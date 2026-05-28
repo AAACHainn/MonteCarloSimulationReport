@@ -26,9 +26,10 @@ describe("simulateMonteCarlo", () => {
     );
 
     expect(result.samplePaths).toHaveLength(2);
-    expect(result.samplePaths[0].finalEquity).toBe(9_700);
-    expect(result.samplePaths[0].maxDrawdown).toBe(400);
-    expect(result.samplePaths[0].maxLosingStreak).toBe(2);
+    expect(result.samplePaths[0].index).toBe(1);
+    expect(result.samplePaths[0].finalEquity).toBe(9_706);
+    expect(result.samplePaths[0].maxDrawdown).toBe(394);
+    expect(result.summary.worstMaxLosingStreak).toBe(2);
     expect(result.samplePaths[0].busted).toBe(false);
     expect(result.summary.profitableScenarios).toBe(1);
     expect(result.summary.bustedScenarios).toBe(0);

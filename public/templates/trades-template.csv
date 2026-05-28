@@ -1,0 +1,4 @@
+date,symbol,direction,pnl,riskAmount,rMultiple,note
+2024-01-02,ES,LONG,150,100,1.5,Provided rMultiple is used directly
+2024-01-03,NQ,SHORT,-120,100,,rMultiple is computed from pnl/riskAmount
+2024-01-04,CL,LONG,75,100,0.75,Optional note

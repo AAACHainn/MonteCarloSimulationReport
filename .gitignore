@@ -5,6 +5,7 @@ dist
 build
 out
 coverage
+samples/
 .turbo
 .eslintcache
 *.tsbuildinfo

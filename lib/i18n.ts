@@ -1,4 +1,4 @@
-export const defaultLocale = "zh-CN" as const;
+﻿export const defaultLocale = "zh-CN" as const;
 export const supportedLocales = ["zh-CN", "en-US"] as const;
 
 export type SupportedLocale = (typeof supportedLocales)[number];
@@ -6,6 +6,7 @@ export type SupportedLocale = (typeof supportedLocales)[number];
 export const dictionaries = {
   "zh-CN": {
     nav: {
+      home: "首页",
       brand: "蒙特卡洛模拟报告",
       datasets: "数据集",
       newSimulation: "新建模拟",
@@ -44,11 +45,16 @@ export const dictionaries = {
       savedSimulations: "次已保存模拟",
       detailEyebrow: "交易数据集",
       runSimulation: "运行模拟",
+      simulationFormulaTip:
+        "模拟时会从历史交易的 R 倍数中有放回抽样，并按“本次盈亏 = 模拟风险金额 × R 倍数”计算。例如初始资金 10,000、每笔风险 1%、抽到 R=0.43，则该笔盈亏为 100 × 0.43 = 43 美元。固定风险按初始资金算，复利按当前权益算。",
       delete: "删除数据集",
+      deleteDialogTitle: "删除数据集",
       deleteConfirm: "确定删除此数据集及其所有相关模拟吗？",
       csvUpload: "CSV 上传",
       csvDescription:
         "数据来源需要包含 rMultiple，或同时包含 pnl 与 riskAmount。重新上传会替换此数据集中的现有交易。",
+      downloadTemplate: "下载 CSV 模板",
+      viewSimulationRecords: "查看模拟记录",
       uploadTrades: "上传交易",
       csvFile: "CSV 文件",
       uploadFailed: "CSV 上传失败。",
@@ -66,6 +72,13 @@ export const dictionaries = {
         risk: "风险额",
         r: "R 倍数",
         note: "备注",
+      },
+      pagination: {
+        rowsPerPage: "每页",
+        range: "显示第 {start}-{end} 笔，共 {total} 笔交易",
+        page: "第 {page} / {totalPages} 页",
+        previous: "上一页",
+        next: "下一页",
       },
     },
     simulations: {
@@ -94,10 +107,15 @@ export const dictionaries = {
       historyEyebrow: "已保存运行",
       historyTitle: "模拟历史",
       historyDescription: "打开已保存报告，无需重新运行模拟引擎。",
+      filteredHistoryDescription: "当前只显示数据集「{dataset}」的模拟运行。",
+      viewAllRuns: "查看全部记录",
       runs: "运行记录",
       runsDescription: "每条记录保存配置、汇总、样本路径和分位数曲线。",
       noRuns: "还没有模拟记录。",
       open: "打开",
+      delete: "删除",
+      deleteDialogTitle: "删除模拟记录",
+      deleteConfirm: "确定删除这条模拟记录吗？",
       created: "创建时间",
       scenarios: "场景数",
       medianFinal: "最终权益中位数",
@@ -118,10 +136,15 @@ export const dictionaries = {
       p50Final: "P50 最终权益",
       p95Final: "P95 最终权益",
       worstFinal: "最差最终权益",
+      p5FinalTip: "第 5 百分位最终权益：约 5% 的模拟结果低于该值，适合观察偏悲观但非极端的下行情景。",
+      p50FinalTip: "第 50 百分位最终权益，也就是中位数：一半模拟结果高于该值，一半低于该值。",
+      p95FinalTip: "第 95 百分位最终权益：约 5% 的模拟结果高于该值，适合观察偏乐观但非极端的上行情景。",
+      worstFinalTip: "所有模拟路径中最终权益最低的一次结果，属于本次模拟样本里的极端最坏情景。",
       breakeven: "盈亏平衡分析",
       profitableScenarios: "盈利场景",
       losingScenarios: "亏损场景",
       bustedScenarios: "爆仓场景",
+      bustedScenariosTip: "模拟过程中，只要权益曾经低于破产线，就记为爆仓场景。本次破产线为 {ruinThreshold}，相当于从初始资金回撤 {drawdownPct}。",
       profitProbability: "盈利概率",
       ruinProbability: "爆仓概率",
       equityPerformance: "权益表现",
@@ -129,6 +152,7 @@ export const dictionaries = {
       medianFinalEquity: "最终权益中位数",
       bestCase: "最佳情况 / 上界",
       worstCase: "最差情况 / 下界",
+      averageTradeProfit: "平均单笔收益",
       drawdownDepth: "回撤深度",
       avgMaxDrawdown: "平均最大回撤",
       worstMaxDrawdown: "最差最大回撤",
@@ -138,7 +162,10 @@ export const dictionaries = {
       worstLosingStreak: "最差最大连亏",
       bestLosingStreak: "最佳最大连亏",
       charts: "图表",
-      sampleCurves: "样本权益曲线",
+      chartValueMode: "图表显示",
+      chartValueAmount: "金额",
+      chartValuePercent: "百分比",
+      sampleCurves: "P1-P100 分位数权益曲线",
       percentileCurves: "权益分位数曲线",
       finalEquityHistogram: "最终权益直方图",
       maxDrawdownHistogram: "最大回撤直方图",
@@ -147,7 +174,7 @@ export const dictionaries = {
     api: {
       datasetNameRequired: "数据集名称必填",
       stepSizeRequired: "阶梯复利模式需要填写阶梯大小。",
-      simulationLimit: "simulationCount × tradesPerSimulation 不能超过 5,000,000。",
+      simulationLimit: "simulationCount × tradesPerSimulation 不能超过 50,000,000。",
       noTrades: "数据集至少需要包含一笔有效交易。",
       datasetNotFound: "未找到数据集。",
       simulationNotFound: "未找到模拟记录。",
@@ -159,10 +186,13 @@ export const dictionaries = {
     common: {
       none: "无",
       dash: "-",
+      confirm: "确认",
+      cancel: "取消",
     },
   },
   "en-US": {
     nav: {
+      home: "Home",
       brand: "MC Simulation Report",
       datasets: "Datasets",
       newSimulation: "New Simulation",
@@ -187,7 +217,7 @@ export const dictionaries = {
     simulations: {} as Record<string, unknown>,
     report: {} as Record<string, unknown>,
     api: {} as Record<string, unknown>,
-    common: { none: "None", dash: "-" },
+    common: { none: "None", dash: "-", confirm: "Confirm", cancel: "Cancel" },
   },
 } as const;
 

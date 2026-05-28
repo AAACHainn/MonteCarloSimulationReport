@@ -17,6 +17,25 @@ type DatasetOption = {
   };
 };
 
+type ApiError =
+  | string
+  | {
+      formErrors?: string[];
+      fieldErrors?: Record<string, string[] | undefined>;
+    };
+
+function formatApiError(error: ApiError | undefined) {
+  if (!error) return copy.simulations.failed;
+  if (typeof error === "string") return error;
+
+  const messages = [
+    ...(error.formErrors ?? []),
+    ...Object.values(error.fieldErrors ?? {}).flatMap((fieldMessages) => fieldMessages ?? []),
+  ];
+
+  return messages[0] ?? copy.simulations.failed;
+}
+
 export function SimulationForm({
   datasets,
   initialDatasetId,
@@ -58,7 +77,7 @@ export function SimulationForm({
 
     const data = await response.json();
     if (!response.ok) {
-      setError(data.error?.formErrors?.[0] ?? data.error ?? copy.simulations.failed);
+      setError(formatApiError(data.error));
       setIsRunning(false);
       return;
     }

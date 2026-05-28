@@ -4,18 +4,39 @@ import { Bar, BarChart, CartesianGrid, ResponsiveContainer, Tooltip, XAxis, YAxi
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { copy } from "@/lib/i18n";
 import type { SimulationSummary } from "@/lib/monte-carlo/types";
+import type { ChartValueMode } from "./report-charts";
 
-export function Histograms({ summary }: { summary: SimulationSummary }) {
+export function Histograms({
+  summary,
+  initialCapital,
+  valueMode,
+}: {
+  summary: SimulationSummary;
+  initialCapital: number;
+  valueMode: ChartValueMode;
+}) {
   const charts = [
     {
       title: copy.report.finalEquityHistogram,
-      data: summary.finalEquityHistogram,
-      xKey: "label",
+      data: summary.finalEquityHistogram.map((bin) => ({
+        ...bin,
+        displayLabel:
+          valueMode === "percent"
+            ? `${formatPercentRange(((bin.start - initialCapital) / initialCapital) * 100, ((bin.end - initialCapital) / initialCapital) * 100)}`
+            : formatMoneyRange(bin.start, bin.end),
+      })),
+      xKey: "displayLabel",
     },
     {
       title: copy.report.maxDrawdownHistogram,
-      data: summary.maxDrawdownHistogram,
-      xKey: "label",
+      data: summary.maxDrawdownHistogram.map((bin) => ({
+        ...bin,
+        displayLabel:
+          valueMode === "percent"
+            ? formatPercentRange((bin.start / initialCapital) * 100, (bin.end / initialCapital) * 100)
+            : formatMoneyRange(bin.start, bin.end),
+      })),
+      xKey: "displayLabel",
     },
     {
       title: copy.report.losingStreakDistribution,
@@ -46,4 +67,12 @@ export function Histograms({ summary }: { summary: SimulationSummary }) {
       ))}
     </div>
   );
+}
+
+function formatMoneyRange(start: number, end: number) {
+  return `$${start.toFixed(0)}-${end.toFixed(0)}`;
+}
+
+function formatPercentRange(start: number, end: number) {
+  return `${start.toFixed(0)}%-${end.toFixed(0)}%`;
 }

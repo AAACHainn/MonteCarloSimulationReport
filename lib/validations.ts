@@ -1,6 +1,8 @@
 import { z } from "zod";
 import { copy } from "./i18n";
 
+export const SIMULATION_WORK_LIMIT = 50_000_000;
+
 export const datasetSchema = z.object({
   name: z.string().trim().min(1, copy.api.datasetNameRequired).max(120),
   description: z.string().trim().max(500).optional().nullable(),
@@ -27,7 +29,7 @@ export const simulationConfigSchema = z
       });
     }
 
-    if (value.simulationCount * value.tradesPerSimulation > 5_000_000) {
+    if (value.simulationCount * value.tradesPerSimulation > SIMULATION_WORK_LIMIT) {
       ctx.addIssue({
         code: z.ZodIssueCode.custom,
         path: ["simulationCount"],

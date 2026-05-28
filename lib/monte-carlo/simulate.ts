@@ -62,6 +62,34 @@ function emptyPercentileCurves(): PercentileCurves {
   };
 }
 
+function buildPercentileSamplePaths(
+  sortedBuckets: number[][],
+  config: SimulationConfig,
+  samplePathLimit: number,
+): SimulationPath[] {
+  const percentiles = Array.from({ length: samplePathLimit }, (_, index) => index + 1);
+
+  return percentiles.map((pct) => {
+    const equityCurve = sortedBuckets.map((bucket, tradeIndex) => ({
+      tradeIndex,
+      equity: percentile(bucket, pct),
+    }));
+    const finalEquity = equityCurve[equityCurve.length - 1]?.equity ?? config.initialCapital;
+    const { maxDrawdown, maxDrawdownPct } = calculateMaxDrawdown(equityCurve);
+
+    return {
+      index: pct,
+      equityCurve,
+      finalEquity,
+      totalReturnPct: ((finalEquity - config.initialCapital) / config.initialCapital) * 100,
+      maxDrawdown,
+      maxDrawdownPct,
+      maxLosingStreak: 0,
+      busted: equityCurve.some((point) => point.equity < config.ruinThreshold),
+    };
+  });
+}
+
 export function simulateMonteCarlo(
   config: SimulationConfig,
   trades: SimulationTradeInput[],
@@ -72,10 +100,9 @@ export function simulateMonteCarlo(
   }
 
   const rng = options.rng ?? Math.random;
-  const samplePathLimit = options.samplePathLimit ?? 100;
+  const samplePathLimit = Math.min(options.samplePathLimit ?? 100, 100);
   const rMultiples = trades.map((trade) => trade.rMultiple).filter(Number.isFinite);
   const percentileBuckets = Array.from({ length: config.tradesPerSimulation + 1 }, () => [] as number[]);
-  const samplePaths: SimulationPath[] = [];
   const allPaths: Omit<SimulationPath, "equityCurve">[] = [];
 
   for (let simIndex = 0; simIndex < config.simulationCount; simIndex += 1) {
@@ -121,10 +148,6 @@ export function simulateMonteCarlo(
       busted,
     };
 
-    if (samplePaths.length < samplePathLimit) {
-      samplePaths.push(path);
-    }
-
     allPaths.push({
       index: path.index,
       finalEquity,
@@ -143,9 +166,9 @@ export function simulateMonteCarlo(
   const profitableScenarios = finalEquities.filter((value) => value > config.initialCapital).length;
   const bustedScenarios = allPaths.filter((path) => path.busted).length;
   const percentileCurves = emptyPercentileCurves();
+  const sortedBuckets = percentileBuckets.map((bucket) => bucket.sort((a, b) => a - b));
 
-  percentileBuckets.forEach((bucket, tradeIndex) => {
-    const sorted = bucket.sort((a, b) => a - b);
+  sortedBuckets.forEach((sorted, tradeIndex) => {
     for (const pct of CURVE_PERCENTILES) {
       percentileCurves[`p${pct}` as keyof PercentileCurves].push({
         tradeIndex,
@@ -156,7 +179,7 @@ export function simulateMonteCarlo(
 
   return {
     config,
-    samplePaths,
+    samplePaths: buildPercentileSamplePaths(sortedBuckets, config, samplePathLimit),
     percentileCurves,
     summary: {
       profitableScenarios,

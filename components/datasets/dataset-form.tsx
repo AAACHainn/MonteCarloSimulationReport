@@ -16,8 +16,9 @@ export function DatasetForm() {
 
   async function onSubmit(event: React.FormEvent<HTMLFormElement>) {
     event.preventDefault();
+    const form = event.currentTarget;
     setError(null);
-    const formData = new FormData(event.currentTarget);
+    const formData = new FormData(form);
     const response = await fetch("/api/datasets", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
@@ -32,7 +33,7 @@ export function DatasetForm() {
       return;
     }
 
-    event.currentTarget.reset();
+    form.reset();
     startTransition(() => router.refresh());
   }
 

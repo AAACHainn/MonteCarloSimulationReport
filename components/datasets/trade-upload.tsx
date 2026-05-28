@@ -22,9 +22,10 @@ export function TradeUpload({ datasetId }: { datasetId: string }) {
 
   async function onSubmit(event: React.FormEvent<HTMLFormElement>) {
     event.preventDefault();
+    const form = event.currentTarget;
     setMessage(null);
     setRejections([]);
-    const formData = new FormData(event.currentTarget);
+    const formData = new FormData(form);
     const response = await fetch(`/api/datasets/${datasetId}/trades/upload`, {
       method: "POST",
       body: formData,
@@ -39,7 +40,7 @@ export function TradeUpload({ datasetId }: { datasetId: string }) {
 
     setMessage(copy.datasets.importedTrades(data.imported));
     setRejections(data.rejectedRows ?? []);
-    event.currentTarget.reset();
+    form.reset();
     startTransition(() => router.refresh());
   }
 

@@ -1,6 +1,8 @@
 import Link from "next/link";
 import { Database } from "lucide-react";
+import { Breadcrumbs } from "@/components/breadcrumbs";
 import { DatasetForm } from "@/components/datasets/dataset-form";
+import { DeleteDatasetButton } from "@/components/datasets/delete-dataset-button";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { prisma } from "@/lib/db";
@@ -19,7 +21,9 @@ export default async function DatasetsPage() {
   });
 
   return (
-    <div className="grid gap-6 lg:grid-cols-[420px_1fr]">
+    <div className="space-y-6">
+      <Breadcrumbs items={[{ label: copy.datasets.title }]} />
+      <div className="grid gap-6 lg:grid-cols-[420px_1fr]">
       <Card>
         <CardHeader>
           <CardTitle>{copy.datasets.createTitle}</CardTitle>
@@ -56,15 +60,19 @@ export default async function DatasetsPage() {
                       </p>
                     </div>
                   </div>
-                  <Button asChild variant="outline">
-                    <Link href={`/datasets/${dataset.id}`}>{copy.home.open}</Link>
-                  </Button>
+                  <div className="flex shrink-0 items-center gap-2">
+                    <Button asChild variant="outline" size="sm">
+                      <Link href={`/datasets/${dataset.id}`}>{copy.home.open}</Link>
+                    </Button>
+                    <DeleteDatasetButton datasetId={dataset.id} size="sm" />
+                  </div>
                 </CardContent>
               </Card>
             ))
           )}
         </div>
       </section>
+      </div>
     </div>
   );
 }

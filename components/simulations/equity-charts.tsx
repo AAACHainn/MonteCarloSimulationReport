@@ -13,6 +13,7 @@ import {
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { copy } from "@/lib/i18n";
 import type { PercentileCurves, SimulationPath } from "@/lib/monte-carlo/types";
+import type { ChartValueMode } from "./report-charts";
 
 const percentileColors = {
   p5: "#dc2626",
@@ -25,19 +26,25 @@ const percentileColors = {
 export function EquityCharts({
   samplePaths,
   percentileCurves,
+  initialCapital,
+  valueMode,
 }: {
   samplePaths: SimulationPath[];
   percentileCurves: PercentileCurves;
+  initialCapital: number;
+  valueMode: ChartValueMode;
 }) {
-  const sampleData = buildSampleData(samplePaths);
+  const sampleData = buildSampleData(samplePaths, initialCapital, valueMode);
   const percentileData = percentileCurves.p50.map((point, index) => ({
     tradeIndex: point.tradeIndex,
-    p5: percentileCurves.p5[index]?.equity,
-    p25: percentileCurves.p25[index]?.equity,
-    p50: percentileCurves.p50[index]?.equity,
-    p75: percentileCurves.p75[index]?.equity,
-    p95: percentileCurves.p95[index]?.equity,
+    p5: formatOptionalChartValue(percentileCurves.p5[index]?.equity, initialCapital, valueMode),
+    p25: formatOptionalChartValue(percentileCurves.p25[index]?.equity, initialCapital, valueMode),
+    p50: formatOptionalChartValue(percentileCurves.p50[index]?.equity, initialCapital, valueMode),
+    p75: formatOptionalChartValue(percentileCurves.p75[index]?.equity, initialCapital, valueMode),
+    p95: formatOptionalChartValue(percentileCurves.p95[index]?.equity, initialCapital, valueMode),
   }));
+  const tickFormatter = (value: number) => formatAxisValue(value, valueMode);
+  const tooltipFormatter = (value: number) => formatTooltipValue(value, valueMode);
 
   return (
     <div className="grid gap-4">
@@ -50,8 +57,8 @@ export function EquityCharts({
             <LineChart data={sampleData}>
               <CartesianGrid strokeDasharray="3 3" />
               <XAxis dataKey="tradeIndex" />
-              <YAxis tickFormatter={(value) => `$${Number(value).toFixed(0)}`} />
-              <Tooltip formatter={(value) => `$${Number(value).toFixed(2)}`} />
+              <YAxis tickFormatter={tickFormatter} />
+              <Tooltip formatter={(value) => tooltipFormatter(Number(value))} />
               {samplePaths.map((path) => (
                 <Line
                   key={path.index}
@@ -78,8 +85,8 @@ export function EquityCharts({
             <LineChart data={percentileData}>
               <CartesianGrid strokeDasharray="3 3" />
               <XAxis dataKey="tradeIndex" />
-              <YAxis tickFormatter={(value) => `$${Number(value).toFixed(0)}`} />
-              <Tooltip formatter={(value) => `$${Number(value).toFixed(2)}`} />
+              <YAxis tickFormatter={tickFormatter} />
+              <Tooltip formatter={(value) => tooltipFormatter(Number(value))} />
               <Legend />
               {Object.entries(percentileColors).map(([key, color]) => (
                 <Line
@@ -100,13 +107,29 @@ export function EquityCharts({
   );
 }
 
-function buildSampleData(samplePaths: SimulationPath[]) {
+function buildSampleData(samplePaths: SimulationPath[], initialCapital: number, valueMode: ChartValueMode) {
   const maxLength = Math.max(...samplePaths.map((path) => path.equityCurve.length), 0);
   return Array.from({ length: maxLength }, (_, index) => {
     const row: Record<string, number> = { tradeIndex: index };
     for (const path of samplePaths) {
-      row[`path${path.index}`] = path.equityCurve[index]?.equity ?? path.finalEquity;
+      row[`path${path.index}`] = formatChartValue(path.equityCurve[index]?.equity ?? path.finalEquity, initialCapital, valueMode);
     }
     return row;
   });
+}
+
+function formatChartValue(value: number, initialCapital: number, valueMode: ChartValueMode) {
+  return valueMode === "percent" ? ((value - initialCapital) / initialCapital) * 100 : value;
+}
+
+function formatOptionalChartValue(value: number | undefined, initialCapital: number, valueMode: ChartValueMode) {
+  return value === undefined ? undefined : formatChartValue(value, initialCapital, valueMode);
+}
+
+function formatAxisValue(value: number, valueMode: ChartValueMode) {
+  return valueMode === "percent" ? `${value.toFixed(0)}%` : `$${value.toFixed(0)}`;
+}
+
+function formatTooltipValue(value: number, valueMode: ChartValueMode) {
+  return valueMode === "percent" ? `${value.toFixed(2)}%` : `$${value.toFixed(2)}`;
 }

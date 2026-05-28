@@ -23,3 +23,12 @@ export async function GET(_request: Request, context: RouteContext) {
 
   return NextResponse.json(run);
 }
+
+export async function DELETE(_request: Request, context: RouteContext) {
+  const { id } = await context.params;
+  await prisma.simulationRun.delete({
+    where: { id },
+  });
+
+  return NextResponse.json({ ok: true });
+}

@@ -1,4 +1,5 @@
 import Link from "next/link";
+import { DeleteSimulationRunButton } from "@/components/simulations/delete-simulation-run-button";
 import { Button } from "@/components/ui/button";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { formatMoney, formatPercent } from "@/lib/format";
@@ -43,10 +44,13 @@ export function HistoryTable({ runs }: { runs: HistoryRun[] }) {
               <TableCell className="text-right">{config.simulationCount.toLocaleString("zh-CN")}</TableCell>
               <TableCell className="text-right">{formatMoney(summary.medianFinalEquity)}</TableCell>
               <TableCell className="text-right">{formatPercent(summary.ruinProbability)}</TableCell>
-              <TableCell className="text-right">
-                <Button asChild variant="outline" size="sm">
-                  <Link href={`/simulations/${run.id}`}>{copy.simulations.open}</Link>
-                </Button>
+              <TableCell>
+                <div className="flex justify-end gap-2">
+                  <Button asChild variant="outline" size="sm">
+                    <Link href={`/simulations/${run.id}`}>{copy.simulations.open}</Link>
+                  </Button>
+                  <DeleteSimulationRunButton runId={run.id} />
+                </div>
               </TableCell>
             </TableRow>
           );

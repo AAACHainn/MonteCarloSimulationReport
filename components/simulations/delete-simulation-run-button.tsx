@@ -3,28 +3,20 @@
 import { useState } from "react";
 import { useRouter } from "next/navigation";
 import { Trash2 } from "lucide-react";
-import { Button, type ButtonProps } from "@/components/ui/button";
+import { Button } from "@/components/ui/button";
 import { ConfirmDialog } from "@/components/ui/confirm-dialog";
 import { copy } from "@/lib/i18n";
 
-export function DeleteDatasetButton({
-  datasetId,
-  size,
-  className,
-}: {
-  datasetId: string;
-  size?: ButtonProps["size"];
-  className?: string;
-}) {
+export function DeleteSimulationRunButton({ runId }: { runId: string }) {
   const router = useRouter();
   const [isDeleting, setIsDeleting] = useState(false);
   const [isConfirmOpen, setIsConfirmOpen] = useState(false);
 
   async function onDelete() {
     setIsDeleting(true);
-    const response = await fetch(`/api/datasets/${datasetId}`, { method: "DELETE" });
+    const response = await fetch(`/api/simulations/${runId}`, { method: "DELETE" });
     if (response.ok) {
-      router.push("/datasets");
+      setIsConfirmOpen(false);
       router.refresh();
       return;
     }
@@ -36,19 +28,18 @@ export function DeleteDatasetButton({
       <Button
         type="button"
         variant="destructive"
-        size={size}
-        className={className}
+        size="sm"
         onClick={() => setIsConfirmOpen(true)}
         disabled={isDeleting}
       >
         <Trash2 className="h-4 w-4" />
-        {copy.datasets.delete}
+        {copy.simulations.delete}
       </Button>
       <ConfirmDialog
         open={isConfirmOpen}
-        title={copy.datasets.deleteDialogTitle}
-        description={copy.datasets.deleteConfirm}
-        confirmLabel={copy.datasets.delete}
+        title={copy.simulations.deleteDialogTitle}
+        description={copy.simulations.deleteConfirm}
+        confirmLabel={copy.simulations.delete}
         isLoading={isDeleting}
         onCancel={() => setIsConfirmOpen(false)}
         onConfirm={onDelete}

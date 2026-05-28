@@ -1,3 +1,4 @@
+import { Breadcrumbs } from "@/components/breadcrumbs";
 import { SimulationForm } from "@/components/simulations/simulation-form";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { prisma } from "@/lib/db";
@@ -27,6 +28,7 @@ export default async function NewSimulationPage({ searchParams }: PageProps) {
 
   return (
     <div className="space-y-6">
+      <Breadcrumbs items={[{ label: copy.simulations.newTitle }]} />
       <section className="border-b pb-6">
         <p className="font-mono text-sm uppercase tracking-wide text-blue-700">{copy.simulations.eyebrow}</p>
         <h1 className="text-3xl font-semibold tracking-tight text-slate-950">{copy.simulations.newTitle}</h1>
