@@ -1,0 +1,60 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "sqlite"
+  url      = env("DATABASE_URL")
+}
+
+enum CompoundingMode {
+  SIMPLE_FIXED_RISK
+  COMPOUND
+  STEP_COMPOUND
+}
+
+enum SamplingMethod {
+  BOOTSTRAP_WITH_REPLACEMENT
+}
+
+model TradeDataset {
+  id             String          @id @default(cuid())
+  name           String
+  description    String?
+  trades         Trade[]
+  simulationRuns SimulationRun[]
+  createdAt      DateTime        @default(now())
+  updatedAt      DateTime        @updatedAt
+}
+
+model Trade {
+  id          String       @id @default(cuid())
+  datasetId   String
+  dataset     TradeDataset @relation(fields: [datasetId], references: [id], onDelete: Cascade)
+  date        DateTime?
+  symbol      String?
+  direction   String?
+  pnl         Float?
+  riskAmount  Float?
+  rMultiple   Float
+  note        String?
+  createdAt   DateTime     @default(now())
+  updatedAt   DateTime     @updatedAt
+
+  @@index([datasetId])
+}
+
+model SimulationRun {
+  id               String       @id @default(cuid())
+  datasetId        String
+  dataset          TradeDataset @relation(fields: [datasetId], references: [id], onDelete: Cascade)
+  config           String
+  summary          String
+  samplePaths      String
+  percentileCurves String
+  createdAt        DateTime     @default(now())
+  updatedAt        DateTime     @updatedAt
+
+  @@index([datasetId])
+  @@index([createdAt])
+}

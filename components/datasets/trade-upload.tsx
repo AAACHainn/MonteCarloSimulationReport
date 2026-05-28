@@ -1,0 +1,72 @@
+"use client";
+
+import { useState, useTransition } from "react";
+import { useRouter } from "next/navigation";
+import { Upload } from "lucide-react";
+import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
+import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
+
+type UploadResult = {
+  imported: number;
+  rejectedRows: Array<{ row: number; reason: string }>;
+};
+
+export function TradeUpload({ datasetId }: { datasetId: string }) {
+  const router = useRouter();
+  const [isPending, startTransition] = useTransition();
+  const [message, setMessage] = useState<string | null>(null);
+  const [rejections, setRejections] = useState<UploadResult["rejectedRows"]>([]);
+
+  async function onSubmit(event: React.FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    setMessage(null);
+    setRejections([]);
+    const formData = new FormData(event.currentTarget);
+    const response = await fetch(`/api/datasets/${datasetId}/trades/upload`, {
+      method: "POST",
+      body: formData,
+    });
+    const data = await response.json();
+
+    if (!response.ok) {
+      setMessage(data.error ?? "CSV upload failed.");
+      setRejections(data.rejectedRows ?? []);
+      return;
+    }
+
+    setMessage(`Imported ${data.imported} trades.`);
+    setRejections(data.rejectedRows ?? []);
+    event.currentTarget.reset();
+    startTransition(() => router.refresh());
+  }
+
+  return (
+    <form onSubmit={onSubmit} className="space-y-4">
+      <div className="space-y-2">
+        <Label htmlFor="file">CSV File</Label>
+        <Input id="file" name="file" type="file" accept=".csv,text/csv" required />
+      </div>
+      <Button type="submit" disabled={isPending}>
+        <Upload className="h-4 w-4" />
+        Upload Trades
+      </Button>
+      {message ? (
+        <Alert>
+          <AlertTitle>{message}</AlertTitle>
+          {rejections.length > 0 ? (
+            <AlertDescription>
+              {rejections.slice(0, 5).map((row) => (
+                <div key={`${row.row}-${row.reason}`}>
+                  Row {row.row}: {row.reason}
+                </div>
+              ))}
+              {rejections.length > 5 ? <div>{rejections.length - 5} more rejected rows.</div> : null}
+            </AlertDescription>
+          ) : null}
+        </Alert>
+      ) : null}
+    </form>
+  );
+}

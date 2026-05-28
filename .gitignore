@@ -1,0 +1,10 @@
+node_modules
+.next
+.pnpm-store
+dist
+coverage
+.env
+.env*.local
+*.log
+*.db
+*.db-journal
