@@ -1,42 +1,43 @@
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { formatMoney, formatNumber, formatPercent } from "@/lib/format";
+import { copy } from "@/lib/i18n";
 import type { SimulationSummary } from "@/lib/monte-carlo/types";
 
 export function MetricGrid({ summary }: { summary: SimulationSummary }) {
   const sections = [
     {
-      title: "Breakeven Analysis",
+      title: copy.report.breakeven,
       metrics: [
-        ["Profitable Scenarios", summary.profitableScenarios.toLocaleString()],
-        ["Losing Scenarios", summary.losingScenarios.toLocaleString()],
-        ["Busted Scenarios", summary.bustedScenarios.toLocaleString()],
-        ["Profit Probability", formatPercent(summary.profitProbability)],
-        ["Ruin Probability", formatPercent(summary.ruinProbability)],
+        [copy.report.profitableScenarios, summary.profitableScenarios.toLocaleString("zh-CN")],
+        [copy.report.losingScenarios, summary.losingScenarios.toLocaleString("zh-CN")],
+        [copy.report.bustedScenarios, summary.bustedScenarios.toLocaleString("zh-CN")],
+        [copy.report.profitProbability, formatPercent(summary.profitProbability)],
+        [copy.report.ruinProbability, formatPercent(summary.ruinProbability)],
       ],
     },
     {
-      title: "Equity Performance",
+      title: copy.report.equityPerformance,
       metrics: [
-        ["Average Final Equity", formatMoney(summary.averageFinalEquity)],
-        ["Median Final Equity", formatMoney(summary.medianFinalEquity)],
-        ["Best Case / High Bound", formatMoney(summary.bestFinalEquity)],
-        ["Worst Case / Low Bound", formatMoney(summary.worstFinalEquity)],
+        [copy.report.averageFinalEquity, formatMoney(summary.averageFinalEquity)],
+        [copy.report.medianFinalEquity, formatMoney(summary.medianFinalEquity)],
+        [copy.report.bestCase, formatMoney(summary.bestFinalEquity)],
+        [copy.report.worstCase, formatMoney(summary.worstFinalEquity)],
       ],
     },
     {
-      title: "Drawdown Depth",
+      title: copy.report.drawdownDepth,
       metrics: [
-        ["Avg Max Drawdown", formatMoney(summary.averageMaxDrawdown)],
-        ["Worst Max Drawdown", formatMoney(summary.worstMaxDrawdown)],
-        ["Best Max Drawdown", formatMoney(summary.bestMaxDrawdown)],
+        [copy.report.avgMaxDrawdown, formatMoney(summary.averageMaxDrawdown)],
+        [copy.report.worstMaxDrawdown, formatMoney(summary.worstMaxDrawdown)],
+        [copy.report.bestMaxDrawdown, formatMoney(summary.bestMaxDrawdown)],
       ],
     },
     {
-      title: "Streaks",
+      title: copy.report.streaks,
       metrics: [
-        ["Avg Losing Streak", formatNumber(summary.averageMaxLosingStreak)],
-        ["Worst Losing Streak", summary.worstMaxLosingStreak.toLocaleString()],
-        ["Best Losing Streak", summary.bestMaxLosingStreak.toLocaleString()],
+        [copy.report.avgLosingStreak, formatNumber(summary.averageMaxLosingStreak)],
+        [copy.report.worstLosingStreak, summary.worstMaxLosingStreak.toLocaleString("zh-CN")],
+        [copy.report.bestLosingStreak, summary.bestMaxLosingStreak.toLocaleString("zh-CN")],
       ],
     },
   ];

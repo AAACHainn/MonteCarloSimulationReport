@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 import { prisma } from "@/lib/db";
+import { copy } from "@/lib/i18n";
 
 type RouteContext = {
   params: Promise<{ id: string }>;
@@ -20,7 +21,7 @@ export async function GET(_request: Request, context: RouteContext) {
   });
 
   if (!dataset) {
-    return NextResponse.json({ error: "Dataset not found" }, { status: 404 });
+    return NextResponse.json({ error: copy.api.datasetNotFound }, { status: 404 });
   }
 
   return NextResponse.json(dataset);

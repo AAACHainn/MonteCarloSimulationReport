@@ -7,6 +7,7 @@ import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import { copy } from "@/lib/i18n";
 
 type UploadResult = {
   imported: number;
@@ -31,12 +32,12 @@ export function TradeUpload({ datasetId }: { datasetId: string }) {
     const data = await response.json();
 
     if (!response.ok) {
-      setMessage(data.error ?? "CSV upload failed.");
+      setMessage(data.error ?? copy.datasets.uploadFailed);
       setRejections(data.rejectedRows ?? []);
       return;
     }
 
-    setMessage(`Imported ${data.imported} trades.`);
+    setMessage(copy.datasets.importedTrades(data.imported));
     setRejections(data.rejectedRows ?? []);
     event.currentTarget.reset();
     startTransition(() => router.refresh());
@@ -45,12 +46,12 @@ export function TradeUpload({ datasetId }: { datasetId: string }) {
   return (
     <form onSubmit={onSubmit} className="space-y-4">
       <div className="space-y-2">
-        <Label htmlFor="file">CSV File</Label>
+        <Label htmlFor="file">{copy.datasets.csvFile}</Label>
         <Input id="file" name="file" type="file" accept=".csv,text/csv" required />
       </div>
       <Button type="submit" disabled={isPending}>
         <Upload className="h-4 w-4" />
-        Upload Trades
+        {copy.datasets.uploadTrades}
       </Button>
       {message ? (
         <Alert>
@@ -59,10 +60,10 @@ export function TradeUpload({ datasetId }: { datasetId: string }) {
             <AlertDescription>
               {rejections.slice(0, 5).map((row) => (
                 <div key={`${row.row}-${row.reason}`}>
-                  Row {row.row}: {row.reason}
+                  {copy.datasets.rejectedRow(row.row, row.reason)}
                 </div>
               ))}
-              {rejections.length > 5 ? <div>{rejections.length - 5} more rejected rows.</div> : null}
+              {rejections.length > 5 ? <div>{copy.datasets.moreRejected(rejections.length - 5)}</div> : null}
             </AlertDescription>
           ) : null}
         </Alert>

@@ -3,6 +3,7 @@ import { prisma } from "@/lib/db";
 import { simulateMonteCarlo } from "@/lib/monte-carlo/simulate";
 import type { SimulationConfig } from "@/lib/monte-carlo/types";
 import { simulationConfigSchema } from "@/lib/validations";
+import { copy } from "@/lib/i18n";
 
 export async function GET() {
   const runs = await prisma.simulationRun.findMany({
@@ -32,7 +33,7 @@ export async function POST(request: Request) {
   });
 
   if (trades.length === 0) {
-    return NextResponse.json({ error: "Dataset must contain at least one valid trade." }, { status: 400 });
+    return NextResponse.json({ error: copy.api.noTrades }, { status: 400 });
   }
 
   const simulationConfig: SimulationConfig = config;

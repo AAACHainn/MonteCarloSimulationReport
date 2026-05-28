@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { prisma } from "@/lib/db";
 import { parseTradesCsv } from "@/lib/csv/parse-trades";
+import { copy } from "@/lib/i18n";
 
 type RouteContext = {
   params: Promise<{ id: string }>;
@@ -12,12 +13,12 @@ export async function POST(request: Request, context: RouteContext) {
   const file = formData.get("file");
 
   if (!(file instanceof File)) {
-    return NextResponse.json({ error: "CSV file is required." }, { status: 400 });
+    return NextResponse.json({ error: copy.api.csvRequired }, { status: 400 });
   }
 
   const dataset = await prisma.tradeDataset.findUnique({ where: { id } });
   if (!dataset) {
-    return NextResponse.json({ error: "Dataset not found" }, { status: 404 });
+    return NextResponse.json({ error: copy.api.datasetNotFound }, { status: 404 });
   }
 
   const csv = await file.text();
@@ -25,7 +26,7 @@ export async function POST(request: Request, context: RouteContext) {
 
   if (parsed.trades.length === 0) {
     return NextResponse.json(
-      { error: "No valid trades found.", rejectedRows: parsed.rejectedRows },
+      { error: copy.api.noValidTrades, rejectedRows: parsed.rejectedRows },
       { status: 400 },
     );
   }

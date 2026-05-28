@@ -11,6 +11,7 @@ import {
   YAxis,
 } from "recharts";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { copy } from "@/lib/i18n";
 import type { PercentileCurves, SimulationPath } from "@/lib/monte-carlo/types";
 
 const percentileColors = {
@@ -42,7 +43,7 @@ export function EquityCharts({
     <div className="grid gap-4">
       <Card>
         <CardHeader>
-          <CardTitle>Sample Equity Curves</CardTitle>
+          <CardTitle>{copy.report.sampleCurves}</CardTitle>
         </CardHeader>
         <CardContent className="h-96">
           <ResponsiveContainer width="100%" height="100%">
@@ -70,7 +71,7 @@ export function EquityCharts({
 
       <Card>
         <CardHeader>
-          <CardTitle>Percentile Equity Curves</CardTitle>
+          <CardTitle>{copy.report.percentileCurves}</CardTitle>
         </CardHeader>
         <CardContent className="h-96">
           <ResponsiveContainer width="100%" height="100%">

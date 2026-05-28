@@ -5,6 +5,7 @@ import {
   median,
   percentile,
 } from "./stats";
+import { copy } from "@/lib/i18n";
 import type {
   EquityPoint,
   PercentileCurves,
@@ -67,7 +68,7 @@ export function simulateMonteCarlo(
   options: SimulateOptions = {},
 ): SimulationResult {
   if (trades.length === 0) {
-    throw new Error("At least one trade with a valid R-multiple is required.");
+    throw new Error(copy.api.algorithmNoTrades);
   }
 
   const rng = options.rng ?? Math.random;

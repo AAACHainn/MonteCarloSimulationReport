@@ -7,6 +7,7 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
+import { copy } from "@/lib/i18n";
 
 type DatasetOption = {
   id: string;
@@ -57,7 +58,7 @@ export function SimulationForm({
 
     const data = await response.json();
     if (!response.ok) {
-      setError(data.error?.formErrors?.[0] ?? data.error ?? "Simulation failed. Check your configuration.");
+      setError(data.error?.formErrors?.[0] ?? data.error ?? copy.simulations.failed);
       setIsRunning(false);
       return;
     }
@@ -68,7 +69,7 @@ export function SimulationForm({
   return (
     <form onSubmit={onSubmit} className="grid gap-5 md:grid-cols-2">
       <div className="space-y-2 md:col-span-2">
-        <Label>Dataset</Label>
+        <Label>{copy.simulations.dataset}</Label>
         <Select value={datasetId} onValueChange={setDatasetId}>
           <SelectTrigger>
             <SelectValue placeholder="Select dataset" />
@@ -83,11 +84,11 @@ export function SimulationForm({
         </Select>
       </div>
 
-      <Field label="Initial Capital" name="initialCapital" type="number" defaultValue="10000" min="1" step="0.01" />
-      <Field label="Risk Per Trade (%)" name="riskPercent" type="number" defaultValue="1" min="0.01" max="100" step="0.01" />
-      <Field label="Simulation Count" name="simulationCount" type="number" defaultValue="10000" min="1" max="50000" />
+      <Field label={copy.simulations.initialCapital} name="initialCapital" type="number" defaultValue="10000" min="1" step="0.01" />
+      <Field label={copy.simulations.riskPerTrade} name="riskPercent" type="number" defaultValue="1" min="0.01" max="100" step="0.01" />
+      <Field label={copy.simulations.simulationCount} name="simulationCount" type="number" defaultValue="10000" min="1" max="50000" />
       <Field
-        label="Trades Per Simulation"
+        label={copy.simulations.tradesPerSimulation}
         name="tradesPerSimulation"
         type="number"
         defaultValue={selectedDataset?._count.trades || 100}
@@ -97,21 +98,21 @@ export function SimulationForm({
       />
 
       <div className="space-y-2">
-        <Label>Compounding Mode</Label>
+        <Label>{copy.simulations.compoundingMode}</Label>
         <Select value={compoundingMode} onValueChange={setCompoundingMode}>
           <SelectTrigger>
             <SelectValue />
           </SelectTrigger>
           <SelectContent>
-            <SelectItem value="SIMPLE_FIXED_RISK">Simple fixed risk</SelectItem>
-            <SelectItem value="COMPOUND">Compound</SelectItem>
-            <SelectItem value="STEP_COMPOUND">Step compound</SelectItem>
+            <SelectItem value="SIMPLE_FIXED_RISK">{copy.simulations.simpleFixedRisk}</SelectItem>
+            <SelectItem value="COMPOUND">{copy.simulations.compound}</SelectItem>
+            <SelectItem value="STEP_COMPOUND">{copy.simulations.stepCompound}</SelectItem>
           </SelectContent>
         </Select>
       </div>
 
       <Field
-        label="Step Size"
+        label={copy.simulations.stepSize}
         name="stepSize"
         type="number"
         defaultValue="1000"
@@ -119,18 +120,18 @@ export function SimulationForm({
         step="0.01"
         disabled={compoundingMode !== "STEP_COMPOUND"}
       />
-      <Field label="Ruin Threshold" name="ruinThreshold" type="number" defaultValue="2500" min="0" step="0.01" />
+      <Field label={copy.simulations.ruinThreshold} name="ruinThreshold" type="number" defaultValue="2500" min="0" step="0.01" />
 
       <div className="space-y-2">
-        <Label>Sampling Method</Label>
-        <Input value="BOOTSTRAP_WITH_REPLACEMENT" disabled />
+        <Label>{copy.simulations.samplingMethod}</Label>
+        <Input value={copy.simulations.bootstrap} disabled />
       </div>
 
       {error ? <p className="text-sm text-red-600 md:col-span-2">{error}</p> : null}
       <div className="md:col-span-2">
         <Button type="submit" disabled={isRunning || !datasetId || datasets.length === 0}>
           <Play className="h-4 w-4" />
-          {isRunning ? "Running..." : "Run Simulation"}
+          {isRunning ? copy.simulations.running : copy.simulations.run}
         </Button>
       </div>
     </form>

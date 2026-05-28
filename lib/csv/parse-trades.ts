@@ -1,4 +1,5 @@
 import { parse } from "csv-parse/sync";
+import { copy } from "@/lib/i18n";
 
 export type ParsedTrade = {
   date: Date | null;
@@ -59,7 +60,7 @@ export function parseTradesCsv(csv: string): ParseTradesResult {
     if (rMultiple === null || !Number.isFinite(rMultiple)) {
       rejectedRows.push({
         row: index + 2,
-        reason: "Missing rMultiple or valid pnl/riskAmount pair.",
+        reason: copy.api.missingR,
       });
       return;
     }

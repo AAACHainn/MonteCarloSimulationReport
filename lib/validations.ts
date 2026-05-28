@@ -1,7 +1,8 @@
 import { z } from "zod";
+import { copy } from "./i18n";
 
 export const datasetSchema = z.object({
-  name: z.string().trim().min(1, "Dataset name is required").max(120),
+  name: z.string().trim().min(1, copy.api.datasetNameRequired).max(120),
   description: z.string().trim().max(500).optional().nullable(),
 });
 
@@ -22,7 +23,7 @@ export const simulationConfigSchema = z
       ctx.addIssue({
         code: z.ZodIssueCode.custom,
         path: ["stepSize"],
-        message: "Step size is required for step compounding.",
+        message: copy.api.stepSizeRequired,
       });
     }
 
@@ -30,7 +31,7 @@ export const simulationConfigSchema = z
       ctx.addIssue({
         code: z.ZodIssueCode.custom,
         path: ["simulationCount"],
-        message: "simulationCount × tradesPerSimulation must be 5,000,000 or less for the MVP.",
+        message: copy.api.simulationLimit,
       });
     }
   });

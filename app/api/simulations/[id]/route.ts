@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 import { prisma } from "@/lib/db";
+import { copy } from "@/lib/i18n";
 
 type RouteContext = {
   params: Promise<{ id: string }>;
@@ -17,7 +18,7 @@ export async function GET(_request: Request, context: RouteContext) {
   });
 
   if (!run) {
-    return NextResponse.json({ error: "Simulation not found" }, { status: 404 });
+    return NextResponse.json({ error: copy.api.simulationNotFound }, { status: 404 });
   }
 
   return NextResponse.json(run);

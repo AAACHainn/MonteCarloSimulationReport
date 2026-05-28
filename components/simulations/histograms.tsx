@@ -2,22 +2,23 @@
 
 import { Bar, BarChart, CartesianGrid, ResponsiveContainer, Tooltip, XAxis, YAxis } from "recharts";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { copy } from "@/lib/i18n";
 import type { SimulationSummary } from "@/lib/monte-carlo/types";
 
 export function Histograms({ summary }: { summary: SimulationSummary }) {
   const charts = [
     {
-      title: "Final Equity Histogram",
+      title: copy.report.finalEquityHistogram,
       data: summary.finalEquityHistogram,
       xKey: "label",
     },
     {
-      title: "Max Drawdown Histogram",
+      title: copy.report.maxDrawdownHistogram,
       data: summary.maxDrawdownHistogram,
       xKey: "label",
     },
     {
-      title: "Losing Streak Distribution",
+      title: copy.report.losingStreakDistribution,
       data: summary.losingStreakDistribution,
       xKey: "streak",
     },

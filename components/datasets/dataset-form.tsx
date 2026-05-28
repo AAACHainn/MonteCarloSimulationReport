@@ -7,6 +7,7 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
+import { copy } from "@/lib/i18n";
 
 export function DatasetForm() {
   const router = useRouter();
@@ -27,7 +28,7 @@ export function DatasetForm() {
     });
 
     if (!response.ok) {
-      setError("Unable to create dataset. Please check the name and try again.");
+      setError(copy.datasets.createError);
       return;
     }
 
@@ -38,17 +39,17 @@ export function DatasetForm() {
   return (
     <form onSubmit={onSubmit} className="space-y-4">
       <div className="space-y-2">
-        <Label htmlFor="name">Dataset Name</Label>
-        <Input id="name" name="name" placeholder="Trend system Q1 trades" required maxLength={120} />
+        <Label htmlFor="name">{copy.datasets.name}</Label>
+        <Input id="name" name="name" placeholder={copy.datasets.namePlaceholder} required maxLength={120} />
       </div>
       <div className="space-y-2">
-        <Label htmlFor="description">Description</Label>
-        <Textarea id="description" name="description" placeholder="Optional notes about this system or sample." />
+        <Label htmlFor="description">{copy.datasets.description}</Label>
+        <Textarea id="description" name="description" placeholder={copy.datasets.descriptionPlaceholder} />
       </div>
       {error ? <p className="text-sm text-red-600">{error}</p> : null}
       <Button type="submit" disabled={isPending}>
         <Plus className="h-4 w-4" />
-        Create Dataset
+        {copy.datasets.create}
       </Button>
     </form>
   );

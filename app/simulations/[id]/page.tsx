@@ -8,6 +8,7 @@ import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { prisma } from "@/lib/db";
 import { formatMoney } from "@/lib/format";
+import { copy } from "@/lib/i18n";
 import type {
   PercentileCurves,
   SimulationConfig,
@@ -45,17 +46,17 @@ export default async function SimulationReportPage({ params }: PageProps) {
 
       <section className="flex flex-col gap-3 rounded-lg border bg-white p-5 md:flex-row md:items-center md:justify-between">
         <div>
-          <div className="text-xs font-medium uppercase tracking-wide text-slate-500">Dataset</div>
+          <div className="text-xs font-medium uppercase tracking-wide text-slate-500">{copy.report.dataset}</div>
           <div className="mt-1 font-semibold text-slate-950">{run.dataset.name}</div>
         </div>
         <div className="grid grid-cols-2 gap-4 md:grid-cols-4">
-          <MiniStat label="P5 Final" value={formatMoney(summary.percentileFinalEquity.p5)} />
-          <MiniStat label="P50 Final" value={formatMoney(summary.percentileFinalEquity.p50)} />
-          <MiniStat label="P95 Final" value={formatMoney(summary.percentileFinalEquity.p95)} />
-          <MiniStat label="Worst Final" value={formatMoney(summary.worstFinalEquity)} />
+          <MiniStat label={copy.report.p5Final} value={formatMoney(summary.percentileFinalEquity.p5)} />
+          <MiniStat label={copy.report.p50Final} value={formatMoney(summary.percentileFinalEquity.p50)} />
+          <MiniStat label={copy.report.p95Final} value={formatMoney(summary.percentileFinalEquity.p95)} />
+          <MiniStat label={copy.report.worstFinal} value={formatMoney(summary.worstFinalEquity)} />
         </div>
         <Button asChild variant="outline">
-          <Link href="/simulations/history">History</Link>
+          <Link href="/simulations/history">{copy.report.history}</Link>
         </Button>
       </section>
 
@@ -63,7 +64,7 @@ export default async function SimulationReportPage({ params }: PageProps) {
 
       <Card>
         <CardHeader>
-          <CardTitle>Charts</CardTitle>
+          <CardTitle>{copy.report.charts}</CardTitle>
         </CardHeader>
         <CardContent className="space-y-4">
           <EquityCharts samplePaths={samplePaths} percentileCurves={percentileCurves} />
