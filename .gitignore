@@ -1,6 +1,7 @@
 node_modules
 .next
 .pnpm-store
+.codex/
 dist
 build
 out
