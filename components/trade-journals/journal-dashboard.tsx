@@ -4,6 +4,7 @@ import { useState, useTransition } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { ArchiveRestore, Download, NotebookTabs, Plus } from "lucide-react";
+import { DeleteJournalButton } from "@/components/trade-journals/delete-journal-button";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
@@ -146,6 +147,7 @@ export function JournalDashboard({ journals, options }: { journals: Journal[]; o
                         {copy.tradeJournals.export}
                       </a>
                     </Button>
+                    <DeleteJournalButton journalId={journal.id} />
                   </div>
                 </CardContent>
               </Card>

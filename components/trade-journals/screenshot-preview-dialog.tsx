@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect } from "react";
+import { createPortal } from "react-dom";
 import Image from "next/image";
 import { X } from "lucide-react";
 import { copy } from "@/lib/i18n";
@@ -23,9 +24,9 @@ export function ScreenshotPreviewDialog({
     return () => document.removeEventListener("keydown", onKeyDown);
   }, [onClose, screenshotUrl]);
 
-  if (!screenshotUrl) return null;
+  if (!screenshotUrl || typeof document === "undefined") return null;
 
-  return (
+  return createPortal(
     <div
       className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/70 px-4 py-6 backdrop-blur-sm"
       role="dialog"
@@ -35,7 +36,6 @@ export function ScreenshotPreviewDialog({
     >
       <div
         className="relative flex max-h-[92vh] max-w-[94vw] items-center justify-center overflow-hidden rounded-lg border border-slate-700 bg-slate-950 p-3 shadow-2xl"
-        onClick={(event) => event.stopPropagation()}
       >
         <Image
           src={screenshotUrl}
@@ -44,6 +44,7 @@ export function ScreenshotPreviewDialog({
           height={1200}
           unoptimized
           className="max-h-[86vh] w-auto max-w-[90vw] object-contain"
+          onClick={(event) => event.stopPropagation()}
         />
         <button
           type="button"
@@ -54,6 +55,7 @@ export function ScreenshotPreviewDialog({
           <X className="h-5 w-5" />
         </button>
       </div>
-    </div>
+    </div>,
+    document.body,
   );
 }

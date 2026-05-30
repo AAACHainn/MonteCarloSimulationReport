@@ -7,7 +7,7 @@ export const dictionaries = {
   "zh-CN": {
     nav: {
       home: "首页",
-      brand: "蒙特卡洛模拟报告",
+      brand: "交易系统分析台",
       datasets: "数据集",
       tradeJournals: "交易日志",
       newSimulation: "新建模拟",
@@ -15,7 +15,7 @@ export const dictionaries = {
     },
     home: {
       eyebrow: "交易系统风险实验室",
-      title: "蒙特卡洛模拟报告",
+      title: "交易系统分析台",
       description:
         "上传历史成交记录，将交易转换为 R 倍数，并通过 Bootstrap 抽样模拟系统风险、回撤、爆仓概率和权益分位数曲线。",
       start: "从数据集开始",
@@ -274,7 +274,7 @@ export const dictionaries = {
   "en-US": {
     nav: {
       home: "Home",
-      brand: "MC Simulation Report",
+      brand: "Trading System Analytics Workbench",
       datasets: "Datasets",
       tradeJournals: "Trade Journals",
       newSimulation: "New Simulation",
@@ -282,7 +282,7 @@ export const dictionaries = {
     },
     home: {
       eyebrow: "Trading System Risk Lab",
-      title: "Monte Carlo Simulation Report",
+      title: "Trading System Analytics Workbench",
       description:
         "Upload historical trades, transform them into R-multiples, and stress-test the system with bootstrap simulations.",
       start: "Start with a Dataset",

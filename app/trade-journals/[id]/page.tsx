@@ -60,7 +60,7 @@ export default async function TradeJournalDetailPage({ params }: PageProps) {
   }));
 
   return (
-    <div className="space-y-6">
+    <div className="relative left-1/2 w-[calc(100vw-3rem)] max-w-[1800px] -translate-x-1/2 space-y-6">
       <Breadcrumbs items={[{ label: copy.tradeJournals.title, href: "/trade-journals" }, { label: journal.name }]} />
       <section className="flex flex-col gap-4 border-b pb-6 lg:flex-row lg:items-end lg:justify-between">
         <div>
@@ -88,7 +88,7 @@ export default async function TradeJournalDetailPage({ params }: PageProps) {
         <StatCard label={copy.tradeJournals.statMaxLosingStreak} value={String(stats.maxLosingStreak)} />
       </section>
 
-      <Card className="relative left-1/2 w-[calc(100vw-3rem)] max-w-[1800px] -translate-x-1/2">
+      <Card>
         <CardHeader><CardTitle>{copy.tradeJournals.statistics}</CardTitle></CardHeader>
         <CardContent className="px-4"><JournalTradeTable journalId={journal.id} trades={trades} options={serializedOptions} /></CardContent>
       </Card>
