@@ -4,6 +4,7 @@ import { datasetSchema } from "@/lib/validations";
 
 export async function GET() {
   const datasets = await prisma.tradeDataset.findMany({
+    where: { tradeJournal: null },
     orderBy: { createdAt: "desc" },
     include: {
       _count: {

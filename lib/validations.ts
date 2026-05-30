@@ -8,6 +8,20 @@ export const datasetSchema = z.object({
   description: z.string().trim().max(500).optional().nullable(),
 });
 
+export const tradeJournalSchema = z.object({
+  name: z.string().trim().min(1, copy.api.journalNameRequired).max(120),
+  description: z.string().trim().max(500).optional().nullable(),
+});
+
+export const tradeOptionSchema = z.object({
+  type: z.enum(["INSTRUMENT", "STRATEGY"]),
+  name: z.string().trim().min(1, copy.api.optionNameRequired).max(80),
+});
+
+export const tradeOptionUpdateSchema = z.object({
+  active: z.boolean(),
+});
+
 export const simulationConfigSchema = z
   .object({
     datasetId: z.string().min(1),

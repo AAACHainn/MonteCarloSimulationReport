@@ -23,6 +23,9 @@ export default async function NewSimulationPage({ searchParams }: PageProps) {
       _count: {
         select: { trades: true },
       },
+      tradeJournal: {
+        select: { id: true },
+      },
     },
   });
 

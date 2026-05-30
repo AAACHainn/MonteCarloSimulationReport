@@ -1,10 +1,16 @@
 import Link from "next/link";
-import { ArrowRight, BarChart3, Database, History } from "lucide-react";
+import { ArrowRight, BarChart3, Database, History, NotebookTabs } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { copy } from "@/lib/i18n";
 
 const actions = [
+  {
+    href: "/trade-journals",
+    icon: NotebookTabs,
+    title: copy.home.manageTradeJournals,
+    body: copy.home.manageTradeJournalsBody,
+  },
   {
     href: "/datasets",
     icon: Database,
@@ -47,7 +53,7 @@ export default function Home() {
         </div>
       </section>
 
-      <section className="grid gap-4 md:grid-cols-3">
+      <section className="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
         {actions.map((action) => (
           <Card key={action.href}>
             <CardHeader>

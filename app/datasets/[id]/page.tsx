@@ -18,8 +18,8 @@ type PageProps = {
 
 export default async function DatasetDetailPage({ params }: PageProps) {
   const { id } = await params;
-  const dataset = await prisma.tradeDataset.findUnique({
-    where: { id },
+  const dataset = await prisma.tradeDataset.findFirst({
+    where: { id, tradeJournal: null },
     include: {
       trades: {
         orderBy: [{ date: "asc" }, { createdAt: "asc" }],

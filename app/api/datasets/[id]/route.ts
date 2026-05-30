@@ -8,8 +8,8 @@ type RouteContext = {
 
 export async function GET(_request: Request, context: RouteContext) {
   const { id } = await context.params;
-  const dataset = await prisma.tradeDataset.findUnique({
-    where: { id },
+  const dataset = await prisma.tradeDataset.findFirst({
+    where: { id, tradeJournal: null },
     include: {
       trades: {
         orderBy: [{ date: "asc" }, { createdAt: "asc" }],
@@ -29,6 +29,11 @@ export async function GET(_request: Request, context: RouteContext) {
 
 export async function DELETE(_request: Request, context: RouteContext) {
   const { id } = await context.params;
+  const dataset = await prisma.tradeDataset.findFirst({ where: { id, tradeJournal: null }, select: { id: true } });
+  if (!dataset) {
+    return NextResponse.json({ error: copy.api.datasetNotFound }, { status: 404 });
+  }
+
   await prisma.tradeDataset.delete({
     where: { id },
   });

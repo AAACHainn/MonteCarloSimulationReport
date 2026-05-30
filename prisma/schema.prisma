@@ -17,31 +17,48 @@ enum SamplingMethod {
   BOOTSTRAP_WITH_REPLACEMENT
 }
 
+enum TradeOptionType {
+  INSTRUMENT
+  STRATEGY
+}
+
 model TradeDataset {
   id             String          @id @default(cuid())
   name           String
   description    String?
   trades         Trade[]
   simulationRuns SimulationRun[]
+  tradeJournal   TradeJournal?
   createdAt      DateTime        @default(now())
   updatedAt      DateTime        @updatedAt
 }
 
 model Trade {
-  id          String       @id @default(cuid())
-  datasetId   String
-  dataset     TradeDataset @relation(fields: [datasetId], references: [id], onDelete: Cascade)
-  date        DateTime?
-  symbol      String?
-  direction   String?
-  pnl         Float?
-  riskAmount  Float?
-  rMultiple   Float
-  note        String?
-  createdAt   DateTime     @default(now())
-  updatedAt   DateTime     @updatedAt
+  id                 String       @id @default(cuid())
+  datasetId          String
+  dataset            TradeDataset @relation(fields: [datasetId], references: [id], onDelete: Cascade)
+  date               DateTime?
+  symbol             String?
+  direction          String?
+  pnl                Float?
+  riskAmount         Float?
+  rMultiple          Float
+  note               String?
+  instrumentOptionId String?
+  instrumentOption   TradeOption? @relation("TradeInstrumentOption", fields: [instrumentOptionId], references: [id])
+  strategyOptionId   String?
+  strategyOption     TradeOption? @relation("TradeStrategyOption", fields: [strategyOptionId], references: [id])
+  entryPrice         Float?
+  stopLossPrice      Float?
+  targetPrice        Float?
+  exitPrice          Float?
+  screenshotPath     String?
+  createdAt          DateTime     @default(now())
+  updatedAt          DateTime     @updatedAt
 
   @@index([datasetId])
+  @@index([instrumentOptionId])
+  @@index([strategyOptionId])
 }
 
 model SimulationRun {
@@ -57,4 +74,28 @@ model SimulationRun {
 
   @@index([datasetId])
   @@index([createdAt])
+}
+
+model TradeJournal {
+  id          String       @id @default(cuid())
+  name        String
+  description String?
+  datasetId   String       @unique
+  dataset     TradeDataset @relation(fields: [datasetId], references: [id], onDelete: Cascade)
+  createdAt   DateTime     @default(now())
+  updatedAt   DateTime     @updatedAt
+}
+
+model TradeOption {
+  id               String          @id @default(cuid())
+  type             TradeOptionType
+  name             String
+  active           Boolean         @default(true)
+  instrumentTrades Trade[]         @relation("TradeInstrumentOption")
+  strategyTrades   Trade[]         @relation("TradeStrategyOption")
+  createdAt        DateTime        @default(now())
+  updatedAt        DateTime        @updatedAt
+
+  @@unique([type, name])
+  @@index([type, active])
 }

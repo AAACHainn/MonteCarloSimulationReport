@@ -10,6 +10,7 @@ export const metadata: Metadata = {
 
 const navItems = [
   { href: "/datasets", label: copy.nav.datasets },
+  { href: "/trade-journals", label: copy.nav.tradeJournals },
   { href: "/simulations/new", label: copy.nav.newSimulation },
   { href: "/simulations/history", label: copy.nav.history },
 ];

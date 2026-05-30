@@ -15,6 +15,7 @@ type DatasetOption = {
   _count: {
     trades: number;
   };
+  tradeJournal: { id: string } | null;
 };
 
 type ApiError =
@@ -96,7 +97,7 @@ export function SimulationForm({
           <SelectContent>
             {datasets.map((dataset) => (
               <SelectItem key={dataset.id} value={dataset.id}>
-                {dataset.name} ({dataset._count.trades} trades)
+                {dataset.name} ({dataset._count.trades} {copy.datasets.trades})
               </SelectItem>
             ))}
           </SelectContent>

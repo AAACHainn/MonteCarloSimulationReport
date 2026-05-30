@@ -16,9 +16,12 @@ export async function POST(request: Request, context: RouteContext) {
     return NextResponse.json({ error: copy.api.csvRequired }, { status: 400 });
   }
 
-  const dataset = await prisma.tradeDataset.findUnique({ where: { id } });
+  const dataset = await prisma.tradeDataset.findUnique({ where: { id }, include: { tradeJournal: true } });
   if (!dataset) {
     return NextResponse.json({ error: copy.api.datasetNotFound }, { status: 404 });
+  }
+  if (dataset.tradeJournal) {
+    return NextResponse.json({ error: copy.api.journalDatasetUploadForbidden }, { status: 400 });
   }
 
   const csv = await file.text();

@@ -12,6 +12,7 @@ export const dynamic = "force-dynamic";
 
 export default async function DatasetsPage() {
   const datasets = await prisma.tradeDataset.findMany({
+    where: { tradeJournal: null },
     orderBy: { createdAt: "desc" },
     include: {
       _count: {
