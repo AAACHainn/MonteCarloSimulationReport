@@ -55,6 +55,50 @@ rMultiple = pnl / riskAmount
 
 ## 本地运行
 
+### 使用 Docker Compose
+
+项目可以在 WSL 内使用 Docker Compose 启动，无需在 WSL 中额外安装 Node.js 或 pnpm。
+
+首次启动或依赖变更后执行：
+
+```bash
+docker compose up --build -d
+```
+
+查看启动日志：
+
+```bash
+docker compose logs -f app
+```
+
+停止容器：
+
+```bash
+docker compose down
+```
+
+重新构建并启动：
+
+```bash
+docker compose up --build -d
+```
+
+浏览器访问：
+
+```text
+http://localhost:3001
+```
+
+Compose 默认将宿主机的 `3001` 端口映射到容器内的 `3000` 端口。如果需要使用其他宿主机端口，可以在启动时设置 `APP_PORT`，例如：
+
+```bash
+APP_PORT=8080 docker compose up --build -d
+```
+
+局域网内其他设备可以通过 `http://<宿主机 IP>:3001` 访问。Compose 默认以开发模式运行 Next.js，并挂载当前源码目录以支持热更新。依赖和 `.next` 缓存保存在 Docker 命名卷中。SQLite 数据库仍保存在 `prisma/dev.db`，交易截图仍保存在 `storage/`；执行 `docker compose down` 不会删除这些业务数据。
+
+### 直接使用本地 Node.js
+
 ### 1. 安装依赖
 
 ```powershell

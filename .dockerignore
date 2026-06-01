@@ -1,0 +1,17 @@
+.git
+.next
+node_modules
+.pnpm-store
+.env
+.env*.local
+*.log
+*.db
+*.db-journal
+*.sqlite
+*.sqlite3
+prisma/dev.db*
+storage/
+coverage/
+dist/
+build/
+out/
