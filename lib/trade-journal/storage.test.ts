@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { validateScreenshotBuffer } from "./storage";
+import { createScreenshotFilename, validateScreenshotBuffer } from "./storage";
 
 describe("validateScreenshotBuffer", () => {
   it("accepts a PNG signature", () => {
@@ -10,5 +10,17 @@ describe("validateScreenshotBuffer", () => {
   it("rejects content that does not match the file extension", () => {
     expect(() => validateScreenshotBuffer(Buffer.from("not an image"), "trade.png"))
       .toThrow("截图内容与文件格式不匹配。");
+  });
+});
+
+describe("createScreenshotFilename", () => {
+  it("uses the instrument name and timestamp", () => {
+    expect(createScreenshotFilename("沪深 300", 1717243200000, ".png"))
+      .toBe("沪深-300-1717243200000.png");
+  });
+
+  it("replaces unsafe filename characters and adds a collision suffix", () => {
+    expect(createScreenshotFilename(" BTC/USDT:* ", 1717243200000, ".webp", 2))
+      .toBe("BTC-USDT-1717243200000-2.webp");
   });
 });

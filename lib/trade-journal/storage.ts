@@ -1,4 +1,3 @@
-import { randomUUID } from "node:crypto";
 import { mkdir, readFile, rm, writeFile } from "node:fs/promises";
 import path from "node:path";
 
@@ -53,7 +52,20 @@ export function validateScreenshotBuffer(buffer: Buffer, originalName: string) {
   return extension === ".jpeg" ? ".jpg" : extension;
 }
 
-export async function writeUploadedScreenshot(journalId: string, tradeId: string, file: File) {
+export function createScreenshotFilename(instrumentName: string, timestamp: number, extension: string, suffix = 0) {
+  const safeInstrumentName = Array.from(instrumentName.trim())
+    .map((character) => character.charCodeAt(0) < 32 || /[<>:"/\\|?*]/.test(character) ? "-" : character)
+    .join("")
+    .replace(/\s+/g, "-")
+    .replace(/-+/g, "-")
+    .replace(/^[. -]+|[. -]+$/g, "")
+    .slice(0, 80)
+    .replace(/[. -]+$/g, "") || "trade";
+  const collisionSuffix = suffix === 0 ? "" : `-${suffix}`;
+  return `${safeInstrumentName}-${timestamp}${collisionSuffix}${extension}`;
+}
+
+export async function writeUploadedScreenshot(journalId: string, instrumentName: string, file: File) {
   const extension = screenshotTypes[file.type as keyof typeof screenshotTypes];
   if (!extension) {
     throw new ScreenshotValidationError("截图仅支持 JPG、PNG 或 WEBP 格式。");
@@ -64,20 +76,25 @@ export async function writeUploadedScreenshot(journalId: string, tradeId: string
     throw new ScreenshotValidationError("截图大小必须在 10 MB 以内。");
   }
 
-  return writeScreenshotBuffer(journalId, tradeId, extension, buffer);
+  return writeScreenshotBuffer(journalId, instrumentName, extension, buffer);
 }
 
-export async function writeScreenshotBuffer(journalId: string, tradeId: string, extension: string, buffer: Buffer) {
+export async function writeScreenshotBuffer(journalId: string, instrumentName: string, extension: string, buffer: Buffer) {
   assertSafeSegment(journalId);
-  assertSafeSegment(tradeId);
   const normalizedExtension = validateScreenshotBuffer(buffer, `screenshot${extension}`);
   const directory = path.join(JOURNAL_STORAGE_ROOT, journalId);
-  const filename = `${tradeId}-${randomUUID()}${normalizedExtension}`;
-  const relativePath = `${journalId}/${filename}`;
+  const timestamp = Date.now();
 
   await mkdir(directory, { recursive: true });
-  await writeFile(path.join(directory, filename), buffer);
-  return relativePath;
+  for (let suffix = 0; ; suffix += 1) {
+    const filename = createScreenshotFilename(instrumentName, timestamp, normalizedExtension, suffix);
+    try {
+      await writeFile(path.join(directory, filename), buffer, { flag: "wx" });
+      return `${journalId}/${filename}`;
+    } catch (error) {
+      if (!(error instanceof Error) || !("code" in error) || error.code !== "EEXIST") throw error;
+    }
+  }
 }
 
 export function resolveScreenshotPath(relativePath: string) {

@@ -59,7 +59,7 @@ export async function POST(request: Request) {
       const calculated = calculateJournalTrade(trade);
       const screenshot = backup.screenshots.get(trade.screenshotFile);
       if (!screenshot) throw new Error("ZIP 备份缺少交易截图。");
-      const screenshotPath = await writeScreenshotBuffer(journalId, id, path.extname(trade.screenshotFile), screenshot);
+      const screenshotPath = await writeScreenshotBuffer(journalId, trade.instrument, path.extname(trade.screenshotFile), screenshot);
 
       trades.push({
         id,

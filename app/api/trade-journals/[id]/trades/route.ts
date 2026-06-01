@@ -26,7 +26,7 @@ export async function POST(request: Request, context: RouteContext) {
     const { instrument, strategy } = await loadJournalTradeOptions(input.instrumentOptionId, input.strategyOptionId);
     const calculated = calculateJournalTrade(input);
     const tradeId = randomUUID();
-    screenshotPath = await writeUploadedScreenshot(id, tradeId, screenshot);
+    screenshotPath = await writeUploadedScreenshot(id, instrument.name, screenshot);
 
     const trade = await prisma.trade.create({
       data: {

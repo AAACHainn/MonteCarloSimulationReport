@@ -1,9 +1,9 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import Image from "next/image";
 import { useRouter } from "next/navigation";
-import { Check, Pencil, Plus, Trash2, X } from "lucide-react";
+import { Check, ChevronLeft, ChevronRight, Pencil, Plus, Trash2, X } from "lucide-react";
 import { ScreenshotPreviewDialog } from "@/components/trade-journals/screenshot-preview-dialog";
 import { Button } from "@/components/ui/button";
 import { ConfirmDialog } from "@/components/ui/confirm-dialog";
@@ -62,6 +62,9 @@ const emptyDraft: Draft = {
   screenshot: null,
 };
 
+const pageSizeOptions = Array.from({ length: 10 }, (_, index) => (index + 1) * 10);
+const acceptedScreenshotTypes = new Set(["image/jpeg", "image/png", "image/webp"]);
+
 export function JournalTradeTable({
   journalId,
   trades,
@@ -80,10 +83,24 @@ export function JournalTradeTable({
   const [deleteTradeId, setDeleteTradeId] = useState<string | null>(null);
   const [isDeleting, setIsDeleting] = useState(false);
   const [previewScreenshot, setPreviewScreenshot] = useState<string | null>(null);
+  const [pageSize, setPageSize] = useState(20);
+  const [page, setPage] = useState(1);
   const instruments = options.filter((option) => option.type === "INSTRUMENT");
   const strategies = options.filter((option) => option.type === "STRATEGY");
+  const totalPages = Math.max(1, Math.ceil(rows.length / pageSize));
 
   useEffect(() => setRows(trades), [trades]);
+  useEffect(() => {
+    setPage((currentPage) => Math.min(currentPage, totalPages));
+  }, [totalPages]);
+
+  const pagedRows = useMemo(() => {
+    const start = (page - 1) * pageSize;
+    return rows.slice(start, start + pageSize);
+  }, [page, pageSize, rows]);
+
+  const startRow = rows.length === 0 ? 0 : (page - 1) * pageSize + 1;
+  const endRow = Math.min(page * pageSize, rows.length);
 
   function beginCreate() {
     setDraft(emptyDraft);
@@ -140,6 +157,7 @@ export function JournalTradeTable({
 
     const row = serializeApiTrade(data);
     setRows((current) => isNew ? [...current, row] : current.map((trade) => trade.id === row.id ? row : trade));
+    if (isNew) setPage(Math.ceil((rows.length + 1) / pageSize));
     cancelEdit();
     router.refresh();
   }
@@ -171,6 +189,36 @@ export function JournalTradeTable({
         </Button>
       </div>
       {error ? <p className="rounded-md border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-700">{error}</p> : null}
+      <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+        <div className="text-sm text-slate-600">
+          {copy.tradeJournals.pagination.range
+            .replace("{start}", startRow.toLocaleString("zh-CN"))
+            .replace("{end}", endRow.toLocaleString("zh-CN"))
+            .replace("{total}", rows.length.toLocaleString("zh-CN"))}
+        </div>
+        <div className="flex flex-wrap items-center gap-2">
+          <span className="text-sm text-slate-600">{copy.tradeJournals.pagination.rowsPerPage}</span>
+          <Select
+            value={String(pageSize)}
+            onValueChange={(value) => {
+              setPageSize(Number(value));
+              setPage(1);
+            }}
+            disabled={editingId !== null}
+          >
+            <SelectTrigger className="w-24">
+              <SelectValue />
+            </SelectTrigger>
+            <SelectContent>
+              {pageSizeOptions.map((value) => (
+                <SelectItem key={value} value={String(value)}>
+                  {value}
+                </SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+        </div>
+      </div>
       <Table className={editingId ? "min-w-[1480px] [&_td]:px-2 [&_th]:px-2" : "table-fixed [&_td]:px-2 [&_th]:px-2"}>
         <TableHeader>
           <TableRow>
@@ -190,7 +238,7 @@ export function JournalTradeTable({
         </TableHeader>
         <TableBody>
           {editingId === "new" ? <EditableRow draft={draft} setDraft={setDraft} options={options} onSave={saveTrade} onCancel={cancelEdit} loading={isSaving} /> : null}
-          {rows.map((trade) =>
+          {pagedRows.map((trade) =>
             editingId === trade.id ? (
               <EditableRow key={trade.id} draft={draft} setDraft={setDraft} options={options} onSave={saveTrade} onCancel={cancelEdit} loading={isSaving} />
             ) : (
@@ -260,6 +308,35 @@ export function JournalTradeTable({
       {rows.length === 0 && editingId !== "new" ? (
         <p className="rounded-md border border-dashed p-6 text-center text-sm text-slate-500">{copy.datasets.noTrades}</p>
       ) : null}
+      <div className="flex flex-col gap-3 border-t pt-4 sm:flex-row sm:items-center sm:justify-between">
+        <div className="text-sm text-slate-600">
+          {copy.tradeJournals.pagination.page
+            .replace("{page}", page.toLocaleString("zh-CN"))
+            .replace("{totalPages}", totalPages.toLocaleString("zh-CN"))}
+        </div>
+        <div className="flex items-center gap-2">
+          <Button
+            type="button"
+            variant="outline"
+            size="sm"
+            disabled={editingId !== null || page <= 1}
+            onClick={() => setPage((currentPage) => Math.max(1, currentPage - 1))}
+          >
+            <ChevronLeft className="h-4 w-4" />
+            {copy.tradeJournals.pagination.previous}
+          </Button>
+          <Button
+            type="button"
+            variant="outline"
+            size="sm"
+            disabled={editingId !== null || page >= totalPages}
+            onClick={() => setPage((currentPage) => Math.min(totalPages, currentPage + 1))}
+          >
+            {copy.tradeJournals.pagination.next}
+            <ChevronRight className="h-4 w-4" />
+          </Button>
+        </div>
+      </div>
       <ConfirmDialog
         open={Boolean(deleteTradeId)}
         title={copy.tradeJournals.deleteTradeTitle}
@@ -305,7 +382,7 @@ function EditableRow({
       <NumberInput value={draft.targetPrice} onChange={(value) => setField("targetPrice", value)} />
       <NumberInput value={draft.exitPrice} onChange={(value) => setField("exitPrice", value)} />
       <TableCell className="text-right text-slate-400">{copy.common.dash}</TableCell>
-      <TableCell><Input type="file" accept="image/jpeg,image/png,image/webp" className="w-56" onChange={(event) => setField("screenshot", event.target.files?.[0] ?? null)} /></TableCell>
+      <TableCell><ScreenshotInput value={draft.screenshot} onChange={(value) => setField("screenshot", value)} /></TableCell>
       <TableCell>
         <div className="flex gap-1">
           <Button type="button" size="sm" onClick={onSave} disabled={loading}><Check className="h-4 w-4" />{copy.tradeJournals.save}</Button>
@@ -313,6 +390,66 @@ function EditableRow({
         </div>
       </TableCell>
     </TableRow>
+  );
+}
+
+function ScreenshotInput({ value, onChange }: { value: File | null; onChange: (value: File | null) => void }) {
+  const [pasteError, setPasteError] = useState<string | null>(null);
+
+  function chooseScreenshot(file: File | null) {
+    if (!file) {
+      onChange(null);
+      setPasteError(null);
+      return;
+    }
+    if (!acceptedScreenshotTypes.has(file.type)) {
+      setPasteError(copy.tradeJournals.screenshotPasteUnsupported);
+      return;
+    }
+    onChange(file);
+    setPasteError(null);
+  }
+
+  function pasteScreenshot(clipboardData: DataTransfer) {
+    const imageItem = Array.from(clipboardData.items).find((item) => item.kind === "file" && item.type.startsWith("image/"));
+    if (!imageItem) return false;
+    chooseScreenshot(imageItem.getAsFile());
+    return true;
+  }
+
+  useEffect(() => {
+    function onPaste(event: ClipboardEvent) {
+      if (event.clipboardData && pasteScreenshot(event.clipboardData)) event.preventDefault();
+    }
+
+    document.addEventListener("paste", onPaste);
+    return () => document.removeEventListener("paste", onPaste);
+  });
+
+  return (
+    <div
+      className="w-64 space-y-1 rounded-md border border-dashed border-slate-300 bg-white px-2 py-2 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+      tabIndex={0}
+      aria-label={copy.tradeJournals.screenshotPasteHint}
+      onPaste={(event) => {
+        if (!pasteScreenshot(event.clipboardData)) return;
+        event.preventDefault();
+        event.stopPropagation();
+      }}
+    >
+      <Input
+        type="file"
+        accept="image/jpeg,image/png,image/webp"
+        className="h-8 w-full text-xs"
+        onChange={(event) => chooseScreenshot(event.target.files?.[0] ?? null)}
+      />
+      <p className="text-xs text-slate-500">
+        {value
+          ? copy.tradeJournals.screenshotSelected.replace("{name}", value.name || copy.tradeJournals.pastedScreenshot)
+          : copy.tradeJournals.screenshotPasteHint}
+      </p>
+      {pasteError ? <p className="text-xs text-red-600">{pasteError}</p> : null}
+    </div>
   );
 }
 

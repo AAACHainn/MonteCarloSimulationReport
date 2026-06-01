@@ -31,7 +31,7 @@ export async function PUT(request: Request, context: RouteContext) {
     const calculated = calculateJournalTrade(input);
     const screenshot = formData.get("screenshot");
     if (screenshot instanceof File && screenshot.size > 0) {
-      newScreenshotPath = await writeUploadedScreenshot(id, tradeId, screenshot);
+      newScreenshotPath = await writeUploadedScreenshot(id, instrument.name, screenshot);
     }
 
     const updated = await prisma.trade.update({
