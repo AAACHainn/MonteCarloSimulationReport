@@ -1,0 +1,28 @@
+services:
+  app:
+    image: sudongpojiaozi/monte-carlo-simulation-report:v0.1
+    environment:
+      DATABASE_URL: file:/data/dev.db
+      NEXT_TELEMETRY_DISABLED: "1"
+    ports:
+      - "${APP_PORT:-3001}:3000"
+    volumes:
+      - app_data:/data
+      - app_storage:/app/storage
+    restart: unless-stopped
+    healthcheck:
+      test:
+        [
+          "CMD",
+          "node",
+          "-e",
+          "fetch('http://127.0.0.1:3000').then((response) => { if (!response.ok) process.exit(1); }).catch(() => process.exit(1));",
+        ]
+      interval: 10s
+      timeout: 5s
+      retries: 12
+      start_period: 30s
+
+volumes:
+  app_data:
+  app_storage:

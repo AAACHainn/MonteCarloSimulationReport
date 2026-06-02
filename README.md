@@ -55,7 +55,7 @@ rMultiple = pnl / riskAmount
 
 ## 本地运行
 
-### 使用 Docker Compose
+### 使用 Docker Compose 开发
 
 项目可以在 WSL 内使用 Docker Compose 启动，无需在 WSL 中额外安装 Node.js 或 pnpm。
 
@@ -96,6 +96,39 @@ APP_PORT=8080 docker compose up --build -d
 ```
 
 局域网内其他设备可以通过 `http://<宿主机 IP>:3001` 访问。Compose 默认以开发模式运行 Next.js，并挂载当前源码目录以支持热更新。依赖和 `.next` 缓存保存在 Docker 命名卷中。SQLite 数据库仍保存在 `prisma/dev.db`，交易截图仍保存在 `storage/`；执行 `docker compose down` 不会删除这些业务数据。
+
+### 使用生产镜像部署
+
+发布镜像使用生产模式运行 Next.js，并在容器启动时自动执行已提交的 Prisma 迁移。拉取并启动 `v0.1`：
+
+```bash
+docker pull sudongpojiaozi/monte-carlo-simulation-report:v0.1
+docker compose -f compose.prod.yaml up -d
+```
+
+浏览器访问：
+
+```text
+http://localhost:3001
+```
+
+生产 Compose 默认使用两个 Docker 命名卷：
+
+- `app_data`：保存 SQLite 数据库 `/data/dev.db`
+- `app_storage`：保存交易截图 `/app/storage`
+
+执行 `docker compose -f compose.prod.yaml down` 不会删除业务数据。升级镜像后，重新拉取并启动：
+
+```bash
+docker compose -f compose.prod.yaml pull
+docker compose -f compose.prod.yaml up -d
+```
+
+如需调整宿主机端口，可以设置 `APP_PORT`：
+
+```bash
+APP_PORT=8080 docker compose -f compose.prod.yaml up -d
+```
 
 ### 直接使用本地 Node.js
 
