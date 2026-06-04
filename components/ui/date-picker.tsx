@@ -13,17 +13,19 @@ export function DatePicker({
   value,
   onChange,
   className,
+  disabled,
 }: {
   value: string;
   onChange: (value: string) => void;
   className?: string;
+  disabled?: boolean;
 }) {
   const selected = value ? parseISO(value) : undefined;
 
   return (
     <Popover.Root>
       <Popover.Trigger asChild>
-        <Button type="button" variant="outline" className={cn("w-36 justify-start px-3 font-normal", className)}>
+        <Button type="button" variant="outline" className={cn("w-36 justify-start px-3 font-normal", className)} disabled={disabled}>
           <CalendarDays className="h-4 w-4 text-slate-500" />
           {selected ? format(selected, "yyyy-MM-dd") : copy.tradeJournals.chooseDate}
         </Button>

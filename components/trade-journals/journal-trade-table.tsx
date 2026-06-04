@@ -3,7 +3,7 @@
 import { useEffect, useMemo, useState } from "react";
 import Image from "next/image";
 import { useRouter } from "next/navigation";
-import { Check, ChevronLeft, ChevronRight, Pencil, Plus, Trash2, X } from "lucide-react";
+import { ArrowDown, ArrowUp, ArrowUpDown, Check, ChevronLeft, ChevronRight, Filter, Pencil, Plus, RotateCcw, Trash2, X } from "lucide-react";
 import { ScreenshotPreviewDialog } from "@/components/trade-journals/screenshot-preview-dialog";
 import { Button } from "@/components/ui/button";
 import { ConfirmDialog } from "@/components/ui/confirm-dialog";
@@ -13,6 +13,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { formatMoney, formatNumber } from "@/lib/format";
 import { copy } from "@/lib/i18n";
+import { cn } from "@/lib/utils";
 
 type TradeOption = {
   id: string;
@@ -50,6 +51,26 @@ type Draft = {
   screenshot: File | null;
 };
 
+type SortKey = "date" | "rMultiple";
+type SortDirection = "asc" | "desc";
+type SortState = {
+  key: SortKey;
+  direction: SortDirection;
+};
+type DirectionFilter = "ALL" | "LONG" | "SHORT";
+type RFilterMode = "ALL" | "GT" | "GTE" | "LT" | "LTE" | "EQ" | "BETWEEN";
+type Filters = {
+  instrumentOptionId: string;
+  strategyOptionId: string;
+  direction: DirectionFilter;
+  dateFrom: string;
+  dateTo: string;
+  rMode: RFilterMode;
+  rValue: string;
+  rMin: string;
+  rMax: string;
+};
+
 const emptyDraft: Draft = {
   date: "",
   instrumentOptionId: "",
@@ -64,6 +85,22 @@ const emptyDraft: Draft = {
 
 const pageSizeOptions = Array.from({ length: 10 }, (_, index) => (index + 1) * 10);
 const acceptedScreenshotTypes = new Set(["image/jpeg", "image/png", "image/webp"]);
+const allFilterValue = "ALL";
+const defaultSortDirections: Record<SortKey, SortDirection> = {
+  date: "asc",
+  rMultiple: "desc",
+};
+const emptyFilters: Filters = {
+  instrumentOptionId: allFilterValue,
+  strategyOptionId: allFilterValue,
+  direction: allFilterValue,
+  dateFrom: "",
+  dateTo: "",
+  rMode: "ALL",
+  rValue: "",
+  rMin: "",
+  rMax: "",
+};
 
 export function JournalTradeTable({
   journalId,
@@ -85,27 +122,74 @@ export function JournalTradeTable({
   const [previewScreenshot, setPreviewScreenshot] = useState<string | null>(null);
   const [pageSize, setPageSize] = useState(20);
   const [page, setPage] = useState(1);
+  const [sort, setSort] = useState<SortState>({ key: "date", direction: "asc" });
+  const [filters, setFilters] = useState<Filters>(emptyFilters);
+  const [openFilter, setOpenFilter] = useState<string | null>(null);
   const instruments = options.filter((option) => option.type === "INSTRUMENT");
   const strategies = options.filter((option) => option.type === "STRATEGY");
-  const totalPages = Math.max(1, Math.ceil(rows.length / pageSize));
+  const instrumentFilterOptions = useMemo(() => buildTradeOptionFilters(rows, "instrument"), [rows]);
+  const strategyFilterOptions = useMemo(() => buildTradeOptionFilters(rows, "strategy"), [rows]);
+  const hasActiveFilters = !areFiltersEmpty(filters);
 
   useEffect(() => setRows(trades), [trades]);
+
+  const filteredRows = useMemo(() => {
+    return rows.filter((trade) => matchesFilters(trade, filters));
+  }, [filters, rows]);
+
+  const sortedRows = useMemo(() => {
+    return filteredRows
+      .map((row, index) => ({ row, index }))
+      .sort((a, b) => {
+        const direction = sort.direction === "asc" ? 1 : -1;
+        const result = sort.key === "date"
+          ? a.row.date.localeCompare(b.row.date)
+          : a.row.rMultiple - b.row.rMultiple;
+
+        return result === 0 ? a.index - b.index : result * direction;
+      })
+      .map(({ row }) => row);
+  }, [filteredRows, sort]);
+
+  const totalPages = Math.max(1, Math.ceil(filteredRows.length / pageSize));
+
   useEffect(() => {
     setPage((currentPage) => Math.min(currentPage, totalPages));
   }, [totalPages]);
 
   const pagedRows = useMemo(() => {
     const start = (page - 1) * pageSize;
-    return rows.slice(start, start + pageSize);
-  }, [page, pageSize, rows]);
+    return sortedRows.slice(start, start + pageSize);
+  }, [page, pageSize, sortedRows]);
 
-  const startRow = rows.length === 0 ? 0 : (page - 1) * pageSize + 1;
-  const endRow = Math.min(page * pageSize, rows.length);
+  const startRow = filteredRows.length === 0 ? 0 : (page - 1) * pageSize + 1;
+  const endRow = Math.min(page * pageSize, filteredRows.length);
 
   function beginCreate() {
     setDraft(emptyDraft);
     setEditingId("new");
     setError(null);
+  }
+
+  function changeSort(key: SortKey) {
+    setSort((current) => ({
+      key,
+      direction: current.key === key
+        ? current.direction === "asc" ? "desc" : "asc"
+        : defaultSortDirections[key],
+    }));
+    setPage(1);
+  }
+
+  function setFilter<Key extends keyof Filters>(key: Key, value: Filters[Key]) {
+    setFilters((current) => ({ ...current, [key]: value }));
+    setPage(1);
+  }
+
+  function resetFilters() {
+    setFilters(emptyFilters);
+    setOpenFilter(null);
+    setPage(1);
   }
 
   function beginEdit(trade: JournalTradeRow) {
@@ -194,7 +278,25 @@ export function JournalTradeTable({
           {copy.tradeJournals.pagination.range
             .replace("{start}", startRow.toLocaleString("zh-CN"))
             .replace("{end}", endRow.toLocaleString("zh-CN"))
-            .replace("{total}", rows.length.toLocaleString("zh-CN"))}
+            .replace("{total}", filteredRows.length.toLocaleString("zh-CN"))}
+          {hasActiveFilters ? (
+            <span className="ml-2 text-slate-500">
+              {copy.tradeJournals.filters.filteredFrom.replace("{total}", rows.length.toLocaleString("zh-CN"))}
+            </span>
+          ) : null}
+          {hasActiveFilters ? (
+            <Button
+              type="button"
+              size="sm"
+              variant="ghost"
+              className="ml-2 h-7 px-2 text-xs"
+              onClick={resetFilters}
+              disabled={editingId !== null}
+            >
+              <RotateCcw className="h-3.5 w-3.5" />
+              {copy.tradeJournals.filters.reset}
+            </Button>
+          ) : null}
         </div>
         <div className="flex flex-wrap items-center gap-2">
           <span className="text-sm text-slate-600">{copy.tradeJournals.pagination.rowsPerPage}</span>
@@ -222,16 +324,123 @@ export function JournalTradeTable({
       <Table className={editingId ? "min-w-[1480px] [&_td]:px-2 [&_th]:px-2" : "table-fixed [&_td]:px-2 [&_th]:px-2"}>
         <TableHeader>
           <TableRow>
-            <TableHead>{copy.tradeJournals.table.date}</TableHead>
-            <TableHead>{copy.tradeJournals.table.instrument}</TableHead>
-            <TableHead>{copy.tradeJournals.table.strategy}</TableHead>
-            <TableHead>{copy.tradeJournals.table.direction}</TableHead>
+            <SortableHead
+              label={copy.tradeJournals.table.date}
+              sortKey="date"
+              activeSort={sort}
+              onSort={changeSort}
+              disabled={editingId !== null}
+              filter={
+                <ColumnFilterPopover
+                  id="date"
+                  openFilter={openFilter}
+                  setOpenFilter={setOpenFilter}
+                  active={filters.dateFrom !== "" || filters.dateTo !== ""}
+                  label={copy.tradeJournals.filters.dateRange}
+                  disabled={editingId !== null}
+                >
+                  <DateFilterPanel
+                    dateFrom={filters.dateFrom}
+                    dateTo={filters.dateTo}
+                    onDateFromChange={(value) => setFilter("dateFrom", value)}
+                    onDateToChange={(value) => setFilter("dateTo", value)}
+                    onClear={() => {
+                      setFilter("dateFrom", "");
+                      setFilter("dateTo", "");
+                    }}
+                  />
+                </ColumnFilterPopover>
+              }
+            />
+            <FilterableHead
+              label={copy.tradeJournals.table.instrument}
+              filterId="instrument"
+              openFilter={openFilter}
+              setOpenFilter={setOpenFilter}
+              active={filters.instrumentOptionId !== allFilterValue}
+              disabled={editingId !== null}
+            >
+              <OptionFilterPanel
+                value={filters.instrumentOptionId}
+                options={[
+                  { value: allFilterValue, label: copy.tradeJournals.filters.allInstruments },
+                  ...instrumentFilterOptions.map((option) => ({ value: option.id, label: option.name })),
+                ]}
+                onChange={(value) => setFilter("instrumentOptionId", value)}
+              />
+            </FilterableHead>
+            <FilterableHead
+              label={copy.tradeJournals.table.strategy}
+              filterId="strategy"
+              openFilter={openFilter}
+              setOpenFilter={setOpenFilter}
+              active={filters.strategyOptionId !== allFilterValue}
+              disabled={editingId !== null}
+            >
+              <OptionFilterPanel
+                value={filters.strategyOptionId}
+                options={[
+                  { value: allFilterValue, label: copy.tradeJournals.filters.allStrategies },
+                  ...strategyFilterOptions.map((option) => ({ value: option.id, label: option.name })),
+                ]}
+                onChange={(value) => setFilter("strategyOptionId", value)}
+              />
+            </FilterableHead>
+            <FilterableHead
+              label={copy.tradeJournals.table.direction}
+              filterId="direction"
+              openFilter={openFilter}
+              setOpenFilter={setOpenFilter}
+              active={filters.direction !== "ALL"}
+              disabled={editingId !== null}
+            >
+              <OptionFilterPanel
+                value={filters.direction}
+                options={[
+                  { value: "ALL", label: copy.tradeJournals.filters.allDirections },
+                  { value: "LONG", label: copy.tradeJournals.table.long },
+                  { value: "SHORT", label: copy.tradeJournals.table.short },
+                ]}
+                onChange={(value) => setFilter("direction", value as DirectionFilter)}
+              />
+            </FilterableHead>
             <TableHead className="text-right">{copy.tradeJournals.table.entry}</TableHead>
             <TableHead className="text-right">{copy.tradeJournals.table.stop}</TableHead>
             <TableHead className="text-right">{copy.tradeJournals.table.risk}</TableHead>
             <TableHead className="text-right">{copy.tradeJournals.table.target}</TableHead>
             <TableHead className="text-right">{copy.tradeJournals.table.exit}</TableHead>
-            <TableHead className="text-right">{copy.tradeJournals.table.r}</TableHead>
+            <SortableHead
+              label={copy.tradeJournals.table.r}
+              sortKey="rMultiple"
+              activeSort={sort}
+              onSort={changeSort}
+              className="text-right"
+              disabled={editingId !== null}
+              filter={
+                <ColumnFilterPopover
+                  id="r"
+                  openFilter={openFilter}
+                  setOpenFilter={setOpenFilter}
+                  active={isRFilterActive(filters)}
+                  label={copy.tradeJournals.filters.rMode}
+                  disabled={editingId !== null}
+                >
+                  <RFilterPanel
+                    filters={filters}
+                    onModeChange={(value) => setFilter("rMode", value)}
+                    onValueChange={(value) => setFilter("rValue", value)}
+                    onMinChange={(value) => setFilter("rMin", value)}
+                    onMaxChange={(value) => setFilter("rMax", value)}
+                    onClear={() => {
+                      setFilter("rMode", "ALL");
+                      setFilter("rValue", "");
+                      setFilter("rMin", "");
+                      setFilter("rMax", "");
+                    }}
+                  />
+                </ColumnFilterPopover>
+              }
+            />
             <TableHead>{copy.tradeJournals.table.screenshot}</TableHead>
             <TableHead>{copy.tradeJournals.table.actions}</TableHead>
           </TableRow>
@@ -242,7 +451,13 @@ export function JournalTradeTable({
             editingId === trade.id ? (
               <EditableRow key={trade.id} draft={draft} setDraft={setDraft} options={options} onSave={saveTrade} onCancel={cancelEdit} loading={isSaving} />
             ) : (
-              <TableRow key={trade.id}>
+              <TableRow
+                key={trade.id}
+                className={cn(
+                  trade.rMultiple > 0 && "bg-emerald-50/70 hover:bg-emerald-100/70",
+                  trade.rMultiple < 0 && "bg-red-50/70 hover:bg-red-100/70",
+                )}
+              >
                 <TableCell className="whitespace-nowrap">{trade.date}</TableCell>
                 <TableCell className="truncate" title={trade.instrumentOption?.name ?? undefined}>{trade.instrumentOption?.name ?? copy.common.dash}</TableCell>
                 <TableCell className="truncate" title={trade.strategyOption?.name ?? undefined}>{trade.strategyOption?.name ?? copy.common.dash}</TableCell>
@@ -252,7 +467,15 @@ export function JournalTradeTable({
                 <TableCell className="text-right">{trade.riskAmount === null ? copy.common.dash : formatMoney(trade.riskAmount)}</TableCell>
                 <PriceCell value={trade.targetPrice} />
                 <PriceCell value={trade.exitPrice} />
-                <TableCell className="text-right font-mono">{formatNumber(trade.rMultiple)}</TableCell>
+                <TableCell
+                  className={cn(
+                    "text-right font-mono font-medium",
+                    trade.rMultiple > 0 && "text-emerald-700",
+                    trade.rMultiple < 0 && "text-red-700",
+                  )}
+                >
+                  {formatNumber(trade.rMultiple)}
+                </TableCell>
                 <TableCell>
                   {trade.screenshotPath ? (
                     <button
@@ -308,6 +531,9 @@ export function JournalTradeTable({
       {rows.length === 0 && editingId !== "new" ? (
         <p className="rounded-md border border-dashed p-6 text-center text-sm text-slate-500">{copy.datasets.noTrades}</p>
       ) : null}
+      {rows.length > 0 && filteredRows.length === 0 && editingId !== "new" ? (
+        <p className="rounded-md border border-dashed p-6 text-center text-sm text-slate-500">{copy.tradeJournals.filters.noResults}</p>
+      ) : null}
       <div className="flex flex-col gap-3 border-t pt-4 sm:flex-row sm:items-center sm:justify-between">
         <div className="text-sm text-slate-600">
           {copy.tradeJournals.pagination.page
@@ -348,6 +574,299 @@ export function JournalTradeTable({
       />
       <ScreenshotPreviewDialog screenshotUrl={previewScreenshot} onClose={() => setPreviewScreenshot(null)} />
     </div>
+  );
+}
+
+function FilterableHead({
+  label,
+  filterId,
+  openFilter,
+  setOpenFilter,
+  active,
+  disabled,
+  children,
+}: {
+  label: string;
+  filterId: string;
+  openFilter: string | null;
+  setOpenFilter: React.Dispatch<React.SetStateAction<string | null>>;
+  active: boolean;
+  disabled?: boolean;
+  children: React.ReactNode;
+}) {
+  return (
+    <TableHead>
+      <div className="flex items-center gap-1">
+        <span className="truncate">{label}</span>
+        <ColumnFilterPopover
+          id={filterId}
+          openFilter={openFilter}
+          setOpenFilter={setOpenFilter}
+          active={active}
+          label={label}
+          disabled={disabled}
+        >
+          {children}
+        </ColumnFilterPopover>
+      </div>
+    </TableHead>
+  );
+}
+
+function ColumnFilterPopover({
+  id,
+  openFilter,
+  setOpenFilter,
+  active,
+  label,
+  disabled,
+  children,
+}: {
+  id: string;
+  openFilter: string | null;
+  setOpenFilter: React.Dispatch<React.SetStateAction<string | null>>;
+  active: boolean;
+  label: string;
+  disabled?: boolean;
+  children: React.ReactNode;
+}) {
+  const isOpen = openFilter === id;
+
+  return (
+    <div className="relative inline-flex">
+        <button
+          type="button"
+          className={cn(
+            "inline-flex h-6 w-6 shrink-0 items-center justify-center rounded text-slate-400 transition-colors hover:bg-slate-100 hover:text-slate-950 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring disabled:pointer-events-none disabled:opacity-50",
+            (active || isOpen) && "bg-blue-50 text-blue-700 hover:bg-blue-100 hover:text-blue-800",
+          )}
+          disabled={disabled}
+          aria-label={copy.tradeJournals.filters.openColumnFilter.replace("{field}", label)}
+          title={copy.tradeJournals.filters.openColumnFilter.replace("{field}", label)}
+          aria-expanded={isOpen}
+          onClick={() => setOpenFilter((current) => current === id ? null : id)}
+        >
+          <Filter className="h-3.5 w-3.5" />
+        </button>
+      {isOpen ? (
+        <div className="absolute left-0 top-7 z-50 w-72 rounded-md border bg-white p-3 text-slate-950 shadow-lg">
+          {children}
+        </div>
+      ) : null}
+    </div>
+  );
+}
+
+function OptionFilterPanel({
+  value,
+  options,
+  onChange,
+}: {
+  value: string;
+  options: { value: string; label: string }[];
+  onChange: (value: string) => void;
+}) {
+  return (
+    <div className="space-y-2">
+      <p className="text-xs font-medium text-slate-500">{copy.tradeJournals.filters.chooseValue}</p>
+      <div className="max-h-64 overflow-auto rounded-md border p-1">
+        {options.map((option) => (
+          <button
+            key={option.value}
+            type="button"
+            className={cn(
+              "flex w-full items-center gap-2 rounded-sm px-2 py-1.5 text-left text-sm outline-none hover:bg-slate-100 focus:bg-slate-100",
+              option.value === value && "font-medium text-slate-950",
+            )}
+            onClick={() => onChange(option.value)}
+          >
+            <Check className={cn("h-4 w-4", option.value === value ? "opacity-100" : "opacity-0")} />
+            <span className="truncate">{option.label}</span>
+          </button>
+        ))}
+      </div>
+    </div>
+  );
+}
+
+function DateFilterPanel({
+  dateFrom,
+  dateTo,
+  onDateFromChange,
+  onDateToChange,
+  onClear,
+}: {
+  dateFrom: string;
+  dateTo: string;
+  onDateFromChange: (value: string) => void;
+  onDateToChange: (value: string) => void;
+  onClear: () => void;
+}) {
+  return (
+    <div className="space-y-3">
+      <p className="text-xs font-medium text-slate-500">{copy.tradeJournals.filters.dateRange}</p>
+      <div className="space-y-2">
+        <FilterPanelField label={copy.tradeJournals.filters.dateFrom}>
+          <DatePicker value={dateFrom} onChange={onDateFromChange} className="h-9 w-full justify-start" />
+        </FilterPanelField>
+        <FilterPanelField label={copy.tradeJournals.filters.dateTo}>
+          <DatePicker value={dateTo} onChange={onDateToChange} className="h-9 w-full justify-start" />
+        </FilterPanelField>
+      </div>
+      <ClearColumnButton onClick={onClear} disabled={dateFrom === "" && dateTo === ""} />
+    </div>
+  );
+}
+
+function RFilterPanel({
+  filters,
+  onModeChange,
+  onValueChange,
+  onMinChange,
+  onMaxChange,
+  onClear,
+}: {
+  filters: Filters;
+  onModeChange: (value: RFilterMode) => void;
+  onValueChange: (value: string) => void;
+  onMinChange: (value: string) => void;
+  onMaxChange: (value: string) => void;
+  onClear: () => void;
+}) {
+  const modes: { value: RFilterMode; label: string }[] = [
+    { value: "ALL", label: copy.tradeJournals.filters.rAll },
+    { value: "GT", label: copy.tradeJournals.filters.rGreaterThan },
+    { value: "GTE", label: copy.tradeJournals.filters.rGreaterThanOrEqual },
+    { value: "LT", label: copy.tradeJournals.filters.rLessThan },
+    { value: "LTE", label: copy.tradeJournals.filters.rLessThanOrEqual },
+    { value: "EQ", label: copy.tradeJournals.filters.rEqual },
+    { value: "BETWEEN", label: copy.tradeJournals.filters.rBetween },
+  ];
+
+  return (
+    <div className="space-y-3">
+      <p className="text-xs font-medium text-slate-500">{copy.tradeJournals.filters.rMode}</p>
+      <div className="grid grid-cols-2 gap-1">
+        {modes.map((mode) => (
+          <button
+            key={mode.value}
+            type="button"
+            className={cn(
+              "rounded-md border px-2 py-1.5 text-sm hover:bg-slate-100 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring",
+              mode.value === filters.rMode ? "border-blue-200 bg-blue-50 text-blue-700" : "border-slate-200 bg-white text-slate-700",
+            )}
+            onClick={() => onModeChange(mode.value)}
+          >
+            {mode.label}
+          </button>
+        ))}
+      </div>
+      {filters.rMode === "BETWEEN" ? (
+        <div className="grid grid-cols-2 gap-2">
+          <FilterPanelField label={copy.tradeJournals.filters.rLower}>
+            <Input
+              type="number"
+              step="any"
+              value={filters.rMin}
+              onChange={(event) => onMinChange(event.target.value)}
+              placeholder={copy.tradeJournals.filters.rLowerPlaceholder}
+              className="h-9 text-right"
+            />
+          </FilterPanelField>
+          <FilterPanelField label={copy.tradeJournals.filters.rUpper}>
+            <Input
+              type="number"
+              step="any"
+              value={filters.rMax}
+              onChange={(event) => onMaxChange(event.target.value)}
+              placeholder={copy.tradeJournals.filters.rUpperPlaceholder}
+              className="h-9 text-right"
+            />
+          </FilterPanelField>
+        </div>
+      ) : (
+        <FilterPanelField label={copy.tradeJournals.filters.rValue}>
+          <Input
+            type="number"
+            step="any"
+            value={filters.rValue}
+            onChange={(event) => onValueChange(event.target.value)}
+            placeholder={copy.tradeJournals.filters.rValuePlaceholder}
+            className="h-9 text-right"
+            disabled={filters.rMode === "ALL"}
+          />
+        </FilterPanelField>
+      )}
+      <ClearColumnButton onClick={onClear} disabled={!isRFilterActive(filters)} />
+    </div>
+  );
+}
+
+function FilterPanelField({ label, children }: { label: string; children: React.ReactNode }) {
+  return (
+    <label className="space-y-1">
+      <span className="text-xs font-medium text-slate-500">{label}</span>
+      {children}
+    </label>
+  );
+}
+
+function ClearColumnButton({ onClick, disabled }: { onClick: () => void; disabled: boolean }) {
+  return (
+    <Button type="button" size="sm" variant="ghost" className="h-8 px-2 text-xs" onClick={onClick} disabled={disabled}>
+      <RotateCcw className="h-3.5 w-3.5" />
+      {copy.tradeJournals.filters.clearColumn}
+    </Button>
+  );
+}
+
+function SortableHead({
+  label,
+  sortKey,
+  activeSort,
+  onSort,
+  className,
+  disabled,
+  filter,
+}: {
+  label: string;
+  sortKey: SortKey;
+  activeSort: SortState;
+  onSort: (key: SortKey) => void;
+  className?: string;
+  disabled?: boolean;
+  filter?: React.ReactNode;
+}) {
+  const isActive = activeSort.key === sortKey;
+  const currentDirection = isActive ? activeSort.direction : null;
+  const nextDirection = isActive && activeSort.direction === "asc" ? "desc" : defaultSortDirections[sortKey];
+  const Icon = currentDirection === "asc" ? ArrowUp : currentDirection === "desc" ? ArrowDown : ArrowUpDown;
+  const title = (nextDirection === "asc" ? copy.tradeJournals.sortAscending : copy.tradeJournals.sortDescending)
+    .replace("{field}", label);
+
+  return (
+    <TableHead
+      className={className}
+      aria-sort={currentDirection === "asc" ? "ascending" : currentDirection === "desc" ? "descending" : "none"}
+    >
+      <div className={cn("flex items-center gap-1", className?.includes("text-right") && "justify-end")}>
+        <button
+          type="button"
+          className={cn(
+            "inline-flex h-8 items-center gap-1 rounded px-1.5 text-sm font-medium text-muted-foreground transition-colors hover:bg-slate-100 hover:text-slate-950 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring disabled:pointer-events-none disabled:opacity-60",
+            isActive && "text-slate-950",
+          )}
+          onClick={() => onSort(sortKey)}
+          disabled={disabled}
+          aria-label={title}
+          title={title}
+        >
+          <span>{label}</span>
+          <Icon className="h-3.5 w-3.5" aria-hidden="true" />
+        </button>
+        {filter}
+      </div>
+    </TableHead>
   );
 }
 
@@ -474,6 +993,81 @@ function NumberInput({ value, onChange }: { value: string; onChange: (value: str
 
 function PriceCell({ value }: { value: number | null }) {
   return <TableCell className="text-right font-mono">{value === null ? copy.common.dash : formatNumber(value)}</TableCell>;
+}
+
+function buildTradeOptionFilters(rows: JournalTradeRow[], type: "instrument" | "strategy") {
+  const optionMap = new Map<string, string>();
+
+  rows.forEach((row) => {
+    const id = type === "instrument" ? row.instrumentOptionId : row.strategyOptionId;
+    const name = type === "instrument" ? row.instrumentOption?.name : row.strategyOption?.name;
+    if (id && name) optionMap.set(id, name);
+  });
+
+  return Array.from(optionMap, ([id, name]) => ({ id, name })).sort((a, b) => a.name.localeCompare(b.name, "zh-CN"));
+}
+
+function areFiltersEmpty(filters: Filters) {
+  return filters.instrumentOptionId === allFilterValue
+    && filters.strategyOptionId === allFilterValue
+    && filters.direction === "ALL"
+    && filters.dateFrom === ""
+    && filters.dateTo === ""
+    && !isRFilterActive(filters);
+}
+
+function isRFilterActive(filters: Filters) {
+  return filters.rMode !== "ALL"
+    || filters.rValue !== ""
+    || filters.rMin !== ""
+    || filters.rMax !== "";
+}
+
+function matchesFilters(trade: JournalTradeRow, filters: Filters) {
+  if (filters.instrumentOptionId !== allFilterValue && trade.instrumentOptionId !== filters.instrumentOptionId) return false;
+  if (filters.strategyOptionId !== allFilterValue && trade.strategyOptionId !== filters.strategyOptionId) return false;
+  if (filters.direction !== "ALL" && trade.direction !== filters.direction) return false;
+  if (filters.dateFrom && (!trade.date || trade.date < filters.dateFrom)) return false;
+  if (filters.dateTo && (!trade.date || trade.date > filters.dateTo)) return false;
+
+  return matchesRFilter(trade.rMultiple, filters);
+}
+
+function matchesRFilter(rMultiple: number, filters: Filters) {
+  if (filters.rMode === "ALL") return true;
+
+  if (filters.rMode === "BETWEEN") {
+    const min = parseFilterNumber(filters.rMin);
+    const max = parseFilterNumber(filters.rMax);
+    if (min === null && max === null) return true;
+    if (min !== null && rMultiple <= min) return false;
+    if (max !== null && rMultiple >= max) return false;
+    return true;
+  }
+
+  const value = parseFilterNumber(filters.rValue);
+  if (value === null) return true;
+
+  switch (filters.rMode) {
+    case "GT":
+      return rMultiple > value;
+    case "GTE":
+      return rMultiple >= value;
+    case "LT":
+      return rMultiple < value;
+    case "LTE":
+      return rMultiple <= value;
+    case "EQ":
+      return rMultiple === value;
+    default:
+      return true;
+  }
+}
+
+function parseFilterNumber(value: string) {
+  if (value.trim() === "") return null;
+  const parsed = Number(value);
+  return Number.isFinite(parsed) ? parsed : null;
 }
 
 function serializeApiTrade(trade: JournalTradeRow & { date: string }) {

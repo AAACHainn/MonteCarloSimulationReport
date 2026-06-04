@@ -17,7 +17,7 @@ const navItems = [
 
 export default function RootLayout({ children }: Readonly<{ children: React.ReactNode }>) {
   return (
-    <html lang={defaultLocale}>
+    <html lang={defaultLocale} suppressHydrationWarning>
       <body>
         <div className="min-h-screen">
           <header className="border-b bg-white">
