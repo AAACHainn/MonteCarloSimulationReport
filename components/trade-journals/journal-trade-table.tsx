@@ -1,8 +1,9 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import Image from "next/image";
 import { useRouter } from "next/navigation";
+import { createPortal } from "react-dom";
 import { ArrowDown, ArrowUp, ArrowUpDown, Check, ChevronLeft, ChevronRight, Filter, Pencil, Plus, RotateCcw, Trash2, X } from "lucide-react";
 import { ScreenshotPreviewDialog } from "@/components/trade-journals/screenshot-preview-dialog";
 import { Button } from "@/components/ui/button";
@@ -367,6 +368,7 @@ export function JournalTradeTable({
                   ...instrumentFilterOptions.map((option) => ({ value: option.id, label: option.name })),
                 ]}
                 onChange={(value) => setFilter("instrumentOptionId", value)}
+                onClear={() => setFilter("instrumentOptionId", allFilterValue)}
               />
             </FilterableHead>
             <FilterableHead
@@ -384,6 +386,7 @@ export function JournalTradeTable({
                   ...strategyFilterOptions.map((option) => ({ value: option.id, label: option.name })),
                 ]}
                 onChange={(value) => setFilter("strategyOptionId", value)}
+                onClear={() => setFilter("strategyOptionId", allFilterValue)}
               />
             </FilterableHead>
             <FilterableHead
@@ -402,6 +405,7 @@ export function JournalTradeTable({
                   { value: "SHORT", label: copy.tradeJournals.table.short },
                 ]}
                 onChange={(value) => setFilter("direction", value as DirectionFilter)}
+                onClear={() => setFilter("direction", "ALL")}
               />
             </FilterableHead>
             <TableHead className="text-right">{copy.tradeJournals.table.entry}</TableHead>
@@ -631,10 +635,57 @@ function ColumnFilterPopover({
   children: React.ReactNode;
 }) {
   const isOpen = openFilter === id;
+  const triggerRef = useRef<HTMLButtonElement | null>(null);
+  const panelRef = useRef<HTMLDivElement | null>(null);
+  const [panelPosition, setPanelPosition] = useState<{ left: number; top: number } | null>(null);
+
+  function updatePanelPosition() {
+    const rect = triggerRef.current?.getBoundingClientRect();
+    if (!rect) return;
+
+    const panelWidth = 288;
+    const viewportPadding = 12;
+    const maxLeft = Math.max(viewportPadding, window.innerWidth - panelWidth - viewportPadding);
+    const left = Math.min(Math.max(viewportPadding, rect.left), maxLeft);
+    setPanelPosition({ left, top: rect.bottom + 6 });
+  }
+
+  useEffect(() => {
+    if (!isOpen) return;
+
+    updatePanelPosition();
+
+    function handleViewportChange() {
+      updatePanelPosition();
+    }
+
+    function handlePointerDown(event: MouseEvent) {
+      const target = event.target as Node;
+      if (triggerRef.current?.contains(target) || panelRef.current?.contains(target)) return;
+      setOpenFilter((current) => current === id ? null : current);
+    }
+
+    function handleKeyDown(event: KeyboardEvent) {
+      if (event.key === "Escape") setOpenFilter((current) => current === id ? null : current);
+    }
+
+    window.addEventListener("resize", handleViewportChange);
+    window.addEventListener("scroll", handleViewportChange, true);
+    document.addEventListener("mousedown", handlePointerDown);
+    document.addEventListener("keydown", handleKeyDown);
+
+    return () => {
+      window.removeEventListener("resize", handleViewportChange);
+      window.removeEventListener("scroll", handleViewportChange, true);
+      document.removeEventListener("mousedown", handlePointerDown);
+      document.removeEventListener("keydown", handleKeyDown);
+    };
+  }, [id, isOpen, setOpenFilter]);
 
   return (
     <div className="relative inline-flex">
         <button
+          ref={triggerRef}
           type="button"
           className={cn(
             "inline-flex h-6 w-6 shrink-0 items-center justify-center rounded text-slate-400 transition-colors hover:bg-slate-100 hover:text-slate-950 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring disabled:pointer-events-none disabled:opacity-50",
@@ -644,15 +695,25 @@ function ColumnFilterPopover({
           aria-label={copy.tradeJournals.filters.openColumnFilter.replace("{field}", label)}
           title={copy.tradeJournals.filters.openColumnFilter.replace("{field}", label)}
           aria-expanded={isOpen}
-          onClick={() => setOpenFilter((current) => current === id ? null : id)}
+          onClick={() => {
+            updatePanelPosition();
+            setOpenFilter((current) => current === id ? null : id);
+          }}
         >
           <Filter className="h-3.5 w-3.5" />
         </button>
-      {isOpen ? (
-        <div className="absolute left-0 top-7 z-50 w-72 rounded-md border bg-white p-3 text-slate-950 shadow-lg">
-          {children}
-        </div>
-      ) : null}
+      {isOpen && panelPosition && typeof document !== "undefined"
+        ? createPortal(
+          <div
+            ref={panelRef}
+            className="fixed z-[100] w-72 rounded-md border bg-white p-3 text-slate-950 shadow-lg"
+            style={{ left: panelPosition.left, top: panelPosition.top }}
+          >
+            {children}
+          </div>,
+          document.body,
+        )
+        : null}
     </div>
   );
 }
@@ -661,10 +722,12 @@ function OptionFilterPanel({
   value,
   options,
   onChange,
+  onClear,
 }: {
   value: string;
   options: { value: string; label: string }[];
   onChange: (value: string) => void;
+  onClear: () => void;
 }) {
   return (
     <div className="space-y-2">
@@ -685,6 +748,7 @@ function OptionFilterPanel({
           </button>
         ))}
       </div>
+      <ClearColumnButton onClick={onClear} disabled={value === allFilterValue} />
     </div>
   );
 }
