@@ -3,7 +3,7 @@
 import { useEffect } from "react";
 import { createPortal } from "react-dom";
 import Image from "next/image";
-import { X } from "lucide-react";
+import { ExternalLink, X } from "lucide-react";
 import { copy } from "@/lib/i18n";
 
 export function ScreenshotPreviewDialog({
@@ -46,6 +46,16 @@ export function ScreenshotPreviewDialog({
           className="max-h-[86vh] w-auto max-w-[90vw] object-contain"
           onClick={(event) => event.stopPropagation()}
         />
+        <a
+          href={screenshotUrl}
+          target="_blank"
+          rel="noreferrer"
+          className="absolute left-4 top-4 inline-flex items-center gap-2 rounded-md bg-slate-950/80 px-3 py-2 text-sm font-medium text-white shadow hover:bg-slate-800 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-white"
+          onClick={(event) => event.stopPropagation()}
+        >
+          <ExternalLink className="h-4 w-4" />
+          {copy.tradeJournals.openOriginalScreenshot}
+        </a>
         <button
           type="button"
           className="absolute right-4 top-4 rounded-md bg-slate-950/80 p-2 text-white shadow hover:bg-slate-800 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-white"

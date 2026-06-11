@@ -4,6 +4,7 @@ import { Download, Play } from "lucide-react";
 import { Breadcrumbs } from "@/components/breadcrumbs";
 import { DeleteJournalButton } from "@/components/trade-journals/delete-journal-button";
 import { JournalTradeTable } from "@/components/trade-journals/journal-trade-table";
+import { MergeJournalImport } from "@/components/trade-journals/merge-journal-import";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { prisma } from "@/lib/db";
@@ -75,6 +76,7 @@ export default async function TradeJournalDetailPage({ params }: PageProps) {
           <Button asChild variant="outline">
             <a href={`/api/trade-journals/${journal.id}/export`}><Download className="h-4 w-4" />{copy.tradeJournals.export}</a>
           </Button>
+          <MergeJournalImport journalId={journal.id} />
           <DeleteJournalButton journalId={journal.id} />
         </div>
       </section>

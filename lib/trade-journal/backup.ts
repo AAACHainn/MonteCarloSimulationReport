@@ -52,6 +52,37 @@ export type ImportedJournalBackup = {
   screenshots: Map<string, Buffer>;
 };
 
+export type TradeDuplicateKeySource = {
+  date: Date | string | null;
+  instrument: string | null | undefined;
+  entryPrice: number | null;
+  stopLossPrice: number | null;
+  targetPrice: number | null;
+};
+
+export function buildTradeDuplicateKey(trade: TradeDuplicateKeySource) {
+  if (
+    !trade.date ||
+    !trade.instrument ||
+    trade.entryPrice === null ||
+    trade.stopLossPrice === null ||
+    trade.targetPrice === null
+  ) {
+    return null;
+  }
+
+  const date = trade.date instanceof Date ? trade.date : new Date(trade.date);
+  if (Number.isNaN(date.getTime())) return null;
+
+  return [
+    date.toISOString().slice(0, 10),
+    trade.instrument.trim(),
+    String(trade.entryPrice),
+    String(trade.stopLossPrice),
+    String(trade.targetPrice),
+  ].join("|");
+}
+
 export function isSafeArchivePath(value: string) {
   const normalized = value.replaceAll("\\", "/");
   return (

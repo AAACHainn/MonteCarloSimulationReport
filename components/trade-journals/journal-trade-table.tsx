@@ -4,7 +4,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import Image from "next/image";
 import { useRouter } from "next/navigation";
 import { createPortal } from "react-dom";
-import { ArrowDown, ArrowUp, ArrowUpDown, Check, ChevronLeft, ChevronRight, Filter, Pencil, Plus, RotateCcw, Trash2, X } from "lucide-react";
+import { ArrowDown, ArrowUp, ArrowUpDown, Check, ChevronLeft, ChevronRight, Download, Filter, Pencil, Plus, RotateCcw, Trash2, X } from "lucide-react";
 import { ScreenshotPreviewDialog } from "@/components/trade-journals/screenshot-preview-dialog";
 import { Button } from "@/components/ui/button";
 import { ConfirmDialog } from "@/components/ui/confirm-dialog";
@@ -12,8 +12,9 @@ import { DatePicker } from "@/components/ui/date-picker";
 import { Input } from "@/components/ui/input";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
-import { formatMoney, formatNumber } from "@/lib/format";
+import { formatMoney, formatNumber, formatPercent } from "@/lib/format";
 import { copy } from "@/lib/i18n";
+import { calculateJournalStats } from "@/lib/trade-journal/calculations";
 import { cn } from "@/lib/utils";
 
 type TradeOption = {
@@ -120,6 +121,7 @@ export function JournalTradeTable({
   const [isSaving, setIsSaving] = useState(false);
   const [deleteTradeId, setDeleteTradeId] = useState<string | null>(null);
   const [isDeleting, setIsDeleting] = useState(false);
+  const [isExporting, setIsExporting] = useState(false);
   const [previewScreenshot, setPreviewScreenshot] = useState<string | null>(null);
   const [pageSize, setPageSize] = useState(20);
   const [page, setPage] = useState(1);
@@ -153,6 +155,10 @@ export function JournalTradeTable({
   }, [filteredRows, sort]);
 
   const totalPages = Math.max(1, Math.ceil(filteredRows.length / pageSize));
+  const filteredStats = useMemo(
+    () => calculateJournalStats(filteredRows.map((trade) => trade.rMultiple)),
+    [filteredRows],
+  );
 
   useEffect(() => {
     setPage((currentPage) => Math.min(currentPage, totalPages));
@@ -259,6 +265,33 @@ export function JournalTradeTable({
     }
   }
 
+  async function exportFilteredRows() {
+    setError(null);
+    setIsExporting(true);
+    const response = await fetch(`/api/trade-journals/${journalId}/export`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ tradeIds: sortedRows.map((trade) => trade.id) }),
+    });
+    setIsExporting(false);
+
+    if (!response.ok) {
+      const data = await response.json().catch(() => null);
+      setError(data?.error ?? copy.tradeJournals.exportFilteredError);
+      return;
+    }
+
+    const blob = await response.blob();
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement("a");
+    link.href = url;
+    link.download = `trade-journal-${journalId}-filtered.zip`;
+    document.body.appendChild(link);
+    link.click();
+    link.remove();
+    URL.revokeObjectURL(url);
+  }
+
   return (
     <div className="space-y-4">
       <div className="flex flex-wrap items-center justify-between gap-3">
@@ -274,6 +307,19 @@ export function JournalTradeTable({
         </Button>
       </div>
       {error ? <p className="rounded-md border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-700">{error}</p> : null}
+      {hasActiveFilters ? (
+        <div className="rounded-lg border bg-slate-50/70 p-3">
+          <div className="mb-2 text-sm font-medium text-slate-700">{copy.tradeJournals.filteredStatistics}</div>
+          <div className="grid gap-2 sm:grid-cols-2 lg:grid-cols-6">
+            <FilteredStat label={copy.tradeJournals.statTradeCount} value={String(filteredStats.tradeCount)} />
+            <FilteredStat label={copy.tradeJournals.statWinRate} value={formatPercent(filteredStats.winRate)} />
+            <FilteredStat label={copy.tradeJournals.statTotalR} value={`${formatNumber(filteredStats.totalR)} R`} />
+            <FilteredStat label={copy.tradeJournals.statAverageR} value={`${formatNumber(filteredStats.averageR)} R`} />
+            <FilteredStat label={copy.tradeJournals.statMedianR} value={`${formatNumber(filteredStats.medianR)} R`} />
+            <FilteredStat label={copy.tradeJournals.statMaxLosingStreak} value={String(filteredStats.maxLosingStreak)} />
+          </div>
+        </div>
+      ) : null}
       <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
         <div className="text-sm text-slate-600">
           {copy.tradeJournals.pagination.range
@@ -300,6 +346,16 @@ export function JournalTradeTable({
           ) : null}
         </div>
         <div className="flex flex-wrap items-center gap-2">
+          <Button
+            type="button"
+            size="sm"
+            variant="outline"
+            onClick={exportFilteredRows}
+            disabled={editingId !== null || isExporting || sortedRows.length === 0}
+          >
+            <Download className="h-4 w-4" />
+            {copy.tradeJournals.exportFiltered}
+          </Button>
           <span className="text-sm text-slate-600">{copy.tradeJournals.pagination.rowsPerPage}</span>
           <Select
             value={String(pageSize)}
@@ -1057,6 +1113,15 @@ function NumberInput({ value, onChange }: { value: string; onChange: (value: str
 
 function PriceCell({ value }: { value: number | null }) {
   return <TableCell className="text-right font-mono">{value === null ? copy.common.dash : formatNumber(value)}</TableCell>;
+}
+
+function FilteredStat({ label, value }: { label: string; value: string }) {
+  return (
+    <div className="rounded-md border bg-white px-3 py-2">
+      <div className="text-xs text-slate-500">{label}</div>
+      <div className="mt-1 font-mono text-sm font-semibold text-slate-950">{value}</div>
+    </div>
+  );
 }
 
 function buildTradeOptionFilters(rows: JournalTradeRow[], type: "instrument" | "strategy") {
