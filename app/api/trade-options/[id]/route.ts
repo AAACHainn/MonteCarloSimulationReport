@@ -1,4 +1,5 @@
 import { NextResponse } from "next/server";
+import { Prisma } from "@prisma/client";
 import { prisma } from "@/lib/db";
 import { tradeOptionUpdateSchema } from "@/lib/validations";
 
@@ -11,8 +12,15 @@ export async function PATCH(request: Request, context: RouteContext) {
     return NextResponse.json({ error: parsed.error.flatten() }, { status: 400 });
   }
 
-  const option = await prisma.tradeOption.update({ where: { id }, data: parsed.data });
-  return NextResponse.json(option);
+  try {
+    const option = await prisma.tradeOption.update({ where: { id }, data: parsed.data });
+    return NextResponse.json(option);
+  } catch (error) {
+    if (error instanceof Prisma.PrismaClientKnownRequestError && error.code === "P2002") {
+      return NextResponse.json({ error: "同类型选项名称已存在。" }, { status: 400 });
+    }
+    throw error;
+  }
 }
 
 export async function DELETE(_request: Request, context: RouteContext) {

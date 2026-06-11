@@ -3,10 +3,11 @@
 import { useState, useTransition } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { ArchiveRestore, Download, NotebookTabs, Plus } from "lucide-react";
+import { ArchiveRestore, Check, Download, NotebookTabs, Pencil, Plus, Trash2, X } from "lucide-react";
 import { DeleteJournalButton } from "@/components/trade-journals/delete-journal-button";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
+import { ConfirmDialog } from "@/components/ui/confirm-dialog";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
@@ -123,35 +124,7 @@ export function JournalDashboard({ journals, options }: { journals: Journal[]; o
           {journals.length === 0 ? (
             <p className="rounded-lg border bg-white p-6 text-sm text-slate-600">{copy.tradeJournals.empty}</p>
           ) : (
-            journals.map((journal) => (
-              <Card key={journal.id}>
-                <CardContent className="space-y-4 p-5">
-                  <div className="flex items-start gap-3">
-                    <NotebookTabs className="mt-1 h-5 w-5 text-blue-700" />
-                    <div>
-                      <h3 className="font-semibold text-slate-950">{journal.name}</h3>
-                      <p className="text-sm text-slate-600">{journal.description || copy.datasets.noDescription}</p>
-                      <p className="mt-2 text-xs text-slate-500">
-                        {journal.dataset._count.trades} {copy.tradeJournals.trades} · {journal.dataset._count.simulationRuns}{" "}
-                        {copy.tradeJournals.simulations}
-                      </p>
-                    </div>
-                  </div>
-                  <div className="flex gap-2">
-                    <Button asChild size="sm" className="flex-1">
-                      <Link href={`/trade-journals/${journal.id}`}>{copy.home.open}</Link>
-                    </Button>
-                    <Button asChild variant="outline" size="sm">
-                      <a href={`/api/trade-journals/${journal.id}/export`}>
-                        <Download className="h-4 w-4" />
-                        {copy.tradeJournals.export}
-                      </a>
-                    </Button>
-                    <DeleteJournalButton journalId={journal.id} />
-                  </div>
-                </CardContent>
-              </Card>
-            ))
+            journals.map((journal) => <JournalCard key={journal.id} journal={journal} />)
           )}
         </div>
       </section>
@@ -159,10 +132,142 @@ export function JournalDashboard({ journals, options }: { journals: Journal[]; o
   );
 }
 
+function JournalCard({ journal }: { journal: Journal }) {
+  const router = useRouter();
+  const [isEditing, setIsEditing] = useState(false);
+  const [name, setName] = useState(journal.name);
+  const [description, setDescription] = useState(journal.description ?? "");
+  const [error, setError] = useState<string | null>(null);
+  const [isSaving, setIsSaving] = useState(false);
+
+  function beginEdit() {
+    setName(journal.name);
+    setDescription(journal.description ?? "");
+    setError(null);
+    setIsEditing(true);
+  }
+
+  function cancelEdit() {
+    setName(journal.name);
+    setDescription(journal.description ?? "");
+    setError(null);
+    setIsEditing(false);
+  }
+
+  async function saveJournal(event: React.FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+
+    const trimmedName = name.trim();
+    if (!trimmedName) {
+      setError(copy.api.journalNameRequired);
+      return;
+    }
+
+    setIsSaving(true);
+    setError(null);
+    const response = await fetch(`/api/trade-journals/${journal.id}`, {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ name: trimmedName, description }),
+    });
+    const data = await response.json().catch(() => null);
+    setIsSaving(false);
+
+    if (!response.ok) {
+      const message =
+        typeof data?.error === "string"
+          ? data.error
+          : data?.error?.fieldErrors?.name?.[0] ?? data?.error?.formErrors?.[0] ?? copy.tradeJournals.updateError;
+      setError(message);
+      return;
+    }
+
+    setIsEditing(false);
+    router.refresh();
+  }
+
+  return (
+    <Card>
+      <CardContent className="space-y-4 p-5">
+        {isEditing ? (
+          <form onSubmit={saveJournal} className="space-y-3">
+            <div className="space-y-2">
+              <Label htmlFor={`journal-name-${journal.id}`}>{copy.tradeJournals.name}</Label>
+              <Input
+                id={`journal-name-${journal.id}`}
+                value={name}
+                onChange={(event) => setName(event.target.value)}
+                required
+                maxLength={120}
+              />
+            </div>
+            <div className="space-y-2">
+              <Label htmlFor={`journal-description-${journal.id}`}>{copy.tradeJournals.description}</Label>
+              <Textarea
+                id={`journal-description-${journal.id}`}
+                value={description}
+                onChange={(event) => setDescription(event.target.value)}
+                maxLength={500}
+                className="min-h-20"
+              />
+            </div>
+            {error ? <p className="text-sm text-red-600">{error}</p> : null}
+            <div className="flex flex-wrap justify-end gap-2">
+              <Button type="button" variant="outline" size="sm" onClick={cancelEdit} disabled={isSaving}>
+                <X className="h-4 w-4" />
+                {copy.common.cancel}
+              </Button>
+              <Button type="submit" size="sm" disabled={isSaving}>
+                <Check className="h-4 w-4" />
+                {copy.tradeJournals.saveJournal}
+              </Button>
+            </div>
+          </form>
+        ) : (
+          <>
+            <div className="flex items-start gap-3">
+              <NotebookTabs className="mt-1 h-5 w-5 shrink-0 text-blue-700" />
+              <div className="min-w-0 flex-1">
+                <h3 className="truncate font-semibold text-slate-950">{journal.name}</h3>
+                <p className="text-sm text-slate-600">{journal.description || copy.datasets.noDescription}</p>
+                <p className="mt-2 text-xs text-slate-500">
+                  {journal.dataset._count.trades} {copy.tradeJournals.trades} · {journal.dataset._count.simulationRuns}{" "}
+                  {copy.tradeJournals.simulations}
+                </p>
+              </div>
+            </div>
+            <div className="grid grid-cols-2 gap-2">
+              <Button asChild size="sm" className="w-full">
+                <Link href={`/trade-journals/${journal.id}`}>{copy.home.open}</Link>
+              </Button>
+              <Button type="button" variant="outline" size="sm" className="w-full" onClick={beginEdit}>
+                <Pencil className="h-4 w-4" />
+                {copy.tradeJournals.editJournal}
+              </Button>
+              <Button asChild variant="outline" size="sm" className="w-full">
+                <a href={`/api/trade-journals/${journal.id}/export`}>
+                  <Download className="h-4 w-4" />
+                  {copy.tradeJournals.export}
+                </a>
+              </Button>
+              <DeleteJournalButton journalId={journal.id} className="w-full" />
+            </div>
+          </>
+        )}
+      </CardContent>
+    </Card>
+  );
+}
+
 function OptionManager({ options }: { options: TradeOption[] }) {
   const router = useRouter();
   const [type, setType] = useState<TradeOption["type"]>("INSTRUMENT");
   const [error, setError] = useState<string | null>(null);
+  const [editingOptionId, setEditingOptionId] = useState<string | null>(null);
+  const [editName, setEditName] = useState("");
+  const [deleteOption, setDeleteOption] = useState<TradeOption | null>(null);
+  const [isSavingOption, setIsSavingOption] = useState(false);
+  const [isDeletingOption, setIsDeletingOption] = useState(false);
 
   async function addOption(event: React.FormEvent<HTMLFormElement>) {
     event.preventDefault();
@@ -175,64 +280,215 @@ function OptionManager({ options }: { options: TradeOption[] }) {
       body: JSON.stringify({ type, name: formData.get("name") }),
     });
     if (!response.ok) {
-      setError("无法保存选项。");
+      const data = await response.json().catch(() => null);
+      setError(data?.error ?? copy.tradeJournals.optionSaveError);
       return;
     }
     form.reset();
     router.refresh();
   }
 
-  async function changeOption(option: TradeOption) {
-    const response = option.active
-      ? await fetch(`/api/trade-options/${option.id}`, { method: "DELETE" })
-      : await fetch(`/api/trade-options/${option.id}`, {
-          method: "PATCH",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ active: true }),
-        });
-    if (response.ok) router.refresh();
+  function beginEditOption(option: TradeOption) {
+    setEditingOptionId(option.id);
+    setEditName(option.name);
+    setError(null);
   }
 
+  function cancelEditOption() {
+    setEditingOptionId(null);
+    setEditName("");
+    setError(null);
+  }
+
+  async function saveOption(option: TradeOption) {
+    const name = editName.trim();
+    if (!name) {
+      setError(copy.api.optionNameRequired);
+      return;
+    }
+
+    setIsSavingOption(true);
+    setError(null);
+    const response = await fetch(`/api/trade-options/${option.id}`, {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ name }),
+    });
+    const data = await response.json().catch(() => null);
+    setIsSavingOption(false);
+
+    if (!response.ok) {
+      setError(data?.error ?? copy.tradeJournals.optionSaveError);
+      return;
+    }
+
+    cancelEditOption();
+    router.refresh();
+  }
+
+  async function toggleOptionActive(option: TradeOption) {
+    setError(null);
+    const response = await fetch(`/api/trade-options/${option.id}`, {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ active: !option.active }),
+    });
+    const data = await response.json().catch(() => null);
+
+    if (!response.ok) {
+      setError(data?.error ?? copy.tradeJournals.optionSaveError);
+      return;
+    }
+
+    router.refresh();
+  }
+
+  async function confirmDeleteOption() {
+    if (!deleteOption) return;
+
+    setIsDeletingOption(true);
+    setError(null);
+    const response = await fetch(`/api/trade-options/${deleteOption.id}`, { method: "DELETE" });
+    const data = await response.json().catch(() => null);
+    setIsDeletingOption(false);
+
+    if (!response.ok) {
+      setError(data?.error ?? copy.tradeJournals.optionDeleteError);
+      return;
+    }
+
+    if (editingOptionId === deleteOption.id) {
+      cancelEditOption();
+    }
+    setDeleteOption(null);
+    router.refresh();
+  }
+
+  const visibleOptions = options.filter((option) => option.type === type);
+
   return (
-    <Card>
-      <CardHeader>
-        <CardTitle>{copy.tradeJournals.optionsTitle}</CardTitle>
-        <CardDescription>{copy.tradeJournals.optionsDescription}</CardDescription>
-      </CardHeader>
-      <CardContent className="space-y-4">
-        <div className="flex gap-2">
-          {(["INSTRUMENT", "STRATEGY"] as const).map((value) => (
-            <Button
-              key={value}
-              type="button"
-              size="sm"
-              variant={type === value ? "default" : "outline"}
-              onClick={() => setType(value)}
-            >
-              {value === "INSTRUMENT" ? copy.tradeJournals.instrument : copy.tradeJournals.strategy}
-            </Button>
-          ))}
-        </div>
-        <form onSubmit={addOption} className="flex gap-2">
-          <Input name="name" required maxLength={80} placeholder={copy.tradeJournals.optionPlaceholder} />
-          <Button type="submit" size="sm">{copy.tradeJournals.addOption}</Button>
-        </form>
-        {error ? <p className="text-sm text-red-600">{error}</p> : null}
-        <div className="max-h-44 space-y-2 overflow-auto">
-          {options.filter((option) => option.type === type).length === 0 ? (
-            <p className="text-sm text-slate-500">{copy.tradeJournals.noOptions}</p>
-          ) : (
-            options.filter((option) => option.type === type).map((option) => (
-              <div key={option.id} className="flex items-center justify-between rounded-md border px-3 py-2 text-sm">
-                <span className={option.active ? "text-slate-900" : "text-slate-400"}>{option.name}</span>
-                <Button type="button" variant="ghost" size="sm" onClick={() => changeOption(option)}>
-                  {option.active ? copy.tradeJournals.deactivate : copy.tradeJournals.reactivate}
-                </Button>
-              </div>
-            ))
-          )}
-        </div>
-      </CardContent>
-    </Card>
+    <>
+      <Card>
+        <CardHeader>
+          <CardTitle>{copy.tradeJournals.optionsTitle}</CardTitle>
+          <CardDescription>{copy.tradeJournals.optionsDescription}</CardDescription>
+        </CardHeader>
+        <CardContent className="space-y-4">
+          <div className="flex gap-2">
+            {(["INSTRUMENT", "STRATEGY"] as const).map((value) => (
+              <Button
+                key={value}
+                type="button"
+                size="sm"
+                variant={type === value ? "default" : "outline"}
+                onClick={() => setType(value)}
+              >
+                {value === "INSTRUMENT" ? copy.tradeJournals.instrument : copy.tradeJournals.strategy}
+              </Button>
+            ))}
+          </div>
+          <form onSubmit={addOption} className="flex gap-2">
+            <Input name="name" required maxLength={80} placeholder={copy.tradeJournals.optionPlaceholder} />
+            <Button type="submit" size="sm">{copy.tradeJournals.addOption}</Button>
+          </form>
+          {error ? <p className="text-sm text-red-600">{error}</p> : null}
+          <div className="max-h-44 space-y-2 overflow-auto pr-1">
+            {visibleOptions.length === 0 ? (
+              <p className="text-sm text-slate-500">{copy.tradeJournals.noOptions}</p>
+            ) : (
+              visibleOptions.map((option) => {
+                const isEditing = editingOptionId === option.id;
+
+                return (
+                  <div key={option.id} className="flex min-h-12 items-center gap-2 rounded-md border px-3 py-2 text-sm">
+                    {isEditing ? (
+                      <>
+                        <Input
+                          value={editName}
+                          onChange={(event) => setEditName(event.target.value)}
+                          maxLength={80}
+                          className="h-8 min-w-0 flex-1"
+                          autoFocus
+                        />
+                        <Button
+                          type="button"
+                          variant="ghost"
+                          size="icon"
+                          className="h-8 w-8 shrink-0 text-blue-700 hover:bg-blue-50 hover:text-blue-800"
+                          onClick={() => saveOption(option)}
+                          disabled={isSavingOption}
+                          aria-label={copy.tradeJournals.saveOption}
+                          title={copy.tradeJournals.saveOption}
+                        >
+                          <Check className="h-4 w-4" />
+                        </Button>
+                        <Button
+                          type="button"
+                          variant="ghost"
+                          size="icon"
+                          className="h-8 w-8 shrink-0"
+                          onClick={cancelEditOption}
+                          disabled={isSavingOption}
+                          aria-label={copy.common.cancel}
+                          title={copy.common.cancel}
+                        >
+                          <X className="h-4 w-4" />
+                        </Button>
+                      </>
+                    ) : (
+                      <>
+                        <span className={`min-w-0 flex-1 truncate ${option.active ? "text-slate-900" : "text-slate-400"}`}>
+                          {option.name}
+                        </span>
+                        <Button
+                          type="button"
+                          variant="ghost"
+                          size="icon"
+                          className="h-8 w-8 shrink-0"
+                          onClick={() => beginEditOption(option)}
+                          aria-label={copy.tradeJournals.editOption}
+                          title={copy.tradeJournals.editOption}
+                        >
+                          <Pencil className="h-4 w-4" />
+                        </Button>
+                        <Button
+                          type="button"
+                          variant="ghost"
+                          size="sm"
+                          className="h-8 shrink-0 px-2"
+                          onClick={() => toggleOptionActive(option)}
+                        >
+                          {option.active ? copy.tradeJournals.deactivate : copy.tradeJournals.reactivate}
+                        </Button>
+                        <Button
+                          type="button"
+                          variant="ghost"
+                          size="icon"
+                          className="h-8 w-8 shrink-0 text-red-600 hover:bg-red-50 hover:text-red-700"
+                          onClick={() => setDeleteOption(option)}
+                          aria-label={copy.tradeJournals.deleteOption}
+                          title={copy.tradeJournals.deleteOption}
+                        >
+                          <Trash2 className="h-4 w-4" />
+                        </Button>
+                      </>
+                    )}
+                  </div>
+                );
+              })
+            )}
+          </div>
+        </CardContent>
+      </Card>
+      <ConfirmDialog
+        open={Boolean(deleteOption)}
+        title={copy.tradeJournals.deleteOptionTitle}
+        description={copy.tradeJournals.deleteOptionConfirm}
+        confirmLabel={copy.tradeJournals.deleteOption}
+        isLoading={isDeletingOption}
+        onCancel={() => setDeleteOption(null)}
+        onConfirm={confirmDeleteOption}
+      />
+    </>
   );
 }

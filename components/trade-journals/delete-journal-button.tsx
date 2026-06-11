@@ -7,7 +7,15 @@ import { Button, type ButtonProps } from "@/components/ui/button";
 import { ConfirmDialog } from "@/components/ui/confirm-dialog";
 import { copy } from "@/lib/i18n";
 
-export function DeleteJournalButton({ journalId, size = "sm" }: { journalId: string; size?: ButtonProps["size"] }) {
+export function DeleteJournalButton({
+  journalId,
+  size = "sm",
+  className,
+}: {
+  journalId: string;
+  size?: ButtonProps["size"];
+  className?: ButtonProps["className"];
+}) {
   const router = useRouter();
   const [open, setOpen] = useState(false);
   const [loading, setLoading] = useState(false);
@@ -25,7 +33,7 @@ export function DeleteJournalButton({ journalId, size = "sm" }: { journalId: str
 
   return (
     <>
-      <Button type="button" variant="destructive" size={size} onClick={() => setOpen(true)} disabled={loading}>
+      <Button type="button" variant="destructive" size={size} className={className} onClick={() => setOpen(true)} disabled={loading}>
         <Trash2 className="h-4 w-4" />
         {copy.tradeJournals.delete}
       </Button>

@@ -18,9 +18,14 @@ export const tradeOptionSchema = z.object({
   name: z.string().trim().min(1, copy.api.optionNameRequired).max(80),
 });
 
-export const tradeOptionUpdateSchema = z.object({
-  active: z.boolean(),
-});
+export const tradeOptionUpdateSchema = z
+  .object({
+    name: z.string().trim().min(1, copy.api.optionNameRequired).max(80).optional(),
+    active: z.boolean().optional(),
+  })
+  .refine((value) => value.name !== undefined || value.active !== undefined, {
+    message: copy.api.optionNameRequired,
+  });
 
 export const simulationConfigSchema = z
   .object({
