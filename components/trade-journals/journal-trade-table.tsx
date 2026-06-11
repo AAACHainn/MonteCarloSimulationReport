@@ -63,7 +63,7 @@ type DirectionFilter = "ALL" | "LONG" | "SHORT";
 type RFilterMode = "ALL" | "GT" | "GTE" | "LT" | "LTE" | "EQ" | "BETWEEN";
 type Filters = {
   instrumentOptionId: string;
-  strategyOptionId: string;
+  strategyOptionIds: string[];
   direction: DirectionFilter;
   dateFrom: string;
   dateTo: string;
@@ -94,7 +94,7 @@ const defaultSortDirections: Record<SortKey, SortDirection> = {
 };
 const emptyFilters: Filters = {
   instrumentOptionId: allFilterValue,
-  strategyOptionId: allFilterValue,
+  strategyOptionIds: [],
   direction: allFilterValue,
   dateFrom: "",
   dateTo: "",
@@ -432,17 +432,15 @@ export function JournalTradeTable({
               filterId="strategy"
               openFilter={openFilter}
               setOpenFilter={setOpenFilter}
-              active={filters.strategyOptionId !== allFilterValue}
+              active={filters.strategyOptionIds.length > 0}
               disabled={editingId !== null}
             >
-              <OptionFilterPanel
-                value={filters.strategyOptionId}
-                options={[
-                  { value: allFilterValue, label: copy.tradeJournals.filters.allStrategies },
-                  ...strategyFilterOptions.map((option) => ({ value: option.id, label: option.name })),
-                ]}
-                onChange={(value) => setFilter("strategyOptionId", value)}
-                onClear={() => setFilter("strategyOptionId", allFilterValue)}
+              <MultiOptionFilterPanel
+                values={filters.strategyOptionIds}
+                allLabel={copy.tradeJournals.filters.allStrategies}
+                options={strategyFilterOptions.map((option) => ({ value: option.id, label: option.name }))}
+                onChange={(values) => setFilter("strategyOptionIds", values)}
+                onClear={() => setFilter("strategyOptionIds", [])}
               />
             </FilterableHead>
             <FilterableHead
@@ -809,6 +807,83 @@ function OptionFilterPanel({
   );
 }
 
+function MultiOptionFilterPanel({
+  values,
+  allLabel,
+  options,
+  onChange,
+  onClear,
+}: {
+  values: string[];
+  allLabel: string;
+  options: { value: string; label: string }[];
+  onChange: (values: string[]) => void;
+  onClear: () => void;
+}) {
+  const selected = new Set(values);
+
+  function toggle(value: string) {
+    if (selected.has(value)) {
+      onChange(values.filter((current) => current !== value));
+      return;
+    }
+
+    onChange([...values, value]);
+  }
+
+  return (
+    <div className="space-y-2">
+      <p className="text-xs font-medium text-slate-500">{copy.tradeJournals.filters.chooseValue}</p>
+      <div className="max-h-64 overflow-auto rounded-md border p-1">
+        <button
+          type="button"
+          className={cn(
+            "flex w-full items-center gap-2 rounded-sm px-2 py-1.5 text-left text-sm outline-none hover:bg-slate-100 focus:bg-slate-100",
+            values.length === 0 && "font-medium text-slate-950",
+          )}
+          onClick={onClear}
+        >
+          <span
+            className={cn(
+              "flex h-4 w-4 shrink-0 items-center justify-center rounded border",
+              values.length === 0 ? "border-blue-600 bg-blue-600 text-white" : "border-slate-300 bg-white text-transparent",
+            )}
+          >
+            <Check className="h-3 w-3" />
+          </span>
+          <span className="truncate">{allLabel}</span>
+        </button>
+        {options.map((option) => {
+          const isSelected = selected.has(option.value);
+
+          return (
+            <button
+              key={option.value}
+              type="button"
+              className={cn(
+                "flex w-full items-center gap-2 rounded-sm px-2 py-1.5 text-left text-sm outline-none hover:bg-slate-100 focus:bg-slate-100",
+                isSelected && "font-medium text-slate-950",
+              )}
+              onClick={() => toggle(option.value)}
+            >
+              <span
+                className={cn(
+                  "flex h-4 w-4 shrink-0 items-center justify-center rounded border",
+                  isSelected ? "border-blue-600 bg-blue-600 text-white" : "border-slate-300 bg-white text-transparent",
+                )}
+              >
+                <Check className="h-3 w-3" />
+              </span>
+              <span className="truncate">{option.label}</span>
+            </button>
+          );
+        })}
+      </div>
+      <ClearColumnButton onClick={onClear} disabled={values.length === 0} />
+    </div>
+  );
+}
+
 function DateFilterPanel({
   dateFrom,
   dateTo,
@@ -1138,7 +1213,7 @@ function buildTradeOptionFilters(rows: JournalTradeRow[], type: "instrument" | "
 
 function areFiltersEmpty(filters: Filters) {
   return filters.instrumentOptionId === allFilterValue
-    && filters.strategyOptionId === allFilterValue
+    && filters.strategyOptionIds.length === 0
     && filters.direction === "ALL"
     && filters.dateFrom === ""
     && filters.dateTo === ""
@@ -1154,7 +1229,7 @@ function isRFilterActive(filters: Filters) {
 
 function matchesFilters(trade: JournalTradeRow, filters: Filters) {
   if (filters.instrumentOptionId !== allFilterValue && trade.instrumentOptionId !== filters.instrumentOptionId) return false;
-  if (filters.strategyOptionId !== allFilterValue && trade.strategyOptionId !== filters.strategyOptionId) return false;
+  if (filters.strategyOptionIds.length > 0 && (!trade.strategyOptionId || !filters.strategyOptionIds.includes(trade.strategyOptionId))) return false;
   if (filters.direction !== "ALL" && trade.direction !== filters.direction) return false;
   if (filters.dateFrom && (!trade.date || trade.date < filters.dateFrom)) return false;
   if (filters.dateTo && (!trade.date || trade.date > filters.dateTo)) return false;
