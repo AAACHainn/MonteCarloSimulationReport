@@ -223,7 +223,14 @@ export function DatePicker({
                 >
                   <SelectValue />
                 </SelectTrigger>
-                <SelectContent data-date-picker-popover className="z-[200] min-w-[6.25rem]">
+                <SelectContent
+                  data-date-picker-popover
+                  position="popper"
+                  side="bottom"
+                  align="start"
+                  sideOffset={4}
+                  className="z-[200] max-h-64 min-w-[6.25rem]"
+                >
                   {months.map((month) => (
                     <SelectItem key={month.value} value={month.value}>
                       {month.label}

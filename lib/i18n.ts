@@ -90,6 +90,7 @@ export const dictionaries = {
       deleteTradeTitle: "删除交易记录",
       deleteTradeConfirm: "确定删除这笔交易及其本地截图吗？",
       saveError: "无法保存交易记录。",
+      newTradeHiddenByFilters: "新交易已保存，但不符合当前筛选条件。",
       sortAscending: "按 {field} 升序排列",
       sortDescending: "按 {field} 降序排列",
       filters: {

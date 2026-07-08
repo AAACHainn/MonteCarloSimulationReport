@@ -117,6 +117,9 @@ export function JournalTradeTable({
   const [isDeleting, setIsDeleting] = useState(false);
   const [isExporting, setIsExporting] = useState(false);
   const [previewScreenshot, setPreviewScreenshot] = useState<string | null>(null);
+  const [highlightedTradeId, setHighlightedTradeId] = useState<string | null>(null);
+  const [hiddenNewTradeId, setHiddenNewTradeId] = useState<string | null>(null);
+  const highlightedRowRef = useRef<HTMLTableRowElement | null>(null);
   const [pageSize, setPageSize] = useState(20);
   const [page, setPage] = useState(1);
   const [sort, setSort] = useState<SortState>({ key: "date", direction: "asc" });
@@ -130,23 +133,8 @@ export function JournalTradeTable({
 
   useEffect(() => setRows(trades), [trades]);
 
-  const filteredRows = useMemo(() => {
-    return rows.filter((trade) => matchesFilters(trade, filters));
-  }, [filters, rows]);
-
-  const sortedRows = useMemo(() => {
-    return filteredRows
-      .map((row, index) => ({ row, index }))
-      .sort((a, b) => {
-        const direction = sort.direction === "asc" ? 1 : -1;
-        const result = sort.key === "date"
-          ? a.row.date.localeCompare(b.row.date)
-          : a.row.rMultiple - b.row.rMultiple;
-
-        return result === 0 ? a.index - b.index : result * direction;
-      })
-      .map(({ row }) => row);
-  }, [filteredRows, sort]);
+  const filteredRows = useMemo(() => getVisibleRows(rows, filters), [filters, rows]);
+  const sortedRows = useMemo(() => getSortedRows(filteredRows, sort), [filteredRows, sort]);
 
   const totalPages = Math.max(1, Math.ceil(filteredRows.length / pageSize));
   const filteredStats = useMemo(
@@ -157,6 +145,13 @@ export function JournalTradeTable({
   useEffect(() => {
     setPage((currentPage) => Math.min(currentPage, totalPages));
   }, [totalPages]);
+
+  useEffect(() => {
+    if (!highlightedTradeId) return;
+    highlightedRowRef.current?.scrollIntoView({ block: "center", behavior: "smooth" });
+    const timeout = window.setTimeout(() => setHighlightedTradeId(null), 3000);
+    return () => window.clearTimeout(timeout);
+  }, [highlightedTradeId, page]);
 
   const pagedRows = useMemo(() => {
     const start = (page - 1) * pageSize;
@@ -191,6 +186,7 @@ export function JournalTradeTable({
     setFilters(emptyFilters);
     setOpenFilter(null);
     setPage(1);
+    setHiddenNewTradeId(null);
   }
 
   function beginEdit(trade: JournalTradeRow) {
@@ -217,6 +213,7 @@ export function JournalTradeTable({
 
   async function saveTrade() {
     setError(null);
+    setHiddenNewTradeId(null);
     if (editingId === "new" && !draft.screenshot) {
       setError(copy.tradeJournals.screenshotRequired);
       return;
@@ -241,8 +238,18 @@ export function JournalTradeTable({
     }
 
     const row = serializeApiTrade(data);
-    setRows((current) => isNew ? [...current, row] : current.map((trade) => trade.id === row.id ? row : trade));
-    if (isNew) setPage(Math.ceil((rows.length + 1) / pageSize));
+    const nextRows = isNew ? [...rows, row] : rows.map((trade) => trade.id === row.id ? row : trade);
+    setRows(nextRows);
+    if (isNew) {
+      const nextSortedRows = getSortedRows(getVisibleRows(nextRows, filters), sort);
+      const newTradeIndex = nextSortedRows.findIndex((trade) => trade.id === row.id);
+      if (newTradeIndex >= 0) {
+        setPage(Math.floor(newTradeIndex / pageSize) + 1);
+        setHighlightedTradeId(row.id);
+      } else {
+        setHiddenNewTradeId(row.id);
+      }
+    }
     cancelEdit();
     router.refresh();
   }
@@ -301,6 +308,22 @@ export function JournalTradeTable({
         </Button>
       </div>
       {error ? <p className="rounded-md border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-700">{error}</p> : null}
+      {hiddenNewTradeId ? (
+        <div className="flex flex-wrap items-center gap-2 rounded-md border border-blue-200 bg-blue-50 px-3 py-2 text-sm text-blue-800">
+          <span>{copy.tradeJournals.newTradeHiddenByFilters}</span>
+          <Button
+            type="button"
+            size="sm"
+            variant="outline"
+            className="h-7 border-blue-200 bg-white px-2 text-xs text-blue-700 hover:bg-blue-100"
+            onClick={resetFilters}
+            disabled={editingId !== null}
+          >
+            <RotateCcw className="h-3.5 w-3.5" />
+            {copy.tradeJournals.filters.reset}
+          </Button>
+        </div>
+      ) : null}
       {hasActiveFilters ? (
         <div className="rounded-lg border bg-slate-50/70 p-3">
           <div className="mb-2 text-sm font-medium text-slate-700">{copy.tradeJournals.filteredStatistics}</div>
@@ -496,10 +519,13 @@ export function JournalTradeTable({
               <EditableRow key={trade.id} draft={draft} setDraft={setDraft} options={options} onSave={saveTrade} onCancel={cancelEdit} loading={isSaving} />
             ) : (
               <TableRow
+                ref={trade.id === highlightedTradeId ? highlightedRowRef : undefined}
                 key={trade.id}
                 className={cn(
+                  "transition-colors duration-500",
                   trade.rMultiple > 0 && "bg-emerald-50/70 hover:bg-emerald-100/70",
                   trade.rMultiple < 0 && "bg-red-50/70 hover:bg-red-100/70",
+                  trade.id === highlightedTradeId && "bg-blue-50 ring-2 ring-inset ring-blue-300 hover:bg-blue-50",
                 )}
               >
                 <TableCell className="whitespace-nowrap">{trade.date}</TableCell>
@@ -1194,6 +1220,24 @@ function matchesFilters(trade: JournalTradeRow, filters: Filters) {
 
 function matchesRFilter(rMultiple: number, filters: Filters) {
   return compileRExpressionFilter(filters.rExpression).test(rMultiple);
+}
+
+function getVisibleRows(rows: JournalTradeRow[], filters: Filters) {
+  return rows.filter((trade) => matchesFilters(trade, filters));
+}
+
+function getSortedRows(rows: JournalTradeRow[], sort: SortState) {
+  return rows
+    .map((row, index) => ({ row, index }))
+    .sort((a, b) => {
+      const direction = sort.direction === "asc" ? 1 : -1;
+      const result = sort.key === "date"
+        ? a.row.date.localeCompare(b.row.date)
+        : a.row.rMultiple - b.row.rMultiple;
+
+      return result === 0 ? a.index - b.index : result * direction;
+    })
+    .map(({ row }) => row);
 }
 
 function serializeApiTrade(trade: JournalTradeRow & { date: string }) {
