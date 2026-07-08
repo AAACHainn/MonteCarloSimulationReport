@@ -32,9 +32,10 @@ export function DatePicker({
       </Popover.Trigger>
       <Popover.Portal>
         <Popover.Content
+          data-date-picker-popover
           align="start"
           sideOffset={6}
-          className="z-50 rounded-lg border bg-white p-3 shadow-lg"
+          className="z-[150] rounded-lg border bg-white p-3 shadow-lg"
         >
           <DayPicker
             mode="single"

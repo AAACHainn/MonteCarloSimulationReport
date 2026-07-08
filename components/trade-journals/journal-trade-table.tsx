@@ -715,6 +715,7 @@ function ColumnFilterPopover({
 
     function handlePointerDown(event: MouseEvent) {
       const target = event.target as Node;
+      if (target instanceof Element && target.closest("[data-date-picker-popover]")) return;
       if (triggerRef.current?.contains(target) || panelRef.current?.contains(target)) return;
       setOpenFilter((current) => current === id ? null : current);
     }
