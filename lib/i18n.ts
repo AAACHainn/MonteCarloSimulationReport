@@ -151,6 +151,13 @@ export const dictionaries = {
         actions: "操作",
       },
       chooseDate: "选择日期",
+      datePicker: {
+        monthSelect: "选择月份",
+        nextMonth: "下一月",
+        previousMonth: "上一月",
+        yearInput: "年份",
+        yearInputPlaceholder: "输入年份",
+      },
       chooseInstrument: "选择品种",
       chooseStrategy: "选择策略",
       screenshotRequired: "请选择交易截图。",
