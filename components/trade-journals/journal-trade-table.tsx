@@ -4,7 +4,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import Image from "next/image";
 import { useRouter } from "next/navigation";
 import { createPortal } from "react-dom";
-import { ArrowDown, ArrowUp, ArrowUpDown, Check, ChevronLeft, ChevronRight, Download, Filter, Pencil, Plus, RotateCcw, Trash2, X } from "lucide-react";
+import { ArrowDown, ArrowUp, ArrowUpDown, Check, ChevronLeft, ChevronRight, Download, Filter, HelpCircle, Pencil, Plus, RotateCcw, Trash2, X } from "lucide-react";
 import { ScreenshotPreviewDialog } from "@/components/trade-journals/screenshot-preview-dialog";
 import { Button } from "@/components/ui/button";
 import { ConfirmDialog } from "@/components/ui/confirm-dialog";
@@ -15,6 +15,7 @@ import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@
 import { formatMoney, formatNumber, formatPercent } from "@/lib/format";
 import { copy } from "@/lib/i18n";
 import { calculateJournalStats } from "@/lib/trade-journal/calculations";
+import { compileRExpressionFilter } from "@/lib/trade-journal/r-expression-filter";
 import { cn } from "@/lib/utils";
 
 type TradeOption = {
@@ -60,17 +61,13 @@ type SortState = {
   direction: SortDirection;
 };
 type DirectionFilter = "ALL" | "LONG" | "SHORT";
-type RFilterMode = "ALL" | "GT" | "GTE" | "LT" | "LTE" | "EQ" | "BETWEEN";
 type Filters = {
   instrumentOptionId: string;
   strategyOptionIds: string[];
   direction: DirectionFilter;
   dateFrom: string;
   dateTo: string;
-  rMode: RFilterMode;
-  rValue: string;
-  rMin: string;
-  rMax: string;
+  rExpression: string;
 };
 
 const emptyDraft: Draft = {
@@ -98,10 +95,7 @@ const emptyFilters: Filters = {
   direction: allFilterValue,
   dateFrom: "",
   dateTo: "",
-  rMode: "ALL",
-  rValue: "",
-  rMin: "",
-  rMax: "",
+  rExpression: "",
 };
 
 export function JournalTradeTable({
@@ -484,17 +478,9 @@ export function JournalTradeTable({
                   disabled={editingId !== null}
                 >
                   <RFilterPanel
-                    filters={filters}
-                    onModeChange={(value) => setFilter("rMode", value)}
-                    onValueChange={(value) => setFilter("rValue", value)}
-                    onMinChange={(value) => setFilter("rMin", value)}
-                    onMaxChange={(value) => setFilter("rMax", value)}
-                    onClear={() => {
-                      setFilter("rMode", "ALL");
-                      setFilter("rValue", "");
-                      setFilter("rMin", "");
-                      setFilter("rMax", "");
-                    }}
+                    expression={filters.rExpression}
+                    onExpressionChange={(value) => setFilter("rExpression", value)}
+                    onClear={() => setFilter("rExpression", "")}
                   />
                 </ColumnFilterPopover>
               }
@@ -915,85 +901,56 @@ function DateFilterPanel({
 }
 
 function RFilterPanel({
-  filters,
-  onModeChange,
-  onValueChange,
-  onMinChange,
-  onMaxChange,
+  expression,
+  onExpressionChange,
   onClear,
 }: {
-  filters: Filters;
-  onModeChange: (value: RFilterMode) => void;
-  onValueChange: (value: string) => void;
-  onMinChange: (value: string) => void;
-  onMaxChange: (value: string) => void;
+  expression: string;
+  onExpressionChange: (value: string) => void;
   onClear: () => void;
 }) {
-  const modes: { value: RFilterMode; label: string }[] = [
-    { value: "ALL", label: copy.tradeJournals.filters.rAll },
-    { value: "GT", label: copy.tradeJournals.filters.rGreaterThan },
-    { value: "GTE", label: copy.tradeJournals.filters.rGreaterThanOrEqual },
-    { value: "LT", label: copy.tradeJournals.filters.rLessThan },
-    { value: "LTE", label: copy.tradeJournals.filters.rLessThanOrEqual },
-    { value: "EQ", label: copy.tradeJournals.filters.rEqual },
-    { value: "BETWEEN", label: copy.tradeJournals.filters.rBetween },
-  ];
+  const compiled = useMemo(() => compileRExpressionFilter(expression), [expression]);
+  const hasError = expression.trim() !== "" && compiled.error !== null;
 
   return (
     <div className="space-y-3">
-      <p className="text-xs font-medium text-slate-500">{copy.tradeJournals.filters.rMode}</p>
-      <div className="grid grid-cols-2 gap-1">
-        {modes.map((mode) => (
+      <div className="flex items-center justify-between gap-2">
+        <p className="text-xs font-medium text-slate-500">{copy.tradeJournals.filters.rMode}</p>
+        <div className="group relative">
           <button
-            key={mode.value}
             type="button"
-            className={cn(
-              "rounded-md border px-2 py-1.5 text-sm hover:bg-slate-100 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring",
-              mode.value === filters.rMode ? "border-blue-200 bg-blue-50 text-blue-700" : "border-slate-200 bg-white text-slate-700",
-            )}
-            onClick={() => onModeChange(mode.value)}
+            className="flex h-7 w-7 items-center justify-center rounded-md text-slate-400 transition-colors hover:bg-slate-100 hover:text-slate-700 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+            aria-label={copy.tradeJournals.filters.rExpressionHelpTitle}
           >
-            {mode.label}
+            <HelpCircle className="h-4 w-4" />
           </button>
-        ))}
-      </div>
-      {filters.rMode === "BETWEEN" ? (
-        <div className="grid grid-cols-2 gap-2">
-          <FilterPanelField label={copy.tradeJournals.filters.rLower}>
-            <Input
-              type="number"
-              step="any"
-              value={filters.rMin}
-              onChange={(event) => onMinChange(event.target.value)}
-              placeholder={copy.tradeJournals.filters.rLowerPlaceholder}
-              className="h-9 text-right"
-            />
-          </FilterPanelField>
-          <FilterPanelField label={copy.tradeJournals.filters.rUpper}>
-            <Input
-              type="number"
-              step="any"
-              value={filters.rMax}
-              onChange={(event) => onMaxChange(event.target.value)}
-              placeholder={copy.tradeJournals.filters.rUpperPlaceholder}
-              className="h-9 text-right"
-            />
-          </FilterPanelField>
+          <div className="pointer-events-none absolute right-0 top-8 z-[160] hidden w-72 rounded-md border bg-white p-3 text-xs leading-5 text-slate-600 shadow-lg group-hover:block group-focus-within:block">
+            <div className="mb-1 font-medium text-slate-950">{copy.tradeJournals.filters.rExpressionHelpTitle}</div>
+            <p>{copy.tradeJournals.filters.rExpressionHelpVariable}</p>
+            <p>{copy.tradeJournals.filters.rExpressionHelpOperators}</p>
+            <div className="mt-2 space-y-1 font-mono text-[11px] text-slate-700">
+              {copy.tradeJournals.filters.rExpressionExamples.map((example) => (
+                <div key={example}>{example}</div>
+              ))}
+            </div>
+          </div>
         </div>
-      ) : (
-        <FilterPanelField label={copy.tradeJournals.filters.rValue}>
+      </div>
+      <FilterPanelField label={copy.tradeJournals.filters.rExpression}>
+        <div className="space-y-1">
           <Input
-            type="number"
-            step="any"
-            value={filters.rValue}
-            onChange={(event) => onValueChange(event.target.value)}
-            placeholder={copy.tradeJournals.filters.rValuePlaceholder}
-            className="h-9 text-right"
-            disabled={filters.rMode === "ALL"}
+            value={expression}
+            onChange={(event) => onExpressionChange(event.target.value)}
+            placeholder={copy.tradeJournals.filters.rExpressionPlaceholder}
+            className={cn("h-9 font-mono", hasError && "border-red-300 focus-visible:ring-red-100")}
+            aria-invalid={hasError}
           />
-        </FilterPanelField>
-      )}
-      <ClearColumnButton onClick={onClear} disabled={!isRFilterActive(filters)} />
+          {hasError ? (
+            <p className="text-xs text-red-600">{copy.tradeJournals.filters.rExpressionError}</p>
+          ) : null}
+        </div>
+      </FilterPanelField>
+      <ClearColumnButton onClick={onClear} disabled={expression.trim() === ""} />
     </div>
   );
 }
@@ -1222,10 +1179,7 @@ function areFiltersEmpty(filters: Filters) {
 }
 
 function isRFilterActive(filters: Filters) {
-  return filters.rMode !== "ALL"
-    || filters.rValue !== ""
-    || filters.rMin !== ""
-    || filters.rMax !== "";
+  return filters.rExpression.trim() !== "";
 }
 
 function matchesFilters(trade: JournalTradeRow, filters: Filters) {
@@ -1239,40 +1193,7 @@ function matchesFilters(trade: JournalTradeRow, filters: Filters) {
 }
 
 function matchesRFilter(rMultiple: number, filters: Filters) {
-  if (filters.rMode === "ALL") return true;
-
-  if (filters.rMode === "BETWEEN") {
-    const min = parseFilterNumber(filters.rMin);
-    const max = parseFilterNumber(filters.rMax);
-    if (min === null && max === null) return true;
-    if (min !== null && rMultiple <= min) return false;
-    if (max !== null && rMultiple >= max) return false;
-    return true;
-  }
-
-  const value = parseFilterNumber(filters.rValue);
-  if (value === null) return true;
-
-  switch (filters.rMode) {
-    case "GT":
-      return rMultiple > value;
-    case "GTE":
-      return rMultiple >= value;
-    case "LT":
-      return rMultiple < value;
-    case "LTE":
-      return rMultiple <= value;
-    case "EQ":
-      return rMultiple === value;
-    default:
-      return true;
-  }
-}
-
-function parseFilterNumber(value: string) {
-  if (value.trim() === "") return null;
-  const parsed = Number(value);
-  return Number.isFinite(parsed) ? parsed : null;
+  return compileRExpressionFilter(filters.rExpression).test(rMultiple);
 }
 
 function serializeApiTrade(trade: JournalTradeRow & { date: string }) {
