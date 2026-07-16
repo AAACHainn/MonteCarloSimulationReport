@@ -53,8 +53,11 @@ describe("strategy code evaluation", () => {
   it.each([
     ["QS:A DN:S", "PASS", 0, 0],
     ["QS:A DN:S XH:B", "PASS", 1, 0],
+    ["QS:A DN:A XH:B", "FAIL", 1, 0],
+    ["QS:B", "FAIL", 1, 0],
     ["QS:A DN:B XH:B", "FAIL", 2, 0],
     ["QS:S DN:S ABC:C", "FAIL", 0, 1],
+    ["QS:S DN:B ABC:C", "FAIL", 1, 1],
     ["", "UNRATED", 0, 0],
   ] as const)("evaluates %s as %s", (input, status, bCount, cCount) => {
     expect(evaluateStrategyCode(input)).toMatchObject({ status, bCount, cCount });

@@ -136,6 +136,7 @@ export function evaluateStrategyCode(value: unknown): StrategyCodeEvaluation {
   }
 
   const bCount = items.filter((item) => item.grade === "B").length;
+  const hasS = items.some((item) => item.grade === "S");
   const cKeys = items.filter((item) => item.grade === "C").map((item) => item.key);
   const cCount = cKeys.length;
 
@@ -159,6 +160,16 @@ export function evaluateStrategyCode(value: unknown): StrategyCodeEvaluation {
     };
   }
 
+  if (bCount === 1 && !hasS) {
+    return {
+      status: "FAIL",
+      bCount,
+      cCount,
+      cKeys,
+      reason: copy.tradeJournals.strategyCodeEvaluation.oneBWithoutS,
+    };
+  }
+
   return {
     status: "PASS",
     bCount,
@@ -166,7 +177,7 @@ export function evaluateStrategyCode(value: unknown): StrategyCodeEvaluation {
     cKeys,
     reason: bCount === 0
       ? copy.tradeJournals.strategyCodeEvaluation.noBOrC
-      : copy.tradeJournals.strategyCodeEvaluation.oneBNoC,
+      : copy.tradeJournals.strategyCodeEvaluation.oneBWithS,
   };
 }
 
