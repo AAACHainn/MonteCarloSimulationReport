@@ -30,7 +30,7 @@ import {
 } from "@/lib/trade-journal/strategy-code-filter";
 import { cn } from "@/lib/utils";
 
-type TradeOption = {
+export type TradeOption = {
   id: string;
   type: "INSTRUMENT" | "STRATEGY";
   name: string;
