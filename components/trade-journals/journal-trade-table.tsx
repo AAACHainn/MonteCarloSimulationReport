@@ -4,8 +4,9 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import Image from "next/image";
 import { useRouter } from "next/navigation";
 import { createPortal } from "react-dom";
-import { ArrowDown, ArrowUp, ArrowUpDown, Check, ChevronLeft, ChevronRight, Download, Filter, HelpCircle, Pencil, Plus, RotateCcw, Trash2, X } from "lucide-react";
+import { ArrowDown, ArrowUp, ArrowUpDown, Check, ChevronLeft, ChevronRight, Download, Eye, EyeOff, Filter, HelpCircle, Pencil, Plus, RotateCcw, Trash2, X } from "lucide-react";
 import { ScreenshotPreviewDialog } from "@/components/trade-journals/screenshot-preview-dialog";
+import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { ConfirmDialog } from "@/components/ui/confirm-dialog";
 import { DatePicker } from "@/components/ui/date-picker";
@@ -16,6 +17,17 @@ import { formatMoney, formatNumber, formatPercent } from "@/lib/format";
 import { copy } from "@/lib/i18n";
 import { calculateJournalStats } from "@/lib/trade-journal/calculations";
 import { compileRExpressionFilter } from "@/lib/trade-journal/r-expression-filter";
+import {
+  evaluateStrategyCode,
+  normalizeStrategyCode,
+  validateStrategyCode,
+  type StrategyCodeStatus,
+} from "@/lib/trade-journal/strategy-code";
+import {
+  compileStrategyCodeRegex,
+  MAX_STRATEGY_CODE_REGEX_LENGTH,
+  type StrategyCodeRegexFilter,
+} from "@/lib/trade-journal/strategy-code-filter";
 import { cn } from "@/lib/utils";
 
 type TradeOption = {
@@ -39,6 +51,7 @@ export type JournalTradeRow = {
   stopLossPrice: number | null;
   targetPrice: number | null;
   exitPrice: number | null;
+  strategyCode: string | null;
   screenshotPath: string | null;
 };
 
@@ -51,6 +64,7 @@ type Draft = {
   riskAmount: string;
   targetPrice: string;
   exitPrice: string;
+  strategyCode: string;
   screenshot: File | null;
 };
 
@@ -68,6 +82,7 @@ type Filters = {
   dateFrom: string;
   dateTo: string;
   rExpression: string;
+  strategyCodeRegex: string;
 };
 
 const emptyDraft: Draft = {
@@ -79,6 +94,7 @@ const emptyDraft: Draft = {
   riskAmount: "",
   targetPrice: "",
   exitPrice: "",
+  strategyCode: "",
   screenshot: null,
 };
 
@@ -96,6 +112,7 @@ const emptyFilters: Filters = {
   dateFrom: "",
   dateTo: "",
   rExpression: "",
+  strategyCodeRegex: "",
 };
 
 export function JournalTradeTable({
@@ -125,6 +142,7 @@ export function JournalTradeTable({
   const [sort, setSort] = useState<SortState>({ key: "date", direction: "asc" });
   const [filters, setFilters] = useState<Filters>(emptyFilters);
   const [openFilter, setOpenFilter] = useState<string | null>(null);
+  const [showStrategyCode, setShowStrategyCode] = useState(true);
   const instruments = options.filter((option) => option.type === "INSTRUMENT");
   const strategies = options.filter((option) => option.type === "STRATEGY");
   const instrumentFilterOptions = useMemo(() => buildTradeOptionFilters(rows, "instrument"), [rows]);
@@ -189,6 +207,23 @@ export function JournalTradeTable({
     setHiddenNewTradeId(null);
   }
 
+  function toggleStrategyCodeVisibility() {
+    if (showStrategyCode && editingId !== null) {
+      const validation = validateStrategyCode(draft.strategyCode);
+      if (!validation.valid) {
+        setError(validation.error);
+        return;
+      }
+    }
+
+    setError(null);
+    setShowStrategyCode((current) => !current);
+    setOpenFilter(null);
+    if (showStrategyCode) {
+      setFilter("strategyCodeRegex", "");
+    }
+  }
+
   function beginEdit(trade: JournalTradeRow) {
     setDraft({
       date: trade.date,
@@ -199,6 +234,7 @@ export function JournalTradeTable({
       riskAmount: trade.riskAmount === null ? "" : String(trade.riskAmount),
       targetPrice: trade.targetPrice === null ? "" : String(trade.targetPrice),
       exitPrice: trade.exitPrice === null ? "" : String(trade.exitPrice),
+      strategyCode: trade.strategyCode ?? "",
       screenshot: null,
     });
     setEditingId(trade.id);
@@ -214,6 +250,11 @@ export function JournalTradeTable({
   async function saveTrade() {
     setError(null);
     setHiddenNewTradeId(null);
+    const strategyCodeValidation = validateStrategyCode(draft.strategyCode);
+    if (!strategyCodeValidation.valid) {
+      setError(strategyCodeValidation.error);
+      return;
+    }
     if (editingId === "new" && !draft.screenshot) {
       setError(copy.tradeJournals.screenshotRequired);
       return;
@@ -223,6 +264,7 @@ export function JournalTradeTable({
     for (const [key, value] of Object.entries(draft)) {
       if (value !== null) formData.set(key, value);
     }
+    formData.set("strategyCode", strategyCodeValidation.normalized);
 
     setIsSaving(true);
     const isNew = editingId === "new";
@@ -367,6 +409,17 @@ export function JournalTradeTable({
             type="button"
             size="sm"
             variant="outline"
+            onClick={toggleStrategyCodeVisibility}
+          >
+            {showStrategyCode ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
+            {showStrategyCode
+              ? copy.tradeJournals.hideStrategyCode
+              : copy.tradeJournals.showStrategyCode}
+          </Button>
+          <Button
+            type="button"
+            size="sm"
+            variant="outline"
             onClick={exportFilteredRows}
             disabled={editingId !== null || isExporting || sortedRows.length === 0}
           >
@@ -395,7 +448,14 @@ export function JournalTradeTable({
           </Select>
         </div>
       </div>
-      <Table className={editingId ? "min-w-[1480px] [&_td]:px-2 [&_th]:px-2" : "table-fixed [&_td]:px-2 [&_th]:px-2"}>
+      <Table
+        className={cn(
+          "[&_td]:px-2 [&_th]:px-2",
+          editingId
+            ? showStrategyCode ? "min-w-[1840px]" : "min-w-[1500px]"
+            : showStrategyCode ? "min-w-[1680px] table-fixed" : "min-w-[1420px] table-fixed",
+        )}
+      >
         <TableHeader>
           <TableRow>
             <SortableHead
@@ -460,6 +520,23 @@ export function JournalTradeTable({
                 onClear={() => setFilter("strategyOptionIds", [])}
               />
             </FilterableHead>
+            {showStrategyCode ? (
+              <FilterableHead
+                label={copy.tradeJournals.table.strategyCode}
+                filterId="strategy-code"
+                openFilter={openFilter}
+                setOpenFilter={setOpenFilter}
+                active={filters.strategyCodeRegex.trim() !== ""}
+                disabled={editingId !== null}
+                className="w-64"
+              >
+                <StrategyCodeRegexFilterPanel
+                  expression={filters.strategyCodeRegex}
+                  onExpressionChange={(value) => setFilter("strategyCodeRegex", value)}
+                  onClear={() => setFilter("strategyCodeRegex", "")}
+                />
+              </FilterableHead>
+            ) : null}
             <FilterableHead
               label={copy.tradeJournals.table.direction}
               filterId="direction"
@@ -509,14 +586,16 @@ export function JournalTradeTable({
               }
             />
             <TableHead>{copy.tradeJournals.table.screenshot}</TableHead>
-            <TableHead>{copy.tradeJournals.table.actions}</TableHead>
+            <TableHead className="sticky right-0 z-20 min-w-40 border-l bg-white shadow-[-8px_0_12px_-12px_rgba(15,23,42,0.45)]">
+              {copy.tradeJournals.table.actions}
+            </TableHead>
           </TableRow>
         </TableHeader>
         <TableBody>
-          {editingId === "new" ? <EditableRow draft={draft} setDraft={setDraft} options={options} onSave={saveTrade} onCancel={cancelEdit} loading={isSaving} /> : null}
+          {editingId === "new" ? <EditableRow draft={draft} setDraft={setDraft} options={options} showStrategyCode={showStrategyCode} onSave={saveTrade} onCancel={cancelEdit} loading={isSaving} /> : null}
           {pagedRows.map((trade) =>
             editingId === trade.id ? (
-              <EditableRow key={trade.id} draft={draft} setDraft={setDraft} options={options} onSave={saveTrade} onCancel={cancelEdit} loading={isSaving} />
+              <EditableRow key={trade.id} draft={draft} setDraft={setDraft} options={options} showStrategyCode={showStrategyCode} onSave={saveTrade} onCancel={cancelEdit} loading={isSaving} />
             ) : (
               <TableRow
                 ref={trade.id === highlightedTradeId ? highlightedRowRef : undefined}
@@ -531,6 +610,19 @@ export function JournalTradeTable({
                 <TableCell className="whitespace-nowrap">{trade.date}</TableCell>
                 <TableCell className="truncate" title={trade.instrumentOption?.name ?? undefined}>{trade.instrumentOption?.name ?? copy.common.dash}</TableCell>
                 <TableCell className="truncate" title={trade.strategyOption?.name ?? undefined}>{trade.strategyOption?.name ?? copy.common.dash}</TableCell>
+                {showStrategyCode ? (
+                  <TableCell>
+                    <div className="flex min-w-0 items-center gap-2">
+                      <span
+                        className="min-w-0 flex-1 truncate whitespace-nowrap font-mono text-xs"
+                        title={trade.strategyCode ?? undefined}
+                      >
+                        {trade.strategyCode ?? copy.common.dash}
+                      </span>
+                      <StrategyCodeBadge status={evaluateStrategyCode(trade.strategyCode).status} />
+                    </div>
+                  </TableCell>
+                ) : null}
                 <TableCell className="whitespace-nowrap">{trade.direction === "LONG" ? copy.tradeJournals.table.long : copy.tradeJournals.table.short}</TableCell>
                 <PriceCell value={trade.entryPrice} />
                 <PriceCell value={trade.stopLossPrice} />
@@ -565,7 +657,14 @@ export function JournalTradeTable({
                     </button>
                   ) : copy.common.dash}
                 </TableCell>
-                <TableCell>
+                <TableCell
+                  className={cn(
+                    "sticky right-0 z-10 min-w-40 border-l bg-white shadow-[-8px_0_12px_-12px_rgba(15,23,42,0.45)]",
+                    trade.rMultiple > 0 && "bg-emerald-50",
+                    trade.rMultiple < 0 && "bg-red-50",
+                    trade.id === highlightedTradeId && "bg-blue-50",
+                  )}
+                >
                   <div className="flex gap-1">
                     <Button
                       type="button"
@@ -654,6 +753,7 @@ function FilterableHead({
   setOpenFilter,
   active,
   disabled,
+  className,
   children,
 }: {
   label: string;
@@ -662,10 +762,11 @@ function FilterableHead({
   setOpenFilter: React.Dispatch<React.SetStateAction<string | null>>;
   active: boolean;
   disabled?: boolean;
+  className?: string;
   children: React.ReactNode;
 }) {
   return (
-    <TableHead>
+    <TableHead className={className}>
       <div className="flex items-center gap-1">
         <span className="truncate">{label}</span>
         <ColumnFilterPopover
@@ -981,6 +1082,41 @@ function RFilterPanel({
   );
 }
 
+function StrategyCodeRegexFilterPanel({
+  expression,
+  onExpressionChange,
+  onClear,
+}: {
+  expression: string;
+  onExpressionChange: (value: string) => void;
+  onClear: () => void;
+}) {
+  const compiled = useMemo(() => compileStrategyCodeRegex(expression), [expression]);
+  const hasError = expression.trim() !== "" && compiled.error !== null;
+  const errorMessage = compiled.error === "TOO_LONG"
+    ? copy.tradeJournals.filters.strategyCodeRegexTooLong
+    : copy.tradeJournals.filters.strategyCodeRegexError;
+
+  return (
+    <div className="space-y-3">
+      <div>
+        <p className="text-xs font-medium text-slate-500">{copy.tradeJournals.filters.strategyCodeRegex}</p>
+        <p className="mt-1 text-xs text-slate-500">{copy.tradeJournals.filters.strategyCodeRegexHint}</p>
+      </div>
+      <Input
+        value={expression}
+        onChange={(event) => onExpressionChange(event.target.value)}
+        placeholder={copy.tradeJournals.filters.strategyCodeRegexPlaceholder}
+        maxLength={MAX_STRATEGY_CODE_REGEX_LENGTH + 1}
+        className={cn("h-9 font-mono", hasError && "border-red-300 focus-visible:ring-red-100")}
+        aria-invalid={hasError}
+      />
+      {hasError ? <p className="text-xs text-red-600">{errorMessage}</p> : null}
+      <ClearColumnButton onClick={onClear} disabled={expression.trim() === ""} />
+    </div>
+  );
+}
+
 function FilterPanelField({ label, children }: { label: string; children: React.ReactNode }) {
   return (
     <label className="space-y-1">
@@ -1053,6 +1189,7 @@ function EditableRow({
   draft,
   setDraft,
   options,
+  showStrategyCode,
   onSave,
   onCancel,
   loading,
@@ -1060,10 +1197,13 @@ function EditableRow({
   draft: Draft;
   setDraft: React.Dispatch<React.SetStateAction<Draft>>;
   options: TradeOption[];
+  showStrategyCode: boolean;
   onSave: () => void;
   onCancel: () => void;
   loading: boolean;
 }) {
+  const strategyCodeValidation = useMemo(() => validateStrategyCode(draft.strategyCode), [draft.strategyCode]);
+
   function setField<Key extends keyof Draft>(key: Key, value: Draft[Key]) {
     setDraft((current) => ({ ...current, [key]: value }));
   }
@@ -1073,6 +1213,15 @@ function EditableRow({
       <TableCell><DatePicker value={draft.date} onChange={(value) => setField("date", value)} /></TableCell>
       <TableCell><OptionSelect value={draft.instrumentOptionId} onChange={(value) => setField("instrumentOptionId", value)} options={options.filter((option) => option.type === "INSTRUMENT")} placeholder={copy.tradeJournals.chooseInstrument} /></TableCell>
       <TableCell><OptionSelect value={draft.strategyOptionId} onChange={(value) => setField("strategyOptionId", value)} options={options.filter((option) => option.type === "STRATEGY")} placeholder={copy.tradeJournals.chooseStrategy} /></TableCell>
+      {showStrategyCode ? (
+        <TableCell>
+          <StrategyCodeInput
+            value={draft.strategyCode}
+            onChange={(value) => setField("strategyCode", value)}
+            onBlur={() => setField("strategyCode", normalizeStrategyCode(draft.strategyCode))}
+          />
+        </TableCell>
+      ) : null}
       <TableCell className="text-slate-400">{copy.common.dash}</TableCell>
       <NumberInput value={draft.entryPrice} onChange={(value) => setField("entryPrice", value)} />
       <NumberInput value={draft.stopLossPrice} onChange={(value) => setField("stopLossPrice", value)} />
@@ -1081,13 +1230,87 @@ function EditableRow({
       <NumberInput value={draft.exitPrice} onChange={(value) => setField("exitPrice", value)} />
       <TableCell className="text-right text-slate-400">{copy.common.dash}</TableCell>
       <TableCell><ScreenshotInput value={draft.screenshot} onChange={(value) => setField("screenshot", value)} /></TableCell>
-      <TableCell>
+      <TableCell className="sticky right-0 z-10 min-w-40 border-l bg-blue-50 shadow-[-8px_0_12px_-12px_rgba(15,23,42,0.45)]">
         <div className="flex gap-1">
-          <Button type="button" size="sm" onClick={onSave} disabled={loading}><Check className="h-4 w-4" />{copy.tradeJournals.save}</Button>
+          <Button type="button" size="sm" onClick={onSave} disabled={loading || !strategyCodeValidation.valid}><Check className="h-4 w-4" />{copy.tradeJournals.save}</Button>
           <Button type="button" size="sm" variant="outline" onClick={onCancel} disabled={loading}><X className="h-4 w-4" />{copy.tradeJournals.cancel}</Button>
         </div>
       </TableCell>
     </TableRow>
+  );
+}
+
+function StrategyCodeInput({
+  value,
+  onChange,
+  onBlur,
+}: {
+  value: string;
+  onChange: (value: string) => void;
+  onBlur: () => void;
+}) {
+  const validation = useMemo(() => validateStrategyCode(value), [value]);
+  const evaluation = validation.valid ? evaluateStrategyCode(validation.normalized) : null;
+
+  return (
+    <div className="w-80 space-y-2">
+      <Input
+        value={value}
+        onChange={(event) => onChange(event.target.value)}
+        onBlur={onBlur}
+        placeholder={copy.tradeJournals.strategyCodePlaceholder}
+        className={cn("font-mono uppercase", !validation.valid && "border-red-300 focus-visible:ring-red-100")}
+        aria-invalid={!validation.valid}
+      />
+      <div className="rounded-md border bg-white p-2 text-xs">
+        <div className="flex flex-wrap items-center gap-x-3 gap-y-1">
+          <span className="text-slate-500">
+            {copy.tradeJournals.strategyCodeNormalized}：
+            <span className="ml-1 font-mono text-slate-800">
+              {validation.normalized || copy.common.dash}
+            </span>
+          </span>
+          {evaluation ? <StrategyCodeBadge status={evaluation.status} /> : null}
+          {evaluation ? (
+            <span className="text-slate-600">
+              {copy.tradeJournals.strategyCodeBCount}：{evaluation.bCount}
+            </span>
+          ) : null}
+          {evaluation ? (
+            <span className="text-slate-600">
+              {copy.tradeJournals.strategyCodeCItems}：
+              {evaluation.cKeys.length > 0 ? evaluation.cKeys.join("、") : copy.tradeJournals.strategyCodeNone}
+            </span>
+          ) : null}
+        </div>
+        {!validation.valid ? <p className="mt-1 text-red-600">{validation.error}</p> : null}
+        {evaluation ? <p className="mt-1 text-slate-500">{evaluation.reason}</p> : null}
+        {evaluation?.status === "FAIL" ? (
+          <p className="mt-1 font-medium text-red-700">{copy.tradeJournals.strategyCodeFailWarning}</p>
+        ) : null}
+      </div>
+    </div>
+  );
+}
+
+function StrategyCodeBadge({ status }: { status: StrategyCodeStatus }) {
+  const label = status === "PASS"
+    ? copy.tradeJournals.strategyCodeStatuses.pass
+    : status === "FAIL"
+      ? copy.tradeJournals.strategyCodeStatuses.fail
+      : copy.tradeJournals.strategyCodeStatuses.unrated;
+
+  return (
+    <Badge
+      className={cn(
+        "shrink-0 px-1.5 py-0",
+        status === "PASS" && "border-emerald-200 bg-emerald-50 text-emerald-700",
+        status === "FAIL" && "border-red-200 bg-red-50 text-red-700",
+        status === "UNRATED" && "border-slate-200 bg-slate-100 text-slate-600",
+      )}
+    >
+      {label}
+    </Badge>
   );
 }
 
@@ -1201,6 +1424,7 @@ function areFiltersEmpty(filters: Filters) {
     && filters.direction === "ALL"
     && filters.dateFrom === ""
     && filters.dateTo === ""
+    && filters.strategyCodeRegex.trim() === ""
     && !isRFilterActive(filters);
 }
 
@@ -1208,9 +1432,14 @@ function isRFilterActive(filters: Filters) {
   return filters.rExpression.trim() !== "";
 }
 
-function matchesFilters(trade: JournalTradeRow, filters: Filters) {
+function matchesFilters(
+  trade: JournalTradeRow,
+  filters: Filters,
+  strategyCodeFilter: StrategyCodeRegexFilter,
+) {
   if (filters.instrumentOptionId !== allFilterValue && trade.instrumentOptionId !== filters.instrumentOptionId) return false;
   if (filters.strategyOptionIds.length > 0 && (!trade.strategyOptionId || !filters.strategyOptionIds.includes(trade.strategyOptionId))) return false;
+  if (!strategyCodeFilter.test(trade.strategyCode)) return false;
   if (filters.direction !== "ALL" && trade.direction !== filters.direction) return false;
   if (filters.dateFrom && (!trade.date || trade.date < filters.dateFrom)) return false;
   if (filters.dateTo && (!trade.date || trade.date > filters.dateTo)) return false;
@@ -1223,7 +1452,8 @@ function matchesRFilter(rMultiple: number, filters: Filters) {
 }
 
 function getVisibleRows(rows: JournalTradeRow[], filters: Filters) {
-  return rows.filter((trade) => matchesFilters(trade, filters));
+  const strategyCodeFilter = compileStrategyCodeRegex(filters.strategyCodeRegex);
+  return rows.filter((trade) => matchesFilters(trade, filters, strategyCodeFilter));
 }
 
 function getSortedRows(rows: JournalTradeRow[], sort: SortState) {

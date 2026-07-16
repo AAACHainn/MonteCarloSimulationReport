@@ -61,6 +61,7 @@ const tradeColumns = [
   ["stopLossPrice", "REAL"],
   ["targetPrice", "REAL"],
   ["exitPrice", "REAL"],
+  ["strategyCode", "TEXT"],
   ["screenshotPath", "TEXT"],
 ];
 

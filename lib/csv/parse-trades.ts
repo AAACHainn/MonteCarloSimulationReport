@@ -1,5 +1,6 @@
 import { parse } from "csv-parse/sync";
 import { copy } from "@/lib/i18n";
+import { validateStrategyCode } from "@/lib/trade-journal/strategy-code";
 
 export type ParsedTrade = {
   date: Date | null;
@@ -9,6 +10,7 @@ export type ParsedTrade = {
   riskAmount: number | null;
   rMultiple: number;
   note: string | null;
+  strategyCode: string | null;
 };
 
 export type ParseTradesResult = {
@@ -51,6 +53,15 @@ export function parseTradesCsv(csv: string): ParseTradesResult {
   const rejectedRows: ParseTradesResult["rejectedRows"] = [];
 
   rows.forEach((row, index) => {
+    const strategyCodeValidation = validateStrategyCode(get(row, "strategyCode") ?? "");
+    if (!strategyCodeValidation.valid) {
+      rejectedRows.push({
+        row: index + 2,
+        reason: strategyCodeValidation.error,
+      });
+      return;
+    }
+
     const pnl = parseNumber(get(row, "pnl"));
     const riskAmount = parseNumber(get(row, "riskAmount"));
     const providedRMultiple = parseNumber(get(row, "rMultiple"));
@@ -73,6 +84,7 @@ export function parseTradesCsv(csv: string): ParseTradesResult {
       riskAmount,
       rMultiple,
       note: get(row, "note") || null,
+      strategyCode: strategyCodeValidation.normalized || null,
     });
   });
 

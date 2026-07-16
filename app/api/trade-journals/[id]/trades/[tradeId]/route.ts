@@ -49,6 +49,7 @@ export async function PUT(request: Request, context: RouteContext) {
         stopLossPrice: input.stopLossPrice,
         targetPrice: input.targetPrice,
         exitPrice: input.exitPrice,
+        strategyCode: input.strategyCode,
         screenshotPath: newScreenshotPath ?? trade.screenshotPath,
       },
       include: { instrumentOption: true, strategyOption: true },

@@ -75,6 +75,7 @@ export async function POST(request: Request) {
         stopLossPrice: trade.stopLossPrice,
         targetPrice: trade.targetPrice,
         exitPrice: trade.exitPrice,
+        strategyCode: trade.strategyCode,
         screenshotPath,
       });
     }

@@ -51,6 +51,7 @@ export default async function TradeJournalDetailPage({ params }: PageProps) {
     stopLossPrice: trade.stopLossPrice,
     targetPrice: trade.targetPrice,
     exitPrice: trade.exitPrice,
+    strategyCode: trade.strategyCode,
     screenshotPath: trade.screenshotPath,
   }));
   const serializedOptions = options.map((option) => ({

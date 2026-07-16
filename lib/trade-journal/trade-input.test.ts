@@ -23,6 +23,22 @@ describe("parseJournalTradeFormData", () => {
     expect(parseJournalTradeFormData(validTradeForm()).date.toISOString()).toBe("2026-05-30T00:00:00.000Z");
   });
 
+  it("normalizes an optional strategy code", () => {
+    const formData = validTradeForm();
+    formData.set("strategyCode", "  qs:a   dn:s ");
+    expect(parseJournalTradeFormData(formData).strategyCode).toBe("QS:A DN:S");
+  });
+
+  it("treats a missing strategy code as an unrated legacy trade", () => {
+    expect(parseJournalTradeFormData(validTradeForm()).strategyCode).toBeNull();
+  });
+
+  it("rejects invalid strategy codes on the server", () => {
+    const formData = validTradeForm();
+    formData.set("strategyCode", "QS:A QS:B");
+    expect(() => parseJournalTradeFormData(formData)).toThrow("发现重复项目QS。");
+  });
+
   it("rejects calendar dates that JavaScript would normalize", () => {
     const formData = validTradeForm();
     formData.set("date", "2026-02-31");

@@ -1,4 +1,5 @@
 import { calculateJournalTrade } from "./calculations";
+import { validateStrategyCode } from "./strategy-code";
 
 export type ParsedJournalTradeInput = {
   date: Date;
@@ -9,6 +10,7 @@ export type ParsedJournalTradeInput = {
   riskAmount: number;
   targetPrice: number;
   exitPrice: number;
+  strategyCode: string | null;
 };
 
 function requiredString(formData: FormData, key: string) {
@@ -38,6 +40,11 @@ export function parseJournalTradeFormData(formData: FormData): ParsedJournalTrad
     throw new Error("请选择有效的交易日期。");
   }
 
+  const strategyCodeValidation = validateStrategyCode(formData.get("strategyCode"));
+  if (!strategyCodeValidation.valid) {
+    throw new Error(strategyCodeValidation.error);
+  }
+
   const input = {
     date,
     instrumentOptionId: requiredString(formData, "instrumentOptionId"),
@@ -47,6 +54,7 @@ export function parseJournalTradeFormData(formData: FormData): ParsedJournalTrad
     riskAmount: requiredNumber(formData, "riskAmount"),
     targetPrice: requiredNumber(formData, "targetPrice"),
     exitPrice: requiredNumber(formData, "exitPrice"),
+    strategyCode: strategyCodeValidation.normalized || null,
   };
 
   calculateJournalTrade(input);

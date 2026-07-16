@@ -44,6 +44,7 @@ export async function POST(request: Request, context: RouteContext) {
         stopLossPrice: input.stopLossPrice,
         targetPrice: input.targetPrice,
         exitPrice: input.exitPrice,
+        strategyCode: input.strategyCode,
         screenshotPath,
       },
       include: { instrumentOption: true, strategyOption: true },

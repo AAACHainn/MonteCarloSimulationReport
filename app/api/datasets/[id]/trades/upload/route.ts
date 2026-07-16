@@ -46,6 +46,7 @@ export async function POST(request: Request, context: RouteContext) {
         riskAmount: trade.riskAmount,
         rMultiple: trade.rMultiple,
         note: trade.note,
+        strategyCode: trade.strategyCode,
       })),
     }),
   ]);

@@ -2,10 +2,24 @@ import path from "node:path";
 import JSZip from "jszip";
 import { z } from "zod";
 import { readScreenshot, validateScreenshotBuffer } from "./storage";
+import { validateStrategyCode } from "./strategy-code";
 
 export const TRADE_JOURNAL_BACKUP_VERSION = 1;
 export const MAX_BACKUP_BYTES = 100 * 1024 * 1024;
 export const MAX_BACKUP_FILES = 1001;
+
+const backupStrategyCodeSchema = z
+  .string()
+  .nullable()
+  .optional()
+  .transform((value, context) => {
+    const validation = validateStrategyCode(value ?? "");
+    if (!validation.valid) {
+      context.addIssue({ code: z.ZodIssueCode.custom, message: validation.error });
+      return z.NEVER;
+    }
+    return validation.normalized || null;
+  });
 
 const backupTradeSchema = z.object({
   date: z.string().datetime(),
@@ -16,6 +30,7 @@ const backupTradeSchema = z.object({
   riskAmount: z.number().positive(),
   targetPrice: z.number().positive(),
   exitPrice: z.number().positive(),
+  strategyCode: backupStrategyCodeSchema,
   screenshotFile: z.string().min(1),
 });
 
@@ -43,6 +58,7 @@ export type ExportJournal = {
     riskAmount: number | null;
     targetPrice: number | null;
     exitPrice: number | null;
+    strategyCode: string | null;
     screenshotPath: string | null;
   }>;
 };
@@ -131,6 +147,7 @@ export async function createTradeJournalBackup(journal: ExportJournal) {
       riskAmount: trade.riskAmount,
       targetPrice: trade.targetPrice,
       exitPrice: trade.exitPrice,
+      strategyCode: trade.strategyCode,
       screenshotFile,
     });
   }

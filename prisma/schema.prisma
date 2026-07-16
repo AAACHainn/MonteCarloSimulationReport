@@ -52,6 +52,7 @@ model Trade {
   stopLossPrice      Float?
   targetPrice        Float?
   exitPrice          Float?
+  strategyCode       String?
   screenshotPath     String?
   createdAt          DateTime     @default(now())
   updatedAt          DateTime     @updatedAt
