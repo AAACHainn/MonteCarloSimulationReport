@@ -19,7 +19,8 @@ export async function GET(_request: Request, context: RouteContext) {
     return new NextResponse(new Uint8Array(buffer), {
       headers: {
         "Content-Type": getScreenshotMimeType(trade.screenshotPath),
-        "Cache-Control": "private, max-age=3600",
+        "Cache-Control": "private, no-store, max-age=0, must-revalidate",
+        "Pragma": "no-cache",
       },
     });
   } catch {

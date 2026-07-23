@@ -18,6 +18,7 @@ import { formatMoney, formatNumber, formatPercent } from "@/lib/format";
 import { copy } from "@/lib/i18n";
 import { calculateJournalStats } from "@/lib/trade-journal/calculations";
 import { compileRExpressionFilter } from "@/lib/trade-journal/r-expression-filter";
+import { getTradeScreenshotUrl } from "@/lib/trade-journal/screenshot-url";
 import {
   evaluateStrategyCode,
   normalizeStrategyCode,
@@ -702,13 +703,13 @@ export function JournalTradeTable({
                       type="button"
                       className="rounded focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
                       onClick={() => setPreviewScreenshot({
-                        url: `/api/trade-journals/${journalId}/trades/${trade.id}/screenshot`,
+                        url: getTradeScreenshotUrl(journalId, trade.id, trade.screenshotPath),
                         tags: trade.tags,
                       })}
                       aria-label={copy.tradeJournals.previewScreenshot}
                     >
                       <Image
-                        src={`/api/trade-journals/${journalId}/trades/${trade.id}/screenshot`}
+                        src={getTradeScreenshotUrl(journalId, trade.id, trade.screenshotPath)}
                         alt={copy.tradeJournals.table.screenshot}
                         width={72}
                         height={44}

@@ -15,6 +15,7 @@ import {
   resolveBrowseIndex,
   type BrowseDirection,
 } from "@/lib/trade-journal/browse";
+import { getTradeScreenshotUrl } from "@/lib/trade-journal/screenshot-url";
 import { evaluateStrategyCode, type StrategyCodeStatus } from "@/lib/trade-journal/strategy-code";
 import {
   MAX_TAG_NAME_LENGTH,
@@ -105,7 +106,11 @@ export function JournalTradeBrowser({
     );
   }
 
-  const screenshotUrl = `/api/trade-journals/${journalId}/trades/${currentTrade.id}/screenshot`;
+  const screenshotUrl = getTradeScreenshotUrl(
+    journalId,
+    currentTrade.id,
+    currentTrade.screenshotPath,
+  );
   const strategyEvaluation = evaluateStrategyCode(currentTrade.strategyCode);
   const isFirst = currentIndex === 0;
   const isLast = currentIndex === browsableTrades.length - 1;
