@@ -26,6 +26,30 @@ async function createBackupFile(strategyCode?: string | null) {
   return new File([buffer], "backup.zip", { type: "application/zip" });
 }
 
+async function createVersion2BackupFile(tags: string[]) {
+  const zip = new JSZip();
+  zip.file("manifest.json", JSON.stringify({
+    version: 2,
+    journal: { name: "Test", description: null },
+    trades: [{
+      date: "2026-05-12T00:00:00.000Z",
+      instrument: "Emini",
+      strategy: "Trend",
+      entryPrice: 100,
+      stopLossPrice: 90,
+      riskAmount: 500,
+      targetPrice: 120,
+      exitPrice: 115,
+      strategyCode: null,
+      tags,
+      screenshotFile: "screenshots/trade-1.png",
+    }],
+  }));
+  zip.file("screenshots/trade-1.png", Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]));
+  const buffer = await zip.generateAsync({ type: "uint8array" });
+  return new File([buffer], "backup-v2.zip", { type: "application/zip" });
+}
+
 describe("isSafeArchivePath", () => {
   it("accepts screenshot paths inside the archive", () => {
     expect(isSafeArchivePath("screenshots/trade-1.png")).toBe(true);
@@ -68,6 +92,7 @@ describe("strategyCode backup compatibility", () => {
   it("imports old backups without strategyCode as an unrated trade", async () => {
     const backup = await readTradeJournalBackup(await createBackupFile());
     expect(backup.manifest.trades[0].strategyCode).toBeNull();
+    expect(backup.manifest.trades[0].tags).toEqual([]);
   });
 
   it("normalizes strategyCode from new backups", async () => {
@@ -77,5 +102,22 @@ describe("strategyCode backup compatibility", () => {
 
   it("rejects invalid strategyCode from new backups", async () => {
     await expect(readTradeJournalBackup(await createBackupFile("QS:A QS:B"))).rejects.toThrow("发现重复项目QS。");
+  });
+});
+
+describe("tag backup compatibility", () => {
+  it("normalizes and deduplicates tags from version 2 backups", async () => {
+    const backup = await readTradeJournalBackup(
+      await createVersion2BackupFile([" BreakOut ", "breakout", " Ａ级机会 "]),
+    );
+
+    expect(backup.manifest.version).toBe(2);
+    expect(backup.manifest.trades[0].tags).toEqual(["BreakOut", "A级机会"]);
+  });
+
+  it("rejects version 2 backups with more than 20 tags", async () => {
+    await expect(
+      readTradeJournalBackup(await createVersion2BackupFile(Array.from({ length: 21 }, (_, index) => `标签${index}`))),
+    ).rejects.toThrow();
   });
 });

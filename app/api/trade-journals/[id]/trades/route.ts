@@ -47,7 +47,7 @@ export async function POST(request: Request, context: RouteContext) {
         strategyCode: input.strategyCode,
         screenshotPath,
       },
-      include: { instrumentOption: true, strategyOption: true },
+      include: { instrumentOption: true, strategyOption: true, tags: { orderBy: { name: "asc" } } },
     });
     return NextResponse.json(trade, { status: 201 });
   } catch (error) {

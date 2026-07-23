@@ -3,8 +3,14 @@ import JSZip from "jszip";
 import { z } from "zod";
 import { readScreenshot, validateScreenshotBuffer } from "./storage";
 import { validateStrategyCode } from "./strategy-code";
+import {
+  deduplicateTagNames,
+  MAX_TAG_NAME_LENGTH,
+  MAX_TAGS_PER_TRADE,
+  normalizeTagName,
+} from "./tags";
 
-export const TRADE_JOURNAL_BACKUP_VERSION = 1;
+export const TRADE_JOURNAL_BACKUP_VERSION = 2;
 export const MAX_BACKUP_BYTES = 100 * 1024 * 1024;
 export const MAX_BACKUP_FILES = 1001;
 
@@ -21,7 +27,12 @@ const backupStrategyCodeSchema = z
     return validation.normalized || null;
   });
 
-const backupTradeSchema = z.object({
+const backupTagSchema = z
+  .string()
+  .transform(normalizeTagName)
+  .pipe(z.string().min(1).max(MAX_TAG_NAME_LENGTH));
+
+const backupTradeBaseSchema = z.object({
   date: z.string().datetime(),
   instrument: z.string().trim().min(1).max(80),
   strategy: z.string().trim().min(1).max(80),
@@ -34,16 +45,41 @@ const backupTradeSchema = z.object({
   screenshotFile: z.string().min(1),
 });
 
-const backupManifestSchema = z.object({
-  version: z.literal(TRADE_JOURNAL_BACKUP_VERSION),
-  journal: z.object({
-    name: z.string().trim().min(1).max(120),
-    description: z.string().max(500).nullable(),
-  }),
-  trades: z.array(backupTradeSchema).max(MAX_BACKUP_FILES - 1),
+const backupJournalSchema = z.object({
+  name: z.string().trim().min(1).max(120),
+  description: z.string().max(500).nullable(),
 });
 
+const backupManifestSchema = z.discriminatedUnion("version", [
+  z.object({
+    version: z.literal(1),
+    journal: backupJournalSchema,
+    trades: z
+      .array(backupTradeBaseSchema.transform((trade) => ({ ...trade, tags: [] as string[] })))
+      .max(MAX_BACKUP_FILES - 1),
+  }),
+  z.object({
+    version: z.literal(TRADE_JOURNAL_BACKUP_VERSION),
+    journal: backupJournalSchema,
+    trades: z
+      .array(
+        backupTradeBaseSchema.extend({
+          tags: z.array(backupTagSchema).max(MAX_TAGS_PER_TRADE).transform(deduplicateTagNames),
+        }),
+      )
+      .max(MAX_BACKUP_FILES - 1),
+  }),
+]);
+
 export type TradeJournalBackupManifest = z.infer<typeof backupManifestSchema>;
+type ExportTradeJournalBackupManifest = {
+  version: typeof TRADE_JOURNAL_BACKUP_VERSION;
+  journal: {
+    name: string;
+    description: string | null;
+  };
+  trades: Array<z.infer<typeof backupTradeBaseSchema> & { tags: string[] }>;
+};
 
 export type ExportJournal = {
   name: string;
@@ -60,6 +96,7 @@ export type ExportJournal = {
     exitPrice: number | null;
     strategyCode: string | null;
     screenshotPath: string | null;
+    tags: Array<{ name: string }>;
   }>;
 };
 
@@ -111,7 +148,7 @@ export function isSafeArchivePath(value: string) {
 
 export async function createTradeJournalBackup(journal: ExportJournal) {
   const zip = new JSZip();
-  const manifest: TradeJournalBackupManifest = {
+  const manifest: ExportTradeJournalBackupManifest = {
     version: TRADE_JOURNAL_BACKUP_VERSION,
     journal: {
       name: journal.name,
@@ -148,6 +185,7 @@ export async function createTradeJournalBackup(journal: ExportJournal) {
       targetPrice: trade.targetPrice,
       exitPrice: trade.exitPrice,
       strategyCode: trade.strategyCode,
+      tags: trade.tags.map((tag) => tag.name),
       screenshotFile,
     });
   }

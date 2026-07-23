@@ -1,5 +1,11 @@
 import { z } from "zod";
 import { copy } from "./i18n";
+import {
+  deduplicateTagNames,
+  MAX_TAG_NAME_LENGTH,
+  MAX_TAGS_PER_TRADE,
+  normalizeTagName,
+} from "./trade-journal/tags";
 
 export const SIMULATION_WORK_LIMIT = 50_000_000;
 
@@ -26,6 +32,29 @@ export const tradeOptionUpdateSchema = z
   .refine((value) => value.name !== undefined || value.active !== undefined, {
     message: copy.api.optionNameRequired,
   });
+
+export const tradeTagNameSchema = z
+  .string()
+  .transform(normalizeTagName)
+  .pipe(
+    z
+      .string()
+      .min(1, copy.api.tagNameRequired)
+      .max(MAX_TAG_NAME_LENGTH, copy.api.tagNameTooLong),
+  );
+
+export const tradeTagSchema = z.object({
+  name: tradeTagNameSchema,
+});
+
+export const tradeTagUpdateSchema = tradeTagSchema;
+
+export const tradeTagsReplaceSchema = z.object({
+  tags: z
+    .array(tradeTagNameSchema)
+    .max(MAX_TAGS_PER_TRADE, copy.api.tooManyTradeTags)
+    .transform(deduplicateTagNames),
+});
 
 export const simulationConfigSchema = z
   .object({

@@ -5,6 +5,8 @@ import { prisma } from "@/lib/db";
 import { buildTradeDuplicateKey, readTradeJournalBackup } from "@/lib/trade-journal/backup";
 import { calculateJournalTrade } from "@/lib/trade-journal/calculations";
 import { removeScreenshot, writeScreenshotBuffer } from "@/lib/trade-journal/storage";
+import { resolveTradeTags } from "@/lib/trade-journal/tag-service";
+import { deduplicateTagNames, normalizeTagKey } from "@/lib/trade-journal/tags";
 
 type RouteContext = { params: Promise<{ id: string }> };
 
@@ -88,6 +90,11 @@ export async function POST(request: Request, context: RouteContext) {
     }
 
     const trades = [];
+    const resolvedTags = await resolveTradeTags(
+      prisma,
+      deduplicateTagNames(importableTrades.flatMap((trade) => trade.tags)),
+    );
+    const tagIds = new Map(resolvedTags.map((tag) => [normalizeTagKey(tag.name), tag.id]));
 
     for (const trade of importableTrades) {
       const screenshot = backup.screenshots.get(trade.screenshotFile);
@@ -114,11 +121,14 @@ export async function POST(request: Request, context: RouteContext) {
         exitPrice: trade.exitPrice,
         strategyCode: trade.strategyCode,
         screenshotPath,
+        tags: {
+          connect: trade.tags.map((name) => ({ id: tagIds.get(normalizeTagKey(name))! })),
+        },
       });
     }
 
     if (trades.length > 0) {
-      await prisma.trade.createMany({ data: trades });
+      await prisma.$transaction(trades.map((data) => prisma.trade.create({ data })));
     }
 
     return NextResponse.json({

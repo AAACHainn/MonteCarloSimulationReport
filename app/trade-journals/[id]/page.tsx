@@ -18,7 +18,7 @@ type PageProps = { params: Promise<{ id: string }> };
 
 export default async function TradeJournalDetailPage({ params }: PageProps) {
   const { id } = await params;
-  const [journal, options] = await Promise.all([
+  const [journal, options, tags] = await Promise.all([
     prisma.tradeJournal.findUnique({
       where: { id },
       include: {
@@ -26,13 +26,14 @@ export default async function TradeJournalDetailPage({ params }: PageProps) {
           include: {
             trades: {
               orderBy: [{ date: "asc" }, { createdAt: "asc" }],
-              include: { instrumentOption: true, strategyOption: true },
+              include: { instrumentOption: true, strategyOption: true, tags: { orderBy: { name: "asc" } } },
             },
           },
         },
       },
     }),
     prisma.tradeOption.findMany({ orderBy: [{ type: "asc" }, { active: "desc" }, { name: "asc" }] }),
+    prisma.tradeTag.findMany({ orderBy: { name: "asc" }, select: { id: true, name: true } }),
   ]);
   if (!journal) notFound();
 
@@ -53,6 +54,7 @@ export default async function TradeJournalDetailPage({ params }: PageProps) {
     exitPrice: trade.exitPrice,
     strategyCode: trade.strategyCode,
     screenshotPath: trade.screenshotPath,
+    tags: trade.tags.map((tag) => ({ id: tag.id, name: tag.name })),
   }));
   const serializedOptions = options.map((option) => ({
     id: option.id,
@@ -93,7 +95,7 @@ export default async function TradeJournalDetailPage({ params }: PageProps) {
         </section>
       </div>
 
-      <JournalTableSection journalId={journal.id} trades={trades} options={serializedOptions} />
+      <JournalTableSection journalId={journal.id} trades={trades} options={serializedOptions} tags={tags} />
     </div>
   );
 }

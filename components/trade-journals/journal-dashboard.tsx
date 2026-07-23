@@ -19,6 +19,7 @@ import {
   X,
 } from "lucide-react";
 import { DeleteJournalButton } from "@/components/trade-journals/delete-journal-button";
+import { TradeTagManager, type ManagedTradeTag } from "@/components/trade-journals/trade-tag-manager";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
@@ -57,7 +58,15 @@ function formatFileSize(size: number) {
   return `${(size / (1024 * 1024)).toFixed(1)} MB`;
 }
 
-export function JournalDashboard({ journals, options }: { journals: Journal[]; options: TradeOption[] }) {
+export function JournalDashboard({
+  journals,
+  options,
+  tags,
+}: {
+  journals: Journal[];
+  options: TradeOption[];
+  tags: ManagedTradeTag[];
+}) {
   const router = useRouter();
   const importInputRef = useRef<HTMLInputElement | null>(null);
   const [isPending, startTransition] = useTransition();
@@ -313,6 +322,8 @@ export function JournalDashboard({ journals, options }: { journals: Journal[]; o
           </CardContent>
         </Card>
       </div>
+
+      <TradeTagManager tags={tags} />
 
       <section className="space-y-4">
         <div>

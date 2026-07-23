@@ -6,12 +6,16 @@ import { copy } from "@/lib/i18n";
 export const dynamic = "force-dynamic";
 
 export default async function TradeJournalsPage() {
-  const [journals, options] = await Promise.all([
+  const [journals, options, tags] = await Promise.all([
     prisma.tradeJournal.findMany({
       orderBy: { createdAt: "desc" },
       include: { dataset: { include: { _count: { select: { trades: true, simulationRuns: true } } } } },
     }),
     prisma.tradeOption.findMany({ orderBy: [{ type: "asc" }, { active: "desc" }, { name: "asc" }] }),
+    prisma.tradeTag.findMany({
+      orderBy: { name: "asc" },
+      include: { _count: { select: { trades: true } } },
+    }),
   ]);
 
   return (
@@ -35,6 +39,7 @@ export default async function TradeJournalsPage() {
           name: option.name,
           active: option.active,
         }))}
+        tags={tags}
       />
     </div>
   );

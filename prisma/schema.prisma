@@ -54,6 +54,7 @@ model Trade {
   exitPrice          Float?
   strategyCode       String?
   screenshotPath     String?
+  tags               TradeTag[]
   createdAt          DateTime     @default(now())
   updatedAt          DateTime     @updatedAt
 
@@ -99,4 +100,15 @@ model TradeOption {
 
   @@unique([type, name])
   @@index([type, active])
+}
+
+model TradeTag {
+  id             String   @id @default(cuid())
+  name           String
+  normalizedName String   @unique
+  trades         Trade[]
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
+
+  @@index([name])
 }

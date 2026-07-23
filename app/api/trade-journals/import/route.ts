@@ -5,6 +5,8 @@ import { prisma } from "@/lib/db";
 import { calculateJournalTrade } from "@/lib/trade-journal/calculations";
 import { readTradeJournalBackup } from "@/lib/trade-journal/backup";
 import { removeJournalScreenshots, writeScreenshotBuffer } from "@/lib/trade-journal/storage";
+import { resolveTradeTags } from "@/lib/trade-journal/tag-service";
+import { deduplicateTagNames, normalizeTagKey } from "@/lib/trade-journal/tags";
 
 async function getImportedJournalName(name: string) {
   let candidate = `${name}（导入）`;
@@ -53,6 +55,12 @@ export async function POST(request: Request) {
       }
     }
 
+    const resolvedTags = await resolveTradeTags(
+      prisma,
+      deduplicateTagNames(backup.manifest.trades.flatMap((trade) => trade.tags)),
+    );
+    const tagIds = new Map(resolvedTags.map((tag) => [normalizeTagKey(tag.name), tag.id]));
+
     const trades = [];
     for (const trade of backup.manifest.trades) {
       const id = randomUUID();
@@ -77,6 +85,9 @@ export async function POST(request: Request) {
         exitPrice: trade.exitPrice,
         strategyCode: trade.strategyCode,
         screenshotPath,
+        tags: {
+          connect: trade.tags.map((name) => ({ id: tagIds.get(normalizeTagKey(name))! })),
+        },
       });
     }
 

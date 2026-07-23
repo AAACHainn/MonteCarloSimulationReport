@@ -17,7 +17,7 @@ export async function GET(_request: Request, context: RouteContext) {
         include: {
           trades: {
             orderBy: [{ date: "asc" }, { createdAt: "asc" }],
-            include: { instrumentOption: true, strategyOption: true },
+            include: { instrumentOption: true, strategyOption: true, tags: { orderBy: { name: "asc" } } },
           },
         },
       },
@@ -63,7 +63,7 @@ export async function POST(request: Request, context: RouteContext) {
       id: { in: parsed.data.tradeIds },
       datasetId: journal.datasetId,
     },
-    include: { instrumentOption: true, strategyOption: true },
+    include: { instrumentOption: true, strategyOption: true, tags: { orderBy: { name: "asc" } } },
   });
   trades.sort((a, b) => (order.get(a.id) ?? 0) - (order.get(b.id) ?? 0));
 

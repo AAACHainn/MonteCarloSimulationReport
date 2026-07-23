@@ -47,10 +47,12 @@ export function JournalTableSection({
   journalId,
   trades,
   options,
+  tags,
 }: {
   journalId: string;
   trades: JournalTradeRow[];
   options: TradeOption[];
+  tags: Array<{ id: string; name: string }>;
 }) {
   const [tableWidth, setTableWidth] = useState<TableWidth>("wide");
   const [viewMode, setViewMode] = useState<JournalViewMode>("table");
@@ -147,6 +149,7 @@ export function JournalTableSection({
             journalId={journalId}
             trades={trades}
             options={options}
+            tags={tags}
             viewMode={viewMode}
             onEditingChange={setIsEditingTrade}
           />

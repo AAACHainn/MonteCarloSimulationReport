@@ -29,6 +29,7 @@ import {
   MAX_STRATEGY_CODE_REGEX_LENGTH,
   type StrategyCodeRegexFilter,
 } from "@/lib/trade-journal/strategy-code-filter";
+import { matchesAnyTag, type TradeTagValue } from "@/lib/trade-journal/tags";
 import { cn } from "@/lib/utils";
 
 export type TradeOption = {
@@ -54,6 +55,7 @@ export type JournalTradeRow = {
   exitPrice: number | null;
   strategyCode: string | null;
   screenshotPath: string | null;
+  tags: TradeTagValue[];
 };
 
 type Draft = {
@@ -79,6 +81,7 @@ type DirectionFilter = "ALL" | "LONG" | "SHORT";
 type Filters = {
   instrumentOptionId: string;
   strategyOptionIds: string[];
+  tagIds: string[];
   direction: DirectionFilter;
   dateFrom: string;
   dateTo: string;
@@ -109,6 +112,7 @@ const defaultSortDirections: Record<SortKey, SortDirection> = {
 const emptyFilters: Filters = {
   instrumentOptionId: allFilterValue,
   strategyOptionIds: [],
+  tagIds: [],
   direction: allFilterValue,
   dateFrom: "",
   dateTo: "",
@@ -120,17 +124,20 @@ export function JournalTradeTable({
   journalId,
   trades,
   options,
+  tags,
   viewMode,
   onEditingChange,
 }: {
   journalId: string;
   trades: JournalTradeRow[];
   options: TradeOption[];
+  tags: TradeTagValue[];
   viewMode: "table" | "browse";
   onEditingChange: (isEditing: boolean) => void;
 }) {
   const router = useRouter();
   const [rows, setRows] = useState(trades);
+  const [tagOptions, setTagOptions] = useState(tags);
   const [editingId, setEditingId] = useState<string | null>(null);
   const [draft, setDraft] = useState<Draft>(emptyDraft);
   const [error, setError] = useState<string | null>(null);
@@ -138,7 +145,10 @@ export function JournalTradeTable({
   const [deleteTradeId, setDeleteTradeId] = useState<string | null>(null);
   const [isDeleting, setIsDeleting] = useState(false);
   const [isExporting, setIsExporting] = useState(false);
-  const [previewScreenshot, setPreviewScreenshot] = useState<string | null>(null);
+  const [previewScreenshot, setPreviewScreenshot] = useState<{
+    url: string;
+    tags: TradeTagValue[];
+  } | null>(null);
   const [browseTradeId, setBrowseTradeId] = useState<string | null>(null);
   const [highlightedTradeId, setHighlightedTradeId] = useState<string | null>(null);
   const [hiddenNewTradeId, setHiddenNewTradeId] = useState<string | null>(null);
@@ -153,9 +163,11 @@ export function JournalTradeTable({
   const strategies = options.filter((option) => option.type === "STRATEGY");
   const instrumentFilterOptions = useMemo(() => buildTradeOptionFilters(rows, "instrument"), [rows]);
   const strategyFilterOptions = useMemo(() => buildTradeOptionFilters(rows, "strategy"), [rows]);
+  const tagFilterOptions = useMemo(() => buildTradeTagFilters(rows), [rows]);
   const hasActiveFilters = !areFiltersEmpty(filters);
 
   useEffect(() => setRows(trades), [trades]);
+  useEffect(() => setTagOptions(tags), [tags]);
 
   useEffect(() => {
     onEditingChange(editingId !== null);
@@ -232,6 +244,17 @@ export function JournalTradeTable({
     if (showStrategyCode) {
       setFilter("strategyCodeRegex", "");
     }
+  }
+
+  function updateTradeTags(tradeId: string, nextTags: TradeTagValue[]) {
+    setRows((currentRows) =>
+      currentRows.map((trade) => trade.id === tradeId ? { ...trade, tags: nextTags } : trade),
+    );
+    setTagOptions((currentTags) => {
+      const tagsById = new Map(currentTags.map((tag) => [tag.id, tag]));
+      nextTags.forEach((tag) => tagsById.set(tag.id, tag));
+      return Array.from(tagsById.values()).sort((left, right) => left.name.localeCompare(right.name, "zh-CN"));
+    });
   }
 
   function beginEdit(trade: JournalTradeRow) {
@@ -601,7 +624,24 @@ export function JournalTradeTable({
                 </ColumnFilterPopover>
               }
             />
-            <TableHead>{copy.tradeJournals.table.screenshot}</TableHead>
+            <FilterableHead
+              label={copy.tradeJournals.table.screenshot}
+              filterLabel={copy.tradeJournals.table.tags}
+              filterId="tags"
+              openFilter={openFilter}
+              setOpenFilter={setOpenFilter}
+              active={filters.tagIds.length > 0}
+              disabled={editingId !== null}
+              className="w-28 min-w-28"
+            >
+              <MultiOptionFilterPanel
+                values={filters.tagIds}
+                allLabel={copy.tradeJournals.filters.allTags}
+                options={tagFilterOptions.map((tag) => ({ value: tag.id, label: tag.name }))}
+                onChange={(values) => setFilter("tagIds", values)}
+                onClear={() => setFilter("tagIds", [])}
+              />
+            </FilterableHead>
             <TableHead className="sticky right-0 z-20 min-w-40 border-l bg-white shadow-[-8px_0_12px_-12px_rgba(15,23,42,0.45)]">
               {copy.tradeJournals.table.actions}
             </TableHead>
@@ -654,12 +694,15 @@ export function JournalTradeTable({
                 >
                   {formatNumber(trade.rMultiple)}
                 </TableCell>
-                <TableCell>
+                <TableCell className="w-28 min-w-28">
                   {trade.screenshotPath ? (
                     <button
                       type="button"
                       className="rounded focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
-                      onClick={() => setPreviewScreenshot(`/api/trade-journals/${journalId}/trades/${trade.id}/screenshot`)}
+                      onClick={() => setPreviewScreenshot({
+                        url: `/api/trade-journals/${journalId}/trades/${trade.id}/screenshot`,
+                        tags: trade.tags,
+                      })}
                       aria-label={copy.tradeJournals.previewScreenshot}
                     >
                       <Image
@@ -755,6 +798,8 @@ export function JournalTradeTable({
           trades={sortedRows}
           currentTradeId={browseTradeId}
           onCurrentTradeChange={setBrowseTradeId}
+          availableTags={tagOptions}
+          onTradeTagsChange={updateTradeTags}
         />
       )}
       <ConfirmDialog
@@ -766,13 +811,18 @@ export function JournalTradeTable({
         onCancel={() => setDeleteTradeId(null)}
         onConfirm={deleteTrade}
       />
-      <ScreenshotPreviewDialog screenshotUrl={previewScreenshot} onClose={() => setPreviewScreenshot(null)} />
+      <ScreenshotPreviewDialog
+        screenshotUrl={previewScreenshot?.url ?? null}
+        tags={previewScreenshot?.tags ?? []}
+        onClose={() => setPreviewScreenshot(null)}
+      />
     </div>
   );
 }
 
 function FilterableHead({
   label,
+  filterLabel,
   filterId,
   openFilter,
   setOpenFilter,
@@ -782,6 +832,7 @@ function FilterableHead({
   children,
 }: {
   label: string;
+  filterLabel?: string;
   filterId: string;
   openFilter: string | null;
   setOpenFilter: React.Dispatch<React.SetStateAction<string | null>>;
@@ -799,7 +850,7 @@ function FilterableHead({
           openFilter={openFilter}
           setOpenFilter={setOpenFilter}
           active={active}
-          label={label}
+          label={filterLabel ?? label}
           disabled={disabled}
         >
           {children}
@@ -1443,9 +1494,17 @@ function buildTradeOptionFilters(rows: JournalTradeRow[], type: "instrument" | "
   return Array.from(optionMap, ([id, name]) => ({ id, name })).sort((a, b) => a.name.localeCompare(b.name, "zh-CN"));
 }
 
+function buildTradeTagFilters(rows: JournalTradeRow[]) {
+  const tagsById = new Map<string, string>();
+  rows.forEach((row) => row.tags.forEach((tag) => tagsById.set(tag.id, tag.name)));
+  return Array.from(tagsById, ([id, name]) => ({ id, name }))
+    .sort((left, right) => left.name.localeCompare(right.name, "zh-CN"));
+}
+
 function areFiltersEmpty(filters: Filters) {
   return filters.instrumentOptionId === allFilterValue
     && filters.strategyOptionIds.length === 0
+    && filters.tagIds.length === 0
     && filters.direction === "ALL"
     && filters.dateFrom === ""
     && filters.dateTo === ""
@@ -1464,6 +1523,7 @@ function matchesFilters(
 ) {
   if (filters.instrumentOptionId !== allFilterValue && trade.instrumentOptionId !== filters.instrumentOptionId) return false;
   if (filters.strategyOptionIds.length > 0 && (!trade.strategyOptionId || !filters.strategyOptionIds.includes(trade.strategyOptionId))) return false;
+  if (!matchesAnyTag(trade.tags, filters.tagIds)) return false;
   if (!strategyCodeFilter.test(trade.strategyCode)) return false;
   if (filters.direction !== "ALL" && trade.direction !== filters.direction) return false;
   if (filters.dateFrom && (!trade.date || trade.date < filters.dateFrom)) return false;

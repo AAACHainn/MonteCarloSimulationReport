@@ -52,7 +52,7 @@ export async function PUT(request: Request, context: RouteContext) {
         strategyCode: input.strategyCode,
         screenshotPath: newScreenshotPath ?? trade.screenshotPath,
       },
-      include: { instrumentOption: true, strategyOption: true },
+      include: { instrumentOption: true, strategyOption: true, tags: { orderBy: { name: "asc" } } },
     });
 
     if (newScreenshotPath) await removeScreenshot(trade.screenshotPath);
