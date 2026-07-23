@@ -1,5 +1,10 @@
 import { describe, expect, it } from "vitest";
-import { compileStrategyCodeRegex, MAX_STRATEGY_CODE_REGEX_LENGTH } from "./strategy-code-filter";
+import {
+  compileStrategyCodeRegex,
+  MAX_STRATEGY_CODE_REGEX_LENGTH,
+  STRATEGY_CODE_FAIL_REGEX,
+  STRATEGY_CODE_PASS_REGEX,
+} from "./strategy-code-filter";
 
 const values = [
   "QS:A DN:S XH:B",
@@ -44,5 +49,26 @@ describe("strategy code regex filter", () => {
       error: "TOO_LONG",
       values,
     });
+  });
+});
+
+describe("strategy code quick filters", () => {
+  it.each([
+    ["QS:A DN:S", "PASS"],
+    ["QS:A DN:S XH:B", "PASS"],
+    ["QS:A DN:A XH:B", "FAIL"],
+    ["QS:B", "FAIL"],
+    ["QS:A DN:B XH:B", "FAIL"],
+    ["QS:S DN:S ABC:C", "FAIL"],
+    ["QS:S DN:B ABC:C", "FAIL"],
+    [null, "UNRATED"],
+  ] as const)("classifies %s as %s", (strategyCode, expectedStatus) => {
+    const passFilter = compileStrategyCodeRegex(STRATEGY_CODE_PASS_REGEX);
+    const failFilter = compileStrategyCodeRegex(STRATEGY_CODE_FAIL_REGEX);
+
+    expect(passFilter.error).toBeNull();
+    expect(failFilter.error).toBeNull();
+    expect(passFilter.test(strategyCode)).toBe(expectedStatus === "PASS");
+    expect(failFilter.test(strategyCode)).toBe(expectedStatus === "FAIL");
   });
 });

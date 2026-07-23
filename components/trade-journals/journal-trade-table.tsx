@@ -27,6 +27,8 @@ import {
 import {
   compileStrategyCodeRegex,
   MAX_STRATEGY_CODE_REGEX_LENGTH,
+  STRATEGY_CODE_FAIL_REGEX,
+  STRATEGY_CODE_PASS_REGEX,
   type StrategyCodeRegexFilter,
 } from "@/lib/trade-journal/strategy-code-filter";
 import { matchesAnyTag, type TradeTagValue } from "@/lib/trade-journal/tags";
@@ -1178,6 +1180,33 @@ function StrategyCodeRegexFilterPanel({
       <div>
         <p className="text-xs font-medium text-slate-500">{copy.tradeJournals.filters.strategyCodeRegex}</p>
         <p className="mt-1 text-xs text-slate-500">{copy.tradeJournals.filters.strategyCodeRegexHint}</p>
+      </div>
+      <div>
+        <p className="text-xs font-medium text-slate-500">
+          {copy.tradeJournals.filters.strategyCodeQuickFilters}
+        </p>
+        <div className="mt-2 flex flex-wrap gap-2">
+          <Button
+            type="button"
+            size="sm"
+            variant={expression.trim() === STRATEGY_CODE_FAIL_REGEX ? "secondary" : "outline"}
+            className="h-8 px-2 text-xs"
+            aria-pressed={expression.trim() === STRATEGY_CODE_FAIL_REGEX}
+            onClick={() => onExpressionChange(STRATEGY_CODE_FAIL_REGEX)}
+          >
+            {copy.tradeJournals.filters.strategyCodeQuickFail}
+          </Button>
+          <Button
+            type="button"
+            size="sm"
+            variant={expression.trim() === STRATEGY_CODE_PASS_REGEX ? "secondary" : "outline"}
+            className="h-8 px-2 text-xs"
+            aria-pressed={expression.trim() === STRATEGY_CODE_PASS_REGEX}
+            onClick={() => onExpressionChange(STRATEGY_CODE_PASS_REGEX)}
+          >
+            {copy.tradeJournals.filters.strategyCodeQuickPass}
+          </Button>
+        </div>
       </div>
       <Input
         value={expression}
