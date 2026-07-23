@@ -41,7 +41,7 @@ export function JournalTradeBrowser({
   onTradeTagsChange: (tradeId: string, tags: TradeTagValue[]) => void;
 }) {
   const browsableTrades = useMemo(() => getBrowsableTrades(trades), [trades]);
-  const [previewScreenshot, setPreviewScreenshot] = useState<string | null>(null);
+  const [isPreviewOpen, setIsPreviewOpen] = useState(false);
   const [tagInput, setTagInput] = useState("");
   const [showTagSuggestions, setShowTagSuggestions] = useState(false);
   const [isSavingTags, setIsSavingTags] = useState(false);
@@ -332,7 +332,7 @@ export function JournalTradeBrowser({
         <button
           type="button"
           className="flex min-h-[320px] w-full items-center justify-center p-2 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-white sm:min-h-[480px]"
-          onClick={() => setPreviewScreenshot(screenshotUrl)}
+          onClick={() => setIsPreviewOpen(true)}
           aria-label={copy.tradeJournals.previewScreenshot}
         >
           <Image
@@ -379,9 +379,9 @@ export function JournalTradeBrowser({
       </div>
 
       <ScreenshotPreviewDialog
-        screenshotUrl={previewScreenshot}
+        screenshotUrl={isPreviewOpen ? screenshotUrl : null}
         tags={currentTrade.tags}
-        onClose={() => setPreviewScreenshot(null)}
+        onClose={() => setIsPreviewOpen(false)}
       />
     </div>
   );
