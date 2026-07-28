@@ -1,7 +1,10 @@
 import { describe, expect, it } from "vitest";
 import {
   calculateJournalStats,
+  calculateSqn,
   calculateJournalTrade,
+  getSqnAssessment,
+  getSqnRating,
   JournalTradeValidationError,
 } from "./calculations";
 
@@ -47,6 +50,55 @@ describe("calculateJournalStats", () => {
       averageR: -0.3,
       medianR: -0.5,
       maxLosingStreak: 2,
+      sqn: -0.34874291623145787,
     });
+  });
+
+  it("calculates SQN with the sample standard deviation", () => {
+    expect(calculateSqn([1, -1, -0.5, 2, -3])).toBeCloseTo(-0.3487429162);
+  });
+
+  it("caps only the SQN trade-count factor at 100", () => {
+    const oneHundredTrades = Array.from({ length: 100 }, (_, index) => index % 2 === 0 ? 0 : 2);
+    const twoHundredTrades = Array.from({ length: 200 }, (_, index) => index % 2 === 0 ? 0 : 2);
+
+    expect(calculateSqn(oneHundredTrades)).toBeCloseTo(Math.sqrt(99));
+    expect(calculateSqn(twoHundredTrades)).toBeCloseTo(10 * Math.sqrt(199 / 200));
+  });
+
+  it("returns null when SQN cannot be calculated", () => {
+    expect(calculateSqn([])).toBeNull();
+    expect(calculateSqn([1])).toBeNull();
+    expect(calculateSqn([1, 1])).toBeNull();
+  });
+
+  it("uses the sample count to determine rating reliability", () => {
+    expect(getSqnAssessment(3, 29)).toEqual({
+      reliability: "INSUFFICIENT_SAMPLE",
+      rating: null,
+    });
+    expect(getSqnAssessment(3, 30)).toEqual({
+      reliability: "PRELIMINARY",
+      rating: "EXCELLENT",
+    });
+    expect(getSqnAssessment(3, 99)).toEqual({
+      reliability: "PRELIMINARY",
+      rating: "EXCELLENT",
+    });
+    expect(getSqnAssessment(3, 100)).toEqual({
+      reliability: "ESTABLISHED",
+      rating: "EXCELLENT",
+    });
+  });
+
+  it("uses continuous SQN rating boundaries", () => {
+    expect(getSqnRating(1.59)).toBe("POOR");
+    expect(getSqnRating(1.6)).toBe("BELOW_AVERAGE");
+    expect(getSqnRating(2)).toBe("AVERAGE");
+    expect(getSqnRating(2.5)).toBe("GOOD");
+    expect(getSqnRating(3)).toBe("EXCELLENT");
+    expect(getSqnRating(5)).toBe("EXCELLENT");
+    expect(getSqnRating(5.01)).toBe("SUPERB");
+    expect(getSqnRating(7)).toBe("RARE");
   });
 });

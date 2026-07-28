@@ -21,6 +21,25 @@ export type JournalStats = {
   averageR: number;
   medianR: number;
   maxLosingStreak: number;
+  sqn: number | null;
+};
+
+export const MIN_SQN_RATING_TRADES = 30;
+export const MAX_SQN_TRADE_COUNT = 100;
+
+export type SqnReliability = "INSUFFICIENT_SAMPLE" | "PRELIMINARY" | "ESTABLISHED";
+export type SqnRating =
+  | "POOR"
+  | "BELOW_AVERAGE"
+  | "AVERAGE"
+  | "GOOD"
+  | "EXCELLENT"
+  | "SUPERB"
+  | "RARE";
+
+export type SqnAssessment = {
+  reliability: SqnReliability;
+  rating: SqnRating | null;
 };
 
 export class JournalTradeValidationError extends Error {}
@@ -83,5 +102,49 @@ export function calculateJournalStats(rMultiples: number[]): JournalStats {
     averageR: average(rMultiples),
     medianR: median(rMultiples),
     maxLosingStreak,
+    sqn: calculateSqn(rMultiples),
   };
+}
+
+export function calculateSqn(rMultiples: number[]): number | null {
+  const tradeCount = rMultiples.length;
+  if (tradeCount < 2) return null;
+
+  const meanR = average(rMultiples);
+  const squaredDeviationSum = rMultiples.reduce(
+    (sum, value) => sum + (value - meanR) ** 2,
+    0,
+  );
+  const sampleStandardDeviation = Math.sqrt(squaredDeviationSum / (tradeCount - 1));
+
+  if (sampleStandardDeviation === 0) return null;
+
+  const adjustedTradeCount = Math.min(tradeCount, MAX_SQN_TRADE_COUNT);
+  const sqn = (meanR / sampleStandardDeviation) * Math.sqrt(adjustedTradeCount);
+  return Number.isFinite(sqn) ? sqn : null;
+}
+
+export function getSqnAssessment(sqn: number | null, tradeCount: number): SqnAssessment {
+  const reliability: SqnReliability = tradeCount < MIN_SQN_RATING_TRADES
+    ? "INSUFFICIENT_SAMPLE"
+    : tradeCount < MAX_SQN_TRADE_COUNT
+      ? "PRELIMINARY"
+      : "ESTABLISHED";
+
+  return {
+    reliability,
+    rating: sqn === null || reliability === "INSUFFICIENT_SAMPLE"
+      ? null
+      : getSqnRating(sqn),
+  };
+}
+
+export function getSqnRating(sqn: number): SqnRating {
+  if (sqn < 1.6) return "POOR";
+  if (sqn < 2) return "BELOW_AVERAGE";
+  if (sqn < 2.5) return "AVERAGE";
+  if (sqn < 3) return "GOOD";
+  if (sqn <= 5) return "EXCELLENT";
+  if (sqn < 7) return "SUPERB";
+  return "RARE";
 }

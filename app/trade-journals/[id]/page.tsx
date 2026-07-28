@@ -1,10 +1,12 @@
 import Link from "next/link";
 import { notFound } from "next/navigation";
+import type { ReactNode } from "react";
 import { Download, Play } from "lucide-react";
 import { Breadcrumbs } from "@/components/breadcrumbs";
 import { DeleteJournalButton } from "@/components/trade-journals/delete-journal-button";
 import { JournalTableSection } from "@/components/trade-journals/journal-table-section";
 import { MergeJournalImport } from "@/components/trade-journals/merge-journal-import";
+import { SqnStatLabel } from "@/components/trade-journals/sqn-stat-label";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
 import { prisma } from "@/lib/db";
@@ -85,11 +87,15 @@ export default async function TradeJournalDetailPage({ params }: PageProps) {
           </div>
         </section>
 
-        <section className="grid gap-3 sm:grid-cols-2 lg:grid-cols-6">
+        <section className="grid gap-3 sm:grid-cols-2 lg:grid-cols-7">
           <StatCard label={copy.tradeJournals.statTradeCount} value={String(stats.tradeCount)} />
           <StatCard label={copy.tradeJournals.statWinRate} value={formatPercent(stats.winRate)} />
           <StatCard label={copy.tradeJournals.statTotalR} value={`${formatNumber(stats.totalR)} R`} />
           <StatCard label={copy.tradeJournals.statAverageR} value={`${formatNumber(stats.averageR)} R`} />
+          <StatCard
+            label={<SqnStatLabel sqn={stats.sqn} tradeCount={stats.tradeCount} />}
+            value={stats.sqn === null ? copy.common.dash : formatNumber(stats.sqn)}
+          />
           <StatCard label={copy.tradeJournals.statMedianR} value={`${formatNumber(stats.medianR)} R`} />
           <StatCard label={copy.tradeJournals.statMaxLosingStreak} value={String(stats.maxLosingStreak)} />
         </section>
@@ -100,7 +106,7 @@ export default async function TradeJournalDetailPage({ params }: PageProps) {
   );
 }
 
-function StatCard({ label, value }: { label: string; value: string }) {
+function StatCard({ label, value }: { label: ReactNode; value: string }) {
   return (
     <Card>
       <CardContent className="p-4">

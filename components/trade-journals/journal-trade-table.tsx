@@ -1,12 +1,13 @@
 "use client";
 
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import Image from "next/image";
 import { useRouter } from "next/navigation";
 import { createPortal } from "react-dom";
 import { ArrowDown, ArrowUp, ArrowUpDown, Check, ChevronLeft, ChevronRight, Download, Eye, EyeOff, Filter, HelpCircle, Pencil, Plus, RotateCcw, Trash2, X } from "lucide-react";
 import { ScreenshotPreviewDialog } from "@/components/trade-journals/screenshot-preview-dialog";
 import { JournalTradeBrowser } from "@/components/trade-journals/journal-trade-browser";
+import { SqnStatLabel } from "@/components/trade-journals/sqn-stat-label";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { ConfirmDialog } from "@/components/ui/confirm-dialog";
@@ -409,11 +410,15 @@ export function JournalTradeTable({
       {hasActiveFilters ? (
         <div className="rounded-lg border bg-slate-50/70 p-3">
           <div className="mb-2 text-sm font-medium text-slate-700">{copy.tradeJournals.filteredStatistics}</div>
-          <div className="grid gap-2 sm:grid-cols-2 lg:grid-cols-6">
+          <div className="grid gap-2 sm:grid-cols-2 lg:grid-cols-7">
             <FilteredStat label={copy.tradeJournals.statTradeCount} value={String(filteredStats.tradeCount)} />
             <FilteredStat label={copy.tradeJournals.statWinRate} value={formatPercent(filteredStats.winRate)} />
             <FilteredStat label={copy.tradeJournals.statTotalR} value={`${formatNumber(filteredStats.totalR)} R`} />
             <FilteredStat label={copy.tradeJournals.statAverageR} value={`${formatNumber(filteredStats.averageR)} R`} />
+            <FilteredStat
+              label={<SqnStatLabel sqn={filteredStats.sqn} tradeCount={filteredStats.tradeCount} />}
+              value={filteredStats.sqn === null ? copy.common.dash : formatNumber(filteredStats.sqn)}
+            />
             <FilteredStat label={copy.tradeJournals.statMedianR} value={`${formatNumber(filteredStats.medianR)} R`} />
             <FilteredStat label={copy.tradeJournals.statMaxLosingStreak} value={String(filteredStats.maxLosingStreak)} />
           </div>
@@ -1503,7 +1508,7 @@ function PriceCell({ value }: { value: number | null }) {
   return <TableCell className="text-right font-mono">{value === null ? copy.common.dash : formatNumber(value)}</TableCell>;
 }
 
-function FilteredStat({ label, value }: { label: string; value: string }) {
+function FilteredStat({ label, value }: { label: ReactNode; value: string }) {
   return (
     <div className="rounded-md border bg-white px-3 py-2">
       <div className="text-xs text-slate-500">{label}</div>
