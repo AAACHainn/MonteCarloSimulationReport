@@ -9,6 +9,7 @@ export const metadata: Metadata = {
 };
 
 const navItems = [
+  { href: "/market-replay", label: copy.nav.marketReplay },
   { href: "/datasets", label: copy.nav.datasets },
   { href: "/trade-journals", label: copy.nav.tradeJournals },
   { href: "/simulations/new", label: copy.nav.newSimulation },

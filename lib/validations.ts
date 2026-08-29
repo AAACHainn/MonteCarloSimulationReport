@@ -6,6 +6,7 @@ import {
   MAX_TAGS_PER_TRADE,
   normalizeTagName,
 } from "./trade-journal/tags";
+import { isReplayInterval } from "./market-replay/types";
 
 export const SIMULATION_WORK_LIMIT = 50_000_000;
 
@@ -17,6 +18,20 @@ export const datasetSchema = z.object({
 export const tradeJournalSchema = z.object({
   name: z.string().trim().min(1, copy.api.journalNameRequired).max(120),
   description: z.string().trim().max(500).optional().nullable(),
+});
+
+export const marketDatasetSchema = z.object({
+  name: z.string().trim().min(1, copy.marketReplay.validation.datasetNameRequired).max(120),
+  description: z.string().trim().max(500).optional().nullable(),
+  symbol: z.string().trim().min(1, copy.marketReplay.validation.symbolRequired).max(80),
+  timeframe: z.string().trim().min(1, copy.marketReplay.validation.timeframeRequired).max(30),
+  timezone: z.string().trim().min(1, copy.marketReplay.validation.timezoneRequired).max(100),
+});
+
+export const replayProgressSchema = z.object({
+  startSequence: z.coerce.number().int().min(0),
+  currentSequence: z.coerce.number().int().min(-1),
+  intervalMs: z.coerce.number().int().refine(isReplayInterval, copy.marketReplay.validation.unsupportedSpeed),
 });
 
 export const tradeOptionSchema = z.object({

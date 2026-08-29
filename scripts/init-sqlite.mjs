@@ -65,6 +65,40 @@ const createStatements = [
     CONSTRAINT "_TradeToTradeTag_A_fkey" FOREIGN KEY ("A") REFERENCES "Trade" ("id") ON DELETE CASCADE ON UPDATE CASCADE,
     CONSTRAINT "_TradeToTradeTag_B_fkey" FOREIGN KEY ("B") REFERENCES "TradeTag" ("id") ON DELETE CASCADE ON UPDATE CASCADE
   )`,
+  `CREATE TABLE IF NOT EXISTS "MarketDataset" (
+    "id" TEXT NOT NULL PRIMARY KEY,
+    "name" TEXT NOT NULL,
+    "description" TEXT,
+    "symbol" TEXT NOT NULL,
+    "timeframe" TEXT NOT NULL,
+    "timezone" TEXT NOT NULL,
+    "barCount" INTEGER NOT NULL,
+    "startTime" DATETIME NOT NULL,
+    "endTime" DATETIME NOT NULL,
+    "createdAt" DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    "updatedAt" DATETIME NOT NULL
+  )`,
+  `CREATE TABLE IF NOT EXISTS "MarketBar" (
+    "datasetId" TEXT NOT NULL,
+    "sequence" INTEGER NOT NULL,
+    "timestamp" DATETIME NOT NULL,
+    "open" REAL NOT NULL,
+    "high" REAL NOT NULL,
+    "low" REAL NOT NULL,
+    "close" REAL NOT NULL,
+    "volume" REAL,
+    PRIMARY KEY ("datasetId", "sequence"),
+    CONSTRAINT "MarketBar_datasetId_fkey" FOREIGN KEY ("datasetId") REFERENCES "MarketDataset" ("id") ON DELETE CASCADE ON UPDATE CASCADE
+  )`,
+  `CREATE TABLE IF NOT EXISTS "ReplayProgress" (
+    "datasetId" TEXT NOT NULL PRIMARY KEY,
+    "startSequence" INTEGER NOT NULL,
+    "currentSequence" INTEGER NOT NULL,
+    "intervalMs" INTEGER NOT NULL,
+    "createdAt" DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    "updatedAt" DATETIME NOT NULL,
+    CONSTRAINT "ReplayProgress_datasetId_fkey" FOREIGN KEY ("datasetId") REFERENCES "MarketDataset" ("id") ON DELETE CASCADE ON UPDATE CASCADE
+  )`,
 ];
 
 const tradeColumns = [
@@ -89,6 +123,8 @@ const indexStatements = [
   `CREATE INDEX IF NOT EXISTS "TradeOption_type_active_idx" ON "TradeOption"("type", "active")`,
   `CREATE UNIQUE INDEX IF NOT EXISTS "TradeTag_normalizedName_key" ON "TradeTag"("normalizedName")`,
   `CREATE INDEX IF NOT EXISTS "TradeTag_name_idx" ON "TradeTag"("name")`,
+  `CREATE INDEX IF NOT EXISTS "MarketDataset_createdAt_idx" ON "MarketDataset"("createdAt")`,
+  `CREATE UNIQUE INDEX IF NOT EXISTS "MarketBar_datasetId_timestamp_key" ON "MarketBar"("datasetId", "timestamp")`,
   `CREATE UNIQUE INDEX IF NOT EXISTS "_TradeToTradeTag_AB_unique" ON "_TradeToTradeTag"("A", "B")`,
   `CREATE INDEX IF NOT EXISTS "_TradeToTradeTag_B_index" ON "_TradeToTradeTag"("B")`,
 ];

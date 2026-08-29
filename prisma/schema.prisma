@@ -112,3 +112,46 @@ model TradeTag {
 
   @@index([name])
 }
+
+model MarketDataset {
+  id          String          @id @default(cuid())
+  name        String
+  description String?
+  symbol      String
+  timeframe   String
+  timezone    String
+  barCount    Int
+  startTime   DateTime
+  endTime     DateTime
+  bars        MarketBar[]
+  progress    ReplayProgress?
+  createdAt   DateTime        @default(now())
+  updatedAt   DateTime        @updatedAt
+
+  @@index([createdAt])
+}
+
+model MarketBar {
+  datasetId String
+  dataset   MarketDataset @relation(fields: [datasetId], references: [id], onDelete: Cascade)
+  sequence  Int
+  timestamp DateTime
+  open      Float
+  high      Float
+  low       Float
+  close     Float
+  volume    Float?
+
+  @@id([datasetId, sequence])
+  @@unique([datasetId, timestamp])
+}
+
+model ReplayProgress {
+  datasetId       String        @id
+  dataset         MarketDataset @relation(fields: [datasetId], references: [id], onDelete: Cascade)
+  startSequence   Int
+  currentSequence Int
+  intervalMs      Int
+  createdAt       DateTime      @default(now())
+  updatedAt       DateTime      @updatedAt
+}

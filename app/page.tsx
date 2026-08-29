@@ -1,10 +1,16 @@
 import Link from "next/link";
-import { ArrowRight, BarChart3, Database, History, NotebookTabs } from "lucide-react";
+import { ArrowRight, BarChart3, ChartCandlestick, Database, History, NotebookTabs } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { copy } from "@/lib/i18n";
 
 const actions = [
+  {
+    href: "/market-replay",
+    icon: ChartCandlestick,
+    title: copy.home.manageMarketReplay,
+    body: copy.home.manageMarketReplayBody,
+  },
   {
     href: "/trade-journals",
     icon: NotebookTabs,
@@ -42,18 +48,18 @@ export default function Home() {
         </div>
         <div className="flex gap-3">
           <Button asChild>
-            <Link href="/datasets">
-              {copy.home.start}
+            <Link href="/market-replay">
+              {copy.home.startReplay}
               <ArrowRight className="h-4 w-4" />
             </Link>
           </Button>
           <Button asChild variant="secondary">
-            <Link href="/simulations/history">{copy.home.history}</Link>
+            <Link href="/trade-journals">{copy.home.openTradeJournal}</Link>
           </Button>
         </div>
       </section>
 
-      <section className="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
+      <section className="grid gap-4 md:grid-cols-2 xl:grid-cols-3">
         {actions.map((action) => (
           <Card key={action.href}>
             <CardHeader>
