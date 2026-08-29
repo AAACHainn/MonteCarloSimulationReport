@@ -114,19 +114,20 @@ model TradeTag {
 }
 
 model MarketDataset {
-  id          String          @id @default(cuid())
-  name        String
-  description String?
-  symbol      String
-  timeframe   String
-  timezone    String
-  barCount    Int
-  startTime   DateTime
-  endTime     DateTime
-  bars        MarketBar[]
-  progress    ReplayProgress?
-  createdAt   DateTime        @default(now())
-  updatedAt   DateTime        @updatedAt
+  id           String               @id @default(cuid())
+  name         String
+  description  String?
+  symbol       String
+  timeframe    String
+  timezone     String
+  barCount     Int
+  startTime    DateTime
+  endTime      DateTime
+  bars         MarketBar[]
+  progress     ReplayProgress?
+  paperSession PaperTradingSession?
+  createdAt    DateTime             @default(now())
+  updatedAt    DateTime             @updatedAt
 
   @@index([createdAt])
 }
@@ -154,4 +155,116 @@ model ReplayProgress {
   intervalMs      Int
   createdAt       DateTime      @default(now())
   updatedAt       DateTime      @updatedAt
+}
+
+model PaperTradingSession {
+  id                    String             @id @default(cuid())
+  datasetId             String             @unique
+  dataset               MarketDataset      @relation(fields: [datasetId], references: [id], onDelete: Cascade)
+  initialCapital        Float
+  currency              String
+  commissionBps         Float              @default(0)
+  slippageBps           Float              @default(0)
+  lastProcessedSequence Int
+  netQuantity           Float              @default(0)
+  averageEntryPrice     Float?
+  realizedPnl           Float              @default(0)
+  totalFees             Float              @default(0)
+  totalSlippage         Float              @default(0)
+  peakEquity            Float
+  maxDrawdown           Float              @default(0)
+  version               Int                @default(1)
+  orders                PaperOrder[]
+  fills                 PaperFill[]
+  trades                PaperTrade[]
+  equityPoints          PaperEquityPoint[]
+  createdAt             DateTime           @default(now())
+  updatedAt             DateTime           @updatedAt
+
+  @@index([datasetId])
+}
+
+model PaperOrder {
+  id                 String              @id @default(cuid())
+  sessionId          String
+  session            PaperTradingSession @relation(fields: [sessionId], references: [id], onDelete: Cascade)
+  side               String
+  type               String
+  status             String              @default("PENDING")
+  quantity           Float
+  price              Float?
+  stopLoss           Float?
+  takeProfit         Float?
+  reduceOnly         Boolean             @default(false)
+  isProtective       Boolean             @default(false)
+  ocoGroupId         String?
+  createdSequence    Int
+  activeFromSequence Int
+  filledSequence     Int?
+  filledAt           DateTime?
+  filledPrice        Float?
+  cancelReason       String?
+  fills              PaperFill[]
+  createdAt          DateTime            @default(now())
+  updatedAt          DateTime            @updatedAt
+
+  @@index([sessionId, status])
+  @@index([sessionId, createdSequence])
+}
+
+model PaperFill {
+  id                String              @id @default(cuid())
+  sessionId         String
+  session           PaperTradingSession @relation(fields: [sessionId], references: [id], onDelete: Cascade)
+  orderId           String
+  order             PaperOrder          @relation(fields: [orderId], references: [id], onDelete: Cascade)
+  sequence          Int
+  timestamp         DateTime
+  side              String
+  price             Float
+  quantity          Float
+  fee               Float
+  slippageCost      Float
+  realizedPnl       Float
+  closedQuantity    Float
+  openedQuantity    Float
+  netQuantityAfter  Float
+  averagePriceAfter Float?
+  reason            String
+  createdAt         DateTime            @default(now())
+
+  @@index([sessionId, sequence])
+  @@index([orderId])
+}
+
+model PaperTrade {
+  id             String              @id @default(cuid())
+  sessionId      String
+  session        PaperTradingSession @relation(fields: [sessionId], references: [id], onDelete: Cascade)
+  side           String
+  status         String              @default("OPEN")
+  openedSequence Int
+  openedAt       DateTime
+  closedSequence Int?
+  closedAt       DateTime?
+  grossPnl       Float               @default(0)
+  fees           Float               @default(0)
+  plannedRisk    Float?
+  createdAt      DateTime            @default(now())
+  updatedAt      DateTime            @updatedAt
+
+  @@index([sessionId, status])
+  @@index([sessionId, openedSequence])
+}
+
+model PaperEquityPoint {
+  sessionId String
+  session   PaperTradingSession @relation(fields: [sessionId], references: [id], onDelete: Cascade)
+  sequence  Int
+  timestamp DateTime
+  balance   Float
+  equity    Float
+  drawdown  Float
+
+  @@id([sessionId, sequence])
 }

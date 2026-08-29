@@ -34,6 +34,41 @@ export const replayProgressSchema = z.object({
   intervalMs: z.coerce.number().int().refine(isReplayInterval, copy.marketReplay.validation.unsupportedSpeed),
 });
 
+export const paperSessionSchema = z.object({
+  initialCapital: z.coerce.number().finite().positive().max(1_000_000_000_000),
+  currency: z.string().trim().min(1).max(12),
+  commissionBps: z.coerce.number().finite().min(0).max(10_000),
+  slippageBps: z.coerce.number().finite().min(0).max(10_000),
+});
+
+export const paperOrderSchema = z.object({
+  side: z.enum(["BUY", "SELL"]),
+  type: z.enum(["MARKET", "LIMIT", "STOP"]),
+  quantity: z.coerce.number().finite().positive().max(1_000_000_000_000),
+  price: z.coerce.number().finite().optional().nullable(),
+  stopLoss: z.coerce.number().finite().optional().nullable(),
+  takeProfit: z.coerce.number().finite().optional().nullable(),
+  reduceOnly: z.boolean().optional().default(false),
+  expectedVersion: z.coerce.number().int().positive(),
+}).superRefine((value, ctx) => {
+  if (value.type !== "MARKET" && value.price == null) {
+    ctx.addIssue({ code: z.ZodIssueCode.custom, path: ["price"], message: copy.paperTrading.priceRequired });
+  }
+});
+
+export const paperOrderUpdateSchema = z.object({
+  quantity: z.coerce.number().finite().positive().max(1_000_000_000_000).optional(),
+  price: z.coerce.number().finite().optional(),
+  expectedVersion: z.coerce.number().int().positive(),
+}).refine((value) => value.quantity !== undefined || value.price !== undefined, copy.paperTrading.orderUpdateRequired);
+
+export const paperAdvanceSchema = z.object({
+  expectedCurrentSequence: z.coerce.number().int().min(-1),
+  expectedVersion: z.coerce.number().int().positive().optional().nullable(),
+});
+
+export const paperResetSchema = z.object({ action: z.enum(["RESET", "CHANGE_START"]) });
+
 export const tradeOptionSchema = z.object({
   type: z.enum(["INSTRUMENT", "STRATEGY"]),
   name: z.string().trim().min(1, copy.api.optionNameRequired).max(80),

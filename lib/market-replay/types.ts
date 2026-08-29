@@ -2,8 +2,18 @@ export const MAX_MARKET_CSV_BYTES = 50 * 1024 * 1024;
 export const MAX_MARKET_BARS = 200_000;
 export const REPLAY_HISTORY_BARS = 200;
 export const REPLAY_INTERVALS = [10_000, 5_000, 3_000, 1_000, 500, 200, 100] as const;
+export const EMA_LENGTH_MIN = 2;
+export const EMA_LENGTH_MAX = 1_000;
+export const MAX_EMA_INDICATORS = 5;
 
 export type ReplayIntervalMs = (typeof REPLAY_INTERVALS)[number];
+
+export type EmaIndicatorConfig = {
+  id: string;
+  length: number;
+  color: string;
+  visible: boolean;
+};
 
 export type MarketBarData = {
   sequence: number;
