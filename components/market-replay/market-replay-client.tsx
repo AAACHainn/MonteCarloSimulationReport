@@ -14,21 +14,27 @@ import { Label } from "@/components/ui/label";
 import { copy } from "@/lib/i18n";
 import {
   createReplayState,
-  findReplayStartSequence,
+  calculatePlaybackAdvance,
   pauseReplay,
   playReplay,
   resetReplay,
-  setReplayInterval,
+  setDisplayInterval,
+  setPlaybackRate,
 } from "@/lib/market-replay/engine";
+import { mergeSourceBar } from "@/lib/market-replay/aggregation";
+import { datasetSession } from "@/lib/market-replay/dataset";
 import {
   EMA_LENGTH_MAX,
   EMA_LENGTH_MIN,
   MAX_EMA_INDICATORS,
-  REPLAY_INTERVALS,
+  MAX_PLAYBACK_RATE,
+  MIN_PLAYBACK_RATE,
+  formatInterval,
+  isValidDisplayInterval,
+  type AggregatedMarketBarData,
   type EmaIndicatorConfig,
   type MarketBarData,
   type MarketDatasetSummary,
-  type ReplayIntervalMs,
   type ReplayState,
 } from "@/lib/market-replay/types";
 import type { PaperOrderType, PaperSessionSnapshot, PaperSide } from "@/lib/paper-trading/types";
@@ -42,6 +48,7 @@ const DEFAULT_EMA_INDICATORS: EmaIndicatorConfig[] = [
   { id: "ema-default-60", length: 60, color: EMA_COLORS[1], visible: true },
   { id: "ema-default-200", length: 200, color: EMA_COLORS[2], visible: true },
 ];
+const DISPLAY_INTERVAL_PRESETS = [1, 5, 10, 15, 30, 60, 120, 180, 300, 600, 900, 1_800, 2_700, 3_600, 7_200, 14_400, 21_600, 43_200, 86_400];
 
 function isValidEmaLength(value: unknown): value is number {
   return Number.isInteger(value) && Number(value) >= EMA_LENGTH_MIN && Number(value) <= EMA_LENGTH_MAX;
@@ -96,7 +103,9 @@ function formatReplayTime(value: string, timezone: string) {
 }
 
 export function MarketReplayClient({ dataset }: { dataset: MarketDatasetSummary }) {
-  const [bars, setBars] = useState<MarketBarData[]>([]);
+  const [bars, setBars] = useState<AggregatedMarketBarData[]>([]);
+  const [warmupBars, setWarmupBars] = useState<AggregatedMarketBarData[]>([]);
+  const [currentSourceBar, setCurrentSourceBar] = useState<MarketBarData | null>(null);
   const [isLoading, setIsLoading] = useState(true);
   const [loadError, setLoadError] = useState<string | null>(null);
   const [replay, setReplay] = useState<ReplayState | null>(null);
@@ -108,6 +117,9 @@ export function MarketReplayClient({ dataset }: { dataset: MarketDatasetSummary 
   const [emaIndicators, setEmaIndicators] = useState<EmaIndicatorConfig[]>(DEFAULT_EMA_INDICATORS);
   const [emaSettingsLoaded, setEmaSettingsLoaded] = useState(false);
   const [emaError, setEmaError] = useState<string | null>(null);
+  const [customInterval, setCustomInterval] = useState("");
+  const [customIntervalUnit, setCustomIntervalUnit] = useState<"s" | "m" | "h">("m");
+  const [repairInterval, setRepairInterval] = useState("");
   const [paperSnapshot, setPaperSnapshot] = useState<PaperSessionSnapshot | null>(null);
   const [paperBusy, setPaperBusy] = useState(false);
   const [paperError, setPaperError] = useState<string | null>(null);
@@ -118,6 +130,8 @@ export function MarketReplayClient({ dataset }: { dataset: MarketDatasetSummary 
   const saveChainRef = useRef<Promise<void>>(Promise.resolve());
   const paperSnapshotRef = useRef<PaperSessionSnapshot | null>(null);
   const advancingRef = useRef(false);
+  const playbackAccumulatorRef = useRef(0);
+  const playbackClockRef = useRef(0);
 
   useEffect(() => {
     const stored = loadEmaSettings();
@@ -140,30 +154,36 @@ export function MarketReplayClient({ dataset }: { dataset: MarketDatasetSummary 
     }
   }, [emaEnabled, emaIndicators, emaSettingsLoaded]);
 
+  const loadWindow = useCallback(async (endSequence: number, displayIntervalSeconds: number, warmupCount: number) => {
+    const params = new URLSearchParams({
+      displayIntervalSeconds: String(displayIntervalSeconds), endSequence: String(endSequence),
+      visibleCount: "200", warmupCount: String(Math.min(EMA_LENGTH_MAX, warmupCount)),
+    });
+    const response = await fetch(`/api/market-datasets/${dataset.id}/bars/window?${params}`);
+    const data = await response.json();
+    if (!response.ok) throw new Error(data?.error ?? copy.marketReplay.loadError);
+    setBars(data.visibleBars as AggregatedMarketBarData[]);
+    setWarmupBars(data.warmupBars as AggregatedMarketBarData[]);
+    setCurrentSourceBar(data.lastSourceBar as MarketBarData | null);
+  }, [dataset.id]);
+
   useEffect(() => {
     let cancelled = false;
-    fetch(`/api/market-datasets/${dataset.id}/bars`)
-      .then(async (response) => {
-        const data = await response.json();
-        if (!response.ok) throw new Error(data?.error ?? copy.marketReplay.loadError);
-        return data.bars as MarketBarData[];
-      })
-      .then((loadedBars) => {
-        if (cancelled) return;
-        setBars(loadedBars);
-        if (dataset.progress) {
-          setReplay(createReplayState(
-            loadedBars.length,
-            dataset.progress.startSequence,
-            dataset.progress.intervalMs,
-            dataset.progress.currentSequence,
-          ));
-        }
-      })
-      .catch((error) => { if (!cancelled) setLoadError(error instanceof Error ? error.message : copy.marketReplay.loadError); })
+    const initialize = async () => {
+      if (!dataset.sourceIntervalSeconds) throw new Error(copy.marketReplay.invalidDisplayInterval);
+      if (dataset.progress) {
+        const next = createReplayState(
+          dataset.barCount, dataset.progress.startSequence, dataset.progress.playbackRate,
+          dataset.progress.displayIntervalSeconds, dataset.progress.currentSequence,
+        );
+        if (!cancelled) setReplay(next);
+        await loadWindow(next.currentSequence, next.displayIntervalSeconds, EMA_LENGTH_MAX);
+      }
+    };
+    initialize().catch((error) => { if (!cancelled) setLoadError(error instanceof Error ? error.message : copy.marketReplay.loadError); })
       .finally(() => { if (!cancelled) setIsLoading(false); });
     return () => { cancelled = true; };
-  }, [dataset.id, dataset.progress]);
+  }, [dataset, loadWindow]);
 
   useEffect(() => { latestReplayRef.current = replay; }, [replay]);
   useEffect(() => { paperSnapshotRef.current = paperSnapshot; }, [paperSnapshot]);
@@ -203,7 +223,8 @@ export function MarketReplayClient({ dataset }: { dataset: MarketDatasetSummary 
         body: JSON.stringify({
           startSequence: next.startSequence,
           currentSequence: next.currentSequence,
-          intervalMs: next.intervalMs,
+          playbackRate: next.playbackRate,
+          displayIntervalSeconds: next.displayIntervalSeconds,
         }),
       });
       if (!response.ok) throw new Error(copy.marketReplay.saveError);
@@ -222,7 +243,7 @@ export function MarketReplayClient({ dataset }: { dataset: MarketDatasetSummary 
     saveTimerRef.current = setTimeout(flushSave, delay);
   }, [flushSave]);
 
-  const advanceOneBar = useCallback(async (keepPlaying: boolean) => {
+  const advanceBars = useCallback(async (count: number, keepPlaying: boolean) => {
     const current = latestReplayRef.current;
     if (!current || advancingRef.current || current.currentSequence >= current.barCount - 1) return;
     advancingRef.current = true;
@@ -233,6 +254,7 @@ export function MarketReplayClient({ dataset }: { dataset: MarketDatasetSummary 
         body: JSON.stringify({
           expectedCurrentSequence: current.currentSequence,
           expectedVersion: paperSnapshotRef.current?.session.version ?? null,
+          count,
         }),
       });
       const data = await response.json();
@@ -241,6 +263,14 @@ export function MarketReplayClient({ dataset }: { dataset: MarketDatasetSummary 
         throw new Error(data?.error ?? copy.paperTrading.advanceFailed);
       }
       if (data.snapshot) setPaperSnapshot(data.snapshot as PaperSessionSnapshot);
+      const advancedBars = data.advancedBars as MarketBarData[];
+      if (advancedBars.length && dataset.sourceIntervalSeconds) {
+        setCurrentSourceBar(advancedBars.at(-1)!);
+        setBars((currentBars) => advancedBars.reduce((aggregates, source) => mergeSourceBar(aggregates, source, {
+          sourceSeconds: dataset.sourceIntervalSeconds!, displaySeconds: current.displayIntervalSeconds,
+          session: datasetSession(dataset), finalSequence: dataset.barCount - 1,
+        }), currentBars).slice(-(200 + Math.max(...emaIndicators.map((item) => item.length), 0))));
+      }
       setReplay((value) => value ? {
         ...value,
         currentSequence: data.currentSequence,
@@ -254,13 +284,39 @@ export function MarketReplayClient({ dataset }: { dataset: MarketDatasetSummary 
     } finally {
       advancingRef.current = false;
     }
-  }, [dataset.id, reloadPaper]);
+  }, [dataset, emaIndicators, reloadPaper]);
+
+  const replayStatus = replay?.status;
+  useEffect(() => {
+    if (replayStatus !== "playing") return;
+    let cancelled = false;
+    let timer: ReturnType<typeof setTimeout> | null = null;
+    playbackClockRef.current = performance.now();
+    const tick = async () => {
+      const current = latestReplayRef.current;
+      if (cancelled || !current || current.status !== "playing" || !dataset.sourceIntervalSeconds) return;
+      const now = performance.now();
+      const advance = calculatePlaybackAdvance(playbackAccumulatorRef.current, now - playbackClockRef.current, current.playbackRate, dataset.sourceIntervalSeconds);
+      playbackClockRef.current = now;
+      const count = advance.count;
+      if (count > 0) {
+        playbackAccumulatorRef.current = advance.accumulator;
+        await advanceBars(count, true);
+      } else playbackAccumulatorRef.current = advance.accumulator;
+      if (!cancelled) timer = setTimeout(tick, 100);
+    };
+    timer = setTimeout(tick, 100);
+    return () => { cancelled = true; if (timer) clearTimeout(timer); };
+  }, [advanceBars, dataset.sourceIntervalSeconds, replayStatus]);
 
   useEffect(() => {
-    if (!replay || replay.status !== "playing") return;
-    const timer = setTimeout(() => { void advanceOneBar(true); }, replay.intervalMs);
-    return () => clearTimeout(timer);
-  }, [advanceOneBar, replay]);
+    const pauseWhenHidden = () => {
+      if (document.visibilityState !== "hidden") return;
+      setReplay((current) => current?.status === "playing" ? pauseReplay(current) : current);
+    };
+    document.addEventListener("visibilitychange", pauseWhenHidden);
+    return () => document.removeEventListener("visibilitychange", pauseWhenHidden);
+  }, []);
 
   useEffect(() => {
     const persistLatest = () => {
@@ -269,7 +325,7 @@ export function MarketReplayClient({ dataset }: { dataset: MarketDatasetSummary 
       void fetch(`/api/market-datasets/${dataset.id}/progress`, {
         method: "PUT",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ startSequence: current.startSequence, currentSequence: current.currentSequence, intervalMs: current.intervalMs }),
+        body: JSON.stringify({ startSequence: current.startSequence, currentSequence: current.currentSequence, playbackRate: current.playbackRate, displayIntervalSeconds: current.displayIntervalSeconds }),
         keepalive: true,
       });
     };
@@ -281,17 +337,18 @@ export function MarketReplayClient({ dataset }: { dataset: MarketDatasetSummary 
     };
   }, [dataset.id]);
 
-  function beginReplay(event: React.FormEvent<HTMLFormElement>) {
+  async function beginReplay(event: React.FormEvent<HTMLFormElement>) {
     event.preventDefault();
-    const startSequence = findReplayStartSequence(bars, selectedTimeToTimestamp(startValue, dataset.timezone));
-    if (startSequence < 0) {
-      setStartError(copy.marketReplay.invalidStart);
-      return;
-    }
-    const next = createReplayState(bars.length, startSequence, 1_000);
-    setStartError(null);
-    setReplay(next);
-    queueSave(next, true);
+    if (!dataset.sourceIntervalSeconds) return setStartError(copy.marketReplay.invalidDisplayInterval);
+    const response = await fetch(`/api/market-datasets/${dataset.id}/replay/start`, {
+      method: "POST", headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ timestamp: new Date(selectedTimeToTimestamp(startValue, dataset.timezone)).toISOString(), playbackRate: 1, displayIntervalSeconds: dataset.sourceIntervalSeconds }),
+    });
+    const data = await response.json();
+    if (!response.ok) return setStartError(data?.error ?? copy.marketReplay.invalidStart);
+    const next = createReplayState(dataset.barCount, data.startSequence, data.playbackRate, data.displayIntervalSeconds, data.currentSequence);
+    setStartError(null); setReplay(next);
+    await loadWindow(next.currentSequence, next.displayIntervalSeconds, EMA_LENGTH_MAX);
   }
 
   function togglePlayback() {
@@ -304,14 +361,23 @@ export function MarketReplayClient({ dataset }: { dataset: MarketDatasetSummary 
   function revealNextBar() {
     if (!replay) return;
     setReplay(pauseReplay(replay));
-    void advanceOneBar(false);
+    void advanceBars(1, false);
   }
 
   function changeSpeed(value: number) {
     if (!replay) return;
-    const next = setReplayInterval(replay, value as ReplayIntervalMs);
+    const next = setPlaybackRate(replay, value);
     setReplay(next);
     queueSave(next, true);
+  }
+
+  async function changeDisplayInterval(value: number) {
+    if (!replay || !dataset.sourceIntervalSeconds || !isValidDisplayInterval(dataset.sourceIntervalSeconds, value)) {
+      setEmaError(copy.marketReplay.invalidDisplayInterval); return;
+    }
+    const next = setDisplayInterval(replay, value);
+    setReplay(next); setEmaError(null); queueSave(next, true);
+    await loadWindow(next.currentSequence, value, EMA_LENGTH_MAX);
   }
 
   function setEmaLength(id: string, value: number) {
@@ -374,7 +440,13 @@ export function MarketReplayClient({ dataset }: { dataset: MarketDatasetSummary 
         return;
       }
       setPaperSnapshot(null);
-      setReplay(confirmAction === "reset" ? resetReplay(replay) : null);
+      if (confirmAction === "reset") {
+        const reset = resetReplay(replay);
+        setReplay(reset);
+        await loadWindow(reset.currentSequence, reset.displayIntervalSeconds, EMA_LENGTH_MAX);
+      } else {
+        setReplay(null); setBars([]); setWarmupBars([]); setCurrentSourceBar(null);
+      }
       setSaveStatus("idle");
     }
     setConfirmAction(null);
@@ -446,7 +518,7 @@ export function MarketReplayClient({ dataset }: { dataset: MarketDatasetSummary 
     });
   }
 
-  const currentBar = replay && replay.currentSequence >= 0 ? bars[replay.currentSequence] : null;
+  const currentBar = replay && replay.currentSequence >= 0 ? currentSourceBar : null;
   const revealedCount = replay ? Math.max(0, replay.currentSequence - replay.startSequence + 1) : 0;
   const replayCount = replay ? replay.barCount - replay.startSequence : 0;
   const statusText = useMemo(() => {
@@ -454,6 +526,15 @@ export function MarketReplayClient({ dataset }: { dataset: MarketDatasetSummary 
     if (saveStatus === "error") return copy.marketReplay.saveError;
     return saveStatus === "saved" ? copy.marketReplay.saved : "";
   }, [saveStatus]);
+
+  if (!dataset.sourceIntervalSeconds) return (
+    <Card className="max-w-xl"><CardHeader><CardTitle>{copy.marketReplay.repairMetadata}</CardTitle><CardDescription>{copy.marketReplay.repairMetadataDescription}</CardDescription></CardHeader>
+      <CardContent className="space-y-3"><Label htmlFor="repair-source-interval">{copy.marketReplay.sourceInterval}</Label><Input id="repair-source-interval" type="number" min="1" max="86400" value={repairInterval} onChange={(event) => setRepairInterval(event.target.value)} />
+        <Button type="button" onClick={async () => {
+          const response = await fetch(`/api/market-datasets/${dataset.id}`, { method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ sourceIntervalSeconds: Number(repairInterval), sessionMode: "TWENTY_FOUR_SEVEN", sessionOpenMinute: null, sessionCloseMinute: null, tradingWeekdays: [1,2,3,4,5,6,7] }) });
+          const data = await response.json().catch(() => null); if (!response.ok) setLoadError(data?.error ?? copy.marketReplay.loadError); else window.location.reload();
+        }}>{copy.marketReplay.saveMetadata}</Button>{loadError ? <p className="text-sm text-red-600">{loadError}</p> : null}</CardContent></Card>
+  );
 
   if (isLoading) return <div className="flex min-h-64 items-center justify-center gap-2 text-sm text-slate-600"><Loader2 className="h-5 w-5 animate-spin" />{copy.marketReplay.loading}</div>;
   if (loadError) return <Alert className="border-red-200 bg-red-50"><AlertTitle>{copy.marketReplay.loadError}</AlertTitle><AlertDescription>{loadError}</AlertDescription></Alert>;
@@ -505,9 +586,24 @@ export function MarketReplayClient({ dataset }: { dataset: MarketDatasetSummary 
               </Button>
               <div className="flex items-center gap-2">
                 <Label htmlFor="replay-speed" className="whitespace-nowrap">{copy.marketReplay.speed}</Label>
-                <select id="replay-speed" value={replay.intervalMs} onChange={(event) => changeSpeed(Number(event.target.value))} className="h-10 rounded-md border bg-white px-3 text-sm">
-                  {REPLAY_INTERVALS.map((interval) => <option key={interval} value={interval}>{copy.marketReplay.speedLabels[interval]}</option>)}
+                <Input id="replay-speed" type="range" min={MIN_PLAYBACK_RATE} max={MAX_PLAYBACK_RATE} value={replay.playbackRate} onChange={(event) => changeSpeed(Number(event.target.value))} className="w-32" />
+                <Input type="number" min={MIN_PLAYBACK_RATE} max={MAX_PLAYBACK_RATE} value={replay.playbackRate} onChange={(event) => changeSpeed(Math.max(MIN_PLAYBACK_RATE, Math.min(MAX_PLAYBACK_RATE, Number(event.target.value))))} className="w-20" />
+                <span className="text-sm font-medium text-slate-700">{copy.marketReplay.playbackRate(replay.playbackRate)}</span>
+              </div>
+              <div className="flex flex-wrap items-center gap-2">
+                <Label htmlFor="display-interval" className="whitespace-nowrap">{copy.marketReplay.displayInterval}</Label>
+                <select id="display-interval" value={replay.displayIntervalSeconds} onChange={(event) => void changeDisplayInterval(Number(event.target.value))} className="h-10 rounded-md border bg-white px-3 text-sm">
+                  {DISPLAY_INTERVAL_PRESETS.filter((value) => dataset.sourceIntervalSeconds && isValidDisplayInterval(dataset.sourceIntervalSeconds, value)).map((value) => <option key={value} value={value}>{formatInterval(value)}</option>)}
+                  {!DISPLAY_INTERVAL_PRESETS.includes(replay.displayIntervalSeconds) ? <option value={replay.displayIntervalSeconds}>{formatInterval(replay.displayIntervalSeconds)}</option> : null}
                 </select>
+                <Input aria-label={copy.marketReplay.customInterval} type="number" min="1" value={customInterval} onChange={(event) => setCustomInterval(event.target.value)} className="w-20" placeholder="9" />
+                <select value={customIntervalUnit} onChange={(event) => setCustomIntervalUnit(event.target.value as "s" | "m" | "h")} className="h-10 rounded-md border bg-white px-2 text-sm">
+                  <option value="s">{copy.marketReplay.intervalSeconds}</option><option value="m">{copy.marketReplay.intervalMinutes}</option><option value="h">{copy.marketReplay.intervalHours}</option>
+                </select>
+                <Button type="button" variant="outline" size="sm" onClick={() => {
+                  const multiplier = customIntervalUnit === "s" ? 1 : customIntervalUnit === "m" ? 60 : 3_600;
+                  void changeDisplayInterval(Number(customInterval) * multiplier);
+                }}>{copy.marketReplay.customInterval}</Button>
               </div>
               <div className="ml-auto flex flex-wrap gap-2">
                 <Button type="button" variant="outline" onClick={() => requestConfirmation("reset")}><RotateCcw className="h-4 w-4" />{copy.marketReplay.reset}</Button>
@@ -596,8 +692,7 @@ export function MarketReplayClient({ dataset }: { dataset: MarketDatasetSummary 
         <div className="grid items-start gap-4 lg:grid-cols-[minmax(0,1fr)_20rem]">
           <ReplayChart
             bars={bars}
-            startSequence={replay.startSequence}
-            currentSequence={replay.currentSequence}
+            warmupBars={warmupBars}
             timezone={dataset.timezone}
             emaEnabled={emaEnabled}
             emaIndicators={emaIndicators}

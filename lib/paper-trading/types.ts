@@ -65,6 +65,14 @@ export type PaperFillData = {
   reason: PaperFillReason;
 };
 
+export type PaperEquityPointData = {
+  sequence: number;
+  timestamp: string;
+  balance: number;
+  equity: number;
+  drawdown: number;
+};
+
 export type PaperTradeData = {
   id: string;
   side: "LONG" | "SHORT";
@@ -108,7 +116,7 @@ export type PaperAdvanceResult = {
   state: PaperSessionState;
   orders: PaperOrderData[];
   fills: PaperFillData[];
-  equityPoint: { sequence: number; timestamp: string; balance: number; equity: number; drawdown: number };
+  equityPoint: PaperEquityPointData;
 };
 
 export type PaperAdvanceInput = {

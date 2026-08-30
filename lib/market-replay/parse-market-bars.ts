@@ -2,6 +2,8 @@ import { parse } from "csv-parse/sync";
 import { tzOffset } from "@date-fns/tz";
 import { copy } from "@/lib/i18n";
 import { MAX_MARKET_BARS } from "./types";
+import { getAggregationBucket } from "./aggregation";
+import type { TradingSessionConfig } from "./types";
 
 export type ParsedMarketBar = {
   sequence: number;
@@ -21,10 +23,11 @@ export class MarketCsvValidationError extends Error {
   }
 }
 
-type CsvRow = Record<string, string | undefined>;
+export type CsvRow = Record<string, string | undefined>;
 type LocalParts = { year: number; month: number; day: number; hour: number; minute: number; second: number; millisecond: number };
 
 const requiredColumns = ["timestamp", "open", "high", "low", "close"] as const;
+export const MARKET_REQUIRED_COLUMNS = requiredColumns;
 
 function normalizeKey(value: string) {
   return value.trim().toLowerCase();
@@ -110,7 +113,48 @@ export function parseMarketTimestamp(value: string | undefined, timezone: string
   return parseLocalIso(value, timezone);
 }
 
-export function parseMarketBarsCsv(csv: string, timezone: string): ParsedMarketBar[] {
+export type MarketBarParseOptions = {
+  sourceIntervalSeconds: number;
+  session: TradingSessionConfig;
+};
+
+export function isMarketTimestampAligned(timestamp: Date, options: MarketBarParseOptions) {
+  return getAggregationBucket(
+    timestamp.getTime(), options.sourceIntervalSeconds, options.sourceIntervalSeconds, options.session,
+  ) !== null;
+}
+
+export function parseMarketCsvRow({
+  row, rowNumber, sequence, timezone, options, previousTime = Number.NEGATIVE_INFINITY,
+  previousChartSecond = Number.NEGATIVE_INFINITY,
+}: {
+  row: CsvRow; rowNumber: number; sequence: number; timezone: string; options?: MarketBarParseOptions;
+  previousTime?: number; previousChartSecond?: number;
+}) {
+  const timestamp = parseMarketTimestamp(readValue(row, "timestamp"), timezone);
+  const open = parseFiniteNumber(readValue(row, "open"));
+  const high = parseFiniteNumber(readValue(row, "high"));
+  const low = parseFiniteNumber(readValue(row, "low"));
+  const close = parseFiniteNumber(readValue(row, "close"));
+  const volumeValue = readValue(row, "volume");
+  const volume = volumeValue ? parseFiniteNumber(volumeValue) : null;
+  const reasons: string[] = [];
+  if (!timestamp) reasons.push(copy.marketReplay.validation.invalidTimestamp);
+  if ([open, high, low, close].some((value) => value === null)) reasons.push(copy.marketReplay.validation.invalidOhlc);
+  if (volumeValue && (volume === null || volume < 0)) reasons.push(copy.marketReplay.validation.invalidVolume);
+  if (open !== null && high !== null && low !== null && close !== null
+    && (high < Math.max(open, close, low) || low > Math.min(open, close, high))) reasons.push(copy.marketReplay.validation.invalidPriceRelation);
+  const chartSecond = timestamp ? Math.floor(timestamp.getTime() / 1_000) : Number.NaN;
+  if (timestamp && (timestamp.getTime() <= previousTime || chartSecond <= previousChartSecond)) reasons.push(copy.marketReplay.validation.invalidOrder);
+  if (timestamp && options && !isMarketTimestampAligned(timestamp, options)) reasons.push(copy.marketReplay.validation.intervalMisaligned);
+  return {
+    issues: reasons.map((reason) => ({ row: rowNumber, reason })),
+    time: timestamp?.getTime() ?? previousTime, chartSecond,
+    bar: reasons.length ? null : { sequence, timestamp: timestamp!, open: open!, high: high!, low: low!, close: close!, volume },
+  };
+}
+
+export function parseMarketBarsCsv(csv: string, timezone: string, options?: MarketBarParseOptions): ParsedMarketBar[] {
   try {
     new Intl.DateTimeFormat("en-US", { timeZone: timezone });
   } catch {
@@ -140,35 +184,14 @@ export function parseMarketBarsCsv(csv: string, timezone: string): ParsedMarketB
 
   rows.forEach((row, index) => {
     const rowNumber = index + 2;
-    const timestamp = parseMarketTimestamp(readValue(row, "timestamp"), timezone);
-    const open = parseFiniteNumber(readValue(row, "open"));
-    const high = parseFiniteNumber(readValue(row, "high"));
-    const low = parseFiniteNumber(readValue(row, "low"));
-    const close = parseFiniteNumber(readValue(row, "close"));
-    const volumeValue = readValue(row, "volume");
-    const volume = volumeValue ? parseFiniteNumber(volumeValue) : null;
-    const rowIssues: string[] = [];
-
-    if (!timestamp) rowIssues.push(copy.marketReplay.validation.invalidTimestamp);
-    if ([open, high, low, close].some((value) => value === null)) rowIssues.push(copy.marketReplay.validation.invalidOhlc);
-    if (volumeValue && (volume === null || volume < 0)) rowIssues.push(copy.marketReplay.validation.invalidVolume);
-    if (open !== null && high !== null && low !== null && close !== null
-      && (high < Math.max(open, close, low) || low > Math.min(open, close, high))) {
-      rowIssues.push(copy.marketReplay.validation.invalidPriceRelation);
-    }
-    const chartSecond = timestamp ? Math.floor(timestamp.getTime() / 1_000) : Number.NaN;
-    if (timestamp && (timestamp.getTime() <= previousTime || chartSecond <= previousChartSecond)) {
-      rowIssues.push(copy.marketReplay.validation.invalidOrder);
-    }
-
-    if (rowIssues.length) {
-      issues.push(...rowIssues.map((reason) => ({ row: rowNumber, reason })));
+    const parsed = parseMarketCsvRow({ row, rowNumber, sequence: index, timezone, options, previousTime, previousChartSecond });
+    if (parsed.issues.length || !parsed.bar) {
+      issues.push(...parsed.issues);
       return;
     }
-
-    previousTime = timestamp!.getTime();
-    previousChartSecond = chartSecond;
-    bars.push({ sequence: index, timestamp: timestamp!, open: open!, high: high!, low: low!, close: close!, volume });
+    previousTime = parsed.time;
+    previousChartSecond = parsed.chartSecond;
+    bars.push(parsed.bar);
   });
 
   if (issues.length) throw new MarketCsvValidationError(issues.slice(0, 20), issues.length);

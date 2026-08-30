@@ -7,7 +7,7 @@ import { serializeMarketDataset } from "@/lib/market-replay/serialize";
 export const dynamic = "force-dynamic";
 
 export default async function MarketReplayPage() {
-  const datasets = await prisma.marketDataset.findMany({ include: { progress: true }, orderBy: { createdAt: "desc" } });
+  const datasets = await prisma.marketDataset.findMany({ where: { status: "READY" }, include: { progress: true }, orderBy: { createdAt: "desc" } });
   return (
     <div className="space-y-6">
       <Breadcrumbs items={[{ label: copy.marketReplay.title }]} />

@@ -1,7 +1,7 @@
 "use client";
 
 import Link from "next/link";
-import { useRef, useState, useTransition } from "react";
+import { useEffect, useRef, useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
 import { ChartCandlestick, Loader2, Play, Trash2, Upload } from "lucide-react";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
@@ -13,8 +13,10 @@ import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
 import { copy } from "@/lib/i18n";
 import type { MarketDatasetSummary } from "@/lib/market-replay/types";
+import { formatInterval } from "@/lib/market-replay/types";
 
 type ImportIssue = { row: number; reason: string };
+type ImportJob = { id: string; fileName: string; status: string; processedRows: number; errors: ImportIssue[]; totalErrors: number };
 
 function formatDatasetTime(value: string, timezone: string) {
   return new Intl.DateTimeFormat("zh-CN", {
@@ -39,6 +41,20 @@ export function MarketDatasetDashboard({ datasets }: { datasets: MarketDatasetSu
   const [totalIssues, setTotalIssues] = useState(0);
   const [deleteDataset, setDeleteDataset] = useState<MarketDatasetSummary | null>(null);
   const [isDeleting, setIsDeleting] = useState(false);
+  const [sessionMode, setSessionMode] = useState<"TWENTY_FOUR_SEVEN" | "DAILY_SESSION">("TWENTY_FOUR_SEVEN");
+  const [importJobs, setImportJobs] = useState<ImportJob[]>([]);
+
+  async function refreshImportJobs() {
+    const response = await fetch("/api/market-dataset-imports");
+    if (response.ok) setImportJobs(await response.json());
+  }
+
+  useEffect(() => { void refreshImportJobs(); }, []);
+
+  function timeToMinute(value: FormDataEntryValue | null) {
+    const match = /^(\d{2}):(\d{2})$/.exec(String(value ?? ""));
+    return match ? Number(match[1]) * 60 + Number(match[2]) : null;
+  }
 
   async function importDataset(event: React.FormEvent<HTMLFormElement>) {
     event.preventDefault();
@@ -47,21 +63,72 @@ export function MarketDatasetDashboard({ datasets }: { datasets: MarketDatasetSu
     setMessage(null);
     setIssues([]);
     setTotalIssues(0);
-    const response = await fetch("/api/market-datasets", { method: "POST", body: new FormData(form) });
-    const data = await response.json().catch(() => null);
+    const formData = new FormData(form);
+    const file = formData.get("file");
+    if (!(file instanceof File)) return;
+    const sourceIntervalSeconds = Number(formData.get("sourceIntervalSeconds"));
+    const metadata = {
+      name: formData.get("name"), description: formData.get("description"), symbol: formData.get("symbol"),
+      timeframe: formatInterval(sourceIntervalSeconds), timezone: formData.get("timezone"),
+      sourceIntervalSeconds, sessionMode,
+      sessionOpenMinute: sessionMode === "DAILY_SESSION" ? timeToMinute(formData.get("sessionOpen")) : null,
+      sessionCloseMinute: sessionMode === "DAILY_SESSION" ? timeToMinute(formData.get("sessionClose")) : null,
+      tradingWeekdays: sessionMode === "DAILY_SESSION" ? formData.getAll("tradingWeekdays").map(Number) : [1,2,3,4,5,6,7],
+      fileName: file.name,
+    };
+    const created = await fetch("/api/market-dataset-imports", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(metadata) });
+    let data = await created.json().catch(() => null);
+    if (!created.ok) {
+      setIsImporting(false); setMessage(data?.error ?? copy.marketReplay.importError); return;
+    }
+    setMessage(copy.marketReplay.uploading);
+    const uploaded = await fetch(`/api/market-dataset-imports/${data.id}/file`, { method: "PUT", headers: { "Content-Type": "application/octet-stream" }, body: file });
+    if (!uploaded.ok) {
+      data = await uploaded.json().catch(() => null); setIsImporting(false); setMessage(data?.error ?? copy.marketReplay.importError); return;
+    }
+    setMessage(copy.marketReplay.processing(0));
+    let processingDone = false;
+    const processingRequest = fetch(`/api/market-dataset-imports/${data.id}/process`, { method: "POST" }).finally(() => { processingDone = true; });
+    while (!processingDone) {
+      await new Promise((resolve) => window.setTimeout(resolve, 750));
+      if (processingDone) break;
+      const progressResponse = await fetch(`/api/market-dataset-imports/${data.id}`);
+      const progress = await progressResponse.json().catch(() => null);
+      if (progressResponse.ok) setMessage(copy.marketReplay.processing(progress.processedRows ?? 0));
+    }
+    const response = await processingRequest;
+    const result = await response.json().catch(() => null);
+    const statusResponse = await fetch(`/api/market-dataset-imports/${data.id}`);
+    data = await statusResponse.json().catch(() => result);
     setIsImporting(false);
 
     if (!response.ok) {
       setMessage(data?.error ?? copy.marketReplay.importError);
-      setIssues(data?.errors ?? []);
-      setTotalIssues(data?.totalErrors ?? data?.errors?.length ?? 0);
+      setIssues(data?.errors ?? []); setTotalIssues(data?.totalErrors ?? data?.errors?.length ?? 0);
+      await refreshImportJobs();
       return;
     }
 
-    setMessage(copy.marketReplay.imported(data.imported));
+    setMessage(copy.marketReplay.imported(data.processedRows));
     form.reset();
     if (fileRef.current) fileRef.current.value = "";
     startTransition(() => router.refresh());
+    await refreshImportJobs();
+  }
+
+  async function retryImport(job: ImportJob) {
+    setIsImporting(true); setMessage(copy.marketReplay.processing(job.processedRows));
+    const response = await fetch(`/api/market-dataset-imports/${job.id}/process`, { method: "POST" });
+    const data = await response.json().catch(() => null);
+    setIsImporting(false);
+    if (!response.ok) setMessage(data?.error ?? copy.marketReplay.importError);
+    else { setMessage(copy.marketReplay.imported(job.processedRows)); startTransition(() => router.refresh()); }
+    await refreshImportJobs();
+  }
+
+  async function cancelImport(jobId: string) {
+    await fetch(`/api/market-dataset-imports/${jobId}`, { method: "DELETE" });
+    await refreshImportJobs();
   }
 
   async function confirmDelete() {
@@ -96,23 +163,38 @@ export function MarketDatasetDashboard({ datasets }: { datasets: MarketDatasetSu
                 <Label htmlFor="market-description">{copy.marketReplay.description}</Label>
                 <Textarea id="market-description" name="description" maxLength={500} placeholder={copy.marketReplay.descriptionPlaceholder} />
               </div>
-              <div className="grid grid-cols-2 gap-3">
-                <div className="space-y-2">
-                  <Label htmlFor="market-symbol">{copy.marketReplay.symbol}</Label>
-                  <Input id="market-symbol" name="symbol" required maxLength={80} placeholder={copy.marketReplay.symbolPlaceholder} />
-                </div>
-                <div className="space-y-2">
-                  <Label htmlFor="market-timeframe">{copy.marketReplay.timeframe}</Label>
-                  <Input id="market-timeframe" name="timeframe" required maxLength={30} placeholder={copy.marketReplay.timeframePlaceholder} />
-                </div>
+              <div className="space-y-2">
+                <Label htmlFor="market-symbol">{copy.marketReplay.symbol}</Label>
+                <Input id="market-symbol" name="symbol" required maxLength={80} placeholder={copy.marketReplay.symbolPlaceholder} />
+              </div>
+              <div className="space-y-2">
+                <Label htmlFor="market-source-interval">{copy.marketReplay.sourceInterval}</Label>
+                <Input id="market-source-interval" name="sourceIntervalSeconds" type="number" min="1" max="86400" required defaultValue="1" />
+                <p className="text-xs text-slate-500">{copy.marketReplay.sourceIntervalHint}</p>
               </div>
               <div className="space-y-2">
                 <Label htmlFor="market-timezone">{copy.marketReplay.timezone}</Label>
                 <Input id="market-timezone" name="timezone" required maxLength={100} defaultValue="Asia/Shanghai" placeholder={copy.marketReplay.timezonePlaceholder} />
               </div>
               <div className="space-y-2">
+                <Label htmlFor="market-session-mode">{copy.marketReplay.sessionMode}</Label>
+                <select id="market-session-mode" value={sessionMode} onChange={(event) => setSessionMode(event.target.value as typeof sessionMode)} className="h-10 w-full rounded-md border bg-white px-3 text-sm">
+                  <option value="TWENTY_FOUR_SEVEN">{copy.marketReplay.session247}</option>
+                  <option value="DAILY_SESSION">{copy.marketReplay.sessionDaily}</option>
+                </select>
+              </div>
+              {sessionMode === "DAILY_SESSION" ? (
+                <div className="space-y-3 rounded-lg border bg-slate-50 p-3">
+                  <div className="grid grid-cols-2 gap-3">
+                    <div><Label htmlFor="session-open">{copy.marketReplay.sessionOpen}</Label><Input id="session-open" name="sessionOpen" type="time" required defaultValue="09:30" /></div>
+                    <div><Label htmlFor="session-close">{copy.marketReplay.sessionClose}</Label><Input id="session-close" name="sessionClose" type="time" required defaultValue="16:00" /></div>
+                  </div>
+                  <div><Label>{copy.marketReplay.tradingWeekdays}</Label><div className="mt-2 flex flex-wrap gap-3">{copy.marketReplay.weekdays.map((label, index) => <label key={label} className="flex items-center gap-1 text-xs"><input type="checkbox" name="tradingWeekdays" value={index + 1} defaultChecked={index < 5} />{label}</label>)}</div></div>
+                </div>
+              ) : null}
+              <div className="space-y-2">
                 <Label htmlFor="market-file">{copy.marketReplay.csvFile}</Label>
-                <Input ref={fileRef} id="market-file" name="file" type="file" accept=".csv,text/csv" required />
+                <Input ref={fileRef} id="market-file" name="file" type="file" accept=".csv,.csv.gz,text/csv,application/gzip" required />
               </div>
               {message ? (
                 <Alert className={issues.length ? "border-red-200 bg-red-50" : "border-emerald-200 bg-emerald-50"}>
@@ -125,6 +207,13 @@ export function MarketDatasetDashboard({ datasets }: { datasets: MarketDatasetSu
                   ) : null}
                 </Alert>
               ) : null}
+              {importJobs.length ? <div className="space-y-2 rounded-lg border bg-slate-50 p-3">{importJobs.map((job) => (
+                <div key={job.id} className="flex flex-wrap items-center gap-2 text-xs text-slate-700">
+                  <span className="min-w-0 flex-1 truncate">{job.fileName} · {job.status} · {job.processedRows.toLocaleString("zh-CN")}</span>
+                  {["FAILED", "INTERRUPTED", "UPLOADED"].includes(job.status) ? <Button type="button" size="sm" variant="outline" disabled={isImporting} onClick={() => void retryImport(job)}>{copy.marketReplay.retryImport}</Button> : null}
+                  {job.status !== "PROCESSING" ? <Button type="button" size="sm" variant="ghost" onClick={() => void cancelImport(job.id)}>{copy.marketReplay.cancelImport}</Button> : null}
+                </div>
+              ))}</div> : null}
               <Button type="submit" className="w-full" disabled={isImporting || isPending}>
                 {isImporting ? <Loader2 className="h-4 w-4 animate-spin" /> : <Upload className="h-4 w-4" />}
                 {isImporting ? copy.marketReplay.importing : copy.marketReplay.import}

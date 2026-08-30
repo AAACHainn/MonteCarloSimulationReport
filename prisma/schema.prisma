@@ -120,16 +120,62 @@ model MarketDataset {
   symbol       String
   timeframe    String
   timezone     String
+  status                String  @default("READY")
+  sourceIntervalSeconds Int?
+  sessionMode           String  @default("TWENTY_FOUR_SEVEN")
+  sessionOpenMinute     Int?
+  sessionCloseMinute    Int?
+  tradingWeekdays       String  @default("1,2,3,4,5,6,7")
   barCount     Int
   startTime    DateTime
   endTime      DateTime
   bars         MarketBar[]
+  barBlocks    MarketBarBlock[]
+  importJobs   MarketDatasetImport[]
   progress     ReplayProgress?
   paperSession PaperTradingSession?
   createdAt    DateTime             @default(now())
   updatedAt    DateTime             @updatedAt
 
   @@index([createdAt])
+}
+
+model MarketBarBlock {
+  datasetId    String
+  dataset      MarketDataset @relation(fields: [datasetId], references: [id], onDelete: Cascade)
+  startSequence Int
+  endSequence   Int
+  startTime     DateTime
+  endTime       DateTime
+  open           Float
+  high           Float
+  low            Float
+  close          Float
+  volume         Float?
+  volumeCount    Int
+  barCount       Int
+
+  @@id([datasetId, startSequence])
+  @@index([datasetId, startTime, endTime])
+}
+
+model MarketDatasetImport {
+  id                 String        @id @default(cuid())
+  datasetId          String?
+  dataset            MarketDataset? @relation(fields: [datasetId], references: [id], onDelete: SetNull)
+  status             String        @default("CREATED")
+  fileName           String
+  storedPath         String?
+  compressedBytes    BigInt        @default(0)
+  expandedBytes      BigInt        @default(0)
+  processedRows      Int           @default(0)
+  totalErrors        Int           @default(0)
+  errors             String        @default("[]")
+  metadata           String
+  createdAt          DateTime      @default(now())
+  updatedAt          DateTime      @updatedAt
+
+  @@index([status, createdAt])
 }
 
 model MarketBar {
@@ -153,6 +199,8 @@ model ReplayProgress {
   startSequence   Int
   currentSequence Int
   intervalMs      Int
+  playbackRate    Int           @default(1)
+  displayIntervalSeconds Int?
   createdAt       DateTime      @default(now())
   updatedAt       DateTime      @updatedAt
 }
@@ -174,6 +222,7 @@ model PaperTradingSession {
   peakEquity            Float
   maxDrawdown           Float              @default(0)
   version               Int                @default(1)
+  equitySampleStride    Int                @default(1)
   orders                PaperOrder[]
   fills                 PaperFill[]
   trades                PaperTrade[]

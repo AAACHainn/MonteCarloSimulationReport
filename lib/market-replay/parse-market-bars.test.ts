@@ -28,6 +28,14 @@ describe("parseMarketBarsCsv", () => {
     expect(result[0].low).toBe(-3);
   });
 
+  it("validates source-open timestamps against the configured cadence", () => {
+    const csv = ["timestamp,open,high,low,close", "2026-01-01T00:00:00Z,1,2,0,1", "2026-01-01T00:07:00Z,1,2,0,1"].join("\n");
+    expect(() => parseMarketBarsCsv(csv, "UTC", {
+      sourceIntervalSeconds: 300,
+      session: { mode: "TWENTY_FOUR_SEVEN", timezone: "UTC", openMinute: null, closeMinute: null, weekdays: [1,2,3,4,5,6,7] },
+    })).toThrow();
+  });
+
   it.each([
     ["2024-03-10 02:30:00", "nonexistent"],
     ["2024-11-03 01:30:00", "ambiguous"],

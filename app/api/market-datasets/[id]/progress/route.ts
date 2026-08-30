@@ -2,6 +2,8 @@ import { NextResponse } from "next/server";
 import { prisma } from "@/lib/db";
 import { replayProgressSchema } from "@/lib/validations";
 import { copy } from "@/lib/i18n";
+import { datasetSourceInterval } from "@/lib/market-replay/dataset";
+import { isValidDisplayInterval } from "@/lib/market-replay/types";
 
 type RouteContext = { params: Promise<{ id: string }> };
 
@@ -13,14 +15,18 @@ export async function PUT(request: Request, context: RouteContext) {
   }
 
   const [dataset, existingProgress, paperSession] = await Promise.all([
-    prisma.marketDataset.findUnique({ where: { id }, select: { barCount: true } }),
+    prisma.marketDataset.findUnique({ where: { id } }),
     prisma.replayProgress.findUnique({ where: { datasetId: id } }),
     prisma.paperTradingSession.findUnique({ where: { datasetId: id }, select: { id: true } }),
   ]);
   if (!dataset) return NextResponse.json({ error: copy.marketReplay.datasetNotFound }, { status: 404 });
-  const { startSequence, currentSequence, intervalMs } = parsed.data;
+  const { startSequence, currentSequence, playbackRate, displayIntervalSeconds } = parsed.data;
   if (startSequence >= dataset.barCount || currentSequence < startSequence - 1 || currentSequence >= dataset.barCount) {
     return NextResponse.json({ error: copy.marketReplay.validation.progressOutOfRange }, { status: 400 });
+  }
+  const sourceSeconds = datasetSourceInterval(dataset);
+  if (!sourceSeconds || !isValidDisplayInterval(sourceSeconds, displayIntervalSeconds)) {
+    return NextResponse.json({ error: copy.marketReplay.invalidDisplayInterval }, { status: 400 });
   }
   if (paperSession && existingProgress && currentSequence !== existingProgress.currentSequence) {
     return NextResponse.json({ error: copy.paperTrading.conflict }, { status: 409 });
@@ -28,8 +34,8 @@ export async function PUT(request: Request, context: RouteContext) {
 
   const progress = await prisma.replayProgress.upsert({
     where: { datasetId: id },
-    create: { datasetId: id, startSequence, currentSequence, intervalMs },
-    update: { startSequence, currentSequence, intervalMs },
+    create: { datasetId: id, startSequence, currentSequence, intervalMs: 1_000, playbackRate, displayIntervalSeconds },
+    update: { startSequence, currentSequence, playbackRate, displayIntervalSeconds },
   });
   return NextResponse.json({ ...progress, updatedAt: progress.updatedAt.toISOString(), createdAt: progress.createdAt.toISOString() });
 }

@@ -6,7 +6,11 @@ import {
   MAX_TAGS_PER_TRADE,
   normalizeTagName,
 } from "./trade-journal/tags";
-import { isReplayInterval } from "./market-replay/types";
+import {
+  MAX_DISPLAY_INTERVAL_SECONDS,
+  MAX_REPLAY_ADVANCE_COUNT,
+  isPlaybackRate,
+} from "./market-replay/types";
 
 export const SIMULATION_WORK_LIMIT = 50_000_000;
 
@@ -26,12 +30,45 @@ export const marketDatasetSchema = z.object({
   symbol: z.string().trim().min(1, copy.marketReplay.validation.symbolRequired).max(80),
   timeframe: z.string().trim().min(1, copy.marketReplay.validation.timeframeRequired).max(30),
   timezone: z.string().trim().min(1, copy.marketReplay.validation.timezoneRequired).max(100),
+  sourceIntervalSeconds: z.coerce.number().int().min(1).max(MAX_DISPLAY_INTERVAL_SECONDS),
+  sessionMode: z.enum(["TWENTY_FOUR_SEVEN", "DAILY_SESSION"]).default("TWENTY_FOUR_SEVEN"),
+  sessionOpenMinute: z.coerce.number().int().min(0).max(1_439).optional().nullable(),
+  sessionCloseMinute: z.coerce.number().int().min(1).max(1_440).optional().nullable(),
+  tradingWeekdays: z.union([z.string(), z.array(z.number().int().min(1).max(7))]).transform((value) => (
+    Array.isArray(value) ? value : value.split(",").map(Number).filter((day) => day >= 1 && day <= 7)
+  )),
+}).superRefine((value, ctx) => {
+  try { new Intl.DateTimeFormat("en-US", { timeZone: value.timezone }); } catch {
+    ctx.addIssue({ code: z.ZodIssueCode.custom, path: ["timezone"], message: copy.marketReplay.validation.invalidTimezone });
+  }
+  if (value.sessionMode === "DAILY_SESSION") {
+    if (value.sessionOpenMinute == null || value.sessionCloseMinute == null || value.sessionOpenMinute >= value.sessionCloseMinute) {
+      ctx.addIssue({ code: z.ZodIssueCode.custom, path: ["sessionCloseMinute"], message: copy.marketReplay.validation.invalidSession });
+    } else if ((value.sessionCloseMinute - value.sessionOpenMinute) * 60 % value.sourceIntervalSeconds !== 0) {
+      ctx.addIssue({ code: z.ZodIssueCode.custom, path: ["sourceIntervalSeconds"], message: copy.marketReplay.validation.sessionIntervalMismatch });
+    }
+    if (!value.tradingWeekdays.length) ctx.addIssue({ code: z.ZodIssueCode.custom, path: ["tradingWeekdays"], message: copy.marketReplay.validation.weekdaysRequired });
+  }
 });
 
 export const replayProgressSchema = z.object({
   startSequence: z.coerce.number().int().min(0),
   currentSequence: z.coerce.number().int().min(-1),
-  intervalMs: z.coerce.number().int().refine(isReplayInterval, copy.marketReplay.validation.unsupportedSpeed),
+  playbackRate: z.coerce.number().int().refine(isPlaybackRate, copy.marketReplay.validation.unsupportedSpeed),
+  displayIntervalSeconds: z.coerce.number().int().min(1).max(MAX_DISPLAY_INTERVAL_SECONDS),
+});
+
+export const replayStartSchema = z.object({
+  timestamp: z.string().datetime(),
+  playbackRate: z.coerce.number().int().refine(isPlaybackRate),
+  displayIntervalSeconds: z.coerce.number().int().min(1).max(MAX_DISPLAY_INTERVAL_SECONDS),
+});
+
+export const replayWindowSchema = z.object({
+  displayIntervalSeconds: z.coerce.number().int().min(1).max(MAX_DISPLAY_INTERVAL_SECONDS),
+  endSequence: z.coerce.number().int().min(-1),
+  visibleCount: z.coerce.number().int().min(20).max(2_000).default(200),
+  warmupCount: z.coerce.number().int().min(0).max(1_000).default(0),
 });
 
 export const paperSessionSchema = z.object({
@@ -65,6 +102,7 @@ export const paperOrderUpdateSchema = z.object({
 export const paperAdvanceSchema = z.object({
   expectedCurrentSequence: z.coerce.number().int().min(-1),
   expectedVersion: z.coerce.number().int().positive().optional().nullable(),
+  count: z.coerce.number().int().min(1).max(MAX_REPLAY_ADVANCE_COUNT).default(1),
 });
 
 export const paperResetSchema = z.object({ action: z.enum(["RESET", "CHANGE_START"]) });

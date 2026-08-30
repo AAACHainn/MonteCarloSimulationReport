@@ -1,7 +1,7 @@
 import {
   REPLAY_HISTORY_BARS,
   type MarketBarData,
-  type ReplayIntervalMs,
+  type PlaybackRate,
   type ReplayState,
 } from "./types";
 
@@ -21,7 +21,8 @@ export function findReplayStartSequence(bars: MarketBarData[], timestampMs: numb
 export function createReplayState(
   barCount: number,
   startSequence: number,
-  intervalMs: ReplayIntervalMs,
+  playbackRate: PlaybackRate,
+  displayIntervalSeconds: number,
   currentSequence = startSequence - 1,
 ): ReplayState {
   const finished = currentSequence >= barCount - 1;
@@ -29,7 +30,8 @@ export function createReplayState(
     barCount,
     startSequence,
     currentSequence,
-    intervalMs,
+    playbackRate,
+    displayIntervalSeconds,
     status: finished ? "finished" : "paused",
   };
 }
@@ -54,12 +56,28 @@ export function stepReplay(state: ReplayState): ReplayState {
   };
 }
 
-export function setReplayInterval(state: ReplayState, intervalMs: ReplayIntervalMs): ReplayState {
-  return { ...state, intervalMs };
+export function setPlaybackRate(state: ReplayState, playbackRate: PlaybackRate): ReplayState {
+  return { ...state, playbackRate };
+}
+
+export function setDisplayInterval(state: ReplayState, displayIntervalSeconds: number): ReplayState {
+  return { ...state, displayIntervalSeconds };
 }
 
 export function resetReplay(state: ReplayState): ReplayState {
   return { ...state, currentSequence: state.startSequence - 1, status: "paused" };
+}
+
+export function calculatePlaybackAdvance(
+  accumulator: number,
+  elapsedMs: number,
+  playbackRate: number,
+  sourceIntervalSeconds: number,
+  maximum = 100,
+) {
+  const nextAccumulator = accumulator + elapsedMs * playbackRate / (sourceIntervalSeconds * 1_000);
+  const count = Math.min(maximum, Math.max(0, Math.floor(nextAccumulator)));
+  return { count, accumulator: nextAccumulator - count };
 }
 
 export function getVisibleBarRange(state: ReplayState) {

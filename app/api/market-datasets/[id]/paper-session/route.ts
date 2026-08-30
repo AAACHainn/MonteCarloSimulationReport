@@ -17,8 +17,11 @@ export async function POST(request: Request, context: RouteContext) {
   const { id } = await context.params;
   const parsed = paperSessionSchema.safeParse(await request.json());
   if (!parsed.success) return NextResponse.json({ error: parsed.error.issues[0]?.message }, { status: 400 });
-  const progress = await prisma.replayProgress.findUnique({ where: { datasetId: id } });
-  if (!progress) return NextResponse.json({ error: copy.marketReplay.validation.progressInvalid }, { status: 400 });
+  const [progress, dataset] = await Promise.all([
+    prisma.replayProgress.findUnique({ where: { datasetId: id } }),
+    prisma.marketDataset.findUnique({ where: { id }, select: { barCount: true } }),
+  ]);
+  if (!progress || !dataset) return NextResponse.json({ error: copy.marketReplay.validation.progressInvalid }, { status: 400 });
   try {
     await prisma.paperTradingSession.create({
       data: {
@@ -26,6 +29,7 @@ export async function POST(request: Request, context: RouteContext) {
         ...parsed.data,
         lastProcessedSequence: progress.currentSequence,
         peakEquity: parsed.data.initialCapital,
+        equitySampleStride: Math.max(1, Math.ceil(dataset.barCount / 20_000)),
       },
     });
   } catch {

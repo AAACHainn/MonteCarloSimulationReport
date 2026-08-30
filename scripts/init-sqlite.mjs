@@ -72,6 +72,12 @@ const createStatements = [
     "symbol" TEXT NOT NULL,
     "timeframe" TEXT NOT NULL,
     "timezone" TEXT NOT NULL,
+    "status" TEXT NOT NULL DEFAULT 'READY',
+    "sourceIntervalSeconds" INTEGER,
+    "sessionMode" TEXT NOT NULL DEFAULT 'TWENTY_FOUR_SEVEN',
+    "sessionOpenMinute" INTEGER,
+    "sessionCloseMinute" INTEGER,
+    "tradingWeekdays" TEXT NOT NULL DEFAULT '1,2,3,4,5,6,7',
     "barCount" INTEGER NOT NULL,
     "startTime" DATETIME NOT NULL,
     "endTime" DATETIME NOT NULL,
@@ -95,6 +101,8 @@ const createStatements = [
     "startSequence" INTEGER NOT NULL,
     "currentSequence" INTEGER NOT NULL,
     "intervalMs" INTEGER NOT NULL,
+    "playbackRate" INTEGER NOT NULL DEFAULT 1,
+    "displayIntervalSeconds" INTEGER,
     "createdAt" DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
     "updatedAt" DATETIME NOT NULL,
     CONSTRAINT "ReplayProgress_datasetId_fkey" FOREIGN KEY ("datasetId") REFERENCES "MarketDataset" ("id") ON DELETE CASCADE ON UPDATE CASCADE
@@ -115,6 +123,7 @@ const createStatements = [
     "peakEquity" REAL NOT NULL,
     "maxDrawdown" REAL NOT NULL DEFAULT 0,
     "version" INTEGER NOT NULL DEFAULT 1,
+    "equitySampleStride" INTEGER NOT NULL DEFAULT 1,
     "createdAt" DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
     "updatedAt" DATETIME NOT NULL,
     CONSTRAINT "PaperTradingSession_datasetId_fkey" FOREIGN KEY ("datasetId") REFERENCES "MarketDataset" ("id") ON DELETE CASCADE ON UPDATE CASCADE
@@ -189,6 +198,38 @@ const createStatements = [
     PRIMARY KEY ("sessionId", "sequence"),
     CONSTRAINT "PaperEquityPoint_sessionId_fkey" FOREIGN KEY ("sessionId") REFERENCES "PaperTradingSession" ("id") ON DELETE CASCADE ON UPDATE CASCADE
   )`,
+  `CREATE TABLE IF NOT EXISTS "MarketBarBlock" (
+    "datasetId" TEXT NOT NULL,
+    "startSequence" INTEGER NOT NULL,
+    "endSequence" INTEGER NOT NULL,
+    "startTime" DATETIME NOT NULL,
+    "endTime" DATETIME NOT NULL,
+    "open" REAL NOT NULL,
+    "high" REAL NOT NULL,
+    "low" REAL NOT NULL,
+    "close" REAL NOT NULL,
+    "volume" REAL,
+    "volumeCount" INTEGER NOT NULL,
+    "barCount" INTEGER NOT NULL,
+    PRIMARY KEY ("datasetId", "startSequence"),
+    CONSTRAINT "MarketBarBlock_datasetId_fkey" FOREIGN KEY ("datasetId") REFERENCES "MarketDataset" ("id") ON DELETE CASCADE ON UPDATE CASCADE
+  )`,
+  `CREATE TABLE IF NOT EXISTS "MarketDatasetImport" (
+    "id" TEXT NOT NULL PRIMARY KEY,
+    "datasetId" TEXT,
+    "status" TEXT NOT NULL DEFAULT 'CREATED',
+    "fileName" TEXT NOT NULL,
+    "storedPath" TEXT,
+    "compressedBytes" BIGINT NOT NULL DEFAULT 0,
+    "expandedBytes" BIGINT NOT NULL DEFAULT 0,
+    "processedRows" INTEGER NOT NULL DEFAULT 0,
+    "totalErrors" INTEGER NOT NULL DEFAULT 0,
+    "errors" TEXT NOT NULL DEFAULT '[]',
+    "metadata" TEXT NOT NULL,
+    "createdAt" DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    "updatedAt" DATETIME NOT NULL,
+    CONSTRAINT "MarketDatasetImport_datasetId_fkey" FOREIGN KEY ("datasetId") REFERENCES "MarketDataset" ("id") ON DELETE SET NULL ON UPDATE CASCADE
+  )`,
 ];
 
 const tradeColumns = [
@@ -201,6 +242,17 @@ const tradeColumns = [
   ["strategyCode", "TEXT"],
   ["screenshotPath", "TEXT"],
 ];
+
+const marketDatasetColumns = [
+  ["status", "TEXT NOT NULL DEFAULT 'READY'"],
+  ["sourceIntervalSeconds", "INTEGER"],
+  ["sessionMode", "TEXT NOT NULL DEFAULT 'TWENTY_FOUR_SEVEN'"],
+  ["sessionOpenMinute", "INTEGER"],
+  ["sessionCloseMinute", "INTEGER"],
+  ["tradingWeekdays", "TEXT NOT NULL DEFAULT '1,2,3,4,5,6,7'"],
+];
+const replayProgressColumns = [["playbackRate", "INTEGER NOT NULL DEFAULT 1"], ["displayIntervalSeconds", "INTEGER"]];
+const paperSessionColumns = [["equitySampleStride", "INTEGER NOT NULL DEFAULT 1"]];
 
 const indexStatements = [
   `CREATE INDEX IF NOT EXISTS "Trade_datasetId_idx" ON "Trade"("datasetId")`,
@@ -223,6 +275,8 @@ const indexStatements = [
   `CREATE INDEX IF NOT EXISTS "PaperFill_orderId_idx" ON "PaperFill"("orderId")`,
   `CREATE INDEX IF NOT EXISTS "PaperTrade_sessionId_status_idx" ON "PaperTrade"("sessionId", "status")`,
   `CREATE INDEX IF NOT EXISTS "PaperTrade_sessionId_openedSequence_idx" ON "PaperTrade"("sessionId", "openedSequence")`,
+  `CREATE INDEX IF NOT EXISTS "MarketBarBlock_datasetId_startTime_endTime_idx" ON "MarketBarBlock"("datasetId", "startTime", "endTime")`,
+  `CREATE INDEX IF NOT EXISTS "MarketDatasetImport_status_createdAt_idx" ON "MarketDatasetImport"("status", "createdAt")`,
   `CREATE UNIQUE INDEX IF NOT EXISTS "_TradeToTradeTag_AB_unique" ON "_TradeToTradeTag"("A", "B")`,
   `CREATE INDEX IF NOT EXISTS "_TradeToTradeTag_B_index" ON "_TradeToTradeTag"("B")`,
 ];
@@ -237,6 +291,14 @@ try {
   for (const [name, type] of tradeColumns) {
     if (!existingTradeColumnNames.has(name)) {
       await prisma.$executeRawUnsafe(`ALTER TABLE "Trade" ADD COLUMN "${name}" ${type}`);
+    }
+  }
+
+  for (const [table, columns] of [["MarketDataset", marketDatasetColumns], ["ReplayProgress", replayProgressColumns], ["PaperTradingSession", paperSessionColumns]]) {
+    const existing = await prisma.$queryRawUnsafe(`PRAGMA table_info("${table}")`);
+    const names = new Set(existing.map((column) => column.name));
+    for (const [name, type] of columns) {
+      if (!names.has(name)) await prisma.$executeRawUnsafe(`ALTER TABLE "${table}" ADD COLUMN "${name}" ${type}`);
     }
   }
 
