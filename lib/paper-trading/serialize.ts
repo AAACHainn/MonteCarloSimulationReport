@@ -1,3 +1,4 @@
+import type { Prisma } from "@prisma/client";
 import { prisma } from "@/lib/db";
 import type {
   PaperFillData,
@@ -76,17 +77,17 @@ function streaks(values: number[]) {
   return { maxWins, maxLosses };
 }
 
-export async function getPaperSessionSnapshot(datasetId: string): Promise<PaperSessionSnapshot | null> {
-  const session = await prisma.paperTradingSession.findUnique({ where: { datasetId } });
+export async function getPaperSessionSnapshot(datasetId: string, db: Prisma.TransactionClient = prisma): Promise<PaperSessionSnapshot | null> {
+  const session = await db.paperTradingSession.findUnique({ where: { datasetId } });
   if (!session) return null;
   const [activeOrders, recentOrders, recentFills, recentTrades, closedTrades, currentBar] = await Promise.all([
-    prisma.paperOrder.findMany({ where: { sessionId: session.id, status: "PENDING" }, orderBy: [{ createdSequence: "asc" }, { createdAt: "asc" }] }),
-    prisma.paperOrder.findMany({ where: { sessionId: session.id, status: { not: "PENDING" } }, orderBy: { updatedAt: "desc" }, take: 30 }),
-    prisma.paperFill.findMany({ where: { sessionId: session.id }, orderBy: [{ sequence: "desc" }, { createdAt: "desc" }], take: 50 }),
-    prisma.paperTrade.findMany({ where: { sessionId: session.id }, orderBy: { openedSequence: "desc" }, take: 30 }),
-    prisma.paperTrade.findMany({ where: { sessionId: session.id, status: "CLOSED" }, orderBy: { closedSequence: "asc" } }),
+    db.paperOrder.findMany({ where: { sessionId: session.id, status: "PENDING" }, orderBy: [{ createdSequence: "asc" }, { createdAt: "asc" }] }),
+    db.paperOrder.findMany({ where: { sessionId: session.id, status: { not: "PENDING" } }, orderBy: { updatedAt: "desc" }, take: 30 }),
+    db.paperFill.findMany({ where: { sessionId: session.id }, orderBy: [{ sequence: "desc" }, { createdAt: "desc" }], take: 50 }),
+    db.paperTrade.findMany({ where: { sessionId: session.id }, orderBy: { openedSequence: "desc" }, take: 30 }),
+    db.paperTrade.findMany({ where: { sessionId: session.id, status: "CLOSED" }, orderBy: { closedSequence: "asc" } }),
     session.lastProcessedSequence >= 0
-      ? prisma.marketBar.findUnique({ where: { datasetId_sequence: { datasetId, sequence: session.lastProcessedSequence } } })
+      ? db.marketBar.findUnique({ where: { datasetId_sequence: { datasetId, sequence: session.lastProcessedSequence } } })
       : Promise.resolve(null),
   ]);
   const unrealizedPnl = currentBar && session.averageEntryPrice !== null

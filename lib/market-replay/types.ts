@@ -4,6 +4,7 @@ export const MAX_MARKET_BARS = 20_000_000;
 export const MARKET_BAR_BLOCK_SIZE = 4_096;
 export const REPLAY_HISTORY_BARS = 200;
 export const MAX_REPLAY_ADVANCE_COUNT = 100;
+export const MAX_DISPLAY_ADVANCE_SOURCE_BARS = 86_400;
 export const MIN_PLAYBACK_RATE = 1;
 export const MAX_PLAYBACK_RATE = 100;
 export const MAX_DISPLAY_INTERVAL_SECONDS = 86_400;

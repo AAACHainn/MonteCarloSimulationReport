@@ -72,10 +72,10 @@ export function calculatePlaybackAdvance(
   accumulator: number,
   elapsedMs: number,
   playbackRate: number,
-  sourceIntervalSeconds: number,
+  displayIntervalSeconds: number,
   maximum = 100,
 ) {
-  const nextAccumulator = accumulator + elapsedMs * playbackRate / (sourceIntervalSeconds * 1_000);
+  const nextAccumulator = accumulator + elapsedMs * playbackRate / (displayIntervalSeconds * 1_000);
   const count = Math.min(maximum, Math.max(0, Math.floor(nextAccumulator)));
   return { count, accumulator: nextAccumulator - count };
 }

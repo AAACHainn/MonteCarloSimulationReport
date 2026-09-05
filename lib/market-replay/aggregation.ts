@@ -90,11 +90,19 @@ export function aggregateMarketSegments({
   finalSequence: number;
 }): AggregatedMarketBarData[] {
   const result: AggregatedMarketBarData[] = [];
+  let cachedBucket: Bucket | null = null;
+  const resolveBucket = (timestamp: string) => {
+    const time = new Date(timestamp).getTime();
+    if (cachedBucket && time >= cachedBucket.start && time < cachedBucket.end
+      && (time - cachedBucket.start) % (sourceSeconds * 1000) === 0) return cachedBucket;
+    cachedBucket = getAggregationBucket(time, sourceSeconds, displaySeconds, session);
+    return cachedBucket;
+  };
   for (const bar of segments) {
     if (bar.firstSequence > currentSequence) break;
-    const bucket = getAggregationBucket(new Date(bar.timestamp).getTime(), sourceSeconds, displaySeconds, session);
+    const bucket = resolveBucket(bar.timestamp);
     if (!bucket) continue;
-    const endBucket = getAggregationBucket(new Date(bar.endTimestamp).getTime(), sourceSeconds, displaySeconds, session);
+    const endBucket = resolveBucket(bar.endTimestamp);
     if (!endBucket || endBucket.start !== bucket.start) throw new Error("Aggregation segment crosses a target bucket boundary.");
     const last = result.at(-1);
     if (!last || new Date(last.timestamp).getTime() !== bucket.start) {
@@ -139,8 +147,10 @@ export function mergeSourceBar(
     new Date(source.timestamp).getTime(), options.sourceSeconds, options.displaySeconds, options.session,
   );
   if (!bucket) return existing;
-  const next = existing.map((bar) => ({ ...bar }));
-  const last = next.at(-1);
+  const next = existing.slice();
+  const previousLast = next.at(-1);
+  const last = previousLast ? { ...previousLast } : undefined;
+  if (last) next[next.length - 1] = last;
   if (!last || new Date(last.timestamp).getTime() !== bucket.start) {
     if (last && last.status === "FORMING") {
       last.status = last.sourceCount === last.expectedCount ? "COMPLETE" : "INCOMPLETE";
@@ -150,7 +160,7 @@ export function mergeSourceBar(
       firstSequence: source.sequence, lastSequence: source.sequence,
       open: source.open, high: source.high, low: source.low, close: source.close,
       volume: source.volume, sourceCount: 1, expectedCount: bucket.expectedCount,
-      status: source.sequence >= options.finalSequence ? (bucket.expectedCount === 1 ? "COMPLETE" : "INCOMPLETE") : "FORMING",
+      status: bucket.expectedCount === 1 ? "COMPLETE" : source.sequence >= options.finalSequence ? "INCOMPLETE" : "FORMING",
     });
     return next;
   }
@@ -162,5 +172,23 @@ export function mergeSourceBar(
   if (source.volume !== null) last.volume = (last.volume ?? 0) + source.volume;
   if (last.sourceCount === last.expectedCount) last.status = "COMPLETE";
   else if (source.sequence >= options.finalSequence) last.status = "INCOMPLETE";
+  return next;
+}
+
+/** Replace server bucket revisions; replayed responses never add volume twice. */
+export function mergeAggregatedBars(existing: AggregatedMarketBarData[], updates: AggregatedMarketBarData[]) {
+  const next = existing.slice();
+  for (const update of updates) {
+    const index = next.findIndex((bar) => bar.timestamp === update.timestamp);
+    if (index >= 0) {
+      if (next[index].lastSequence <= update.lastSequence) next[index] = update;
+    } else if (!next.length || update.timestamp > next.at(-1)!.timestamp) {
+      const last = next.at(-1);
+      if (last?.status === "FORMING") {
+        next[next.length - 1] = { ...last, status: last.sourceCount === last.expectedCount ? "COMPLETE" : "INCOMPLETE" };
+      }
+      next.push(update);
+    }
+  }
   return next;
 }

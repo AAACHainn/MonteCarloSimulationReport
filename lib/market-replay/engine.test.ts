@@ -51,7 +51,7 @@ describe("market replay engine", () => {
     expect([MIN_PLAYBACK_RATE, MAX_PLAYBACK_RATE]).toEqual([1, 100]);
   });
 
-  it("advances from active source time rather than timestamp gaps", () => {
+  it("advances from the displayed interval and skips timestamp gaps", () => {
     expect(calculatePlaybackAdvance(0, 100, 100, 1)).toEqual({ count: 10, accumulator: 0 });
     expect(calculatePlaybackAdvance(0, 3_000, 100, 300)).toEqual({ count: 1, accumulator: 0 });
     expect(calculatePlaybackAdvance(0, 1_000, 1, 1)).toEqual({ count: 1, accumulator: 0 });

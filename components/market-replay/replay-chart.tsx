@@ -5,11 +5,11 @@ import {
   type MouseEvent as ReactMouseEvent,
   type PointerEvent as ReactPointerEvent,
 } from "react";
-import { Link2, Loader2, LogOut, ShieldAlert, X } from "lucide-react";
+import { Link2, Loader2, LogOut, RotateCcw, ShieldAlert, X } from "lucide-react";
 import {
   CandlestickSeries, ColorType, createChart, createSeriesMarkers, CrosshairMode,
   HistogramSeries, LineSeries, type IChartApi, type IPriceLine, type ISeriesApi,
-  type ISeriesMarkersPluginApi, type Time, type UTCTimestamp,
+  type ISeriesMarkersPluginApi, type Time, TickMarkType, type UTCTimestamp,
 } from "lightweight-charts";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -17,7 +17,8 @@ import { Label } from "@/components/ui/label";
 import { calculateEmaSeries } from "@/lib/market-replay/ema";
 import type { AggregatedMarketBarData, EmaIndicatorConfig } from "@/lib/market-replay/types";
 import { copy } from "@/lib/i18n";
-import { rangeAfterNewReplayBar } from "@/lib/market-replay/chart-range";
+import { defaultReplayLogicalRange, rangeAfterNewReplayBar } from "@/lib/market-replay/chart-range";
+import { formatUtcDateTime, utcDateParts } from "@/lib/market-replay/display-timezone";
 import { formatPriceForTick, priceDecimalsForTick, snapPriceToTick } from "@/lib/market-replay/price-ticks";
 import {
   calculateRiskSizing,
@@ -67,6 +68,16 @@ function chartTime(timestamp: string) {
   return Math.floor(new Date(timestamp).getTime() / 1_000) as UTCTimestamp;
 }
 
+function formatChartTick(time: Time, tickMarkType: TickMarkType, offsetMinutes: number) {
+  if (typeof time !== "number") return String(time);
+  const parts = utcDateParts(time * 1_000, offsetMinutes);
+  if (tickMarkType === TickMarkType.Year) return parts.year;
+  if (tickMarkType === TickMarkType.Month) return `${parts.year}/${parts.month}`;
+  if (tickMarkType === TickMarkType.DayOfMonth) return `${parts.month}/${parts.day}`;
+  if (tickMarkType === TickMarkType.TimeWithSeconds) return `${parts.hour}:${parts.minute}:${parts.second}`;
+  return `${parts.hour}:${parts.minute}`;
+}
+
 function candle(bar: AggregatedMarketBarData) {
   const incomplete = bar.status === "INCOMPLETE";
   return {
@@ -107,7 +118,7 @@ function orderTypeLabel(type: "LIMIT" | "STOP") {
 }
 
 export function ReplayChart({
-  datasetId, priceTickSize, bars, warmupBars, timezone, emaEnabled, emaIndicators, paperSnapshot,
+  datasetId, priceTickSize, bars, warmupBars, displayUtcOffsetMinutes, emaEnabled, emaIndicators, paperSnapshot,
   paperBusy, paperError, onSubmitOrder, onOrderPriceChange,
   onCancelOrder, onClosePosition, onDraftActiveChange, onOpenPaperAccount,
 }: {
@@ -115,7 +126,7 @@ export function ReplayChart({
   priceTickSize: number;
   bars: AggregatedMarketBarData[];
   warmupBars: AggregatedMarketBarData[];
-  timezone: string;
+  displayUtcOffsetMinutes: number;
   emaEnabled: boolean;
   emaIndicators: EmaIndicatorConfig[];
   paperSnapshot: PaperSessionSnapshot | null;
@@ -148,12 +159,14 @@ export function ReplayChart({
   const latest = bars.at(-1);
   const currentPrice = latest?.close ?? null;
   const currentPriceRef = useRef(currentPrice);
+  const displayUtcOffsetRef = useRef(displayUtcOffsetMinutes);
   const onOrderPriceChangeRef = useRef(onOrderPriceChange);
   const paperSessionId = paperSnapshot?.session.id ?? null;
   const paperInitialCapital = paperSnapshot?.session.initialCapital ?? null;
   const hasPendingClose = paperSnapshot?.activeOrders.some((order) => order.reduceOnly && !order.isProtective) ?? false;
 
   useEffect(() => { currentPriceRef.current = currentPrice; }, [currentPrice]);
+  useEffect(() => { displayUtcOffsetRef.current = displayUtcOffsetMinutes; }, [displayUtcOffsetMinutes]);
   useEffect(() => { onOrderPriceChangeRef.current = onOrderPriceChange; }, [onOrderPriceChange]);
 
   const syncLineActionCoordinates = useCallback(() => {
@@ -204,17 +217,19 @@ export function ReplayChart({
     const priceLines = priceLinesRef.current;
     const lineTargets = lineTargetsRef.current;
     const emaSeries = emaSeriesRef.current;
-    const formatter = new Intl.DateTimeFormat("zh-CN", {
-      timeZone: timezone, year: "numeric", month: "2-digit", day: "2-digit",
-      hour: "2-digit", minute: "2-digit", second: "2-digit", hourCycle: "h23",
-    });
     const chart = createChart(container, {
       width: container.clientWidth, height: container.clientHeight,
       layout: { background: { type: ColorType.Solid, color: "#fff" }, textColor: "#475569", attributionLogo: true, panes: { separatorColor: "#e2e8f0", separatorHoverColor: "#cbd5e1" } },
       grid: { vertLines: { color: "#f1f5f9" }, horzLines: { color: "#f1f5f9" } },
       crosshair: { mode: CrosshairMode.Normal },
-      localization: { locale: "zh-CN", timeFormatter: (time: Time) => typeof time === "number" ? formatter.format(new Date(time * 1_000)) : String(time) },
-      timeScale: { timeVisible: true, secondsVisible: true, rightOffset: 4, shiftVisibleRangeOnNewBar: false },
+      localization: { locale: "zh-CN", timeFormatter: (time: Time) => typeof time === "number" ? formatUtcDateTime(time * 1_000, displayUtcOffsetRef.current) : String(time) },
+      timeScale: {
+        timeVisible: true,
+        secondsVisible: true,
+        rightOffset: 4,
+        shiftVisibleRangeOnNewBar: false,
+        tickMarkFormatter: (time: Time, tickMarkType: TickMarkType) => formatChartTick(time, tickMarkType, displayUtcOffsetRef.current),
+      },
       rightPriceScale: { borderColor: "#e2e8f0" },
     });
     const candles = chart.addSeries(CandlestickSeries, {
@@ -242,7 +257,20 @@ export function ReplayChart({
       chart.remove(); chartRef.current = null; candleRef.current = null; volumeRef.current = null;
       markersRef.current = null; priceLines.clear(); lineTargets.clear(); emaSeries.clear(); lastDataRef.current = [];
     };
-  }, [hasVolume, priceTickSize, syncLineActionCoordinates, timezone]);
+  }, [hasVolume, priceTickSize, syncLineActionCoordinates]);
+
+  useEffect(() => {
+    displayUtcOffsetRef.current = displayUtcOffsetMinutes;
+    chartRef.current?.applyOptions({
+      localization: {
+        locale: "zh-CN",
+        timeFormatter: (time: Time) => typeof time === "number" ? formatUtcDateTime(time * 1_000, displayUtcOffsetMinutes) : String(time),
+      },
+      timeScale: {
+        tickMarkFormatter: (time: Time, tickMarkType: TickMarkType) => formatChartTick(time, tickMarkType, displayUtcOffsetMinutes),
+      },
+    });
+  }, [displayUtcOffsetMinutes]);
 
   useEffect(() => {
     const chart = chartRef.current; const series = candleRef.current;
@@ -259,10 +287,19 @@ export function ReplayChart({
       }
       if (range && next.length > previous.length) chart.timeScale().setVisibleLogicalRange(rangeAfterNewReplayBar(range, previousLastIndex));
     } else {
-      const hadData = previous.length > 0;
+      const range = chart.timeScale().getVisibleLogicalRange();
+      const previousLastIndex = previous.length - 1;
+      const previousLastInNext = next.findIndex((bar) => bar.timestamp === previous.at(-1)?.timestamp);
       series.setData(next.map(candle));
       volumeRef.current?.setData(next.filter((bar) => bar.volume !== null).map(volume));
-      if (!hadData || previous[0]?.timestamp !== next[0]?.timestamp) chart.timeScale().fitContent();
+      if (range && previousLastInNext >= 0) {
+        // A rolling server window renumbers logical indices. Preserve zoom and historical panning.
+        const advanced = rangeAfterNewReplayBar(range, previousLastIndex, next.length - 1 - previousLastInNext);
+        const removed = previousLastIndex - previousLastInNext;
+        chart.timeScale().setVisibleLogicalRange({ from: advanced.from - removed, to: advanced.to - removed });
+      } else if (next.length > 0) {
+        chart.timeScale().setVisibleLogicalRange(defaultReplayLogicalRange(chart.timeScale().width(), next.length));
+      }
     }
     lastDataRef.current = next.map((bar) => ({ ...bar }));
   }, [bars]);
@@ -461,9 +498,19 @@ export function ReplayChart({
     const fallback = currentPrice ?? 0;
     setContextMenu({
       x: Math.max(8, Math.min(event.clientX - root.left, root.width - 228)),
-      y: Math.max(8, Math.min(event.clientY - root.top, root.height - 154)),
+      y: Math.max(8, Math.min(event.clientY - root.top, root.height - 220)),
       price: Number.isFinite(price) && price > 0 ? price : fallback,
     });
+  }
+
+  function resetChartView() {
+    const chart = chartRef.current;
+    if (!chart) return;
+    chart.timeScale().setVisibleLogicalRange(defaultReplayLogicalRange(chart.timeScale().width(), bars.length));
+    candleRef.current?.priceScale().applyOptions({ autoScale: true });
+    volumeRef.current?.priceScale().applyOptions({ autoScale: true });
+    setContextMenu(null);
+    requestAnimationFrame(syncLineActionCoordinates);
   }
 
   function createDraft(side: PaperSide, type: "LIMIT" | "STOP") {
@@ -579,6 +626,12 @@ export function ReplayChart({
 
       {contextMenu ? (
         <div data-context-menu role="menu" className="absolute z-40 w-[220px] overflow-hidden rounded-lg border border-slate-200 bg-white p-1.5 shadow-xl" style={{ left: contextMenu.x, top: contextMenu.y }}>
+          <div className="mb-1 border-b pb-1">
+            <button type="button" role="menuitem" data-testid="context-reset-chart-view" className="flex w-full items-center gap-2 rounded-md px-2 py-2 text-left text-sm font-medium text-slate-700 hover:bg-slate-100 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-600" onClick={resetChartView}>
+              <RotateCcw className="h-4 w-4" />
+              {copy.marketReplay.resetChartView}
+            </button>
+          </div>
           <div className="border-b px-2 py-1.5">
             <p className="text-[10px] font-medium uppercase tracking-wide text-slate-400">{copy.paperTrading.contextPrice}</p>
             <p className="font-mono text-sm font-semibold text-slate-900">{formatPriceForTick(contextMenu.price, priceTickSize)}</p>

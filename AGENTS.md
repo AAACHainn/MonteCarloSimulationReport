@@ -282,8 +282,10 @@ corepack pnpm run build
 - 图表窗口通过 `GET /api/market-datasets/[id]/bars/window` 获取，接口只返回当前源序号及以前的聚合窗口、EMA 预热区和最后一根源 K 线。
 - 回放起点通过 `POST /api/market-datasets/[id]/replay/start` 在服务端定位。
 - `ReplayProgress` 使用 `playbackRate`（整数 `1–100`）和 `displayIntervalSeconds`。旧 `intervalMs` 暂时保留一轮迁移兼容，不应再用于新回放逻辑。
-- 1× 表示按源周期的真实活跃时间推进；时间戳缺口、周末和休市时间不会产生等待。页面进入后台时自动暂停。
-- `POST /api/market-datasets/[id]/replay/advance` 支持单次最多推进 100 根源 K 线，但模拟交易引擎仍按顺序逐根处理，不能把一批源 K 线合并后撮合。
+- 自动播放和“下一根”按显示周期整根推进。1× 的每根等待时间等于显示周期，倍率相应缩短等待；例如 5 分钟 / 100× 为每 3 秒一根。时间戳缺口、周末和休市不会额外等待。页面进入后台时自动暂停。
+- `POST /api/market-datasets/[id]/replay/advance` 未传显示周期时单次最多推进 100 根源 K 线；传显示周期时 `count` 表示显示 K 线根数，单次读取上限 86,400 根源 K 线。模拟交易引擎仍按顺序逐源处理，不能把一批源 K 线合并后撮合。
+- 显示周期推进返回 `aggregatedBars`（受影响桶的完整修订）和 `lastSourceBar`，前端替换/追加这些桶，不再每一步请求完整窗口。权益采样点批量写入，账户快照在推进事务内读取。
+- `GET /api/market-datasets/[id]/progress` 用于失败后的权威进度和账户同步；`PUT` 只保存速度与显示周期，不覆盖推进序号或重新创建已清空的回放。快速手动点击串行执行。
 - Lightweight Charts 使用 `series.update()` 更新当前形成 K 线；用户手动平移后不得自动跳回左侧，只有视口仍位于实时右边缘时才跟随新 K 线。
 - EMA 只使用屏幕可见聚合 K 线及左侧最多 `max EMA length` 根预热数据，不从数据集第一根递推，因此窗口左端可能与 TradingView 全历史 EMA 有轻微差异。
 - 成交标记显示在成交源序号所属的聚合 K 线上，详情仍保留真实源时间、序号和成交价。

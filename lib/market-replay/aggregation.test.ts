@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { aggregateMarketBars, aggregateMarketSegments, getAggregationBucket } from "./aggregation";
+import { aggregateMarketBars, aggregateMarketSegments, getAggregationBucket, mergeAggregatedBars, mergeSourceBar } from "./aggregation";
 import type { MarketBarData, TradingSessionConfig } from "./types";
 
 const always: TradingSessionConfig = { mode: "TWENTY_FOUR_SEVEN", timezone: "UTC", openMinute: null, closeMinute: null, weekdays: [1,2,3,4,5,6,7] };
@@ -67,5 +67,32 @@ describe("market bar aggregation", () => {
     expect(result).toHaveLength(dayCount);
     expect(result.slice(0, -1).every((item) => item.status === "COMPLETE")).toBe(true);
     expect(result.at(-1)?.status).toBe("INCOMPLETE");
+  });
+});
+
+describe("incremental replay aggregation", () => {
+  const options = { sourceSeconds: 1, displaySeconds: 5, session: always, finalSequence: 9 };
+  it("replaces a partial bucket, remains immutable and ignores duplicate or older revisions", () => {
+    const raw = Array.from({ length: 5 }, (_, i) => bar(i, i));
+    const forming = aggregateMarketBars({ bars: raw.slice(0, 2), ...options, currentSequence: 1 });
+    const complete = aggregateMarketBars({ bars: raw, ...options, currentSequence: 4 });
+    const next = mergeAggregatedBars(forming, complete);
+    expect(next).toEqual(complete);
+    expect(forming[0].sourceCount).toBe(2);
+    expect(mergeAggregatedBars(next, complete)).toEqual(complete);
+    expect(mergeAggregatedBars(next, forming)).toEqual(complete);
+  });
+  it("closes a missing-data bucket when the next bucket arrives", () => {
+    const forming = aggregateMarketBars({ bars: [bar(0, 0)], ...options, currentSequence: 0 });
+    const following = aggregateMarketBars({ bars: [bar(1, 7)], ...options, currentSequence: 1 });
+    const merged = mergeAggregatedBars(forming, following);
+    expect(merged[0].status).toBe("INCOMPLETE");
+    expect(forming[0].status).toBe("FORMING");
+  });
+  it("keeps single-source-period candles complete without mutating history", () => {
+    const original = aggregateMarketBars({ bars: [bar(0, 0)], ...options, displaySeconds: 1, currentSequence: 0 });
+    const next = mergeSourceBar(original, bar(1, 1), { ...options, displaySeconds: 1 });
+    expect(next[1].status).toBe("COMPLETE");
+    expect(original).toHaveLength(1);
   });
 });
