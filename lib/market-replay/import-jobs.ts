@@ -72,7 +72,7 @@ export async function processImportJob(jobId: string) {
       data: {
         name: metadata.name, description: metadata.description || null, symbol: metadata.symbol,
         timeframe: metadata.timeframe, timezone: metadata.timezone, status: "IMPORTING",
-        sourceIntervalSeconds: metadata.sourceIntervalSeconds, sessionMode: metadata.sessionMode,
+        sourceIntervalSeconds: metadata.sourceIntervalSeconds, priceTickSize: metadata.priceTickSize, sessionMode: metadata.sessionMode,
         sessionOpenMinute: metadata.sessionOpenMinute ?? null, sessionCloseMinute: metadata.sessionCloseMinute ?? null,
         tradingWeekdays: metadata.tradingWeekdays.join(","), barCount: 0,
         startTime: new Date(0), endTime: new Date(0),

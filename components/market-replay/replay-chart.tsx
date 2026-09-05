@@ -1,16 +1,67 @@
 "use client";
 
-import { useEffect, useMemo, useRef } from "react";
+import {
+  useCallback, useEffect, useMemo, useRef, useState,
+  type MouseEvent as ReactMouseEvent,
+  type PointerEvent as ReactPointerEvent,
+} from "react";
+import { Link2, Loader2, LogOut, ShieldAlert, X } from "lucide-react";
 import {
   CandlestickSeries, ColorType, createChart, createSeriesMarkers, CrosshairMode,
   HistogramSeries, LineSeries, type IChartApi, type IPriceLine, type ISeriesApi,
   type ISeriesMarkersPluginApi, type Time, type UTCTimestamp,
 } from "lightweight-charts";
+import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
 import { calculateEmaSeries } from "@/lib/market-replay/ema";
 import type { AggregatedMarketBarData, EmaIndicatorConfig } from "@/lib/market-replay/types";
 import { copy } from "@/lib/i18n";
 import { rangeAfterNewReplayBar } from "@/lib/market-replay/chart-range";
-import type { PaperOrderData, PaperSessionSnapshot } from "@/lib/paper-trading/types";
+import { formatPriceForTick, priceDecimalsForTick, snapPriceToTick } from "@/lib/market-replay/price-ticks";
+import {
+  calculateRiskSizing,
+  orderTypeForEntry,
+  targetPriceForR,
+  type RiskSizingError,
+} from "@/lib/paper-trading/risk-sizing";
+import type { PaperSessionSnapshot, PaperSide } from "@/lib/paper-trading/types";
+
+type DraftOrder = {
+  side: PaperSide;
+  type: "LIMIT" | "STOP";
+  entryPrice: number;
+  stopLoss: number;
+  takeProfit: number;
+  riskAmount: number;
+  targetR: number;
+  tpMode: "LINKED" | "FREE";
+};
+
+type ContextMenuState = { x: number; y: number; price: number };
+type OrderUpdate = {
+  price?: number;
+  quantity?: number;
+  stopLoss?: number | null;
+  takeProfit?: number | null;
+  riskAmount?: number | null;
+};
+type LineTarget = {
+  key: string;
+  price: number;
+  kind: "draft" | "order";
+  field: "entryPrice" | "stopLoss" | "takeProfit" | "price";
+  orderId?: string;
+};
+type LineAction = {
+  key: string;
+  price: number;
+  y: number;
+  color: string;
+  label: string;
+  kind: "cancel" | "close";
+  orderId?: string;
+};
 
 function chartTime(timestamp: string) {
   return Math.floor(new Date(timestamp).getTime() / 1_000) as UTCTimestamp;
@@ -31,33 +82,127 @@ function volume(bar: AggregatedMarketBarData) {
   };
 }
 
+function number(value: number, digits = 8) {
+  return new Intl.NumberFormat("zh-CN", { maximumFractionDigits: digits }).format(value);
+}
+
+function money(value: number, currency: string) {
+  return `${new Intl.NumberFormat("zh-CN", { minimumFractionDigits: 2, maximumFractionDigits: 2 }).format(value)} ${currency}`;
+}
+
+function sizingErrorText(error: RiskSizingError) {
+  const labels: Record<RiskSizingError, string> = {
+    INVALID_PRICE: copy.paperTrading.invalidPrice,
+    INVALID_RISK_AMOUNT: copy.paperTrading.invalidRiskAmount,
+    INVALID_STOP_SIDE: copy.paperTrading.invalidStopSide,
+    INVALID_TARGET_SIDE: copy.paperTrading.invalidTargetSide,
+    INVALID_UNIT_RISK: copy.paperTrading.invalidUnitRisk,
+    QUANTITY_LIMIT: copy.paperTrading.quantityLimit,
+  };
+  return labels[error];
+}
+
+function orderTypeLabel(type: "LIMIT" | "STOP") {
+  return type === "LIMIT" ? copy.paperTrading.limit : copy.paperTrading.stop;
+}
+
 export function ReplayChart({
-  bars, warmupBars, timezone, emaEnabled, emaIndicators, paperSnapshot,
-  onOrderPriceChange, onTradingInteraction,
+  datasetId, priceTickSize, bars, warmupBars, timezone, emaEnabled, emaIndicators, paperSnapshot,
+  paperBusy, paperError, onSubmitOrder, onOrderPriceChange,
+  onCancelOrder, onClosePosition, onDraftActiveChange, onOpenPaperAccount,
 }: {
+  datasetId: string;
+  priceTickSize: number;
   bars: AggregatedMarketBarData[];
   warmupBars: AggregatedMarketBarData[];
   timezone: string;
   emaEnabled: boolean;
   emaIndicators: EmaIndicatorConfig[];
   paperSnapshot: PaperSessionSnapshot | null;
-  onOrderPriceChange: (orderId: string, update: { price?: number; quantity?: number }) => Promise<void>;
-  onTradingInteraction: () => void;
+  paperBusy: boolean;
+  paperError: string | null;
+  onSubmitOrder: (order: { side: PaperSide; type: "LIMIT" | "STOP"; quantity: number; riskAmount: number; price: number; stopLoss: number; takeProfit: number }) => Promise<boolean>;
+  onOrderPriceChange: (orderId: string, update: OrderUpdate) => Promise<boolean>;
+  onCancelOrder: (orderId: string) => Promise<boolean>;
+  onClosePosition: () => Promise<boolean>;
+  onDraftActiveChange: (active: boolean) => void;
+  onOpenPaperAccount: () => void;
 }) {
   const containerRef = useRef<HTMLDivElement | null>(null);
   const chartRef = useRef<IChartApi | null>(null);
   const candleRef = useRef<ISeriesApi<"Candlestick"> | null>(null);
   const volumeRef = useRef<ISeriesApi<"Histogram"> | null>(null);
   const priceLinesRef = useRef(new Map<string, IPriceLine>());
+  const lineTargetsRef = useRef(new Map<string, LineTarget>());
   const markersRef = useRef<ISeriesMarkersPluginApi<Time> | null>(null);
   const emaSeriesRef = useRef(new Map<string, ISeriesApi<"Line">>());
   const lastDataRef = useRef<AggregatedMarketBarData[]>([]);
+  const [contextMenu, setContextMenu] = useState<ContextMenuState | null>(null);
+  const [draft, setDraft] = useState<DraftOrder | null>(null);
+  const [defaultRiskAmount, setDefaultRiskAmount] = useState<number | null>(null);
+  const [defaultTargetR, setDefaultTargetR] = useState(2);
+  const [defaultSaved, setDefaultSaved] = useState(false);
+  const [draftError, setDraftError] = useState<string | null>(null);
+  const [lineActions, setLineActions] = useState<LineAction[]>([]);
   const hasVolume = useMemo(() => [...warmupBars, ...bars].some((bar) => bar.volume !== null), [bars, warmupBars]);
+  const latest = bars.at(-1);
+  const currentPrice = latest?.close ?? null;
+  const currentPriceRef = useRef(currentPrice);
+  const onOrderPriceChangeRef = useRef(onOrderPriceChange);
+  const paperSessionId = paperSnapshot?.session.id ?? null;
+  const paperInitialCapital = paperSnapshot?.session.initialCapital ?? null;
+  const hasPendingClose = paperSnapshot?.activeOrders.some((order) => order.reduceOnly && !order.isProtective) ?? false;
+
+  useEffect(() => { currentPriceRef.current = currentPrice; }, [currentPrice]);
+  useEffect(() => { onOrderPriceChangeRef.current = onOrderPriceChange; }, [onOrderPriceChange]);
+
+  const syncLineActionCoordinates = useCallback(() => {
+    const series = candleRef.current;
+    if (!series) return;
+    setLineActions((current) => current.map((action) => {
+      const coordinate = series.priceToCoordinate(action.price);
+      return coordinate === null ? action : { ...action, y: Number(coordinate) };
+    }));
+  }, []);
+
+  useEffect(() => {
+    if (!paperSessionId || paperInitialCapital === null) {
+      setDefaultRiskAmount(null);
+      return;
+    }
+    const fallback = paperInitialCapital * 0.01;
+    try {
+      const stored = JSON.parse(window.localStorage.getItem(`market-replay-risk-settings-v1:${datasetId}`) ?? "null") as { riskAmount?: unknown; targetR?: unknown } | null;
+      setDefaultRiskAmount(typeof stored?.riskAmount === "number" && stored.riskAmount > 0 ? stored.riskAmount : fallback);
+      setDefaultTargetR(typeof stored?.targetR === "number" && stored.targetR > 0 ? stored.targetR : 2);
+    } catch {
+      setDefaultRiskAmount(fallback);
+      setDefaultTargetR(2);
+    }
+  }, [datasetId, paperInitialCapital, paperSessionId]);
+
+  useEffect(() => {
+    onDraftActiveChange(Boolean(draft));
+  }, [draft, onDraftActiveChange]);
+
+  useEffect(() => {
+    if (paperSessionId === null && draft !== null) {
+      setDraft(null);
+      setDraftError(null);
+    }
+  }, [draft, paperSessionId]);
+
+  useEffect(() => {
+    const close = (event: KeyboardEvent) => { if (event.key === "Escape") setContextMenu(null); };
+    window.addEventListener("keydown", close);
+    return () => window.removeEventListener("keydown", close);
+  }, []);
 
   useEffect(() => {
     const container = containerRef.current;
     if (!container) return;
     const priceLines = priceLinesRef.current;
+    const lineTargets = lineTargetsRef.current;
     const emaSeries = emaSeriesRef.current;
     const formatter = new Intl.DateTimeFormat("zh-CN", {
       timeZone: timezone, year: "numeric", month: "2-digit", day: "2-digit",
@@ -74,6 +219,7 @@ export function ReplayChart({
     });
     const candles = chart.addSeries(CandlestickSeries, {
       upColor: "#16a34a", downColor: "#dc2626", wickUpColor: "#16a34a", wickDownColor: "#dc2626", borderVisible: true,
+      priceFormat: { type: "price", minMove: priceTickSize, precision: priceDecimalsForTick(priceTickSize) },
     });
     let volumes: ISeriesApi<"Histogram"> | null = null;
     if (hasVolume) {
@@ -82,16 +228,21 @@ export function ReplayChart({
       volumes = pane.addSeries(HistogramSeries, { priceFormat: { type: "volume" }, priceLineVisible: false, lastValueVisible: false });
     }
     const observer = new ResizeObserver(([entry]) => {
-      if (entry?.contentRect.width && entry.contentRect.height) chart.applyOptions({ width: entry.contentRect.width, height: entry.contentRect.height });
+      if (entry?.contentRect.width && entry.contentRect.height) {
+        chart.applyOptions({ width: entry.contentRect.width, height: entry.contentRect.height });
+        syncLineActionCoordinates();
+      }
     });
     observer.observe(container);
+    chart.timeScale().subscribeVisibleLogicalRangeChange(syncLineActionCoordinates);
     chartRef.current = chart; candleRef.current = candles; volumeRef.current = volumes;
     markersRef.current = createSeriesMarkers(candles, []);
     return () => {
-      observer.disconnect(); chart.remove(); chartRef.current = null; candleRef.current = null; volumeRef.current = null;
-      markersRef.current = null; priceLines.clear(); emaSeries.clear(); lastDataRef.current = [];
+      observer.disconnect(); chart.timeScale().unsubscribeVisibleLogicalRangeChange(syncLineActionCoordinates);
+      chart.remove(); chartRef.current = null; candleRef.current = null; volumeRef.current = null;
+      markersRef.current = null; priceLines.clear(); lineTargets.clear(); emaSeries.clear(); lastDataRef.current = [];
     };
-  }, [hasVolume, timezone]);
+  }, [hasVolume, priceTickSize, syncLineActionCoordinates, timezone]);
 
   useEffect(() => {
     const chart = chartRef.current; const series = candleRef.current;
@@ -137,57 +288,364 @@ export function ReplayChart({
     }
   }, [bars, emaEnabled, emaIndicators, warmupBars]);
 
+  const draftSizing = useMemo(() => {
+    if (!draft || !paperSnapshot) return null;
+    return calculateRiskSizing({
+      side: draft.side, type: draft.type, entryPrice: draft.entryPrice,
+      stopLoss: draft.stopLoss, takeProfit: draft.takeProfit, riskAmount: draft.riskAmount,
+      commissionBps: paperSnapshot.session.commissionBps,
+      slippageBps: paperSnapshot.session.slippageBps,
+    });
+  }, [draft, paperSnapshot]);
+
   useEffect(() => {
     const series = candleRef.current;
     if (!series) return;
     for (const line of priceLinesRef.current.values()) series.removePriceLine(line);
     priceLinesRef.current.clear();
-    if (!paperSnapshot) { markersRef.current?.setMarkers([]); return; }
-    if (paperSnapshot.session.averageEntryPrice !== null && paperSnapshot.session.netQuantity !== 0) {
-      priceLinesRef.current.set("position", series.createPriceLine({ price: paperSnapshot.session.averageEntryPrice, color: "#475569", lineWidth: 2, lineStyle: 2, axisLabelVisible: true, title: copy.paperTrading.positionValue(paperSnapshot.session.netQuantity, paperSnapshot.session.averageEntryPrice) }));
+    lineTargetsRef.current.clear();
+    const nextLineActions: LineAction[] = [];
+    const addLine = (target: LineTarget | null, price: number, color: string, title: string, solid = false) => {
+      const key = target?.key ?? `static:${title}`;
+      priceLinesRef.current.set(key, series.createPriceLine({ price, color, lineWidth: 1, lineStyle: solid ? 0 : 2, axisLabelVisible: true, title }));
+      if (target) lineTargetsRef.current.set(key, target);
+    };
+    const addAction = (action: Omit<LineAction, "y">) => {
+      const coordinate = series.priceToCoordinate(action.price);
+      if (coordinate !== null) nextLineActions.push({ ...action, y: Number(coordinate) });
+    };
+    if (paperSnapshot?.session.averageEntryPrice !== null && paperSnapshot?.session.averageEntryPrice !== undefined && paperSnapshot.session.netQuantity !== 0) {
+      addLine(null, paperSnapshot.session.averageEntryPrice, "#475569", copy.paperTrading.positionValue(paperSnapshot.session.netQuantity, paperSnapshot.session.averageEntryPrice));
+      addAction({ key: "position", price: paperSnapshot.session.averageEntryPrice, color: "#475569", label: copy.paperTrading.positionValue(paperSnapshot.session.netQuantity, paperSnapshot.session.averageEntryPrice), kind: "close" });
     }
-    for (const order of paperSnapshot.activeOrders) {
-      if (order.price === null) continue;
-      const isStop = order.isProtective && order.type === "STOP";
-      const color = isStop ? "#dc2626" : order.isProtective ? "#16a34a" : order.side === "BUY" ? "#2563eb" : "#ea580c";
-      const title = order.isProtective ? isStop ? copy.paperTrading.stopLoss : copy.paperTrading.takeProfit : `${order.side === "BUY" ? copy.paperTrading.buy : copy.paperTrading.sell} ${order.type === "LIMIT" ? copy.paperTrading.limit : copy.paperTrading.stop}`;
-      priceLinesRef.current.set(order.id, series.createPriceLine({ price: order.price, color, lineWidth: 2, lineStyle: order.isProtective ? 0 : 2, axisLabelVisible: true, title }));
+    for (const order of paperSnapshot?.activeOrders ?? []) {
+      if (order.price !== null) {
+        const isStop = order.isProtective && order.type === "STOP";
+        const color = isStop ? "#dc2626" : order.isProtective ? "#16a34a" : order.side === "BUY" ? "#2563eb" : "#ea580c";
+        const title = order.isProtective ? isStop ? copy.paperTrading.stopLoss : copy.paperTrading.takeProfit : copy.paperTrading.orderLine(order.side === "BUY" ? copy.paperTrading.buy : copy.paperTrading.sell, order.type === "LIMIT" ? copy.paperTrading.limit : copy.paperTrading.stop);
+        addLine({ key: order.id, price: order.price, kind: "order", field: "price", orderId: order.id }, order.price, color, title, order.isProtective);
+        addAction({ key: order.id, price: order.price, color, label: `${title} · ${number(order.quantity)}`, kind: "cancel", orderId: order.id });
+      }
+      if (!order.isProtective && order.stopLoss !== null) {
+        const title = order.riskAmount == null ? copy.paperTrading.stopLoss : copy.paperTrading.stopLine(money(order.riskAmount, paperSnapshot!.session.currency));
+        addLine({ key: `${order.id}:sl`, price: order.stopLoss, kind: "order", field: "stopLoss", orderId: order.id }, order.stopLoss, "#dc2626", title, true);
+      }
+      if (!order.isProtective && order.takeProfit !== null) {
+        let ratio = "—"; let profit = "—";
+        if (order.riskAmount != null && order.stopLoss !== null && order.price !== null && order.type !== "MARKET") {
+          const sizing = calculateRiskSizing({ side: order.side, type: order.type, entryPrice: order.price, stopLoss: order.stopLoss, takeProfit: order.takeProfit, riskAmount: order.riskAmount, commissionBps: paperSnapshot!.session.commissionBps, slippageBps: paperSnapshot!.session.slippageBps });
+          if (sizing.ok && sizing.value.projectedProfit !== null && sizing.value.rewardRiskRatio !== null) {
+            ratio = sizing.value.rewardRiskRatio.toFixed(2);
+            profit = money(sizing.value.projectedProfit, paperSnapshot!.session.currency);
+          }
+        }
+        addLine({ key: `${order.id}:tp`, price: order.takeProfit, kind: "order", field: "takeProfit", orderId: order.id }, order.takeProfit, "#16a34a", copy.paperTrading.targetLine(ratio, profit), true);
+      }
     }
-    markersRef.current?.setMarkers(paperSnapshot.recentFills.flatMap((fill) => {
+    if (draft && paperSnapshot) {
+      const side = draft.side === "BUY" ? copy.paperTrading.buy : copy.paperTrading.sell;
+      addLine({ key: "draft:entry", price: draft.entryPrice, kind: "draft", field: "entryPrice" }, draft.entryPrice, "#2563eb", copy.paperTrading.orderLine(side, orderTypeLabel(draft.type)), true);
+      addLine({ key: "draft:sl", price: draft.stopLoss, kind: "draft", field: "stopLoss" }, draft.stopLoss, "#dc2626", copy.paperTrading.stopLine(money(draft.riskAmount, paperSnapshot.session.currency)), true);
+      const ratio = draftSizing?.ok && draftSizing.value.rewardRiskRatio !== null ? draftSizing.value.rewardRiskRatio.toFixed(2) : "—";
+      const profit = draftSizing?.ok && draftSizing.value.projectedProfit !== null ? money(draftSizing.value.projectedProfit, paperSnapshot.session.currency) : "—";
+      addLine({ key: "draft:tp", price: draft.takeProfit, kind: "draft", field: "takeProfit" }, draft.takeProfit, "#16a34a", copy.paperTrading.targetLine(ratio, profit), true);
+    }
+    markersRef.current?.setMarkers((paperSnapshot?.recentFills ?? []).flatMap((fill) => {
       const aggregate = bars.find((bar) => fill.sequence >= bar.firstSequence && fill.sequence <= bar.lastSequence);
       if (!aggregate) return [];
       return [{ time: chartTime(aggregate.timestamp), position: fill.side === "BUY" ? "belowBar" as const : "aboveBar" as const, shape: fill.side === "BUY" ? "arrowUp" as const : "arrowDown" as const, color: fill.side === "BUY" ? "#16a34a" : "#dc2626", text: fill.reason }];
     }));
-  }, [bars, paperSnapshot]);
+    setLineActions(nextLineActions);
+  }, [bars, draft, draftSizing, paperSnapshot]);
+
+  const moveDraftLine = useCallback((current: DraftOrder, field: LineTarget["field"], price: number): DraftOrder => {
+    price = snapPriceToTick(price, priceTickSize);
+    const livePrice = currentPriceRef.current;
+    if (!Number.isFinite(price) || price <= 0 || livePrice === null) return current;
+    if (field === "stopLoss") {
+      if ((current.side === "BUY" && price >= current.entryPrice) || (current.side === "SELL" && price <= current.entryPrice)) return current;
+      return { ...current, stopLoss: price, takeProfit: current.tpMode === "LINKED" ? snapPriceToTick(targetPriceForR(current.side, current.entryPrice, price, current.targetR), priceTickSize) : current.takeProfit };
+    }
+    if (field === "takeProfit") {
+      if ((current.side === "BUY" && price <= current.entryPrice) || (current.side === "SELL" && price >= current.entryPrice)) return current;
+      return { ...current, takeProfit: price, tpMode: "FREE" };
+    }
+    if (field === "entryPrice") {
+      const valid = current.side === "BUY"
+        ? price > current.stopLoss && price < current.takeProfit
+        : price < current.stopLoss && price > current.takeProfit;
+      if (!valid) return current;
+      return {
+        ...current,
+        entryPrice: price,
+        type: orderTypeForEntry(current.side, price, livePrice),
+        takeProfit: current.tpMode === "LINKED" ? snapPriceToTick(targetPriceForR(current.side, price, current.stopLoss, current.targetR), priceTickSize) : current.takeProfit,
+      };
+    }
+    return current;
+  }, [priceTickSize]);
 
   useEffect(() => {
     const container = containerRef.current; const series = candleRef.current;
-    if (!container || !series || !paperSnapshot) return;
-    let dragging: { order: PaperOrderData; originalPrice: number; previewPrice: number } | null = null;
+    if (!container || !series) return;
+    let dragging: { target: LineTarget; originalPrice: number; previewPrice: number } | null = null;
+    const setLineCursor = (cursor: "" | "ns-resize") => {
+      container.style.cursor = cursor;
+      container.querySelectorAll("canvas").forEach((canvas) => { canvas.style.cursor = cursor; });
+    };
+    const nearestLine = (y: number) => [...lineTargetsRef.current.values()]
+      .map((target) => ({ target, coordinate: series.priceToCoordinate(target.price) }))
+      .filter((item) => item.coordinate !== null)
+      .sort((a, b) => Math.abs(Number(a.coordinate) - y) - Math.abs(Number(b.coordinate) - y))[0];
     const down = (event: PointerEvent) => {
+      if ((event.target as HTMLElement | null)?.closest("button,input,[data-context-menu]")) return;
       const y = event.clientY - container.getBoundingClientRect().top;
-      const candidate = paperSnapshot.activeOrders.flatMap((order) => order.price === null ? [] : [{ order, coordinate: series.priceToCoordinate(order.price) }])
-        .filter((item) => item.coordinate !== null).sort((a, b) => Math.abs(Number(a.coordinate) - y) - Math.abs(Number(b.coordinate) - y))[0];
-      if (!candidate || candidate.order.price === null || Math.abs(Number(candidate.coordinate) - y) > 8) return;
-      event.preventDefault(); onTradingInteraction(); dragging = { order: candidate.order, originalPrice: candidate.order.price, previewPrice: candidate.order.price }; container.setPointerCapture(event.pointerId);
+      const candidate = nearestLine(y);
+      if (!candidate || Math.abs(Number(candidate.coordinate) - y) > 8) return;
+      event.preventDefault(); setLineCursor("ns-resize"); setContextMenu(null);
+      dragging = { target: candidate.target, originalPrice: candidate.target.price, previewPrice: candidate.target.price };
+      container.setPointerCapture(event.pointerId);
     };
     const move = (event: PointerEvent) => {
-      if (!dragging) return; const price = series.coordinateToPrice((event.clientY - container.getBoundingClientRect().top) as never);
-      if (price === null || !Number.isFinite(Number(price))) return; dragging.previewPrice = Number(price); priceLinesRef.current.get(dragging.order.id)?.applyOptions({ price: dragging.previewPrice });
+      const y = event.clientY - container.getBoundingClientRect().top;
+      if (!dragging) {
+        const candidate = nearestLine(y);
+        setLineCursor(candidate && Math.abs(Number(candidate.coordinate) - y) <= 8 ? "ns-resize" : "");
+        return;
+      }
+      const price = snapPriceToTick(Number(series.coordinateToPrice((event.clientY - container.getBoundingClientRect().top) as never)), priceTickSize);
+      if (!Number.isFinite(price) || price <= 0) return;
+      if (dragging.target.kind === "draft") {
+        setDraft((current) => {
+          if (!current) return current;
+          const next = moveDraftLine(current, dragging!.target.field, price);
+          dragging!.previewPrice = next[dragging!.target.field as keyof DraftOrder] as number;
+          return next;
+        });
+      } else {
+        dragging.previewPrice = price;
+        priceLinesRef.current.get(dragging.target.key)?.applyOptions({ price });
+        setLineActions((current) => current.map((action) => action.key === dragging!.target.key ? { ...action, price, y } : action));
+      }
     };
-    const finish = () => { if (!dragging) return; const value = dragging; dragging = null; if (value.previewPrice !== value.originalPrice) void onOrderPriceChange(value.order.id, { price: value.previewPrice }); };
-    const key = (event: KeyboardEvent) => { if (event.key === "Escape" && dragging) { priceLinesRef.current.get(dragging.order.id)?.applyOptions({ price: dragging.originalPrice }); dragging = null; } };
-    container.addEventListener("pointerdown", down); container.addEventListener("pointermove", move); container.addEventListener("pointerup", finish); window.addEventListener("keydown", key);
-    return () => { container.removeEventListener("pointerdown", down); container.removeEventListener("pointermove", move); container.removeEventListener("pointerup", finish); window.removeEventListener("keydown", key); };
-  }, [onOrderPriceChange, onTradingInteraction, paperSnapshot]);
+    const finish = () => {
+      if (!dragging) return;
+      const value = dragging; dragging = null; setLineCursor("");
+      if (value.target.kind === "order" && value.target.orderId && value.previewPrice !== value.originalPrice) {
+        void onOrderPriceChangeRef.current(value.target.orderId, { [value.target.field]: value.previewPrice });
+      }
+    };
+    const key = (event: KeyboardEvent) => {
+      if (event.key === "Escape" && dragging) {
+        if (dragging.target.kind === "order") priceLinesRef.current.get(dragging.target.key)?.applyOptions({ price: dragging.originalPrice });
+        dragging = null; setLineCursor(""); syncLineActionCoordinates();
+      }
+    };
+    const leave = () => { if (!dragging) setLineCursor(""); };
+    container.addEventListener("pointerdown", down); container.addEventListener("pointermove", move);
+    container.addEventListener("pointerup", finish); container.addEventListener("pointerleave", leave); window.addEventListener("keydown", key);
+    return () => {
+      container.removeEventListener("pointerdown", down); container.removeEventListener("pointermove", move);
+      container.removeEventListener("pointerup", finish); container.removeEventListener("pointerleave", leave); window.removeEventListener("keydown", key);
+      setLineCursor("");
+    };
+  }, [moveDraftLine, priceTickSize, syncLineActionCoordinates]);
 
-  const latest = bars.at(-1);
+  function openContextMenu(event: ReactMouseEvent<HTMLDivElement>) {
+    event.preventDefault();
+    if ((event.target as HTMLElement).closest("[data-order-ticket],[data-context-menu],[data-line-action]")) return;
+    const series = candleRef.current;
+    const root = event.currentTarget.getBoundingClientRect();
+    const rawPrice = series?.coordinateToPrice((event.clientY - root.top) as never);
+    const price = snapPriceToTick(Number(rawPrice), priceTickSize);
+    const fallback = currentPrice ?? 0;
+    setContextMenu({
+      x: Math.max(8, Math.min(event.clientX - root.left, root.width - 228)),
+      y: Math.max(8, Math.min(event.clientY - root.top, root.height - 154)),
+      price: Number.isFinite(price) && price > 0 ? price : fallback,
+    });
+  }
+
+  function createDraft(side: PaperSide, type: "LIMIT" | "STOP") {
+    if (!paperSnapshot || !latest || !contextMenu || contextMenu.price <= 0) return;
+    const rawDistance = latest.high > latest.low && Number.isFinite(latest.high - latest.low)
+      ? latest.high - latest.low
+      : contextMenu.price * 0.01;
+    const distance = Math.max(priceTickSize, Math.round(Math.min(rawDistance, contextMenu.price * 0.99) / priceTickSize) * priceTickSize);
+    const riskAmount = defaultRiskAmount ?? paperSnapshot.session.initialCapital * 0.01;
+    const stopLoss = snapPriceToTick(side === "BUY" ? contextMenu.price - distance : contextMenu.price + distance, priceTickSize);
+    const targetR = defaultTargetR > 0 ? defaultTargetR : 2;
+    setDraft({
+      side, type, entryPrice: contextMenu.price, stopLoss,
+      takeProfit: snapPriceToTick(targetPriceForR(side, contextMenu.price, stopLoss, targetR), priceTickSize),
+      riskAmount, targetR, tpMode: "LINKED",
+    });
+    setDraftError(null); setDefaultSaved(false); setContextMenu(null);
+  }
+
+  function setDraftPrice(field: "entryPrice" | "stopLoss" | "takeProfit", value: number) {
+    value = snapPriceToTick(value, priceTickSize);
+    setDraft((current) => {
+      if (!current) return current;
+      if (field === "entryPrice") return {
+        ...current,
+        entryPrice: value,
+        type: currentPrice === null ? current.type : orderTypeForEntry(current.side, value, currentPrice),
+        takeProfit: current.tpMode === "LINKED" ? snapPriceToTick(targetPriceForR(current.side, value, current.stopLoss, current.targetR), priceTickSize) : current.takeProfit,
+      };
+      if (field === "stopLoss") return {
+        ...current, stopLoss: value,
+        takeProfit: current.tpMode === "LINKED" ? snapPriceToTick(targetPriceForR(current.side, current.entryPrice, value, current.targetR), priceTickSize) : current.takeProfit,
+      };
+      return { ...current, takeProfit: value, tpMode: "FREE" };
+    });
+    setDraftError(null);
+  }
+
+  function setTargetR(value: number) {
+    setDraft((current) => current ? {
+      ...current, targetR: value, tpMode: "LINKED" as const,
+      takeProfit: snapPriceToTick(targetPriceForR(current.side, current.entryPrice, current.stopLoss, value), priceTickSize),
+    } : current);
+    setDraftError(null);
+  }
+
+  function saveDefaults() {
+    if (!draft || draft.riskAmount <= 0 || draft.targetR <= 0) return;
+    setDefaultRiskAmount(draft.riskAmount); setDefaultTargetR(draft.targetR);
+    try {
+      window.localStorage.setItem(`market-replay-risk-settings-v1:${datasetId}`, JSON.stringify({ riskAmount: draft.riskAmount, targetR: draft.targetR }));
+    } catch {
+      // Local storage is optional; the current draft remains usable.
+    }
+    setDefaultSaved(true);
+  }
+
+  async function submitDraft() {
+    if (!draft || !draftSizing?.ok) return;
+    const success = await onSubmitOrder({
+      side: draft.side, type: draft.type, quantity: draftSizing.value.quantity,
+      riskAmount: draft.riskAmount, price: draft.entryPrice,
+      stopLoss: draft.stopLoss, takeProfit: draft.takeProfit,
+    });
+    if (success) {
+      setDraft(null); setDraftError(null);
+    } else setDraftError(copy.paperTrading.draftSubmitFailed);
+  }
+
+  const menuBelowCurrent = currentPrice !== null && contextMenu !== null && contextMenu.price < currentPrice;
+
   return (
-    <div className="relative">
-      <div ref={containerRef} className="h-[calc(100vh-18rem)] min-h-[620px] w-full overflow-hidden rounded-lg border bg-white" aria-label={copy.marketReplay.chartAriaLabel} />
+    <div
+      className="relative h-full min-h-0 select-none"
+      onContextMenu={openContextMenu}
+      onPointerDown={(event: ReactPointerEvent<HTMLDivElement>) => {
+        if (!(event.target as HTMLElement).closest("[data-context-menu]")) setContextMenu(null);
+      }}
+    >
+      <div ref={containerRef} className="h-full min-h-[240px] w-full overflow-hidden bg-white" aria-label={copy.marketReplay.chartAriaLabel} />
+
+      {lineActions.map((action) => (
+        <div
+          key={action.key}
+          data-line-action
+          data-testid={`line-action-${action.kind}-${action.key}`}
+          className="absolute right-16 z-20 flex max-w-[360px] -translate-y-1/2 items-center overflow-hidden rounded-md border bg-white/95 text-[11px] shadow-sm backdrop-blur"
+          style={{ top: action.y, borderColor: `${action.color}66`, color: action.color }}
+          onContextMenu={(event) => event.preventDefault()}
+        >
+          <span className="truncate px-2 py-1 font-medium">{action.label}</span>
+          <button
+            type="button"
+            className="flex shrink-0 items-center gap-1 border-l px-2 py-1 font-semibold hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-50"
+            style={{ borderColor: `${action.color}44` }}
+            disabled={paperBusy || (action.kind === "close" && hasPendingClose)}
+            aria-label={action.kind === "cancel" ? copy.paperTrading.cancelOrderFromLine(action.label) : copy.paperTrading.oneClickClose}
+            onClick={() => action.kind === "cancel" && action.orderId ? void onCancelOrder(action.orderId) : void onClosePosition()}
+          >
+            {action.kind === "cancel" ? <X className="h-3 w-3" /> : <LogOut className="h-3 w-3" />}
+            {action.kind === "cancel" ? copy.paperTrading.cancelFromLine : hasPendingClose ? copy.paperTrading.closePending : copy.paperTrading.oneClickClose}
+          </button>
+        </div>
+      ))}
+
       {latest?.status !== "COMPLETE" ? (
         <div className={`pointer-events-none absolute left-3 top-3 rounded-md px-2 py-1 text-xs shadow-sm ${latest?.status === "INCOMPLETE" ? "bg-amber-100 text-amber-900" : "bg-blue-50 text-blue-800"}`}>
           {latest?.status === "INCOMPLETE" ? copy.marketReplay.incompleteBar(latest.sourceCount, latest.expectedCount) : latest ? copy.marketReplay.formingBar(latest.sourceCount, latest.expectedCount) : null}
+        </div>
+      ) : null}
+
+      {!draft && paperSnapshot && latest ? <div className="pointer-events-none absolute bottom-3 left-3 rounded-md border border-slate-200 bg-white/90 px-2 py-1 text-[11px] text-slate-500 shadow-sm backdrop-blur">{copy.paperTrading.rightClickHint}</div> : null}
+
+      {contextMenu ? (
+        <div data-context-menu role="menu" className="absolute z-40 w-[220px] overflow-hidden rounded-lg border border-slate-200 bg-white p-1.5 shadow-xl" style={{ left: contextMenu.x, top: contextMenu.y }}>
+          <div className="border-b px-2 py-1.5">
+            <p className="text-[10px] font-medium uppercase tracking-wide text-slate-400">{copy.paperTrading.contextPrice}</p>
+            <p className="font-mono text-sm font-semibold text-slate-900">{formatPriceForTick(contextMenu.price, priceTickSize)}</p>
+          </div>
+          {!paperSnapshot ? (
+            <div className="space-y-2 p-2">
+              <p className="text-xs leading-5 text-slate-600">{copy.paperTrading.contextNoAccount}</p>
+              <Button type="button" size="sm" className="w-full" onClick={() => { setContextMenu(null); onOpenPaperAccount(); }}>{copy.paperTrading.openAccountSettings}</Button>
+            </div>
+          ) : !latest || currentPrice === null ? (
+            <div className="flex gap-2 p-2 text-xs leading-5 text-amber-800"><ShieldAlert className="mt-0.5 h-4 w-4 shrink-0" />{copy.paperTrading.contextNoBar}</div>
+          ) : menuBelowCurrent ? (
+            <div className="space-y-0.5 pt-1">
+              <button type="button" role="menuitem" data-testid="context-buy-limit" className="flex w-full items-center rounded-md px-2 py-2 text-left text-sm font-medium text-blue-700 hover:bg-blue-50" onClick={() => createDraft("BUY", "LIMIT")}>{copy.paperTrading.buyLimit}</button>
+              <button type="button" role="menuitem" data-testid="context-sell-stop" className="flex w-full items-center rounded-md px-2 py-2 text-left text-sm font-medium text-red-700 hover:bg-red-50" onClick={() => createDraft("SELL", "STOP")}>{copy.paperTrading.sellStop}</button>
+            </div>
+          ) : (
+            <div className="space-y-0.5 pt-1">
+              <button type="button" role="menuitem" data-testid="context-sell-limit" className="flex w-full items-center rounded-md px-2 py-2 text-left text-sm font-medium text-orange-700 hover:bg-orange-50" onClick={() => createDraft("SELL", "LIMIT")}>{copy.paperTrading.sellLimit}</button>
+              <button type="button" role="menuitem" data-testid="context-buy-stop" className="flex w-full items-center rounded-md px-2 py-2 text-left text-sm font-medium text-blue-700 hover:bg-blue-50" onClick={() => createDraft("BUY", "STOP")}>{copy.paperTrading.buyStop}</button>
+            </div>
+          )}
+        </div>
+      ) : null}
+
+      {draft && paperSnapshot ? (
+        <div data-order-ticket data-testid="risk-order-ticket" className="absolute right-16 top-3 z-30 w-[292px] rounded-xl border border-slate-200 bg-white/95 shadow-xl backdrop-blur">
+          <div className="flex items-start justify-between border-b px-3 py-2.5">
+            <div>
+              <div className="flex items-center gap-2">
+                <span className={`rounded px-1.5 py-0.5 text-[10px] font-bold ${draft.side === "BUY" ? "bg-blue-100 text-blue-700" : "bg-orange-100 text-orange-700"}`}>{draft.side === "BUY" ? copy.paperTrading.buy : copy.paperTrading.sell}</span>
+                <span className="text-sm font-semibold text-slate-950">{copy.paperTrading.draftTitle}</span>
+              </div>
+              <p className="mt-1 text-[11px] text-slate-500">{copy.paperTrading.draftDescription}</p>
+            </div>
+            <Button type="button" variant="ghost" size="icon" className="-mr-1 -mt-1 h-7 w-7" aria-label={copy.paperTrading.cancelDraft} onClick={() => { setDraft(null); setDraftError(null); }}><X className="h-4 w-4" /></Button>
+          </div>
+          <div className="space-y-3 p-3">
+            <div className="grid grid-cols-3 gap-2">
+              <div><Label htmlFor="draft-entry" className="text-[10px] text-blue-700">ENTRY · {orderTypeLabel(draft.type)}</Label><Input id="draft-entry" data-testid="draft-entry" type="number" step={priceTickSize} className="mt-1 h-8 px-2 font-mono text-xs" value={draft.entryPrice} onChange={(event) => setDraftPrice("entryPrice", Number(event.target.value))} /></div>
+              <div><Label htmlFor="draft-sl" className="text-[10px] text-red-700">SL</Label><Input id="draft-sl" data-testid="draft-sl" type="number" step={priceTickSize} className="mt-1 h-8 px-2 font-mono text-xs" value={draft.stopLoss} onChange={(event) => setDraftPrice("stopLoss", Number(event.target.value))} /></div>
+              <div><Label htmlFor="draft-tp" className="text-[10px] text-emerald-700">TP</Label><Input id="draft-tp" data-testid="draft-tp" type="number" step={priceTickSize} className="mt-1 h-8 px-2 font-mono text-xs" value={draft.takeProfit} onChange={(event) => setDraftPrice("takeProfit", Number(event.target.value))} /></div>
+            </div>
+            <div className="grid grid-cols-2 gap-2">
+              <div><Label htmlFor="draft-risk" className="text-[11px]">{copy.paperTrading.fixedRiskAmount}</Label><Input id="draft-risk" data-testid="draft-risk" type="number" min="0.01" step="any" className="mt-1 h-8" value={draft.riskAmount} onChange={(event) => { setDraft((current) => current ? { ...current, riskAmount: Number(event.target.value) } : current); setDraftError(null); setDefaultSaved(false); }} /></div>
+              <div><Label htmlFor="draft-target-r" className="text-[11px]">{copy.paperTrading.targetR}</Label><Input id="draft-target-r" data-testid="draft-target-r" type="number" min="0.01" step="0.1" className="mt-1 h-8" value={draft.targetR} onChange={(event) => { setTargetR(Number(event.target.value)); setDefaultSaved(false); }} /></div>
+            </div>
+            <div className="flex items-center justify-between text-[11px]">
+              <span className={`inline-flex items-center gap-1 ${draft.tpMode === "LINKED" ? "text-blue-700" : "text-slate-500"}`}><Link2 className="h-3 w-3" />{draft.tpMode === "LINKED" ? copy.paperTrading.linkedTarget : copy.paperTrading.freeTarget}</span>
+              <div className="flex items-center gap-1">
+                {draft.tpMode === "FREE" ? <button type="button" className="font-medium text-blue-700 hover:underline" onClick={() => setTargetR(draft.targetR)}>{copy.paperTrading.restoreTargetR}</button> : null}
+                <button type="button" className="font-medium text-slate-500 hover:text-slate-900" onClick={saveDefaults}>{defaultSaved ? copy.paperTrading.defaultSaved : copy.paperTrading.saveAsDefault}</button>
+              </div>
+            </div>
+            <div className="grid grid-cols-2 gap-x-3 gap-y-1 rounded-lg bg-slate-50 p-2.5 text-xs">
+              <span className="text-slate-500">{copy.paperTrading.estimatedQuantity}</span><strong data-testid="draft-quantity" className="text-right font-mono font-semibold text-slate-900">{draftSizing?.ok ? number(draftSizing.value.quantity) : "—"}</strong>
+              <span className="text-slate-500">{copy.paperTrading.estimatedLoss}</span><strong className="text-right font-medium text-red-700">{draftSizing?.ok ? `-${money(draftSizing.value.projectedLoss, paperSnapshot.session.currency)}` : "—"}</strong>
+              <span className="text-slate-500">{copy.paperTrading.estimatedProfit}</span><strong className="text-right font-medium text-emerald-700">{draftSizing?.ok && draftSizing.value.projectedProfit !== null ? `+${money(draftSizing.value.projectedProfit, paperSnapshot.session.currency)}` : "—"}</strong>
+              <span className="text-slate-500">{copy.paperTrading.netRewardRisk}</span><strong data-testid="draft-ratio" className="text-right font-mono font-semibold text-slate-900">{draftSizing?.ok && draftSizing.value.rewardRiskRatio !== null ? `${draftSizing.value.rewardRiskRatio.toFixed(2)}R` : "—"}</strong>
+            </div>
+            {!draftSizing?.ok ? <p className="text-xs text-red-600">{draftSizing ? sizingErrorText(draftSizing.error) : copy.paperTrading.invalidPrice}</p> : null}
+            {draftError || paperError ? <p className="text-xs text-red-600">{draftError ?? paperError}</p> : null}
+            <div className="grid grid-cols-[1fr_1.6fr] gap-2">
+              <Button type="button" variant="outline" size="sm" disabled={paperBusy} onClick={() => { setDraft(null); setDraftError(null); }}>{copy.paperTrading.cancelDraft}</Button>
+              <Button type="button" size="sm" data-testid="confirm-risk-order" disabled={paperBusy || !draftSizing?.ok} onClick={() => void submitDraft()}>{paperBusy ? <Loader2 className="h-4 w-4 animate-spin" /> : null}{paperBusy ? copy.paperTrading.submitting : copy.paperTrading.confirmDraft}</Button>
+            </div>
+          </div>
         </div>
       ) : null}
     </div>

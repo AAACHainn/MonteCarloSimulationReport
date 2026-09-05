@@ -76,6 +76,7 @@ function createBracket(
     status: "PENDING" as const,
     side,
     quantity: Math.abs(state.netQuantity),
+    riskAmount: null,
     stopLoss: null,
     takeProfit: null,
     reduceOnly: true,

@@ -2,7 +2,9 @@ import { randomUUID } from "node:crypto";
 import { NextResponse } from "next/server";
 import { prisma } from "@/lib/db";
 import { copy } from "@/lib/i18n";
-import { serializeSourceBar } from "@/lib/market-replay/dataset";
+import { getAggregationBucket } from "@/lib/market-replay/aggregation";
+import { datasetSession, datasetSourceInterval, serializeSourceBar } from "@/lib/market-replay/dataset";
+import { isValidDisplayInterval } from "@/lib/market-replay/types";
 import { advancePaperTrading } from "@/lib/paper-trading/engine";
 import { getPaperSessionSnapshot, serializePaperOrder, serializePaperSession } from "@/lib/paper-trading/serialize";
 import type { PaperEquityPointData, PaperFillData } from "@/lib/paper-trading/types";
@@ -17,14 +19,53 @@ export async function POST(request: Request, context: RouteContext) {
 
   const outcome = await prisma.$transaction(async (tx) => {
     const [dataset, progress, session] = await Promise.all([
-      tx.marketDataset.findUnique({ where: { id }, select: { barCount: true } }),
+      tx.marketDataset.findUnique({ where: { id } }),
       tx.replayProgress.findUnique({ where: { datasetId: id } }),
       tx.paperTradingSession.findUnique({ where: { datasetId: id } }),
     ]);
     if (!dataset || !progress) return { status: 404, error: copy.marketReplay.datasetNotFound } as const;
     if (progress.currentSequence !== parsed.data.expectedCurrentSequence) return { status: 409, error: copy.paperTrading.conflict } as const;
     if (progress.currentSequence >= dataset.barCount - 1) return { status: 400, error: copy.paperTrading.noNextBar } as const;
-    const targetSequence = Math.min(dataset.barCount - 1, progress.currentSequence + parsed.data.count);
+    let targetSequence = Math.min(dataset.barCount - 1, progress.currentSequence + parsed.data.count);
+    let completedDisplayBucketStart: string | null = null;
+    if (parsed.data.displayIntervalSeconds !== undefined) {
+      const sourceSeconds = datasetSourceInterval(dataset);
+      if (!sourceSeconds || !isValidDisplayInterval(sourceSeconds, parsed.data.displayIntervalSeconds)) {
+        return { status: 400, error: copy.marketReplay.invalidDisplayInterval } as const;
+      }
+      const [currentBar, nextBar] = await Promise.all([
+        progress.currentSequence >= 0
+          ? tx.marketBar.findUnique({ where: { datasetId_sequence: { datasetId: id, sequence: progress.currentSequence } } })
+          : null,
+        tx.marketBar.findFirst({ where: { datasetId: id, sequence: { gt: progress.currentSequence } }, orderBy: { sequence: "asc" } }),
+      ]);
+      if (!nextBar) return { status: 400, error: copy.paperTrading.noNextBar } as const;
+      const sessionConfig = datasetSession(dataset);
+      const nextBucket = getAggregationBucket(nextBar.timestamp.getTime(), sourceSeconds, parsed.data.displayIntervalSeconds, sessionConfig);
+      const currentBucket = currentBar
+        ? getAggregationBucket(currentBar.timestamp.getTime(), sourceSeconds, parsed.data.displayIntervalSeconds, sessionConfig)
+        : null;
+      const targetBucket = currentBucket?.start === nextBucket?.start ? currentBucket : nextBucket;
+      if (!targetBucket) return { status: 400, error: copy.marketReplay.invalidDisplayInterval } as const;
+      const targetBar = await tx.marketBar.findFirst({
+        where: {
+          datasetId: id,
+          sequence: { gt: progress.currentSequence },
+          timestamp: { gte: new Date(targetBucket.start), lt: new Date(targetBucket.end) },
+        },
+        orderBy: { sequence: "desc" },
+      });
+      if (!targetBar) return { status: 404, error: copy.marketReplay.loadError } as const;
+      targetSequence = targetBar.sequence;
+      completedDisplayBucketStart = new Date(targetBucket.start).toISOString();
+    }
+    if (!session && parsed.data.displayIntervalSeconds !== undefined) {
+      await tx.replayProgress.update({ where: { datasetId: id }, data: { currentSequence: targetSequence } });
+      return {
+        status: 200, error: null, currentSequence: targetSequence, paper: false,
+        bars: [], completedDisplayBucketStart,
+      } as const;
+    }
     const dbBars = await tx.marketBar.findMany({
       where: { datasetId: id, sequence: { gt: progress.currentSequence, lte: targetSequence } },
       orderBy: { sequence: "asc" },
@@ -33,7 +74,7 @@ export async function POST(request: Request, context: RouteContext) {
 
     if (!session) {
       await tx.replayProgress.update({ where: { datasetId: id }, data: { currentSequence: targetSequence } });
-      return { status: 200, error: null, currentSequence: targetSequence, paper: false, bars: dbBars } as const;
+      return { status: 200, error: null, currentSequence: targetSequence, paper: false, bars: dbBars, completedDisplayBucketStart } as const;
     }
     if (session.version !== parsed.data.expectedVersion || session.lastProcessedSequence !== progress.currentSequence) {
       return { status: 409, error: copy.paperTrading.conflict } as const;
@@ -70,14 +111,14 @@ export async function POST(request: Request, context: RouteContext) {
         where: { id: order.id },
         create: {
           id: order.id, sessionId: session.id, side: order.side, type: order.type, status: order.status,
-          quantity: order.quantity, price: order.price, stopLoss: order.stopLoss, takeProfit: order.takeProfit,
+          quantity: order.quantity, riskAmount: order.riskAmount, price: order.price, stopLoss: order.stopLoss, takeProfit: order.takeProfit,
           reduceOnly: order.reduceOnly, isProtective: order.isProtective, ocoGroupId: order.ocoGroupId,
           createdSequence: order.createdSequence, activeFromSequence: order.activeFromSequence,
           filledSequence: order.filledSequence, filledAt: order.filledAt ? new Date(order.filledAt) : null,
           filledPrice: order.filledPrice, cancelReason: order.cancelReason,
         },
         update: {
-          status: order.status, quantity: order.quantity, price: order.price,
+          status: order.status, quantity: order.quantity, riskAmount: order.riskAmount, price: order.price,
           activeFromSequence: order.activeFromSequence, filledSequence: order.filledSequence,
           filledAt: order.filledAt ? new Date(order.filledAt) : null,
           filledPrice: order.filledPrice, cancelReason: order.cancelReason,
@@ -91,7 +132,9 @@ export async function POST(request: Request, context: RouteContext) {
     let activeTrade = await tx.paperTrade.findFirst({ where: { sessionId: session.id, status: "OPEN" } });
     for (const fill of fills) {
       const parent = orders.find((order) => order.id === fill.orderId);
-      const risk = parent?.stopLoss == null ? null : Math.abs(fill.price - parent.stopLoss) * fill.openedQuantity;
+      const risk = parent?.riskAmount != null && fill.quantity > 0
+        ? parent.riskAmount * fill.openedQuantity / fill.quantity
+        : parent?.stopLoss == null ? null : Math.abs(fill.price - parent.stopLoss) * fill.openedQuantity;
       if (fill.reason === "ENTRY") {
         activeTrade = await tx.paperTrade.create({ data: { sessionId: session.id, side: fill.netQuantityAfter > 0 ? "LONG" : "SHORT", openedSequence: fill.sequence, openedAt: new Date(fill.timestamp), fees: fill.fee, plannedRisk: risk } });
       } else if (fill.reason === "ADD" && activeTrade) {
@@ -115,13 +158,14 @@ export async function POST(request: Request, context: RouteContext) {
       });
     }
     await tx.replayProgress.update({ where: { datasetId: id }, data: { currentSequence: targetSequence } });
-    return { status: 200, error: null, currentSequence: targetSequence, paper: true, bars: dbBars } as const;
+    return { status: 200, error: null, currentSequence: targetSequence, paper: true, bars: dbBars, completedDisplayBucketStart } as const;
   }, { timeout: 120_000 });
 
   if (outcome.error) return NextResponse.json({ error: outcome.error }, { status: outcome.status });
   return NextResponse.json({
     currentSequence: outcome.currentSequence,
-    advancedBars: outcome.bars.map(serializeSourceBar),
+    advancedBars: parsed.data.displayIntervalSeconds === undefined ? outcome.bars.map(serializeSourceBar) : [],
+    completedDisplayBucketStart: outcome.completedDisplayBucketStart,
     snapshot: outcome.paper ? await getPaperSessionSnapshot(id) : null,
   });
 }

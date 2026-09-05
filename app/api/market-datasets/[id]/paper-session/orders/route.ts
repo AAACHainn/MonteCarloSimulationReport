@@ -2,14 +2,11 @@ import { NextResponse } from "next/server";
 import { prisma } from "@/lib/db";
 import { copy } from "@/lib/i18n";
 import { getPaperSessionSnapshot } from "@/lib/paper-trading/serialize";
+import { calculateRiskSizing, isValidBracket } from "@/lib/paper-trading/risk-sizing";
+import { isPriceOnTick } from "@/lib/market-replay/price-ticks";
 import { paperOrderSchema } from "@/lib/validations";
 
 type RouteContext = { params: Promise<{ id: string }> };
-
-function validBracket(side: "BUY" | "SELL", reference: number, stopLoss?: number | null, takeProfit?: number | null) {
-  if (side === "BUY") return (stopLoss == null || stopLoss < reference) && (takeProfit == null || takeProfit > reference);
-  return (stopLoss == null || stopLoss > reference) && (takeProfit == null || takeProfit < reference);
-}
 
 export async function POST(request: Request, context: RouteContext) {
   const { id } = await context.params;
@@ -21,21 +18,44 @@ export async function POST(request: Request, context: RouteContext) {
     if (session.version !== parsed.data.expectedVersion) return { status: 409, error: copy.paperTrading.conflict };
     const [progress, dataset] = await Promise.all([
       tx.replayProgress.findUnique({ where: { datasetId: id } }),
-      tx.marketDataset.findUnique({ where: { id }, select: { barCount: true } }),
+      tx.marketDataset.findUnique({ where: { id }, select: { barCount: true, priceTickSize: true } }),
     ]);
     if (!progress || !dataset || progress.currentSequence < 0) return { status: 400, error: copy.paperTrading.noCurrentBar };
     if (progress.currentSequence >= dataset.barCount - 1) return { status: 400, error: copy.paperTrading.noNextBar };
+    const prices = [parsed.data.price, parsed.data.stopLoss, parsed.data.takeProfit].filter((value): value is number => value !== null && value !== undefined);
+    if (prices.some((price) => !isPriceOnTick(price, dataset.priceTickSize))) {
+      return { status: 400, error: copy.paperTrading.priceNotOnTick };
+    }
     const currentBar = await tx.marketBar.findUnique({ where: { datasetId_sequence: { datasetId: id, sequence: progress.currentSequence } } });
     const reference = parsed.data.price ?? currentBar?.close;
-    if (reference == null || !validBracket(parsed.data.side, reference, parsed.data.stopLoss, parsed.data.takeProfit)) {
+    if (reference == null || !isValidBracket(parsed.data.side, reference, parsed.data.stopLoss ?? null, parsed.data.takeProfit ?? null)) {
       return { status: 400, error: copy.paperTrading.invalidBracket };
+    }
+    let quantity = parsed.data.quantity;
+    if (parsed.data.riskAmount != null) {
+      if (parsed.data.type === "MARKET" || parsed.data.stopLoss == null) {
+        return { status: 400, error: copy.paperTrading.invalidBracket };
+      }
+      const sizing = calculateRiskSizing({
+        side: parsed.data.side,
+        type: parsed.data.type,
+        entryPrice: reference,
+        stopLoss: parsed.data.stopLoss,
+        takeProfit: parsed.data.takeProfit,
+        riskAmount: parsed.data.riskAmount,
+        commissionBps: session.commissionBps,
+        slippageBps: session.slippageBps,
+      });
+      if (!sizing.ok) return { status: 400, error: copy.paperTrading.invalidBracket };
+      quantity = sizing.value.quantity;
     }
     await tx.paperOrder.create({
       data: {
         sessionId: session.id,
         side: parsed.data.side,
         type: parsed.data.type,
-        quantity: parsed.data.quantity,
+        quantity,
+        riskAmount: parsed.data.reduceOnly ? null : parsed.data.riskAmount,
         price: parsed.data.type === "MARKET" ? null : parsed.data.price,
         stopLoss: parsed.data.reduceOnly ? null : parsed.data.stopLoss,
         takeProfit: parsed.data.reduceOnly ? null : parsed.data.takeProfit,

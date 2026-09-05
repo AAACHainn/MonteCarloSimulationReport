@@ -24,6 +24,11 @@ export const tradeJournalSchema = z.object({
   description: z.string().trim().max(500).optional().nullable(),
 });
 
+export const priceTickSizeSchema = z.coerce.number({ invalid_type_error: copy.marketReplay.validation.invalidPriceTickSize })
+  .finite(copy.marketReplay.validation.invalidPriceTickSize)
+  .positive(copy.marketReplay.validation.invalidPriceTickSize)
+  .max(1_000_000_000_000, copy.marketReplay.validation.invalidPriceTickSize);
+
 export const marketDatasetSchema = z.object({
   name: z.string().trim().min(1, copy.marketReplay.validation.datasetNameRequired).max(120),
   description: z.string().trim().max(500).optional().nullable(),
@@ -31,6 +36,7 @@ export const marketDatasetSchema = z.object({
   timeframe: z.string().trim().min(1, copy.marketReplay.validation.timeframeRequired).max(30),
   timezone: z.string().trim().min(1, copy.marketReplay.validation.timezoneRequired).max(100),
   sourceIntervalSeconds: z.coerce.number().int().min(1).max(MAX_DISPLAY_INTERVAL_SECONDS),
+  priceTickSize: priceTickSizeSchema,
   sessionMode: z.enum(["TWENTY_FOUR_SEVEN", "DAILY_SESSION"]).default("TWENTY_FOUR_SEVEN"),
   sessionOpenMinute: z.coerce.number().int().min(0).max(1_439).optional().nullable(),
   sessionCloseMinute: z.coerce.number().int().min(1).max(1_440).optional().nullable(),
@@ -82,6 +88,7 @@ export const paperOrderSchema = z.object({
   side: z.enum(["BUY", "SELL"]),
   type: z.enum(["MARKET", "LIMIT", "STOP"]),
   quantity: z.coerce.number().finite().positive().max(1_000_000_000_000),
+  riskAmount: z.coerce.number().finite().positive().max(1_000_000_000_000).optional().nullable(),
   price: z.coerce.number().finite().optional().nullable(),
   stopLoss: z.coerce.number().finite().optional().nullable(),
   takeProfit: z.coerce.number().finite().optional().nullable(),
@@ -96,13 +103,19 @@ export const paperOrderSchema = z.object({
 export const paperOrderUpdateSchema = z.object({
   quantity: z.coerce.number().finite().positive().max(1_000_000_000_000).optional(),
   price: z.coerce.number().finite().optional(),
+  stopLoss: z.coerce.number().finite().optional().nullable(),
+  takeProfit: z.coerce.number().finite().optional().nullable(),
+  riskAmount: z.coerce.number().finite().positive().max(1_000_000_000_000).optional().nullable(),
   expectedVersion: z.coerce.number().int().positive(),
-}).refine((value) => value.quantity !== undefined || value.price !== undefined, copy.paperTrading.orderUpdateRequired);
+}).refine((value) => value.quantity !== undefined || value.price !== undefined
+  || value.stopLoss !== undefined || value.takeProfit !== undefined || value.riskAmount !== undefined,
+copy.paperTrading.orderUpdateRequired);
 
 export const paperAdvanceSchema = z.object({
   expectedCurrentSequence: z.coerce.number().int().min(-1),
   expectedVersion: z.coerce.number().int().positive().optional().nullable(),
   count: z.coerce.number().int().min(1).max(MAX_REPLAY_ADVANCE_COUNT).default(1),
+  displayIntervalSeconds: z.coerce.number().int().min(1).max(MAX_DISPLAY_INTERVAL_SECONDS).optional(),
 });
 
 export const paperResetSchema = z.object({ action: z.enum(["RESET", "CHANGE_START"]) });

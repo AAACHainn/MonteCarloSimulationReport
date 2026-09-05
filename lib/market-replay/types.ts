@@ -94,6 +94,7 @@ export type MarketDatasetSummary = {
   timezone: string;
   status: string;
   sourceIntervalSeconds: number | null;
+  priceTickSize: number;
   sessionMode: SessionMode;
   sessionOpenMinute: number | null;
   sessionCloseMinute: number | null;

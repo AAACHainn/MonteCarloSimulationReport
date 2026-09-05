@@ -2,15 +2,17 @@
 
 import { TZDate } from "@date-fns/tz";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { ChevronRight, Loader2, Pause, Play, Plus, RotateCcw, Settings2, X } from "lucide-react";
+import { ChevronRight, Loader2, Pause, Play, Plus, RotateCcw, Settings2, WalletCards, X } from "lucide-react";
 import { ReplayChart } from "@/components/market-replay/replay-chart";
 import { PaperAccountStrip, PaperTradingDetails, PaperTradingPanel } from "@/components/market-replay/paper-trading-panel";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { ConfirmDialog } from "@/components/ui/confirm-dialog";
+import { Dialog } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { copy } from "@/lib/i18n";
 import {
   createReplayState,
@@ -113,6 +115,7 @@ export function MarketReplayClient({ dataset }: { dataset: MarketDatasetSummary 
   const [startError, setStartError] = useState<string | null>(null);
   const [saveStatus, setSaveStatus] = useState<SaveStatus>("idle");
   const [confirmAction, setConfirmAction] = useState<"reset" | "change-start" | "paper-clear" | null>(null);
+  const [settingsDialog, setSettingsDialog] = useState<"indicators" | "paper" | null>(null);
   const [emaEnabled, setEmaEnabled] = useState(false);
   const [emaIndicators, setEmaIndicators] = useState<EmaIndicatorConfig[]>(DEFAULT_EMA_INDICATORS);
   const [emaSettingsLoaded, setEmaSettingsLoaded] = useState(false);
@@ -123,6 +126,7 @@ export function MarketReplayClient({ dataset }: { dataset: MarketDatasetSummary 
   const [paperSnapshot, setPaperSnapshot] = useState<PaperSessionSnapshot | null>(null);
   const [paperBusy, setPaperBusy] = useState(false);
   const [paperError, setPaperError] = useState<string | null>(null);
+  const [draftActive, setDraftActive] = useState(false);
   const latestReplayRef = useRef<ReplayState | null>(null);
   const pendingSaveRef = useRef<ReplayState | null>(null);
   const saveTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -130,8 +134,17 @@ export function MarketReplayClient({ dataset }: { dataset: MarketDatasetSummary 
   const saveChainRef = useRef<Promise<void>>(Promise.resolve());
   const paperSnapshotRef = useRef<PaperSessionSnapshot | null>(null);
   const advancingRef = useRef(false);
+  const advanceCompletionRef = useRef<Promise<void>>(Promise.resolve());
+  const paperMutationActiveRef = useRef(false);
+  const paperMutationChainRef = useRef<Promise<void>>(Promise.resolve());
+  const pendingPaperMutationsRef = useRef(0);
   const playbackAccumulatorRef = useRef(0);
   const playbackClockRef = useRef(0);
+
+  const commitPaperSnapshot = useCallback((snapshot: PaperSessionSnapshot | null) => {
+    paperSnapshotRef.current = snapshot;
+    setPaperSnapshot(snapshot);
+  }, []);
 
   useEffect(() => {
     const stored = loadEmaSettings();
@@ -154,7 +167,12 @@ export function MarketReplayClient({ dataset }: { dataset: MarketDatasetSummary 
     }
   }, [emaEnabled, emaIndicators, emaSettingsLoaded]);
 
-  const loadWindow = useCallback(async (endSequence: number, displayIntervalSeconds: number, warmupCount: number) => {
+  const loadWindow = useCallback(async (
+    endSequence: number,
+    displayIntervalSeconds: number,
+    warmupCount: number,
+    completedDisplayBucketStart: string | null = null,
+  ) => {
     const params = new URLSearchParams({
       displayIntervalSeconds: String(displayIntervalSeconds), endSequence: String(endSequence),
       visibleCount: "200", warmupCount: String(Math.min(EMA_LENGTH_MAX, warmupCount)),
@@ -162,7 +180,12 @@ export function MarketReplayClient({ dataset }: { dataset: MarketDatasetSummary 
     const response = await fetch(`/api/market-datasets/${dataset.id}/bars/window?${params}`);
     const data = await response.json();
     if (!response.ok) throw new Error(data?.error ?? copy.marketReplay.loadError);
-    setBars(data.visibleBars as AggregatedMarketBarData[]);
+    const closeCompletedBucket = (bar: AggregatedMarketBarData) => (
+      bar.timestamp === completedDisplayBucketStart
+        ? { ...bar, status: bar.sourceCount === bar.expectedCount ? "COMPLETE" as const : "INCOMPLETE" as const }
+        : bar
+    );
+    setBars((data.visibleBars as AggregatedMarketBarData[]).map(closeCompletedBucket));
     setWarmupBars(data.warmupBars as AggregatedMarketBarData[]);
     setCurrentSourceBar(data.lastSourceBar as MarketBarData | null);
   }, [dataset.id]);
@@ -192,9 +215,9 @@ export function MarketReplayClient({ dataset }: { dataset: MarketDatasetSummary 
     const response = await fetch(`/api/market-datasets/${dataset.id}/paper-session`);
     const data = await response.json();
     if (!response.ok) throw new Error(data?.error ?? copy.paperTrading.requestFailed);
-    setPaperSnapshot(data.snapshot as PaperSessionSnapshot | null);
+    commitPaperSnapshot(data.snapshot as PaperSessionSnapshot | null);
     return data.snapshot as PaperSessionSnapshot | null;
-  }, [dataset.id]);
+  }, [commitPaperSnapshot, dataset.id]);
 
   useEffect(() => {
     let cancelled = false;
@@ -202,11 +225,11 @@ export function MarketReplayClient({ dataset }: { dataset: MarketDatasetSummary 
       .then(async (response) => {
         const data = await response.json();
         if (!response.ok) throw new Error(data?.error ?? copy.paperTrading.requestFailed);
-        if (!cancelled) setPaperSnapshot(data.snapshot as PaperSessionSnapshot | null);
+        if (!cancelled) commitPaperSnapshot(data.snapshot as PaperSessionSnapshot | null);
       })
       .catch((error) => { if (!cancelled) setPaperError(error instanceof Error ? error.message : copy.paperTrading.requestFailed); });
     return () => { cancelled = true; };
-  }, [dataset.id]);
+  }, [commitPaperSnapshot, dataset.id]);
 
   const flushSave = useCallback(() => {
     if (saveTimerRef.current) clearTimeout(saveTimerRef.current);
@@ -243,10 +266,12 @@ export function MarketReplayClient({ dataset }: { dataset: MarketDatasetSummary 
     saveTimerRef.current = setTimeout(flushSave, delay);
   }, [flushSave]);
 
-  const advanceBars = useCallback(async (count: number, keepPlaying: boolean) => {
+  const advanceBars = useCallback(async (count: number, keepPlaying: boolean, displayIntervalSeconds?: number) => {
     const current = latestReplayRef.current;
-    if (!current || advancingRef.current || current.currentSequence >= current.barCount - 1) return;
+    if (!current || advancingRef.current || paperMutationActiveRef.current || current.currentSequence >= current.barCount - 1) return;
     advancingRef.current = true;
+    let resolveAdvance: () => void = () => undefined;
+    advanceCompletionRef.current = new Promise<void>((resolve) => { resolveAdvance = resolve; });
     try {
       const response = await fetch(`/api/market-datasets/${dataset.id}/replay/advance`, {
         method: "POST",
@@ -255,6 +280,7 @@ export function MarketReplayClient({ dataset }: { dataset: MarketDatasetSummary 
           expectedCurrentSequence: current.currentSequence,
           expectedVersion: paperSnapshotRef.current?.session.version ?? null,
           count,
+          displayIntervalSeconds,
         }),
       });
       const data = await response.json();
@@ -262,9 +288,11 @@ export function MarketReplayClient({ dataset }: { dataset: MarketDatasetSummary 
         if (response.status === 409) await reloadPaper();
         throw new Error(data?.error ?? copy.paperTrading.advanceFailed);
       }
-      if (data.snapshot) setPaperSnapshot(data.snapshot as PaperSessionSnapshot);
+      if (data.snapshot) commitPaperSnapshot(data.snapshot as PaperSessionSnapshot);
       const advancedBars = data.advancedBars as MarketBarData[];
-      if (advancedBars.length && dataset.sourceIntervalSeconds) {
+      if (displayIntervalSeconds !== undefined) {
+        await loadWindow(data.currentSequence, current.displayIntervalSeconds, EMA_LENGTH_MAX, data.completedDisplayBucketStart ?? null);
+      } else if (advancedBars.length && dataset.sourceIntervalSeconds) {
         setCurrentSourceBar(advancedBars.at(-1)!);
         setBars((currentBars) => advancedBars.reduce((aggregates, source) => mergeSourceBar(aggregates, source, {
           sourceSeconds: dataset.sourceIntervalSeconds!, displaySeconds: current.displayIntervalSeconds,
@@ -283,8 +311,9 @@ export function MarketReplayClient({ dataset }: { dataset: MarketDatasetSummary 
       setPaperError(error instanceof Error ? error.message : copy.paperTrading.advanceFailed);
     } finally {
       advancingRef.current = false;
+      resolveAdvance();
     }
-  }, [dataset, emaIndicators, reloadPaper]);
+  }, [commitPaperSnapshot, dataset, emaIndicators, loadWindow, reloadPaper]);
 
   const replayStatus = replay?.status;
   useEffect(() => {
@@ -358,11 +387,24 @@ export function MarketReplayClient({ dataset }: { dataset: MarketDatasetSummary 
     if (next.status !== "playing") queueSave(next, true);
   }
 
-  function revealNextBar() {
-    if (!replay) return;
-    setReplay(pauseReplay(replay));
-    void advanceBars(1, false);
-  }
+  const revealNextBar = useCallback(() => {
+    const current = latestReplayRef.current;
+    if (!current || current.status === "playing" || current.status === "finished") return;
+    setReplay(pauseReplay(current));
+    void advanceBars(1, false, current.displayIntervalSeconds);
+  }, [advanceBars]);
+
+  useEffect(() => {
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (!event.ctrlKey || event.altKey || event.shiftKey || event.metaKey || event.key !== "ArrowRight") return;
+      const target = event.target as HTMLElement | null;
+      if (settingsDialog || confirmAction || target?.closest("input, textarea, [contenteditable='true']")) return;
+      event.preventDefault();
+      revealNextBar();
+    };
+    window.addEventListener("keydown", onKeyDown);
+    return () => window.removeEventListener("keydown", onKeyDown);
+  }, [confirmAction, revealNextBar, settingsDialog]);
 
   function changeSpeed(value: number) {
     if (!replay) return;
@@ -410,7 +452,7 @@ export function MarketReplayClient({ dataset }: { dataset: MarketDatasetSummary 
 
   function requestConfirmation(action: "reset" | "change-start" | "paper-clear") {
     if (!replay) return;
-    if (replay.status === "playing") {
+    if (action !== "paper-clear" && replay.status === "playing") {
       const paused = pauseReplay(replay);
       setReplay(paused);
       queueSave(paused, true);
@@ -423,7 +465,7 @@ export function MarketReplayClient({ dataset }: { dataset: MarketDatasetSummary 
     if (confirmAction === "paper-clear") {
       const response = await fetch(`/api/market-datasets/${dataset.id}/paper-session`, { method: "DELETE" });
       if (!response.ok) setPaperError(copy.paperTrading.requestFailed);
-      else { setPaperSnapshot(null); setPaperError(null); }
+      else { commitPaperSnapshot(null); setPaperError(null); }
     } else {
       if (saveTimerRef.current) clearTimeout(saveTimerRef.current);
       saveTimerRef.current = null;
@@ -439,7 +481,7 @@ export function MarketReplayClient({ dataset }: { dataset: MarketDatasetSummary 
         setConfirmAction(null);
         return;
       }
-      setPaperSnapshot(null);
+      commitPaperSnapshot(null);
       if (confirmAction === "reset") {
         const reset = resetReplay(replay);
         setReplay(reset);
@@ -452,69 +494,83 @@ export function MarketReplayClient({ dataset }: { dataset: MarketDatasetSummary 
     setConfirmAction(null);
   }
 
-  function pauseForTrading() {
-    const current = latestReplayRef.current;
-    if (!current || current.status !== "playing") return;
-    const paused = pauseReplay(current);
-    setReplay(paused);
-    queueSave(paused, true);
-  }
-
-  async function mutatePaper(url: string, init: RequestInit) {
-    pauseForTrading();
+  async function mutatePaper(url: string, createInit: (version: number | null) => RequestInit) {
+    pendingPaperMutationsRef.current += 1;
     setPaperBusy(true);
     setPaperError(null);
-    try {
-      const response = await fetch(url, init);
-      const data = await response.json();
-      if (!response.ok) {
-        if (response.status === 409) await reloadPaper();
-        throw new Error(data?.error ?? copy.paperTrading.requestFailed);
+    const operation = paperMutationChainRef.current.catch(() => undefined).then(async () => {
+      paperMutationActiveRef.current = true;
+      await advanceCompletionRef.current.catch(() => undefined);
+      try {
+        const version = paperSnapshotRef.current?.session.version ?? null;
+        const response = await fetch(url, createInit(version));
+        const data = await response.json();
+        if (!response.ok) {
+          if (response.status === 409) await reloadPaper();
+          throw new Error(data?.error ?? copy.paperTrading.requestFailed);
+        }
+        if (data.snapshot !== undefined) commitPaperSnapshot(data.snapshot as PaperSessionSnapshot | null);
+        return true;
+      } catch (error) {
+        setPaperError(error instanceof Error ? error.message : copy.paperTrading.requestFailed);
+        if (paperSnapshotRef.current) await reloadPaper().catch(() => undefined);
+        return false;
+      } finally {
+        paperMutationActiveRef.current = false;
       }
-      if (data.snapshot !== undefined) setPaperSnapshot(data.snapshot as PaperSessionSnapshot | null);
-    } catch (error) {
-      setPaperError(error instanceof Error ? error.message : copy.paperTrading.requestFailed);
-      if (paperSnapshotRef.current) await reloadPaper().catch(() => undefined);
-    } finally {
-      setPaperBusy(false);
-    }
+    });
+    paperMutationChainRef.current = operation.then(() => undefined, () => undefined);
+    return operation.finally(() => {
+      pendingPaperMutationsRef.current -= 1;
+      if (pendingPaperMutationsRef.current === 0) setPaperBusy(false);
+    });
   }
 
   async function createPaperAccount(config: { initialCapital: number; currency: string; commissionBps: number; slippageBps: number }) {
-    await mutatePaper(`/api/market-datasets/${dataset.id}/paper-session`, {
+    return mutatePaper(`/api/market-datasets/${dataset.id}/paper-session`, () => ({
       method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(config),
-    });
+    }));
   }
 
-  async function submitPaperOrder(order: { side: PaperSide; type: PaperOrderType; quantity: number; price: number | null; stopLoss: number | null; takeProfit: number | null; reduceOnly?: boolean }) {
-    const version = paperSnapshotRef.current?.session.version;
-    if (!version) return;
-    await mutatePaper(`/api/market-datasets/${dataset.id}/paper-session/orders`, {
+  async function submitPaperOrder(order: { side: PaperSide; type: PaperOrderType; quantity: number; riskAmount?: number | null; price: number | null; stopLoss: number | null; takeProfit: number | null; reduceOnly?: boolean }) {
+    if (!paperSnapshotRef.current) return false;
+    return mutatePaper(`/api/market-datasets/${dataset.id}/paper-session/orders`, (version) => ({
       method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ ...order, expectedVersion: version }),
-    });
+    }));
   }
 
-  async function updatePaperOrder(orderId: string, update: { price?: number; quantity?: number }) {
-    const version = paperSnapshotRef.current?.session.version;
-    if (!version) return;
-    await mutatePaper(`/api/market-datasets/${dataset.id}/paper-session/orders/${orderId}`, {
+  async function updatePaperOrder(orderId: string, update: { price?: number; quantity?: number; stopLoss?: number | null; takeProfit?: number | null; riskAmount?: number | null }) {
+    if (!paperSnapshotRef.current) return false;
+    return mutatePaper(`/api/market-datasets/${dataset.id}/paper-session/orders/${orderId}`, (version) => ({
       method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ ...update, expectedVersion: version }),
-    });
+    }));
   }
 
   async function cancelPaperOrder(orderId: string) {
-    const version = paperSnapshotRef.current?.session.version;
-    if (!version) return;
-    await mutatePaper(`/api/market-datasets/${dataset.id}/paper-session/orders/${orderId}`, {
+    if (!paperSnapshotRef.current) return false;
+    return mutatePaper(`/api/market-datasets/${dataset.id}/paper-session/orders/${orderId}`, (version) => ({
       method: "DELETE", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ expectedVersion: version }),
-    });
+    }));
   }
 
   async function cancelPaperScope(scope: "ALL" | "BRACKET") {
-    const version = paperSnapshotRef.current?.session.version;
-    if (!version) return;
-    await mutatePaper(`/api/market-datasets/${dataset.id}/paper-session/orders`, {
+    if (!paperSnapshotRef.current) return false;
+    return mutatePaper(`/api/market-datasets/${dataset.id}/paper-session/orders`, (version) => ({
       method: "DELETE", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ expectedVersion: version, scope }),
+    }));
+  }
+
+  async function closePaperPosition() {
+    const quantity = Math.abs(paperSnapshotRef.current?.session.netQuantity ?? 0);
+    if (quantity <= 0) return false;
+    return submitPaperOrder({
+      side: Number(paperSnapshotRef.current?.session.netQuantity) > 0 ? "SELL" : "BUY",
+      type: "MARKET",
+      quantity,
+      price: null,
+      stopLoss: null,
+      takeProfit: null,
+      reduceOnly: true,
     });
   }
 
@@ -573,148 +629,96 @@ export function MarketReplayClient({ dataset }: { dataset: MarketDatasetSummary 
 
   return (
     <>
-      <div className="space-y-4">
-        <Card>
-          <CardContent className="space-y-4 p-4">
-            <div className="flex flex-wrap items-center gap-2">
-              <Button type="button" onClick={togglePlayback} disabled={replay.status === "finished"}>
-                {replay.status === "playing" ? <Pause className="h-4 w-4" /> : <Play className="h-4 w-4" />}
-                {replay.status === "playing" ? copy.marketReplay.pause : copy.marketReplay.play}
-              </Button>
-              <Button type="button" variant="outline" onClick={revealNextBar} disabled={replay.status === "finished" || replay.status === "playing"}>
-                <ChevronRight className="h-4 w-4" />{copy.marketReplay.nextBar}
-              </Button>
-              <div className="flex items-center gap-2">
-                <Label htmlFor="replay-speed" className="whitespace-nowrap">{copy.marketReplay.speed}</Label>
-                <Input id="replay-speed" type="range" min={MIN_PLAYBACK_RATE} max={MAX_PLAYBACK_RATE} value={replay.playbackRate} onChange={(event) => changeSpeed(Number(event.target.value))} className="w-32" />
-                <Input type="number" min={MIN_PLAYBACK_RATE} max={MAX_PLAYBACK_RATE} value={replay.playbackRate} onChange={(event) => changeSpeed(Math.max(MIN_PLAYBACK_RATE, Math.min(MAX_PLAYBACK_RATE, Number(event.target.value))))} className="w-20" />
-                <span className="text-sm font-medium text-slate-700">{copy.marketReplay.playbackRate(replay.playbackRate)}</span>
-              </div>
-              <div className="flex flex-wrap items-center gap-2">
-                <Label htmlFor="display-interval" className="whitespace-nowrap">{copy.marketReplay.displayInterval}</Label>
-                <select id="display-interval" value={replay.displayIntervalSeconds} onChange={(event) => void changeDisplayInterval(Number(event.target.value))} className="h-10 rounded-md border bg-white px-3 text-sm">
-                  {DISPLAY_INTERVAL_PRESETS.filter((value) => dataset.sourceIntervalSeconds && isValidDisplayInterval(dataset.sourceIntervalSeconds, value)).map((value) => <option key={value} value={value}>{formatInterval(value)}</option>)}
-                  {!DISPLAY_INTERVAL_PRESETS.includes(replay.displayIntervalSeconds) ? <option value={replay.displayIntervalSeconds}>{formatInterval(replay.displayIntervalSeconds)}</option> : null}
-                </select>
-                <Input aria-label={copy.marketReplay.customInterval} type="number" min="1" value={customInterval} onChange={(event) => setCustomInterval(event.target.value)} className="w-20" placeholder="9" />
-                <select value={customIntervalUnit} onChange={(event) => setCustomIntervalUnit(event.target.value as "s" | "m" | "h")} className="h-10 rounded-md border bg-white px-2 text-sm">
-                  <option value="s">{copy.marketReplay.intervalSeconds}</option><option value="m">{copy.marketReplay.intervalMinutes}</option><option value="h">{copy.marketReplay.intervalHours}</option>
-                </select>
-                <Button type="button" variant="outline" size="sm" onClick={() => {
-                  const multiplier = customIntervalUnit === "s" ? 1 : customIntervalUnit === "m" ? 60 : 3_600;
-                  void changeDisplayInterval(Number(customInterval) * multiplier);
-                }}>{copy.marketReplay.customInterval}</Button>
-              </div>
-              <div className="ml-auto flex flex-wrap gap-2">
-                <Button type="button" variant="outline" onClick={() => requestConfirmation("reset")}><RotateCcw className="h-4 w-4" />{copy.marketReplay.reset}</Button>
-                <Button type="button" variant="outline" onClick={() => requestConfirmation("change-start")}>{copy.marketReplay.chooseNewStart}</Button>
-              </div>
-            </div>
-            <div className="grid gap-3 border-t pt-4 text-sm sm:grid-cols-2 lg:grid-cols-4">
-              <div><p className="text-xs text-slate-500">{copy.marketReplay.recentProgress}</p><p className="font-medium text-slate-950">{copy.marketReplay.progress(revealedCount, replayCount)}</p></div>
-              <div><p className="text-xs text-slate-500">{copy.marketReplay.currentTime}</p><p className="font-medium text-slate-950">{currentBar ? formatReplayTime(currentBar.timestamp, dataset.timezone) : copy.marketReplay.waiting}</p></div>
-              <div><p className="text-xs text-slate-500">{copy.marketReplay.ohlc}</p><p className="font-mono text-xs text-slate-800">{currentBar ? `${currentBar.open} / ${currentBar.high} / ${currentBar.low} / ${currentBar.close}` : "–"}</p></div>
-              <div><p className="text-xs text-slate-500">{copy.marketReplay.status}</p><p className="font-medium text-slate-950">{replay.status === "playing" ? copy.marketReplay.play : replay.status === "finished" ? copy.marketReplay.finished : copy.marketReplay.pause}{statusText ? ` · ${statusText}` : ""}</p></div>
-            </div>
-            <div className="space-y-3 border-t pt-4">
-              <div className="flex flex-wrap items-start justify-between gap-3">
-                <div>
-                  <p className="text-sm font-medium text-slate-950">{copy.marketReplay.emaTitle}</p>
-                  <p className="mt-0.5 text-xs text-slate-500">{copy.marketReplay.emaDescription}</p>
-                </div>
-                <div className="flex items-center gap-2">
-                  <span className="text-xs text-slate-500">{emaEnabled ? copy.marketReplay.emaOn : copy.marketReplay.emaOff}</span>
-                  <button
-                    type="button"
-                    role="switch"
-                    aria-checked={emaEnabled}
-                    aria-label={copy.marketReplay.emaMaster}
-                    onClick={() => setEmaEnabled((enabled) => !enabled)}
-                    className={`relative h-6 w-11 rounded-full transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-600 focus-visible:ring-offset-2 ${emaEnabled ? "bg-blue-600" : "bg-slate-300"}`}
-                  >
-                    <span className={`absolute left-0 top-0.5 h-5 w-5 rounded-full bg-white shadow-sm transition-transform ${emaEnabled ? "translate-x-5" : "translate-x-0.5"}`} />
-                  </button>
-                </div>
-              </div>
-              <div className="flex flex-wrap items-center gap-2">
-                {emaIndicators.map((indicator) => (
-                  <div key={indicator.id} className="flex h-10 items-center gap-2 rounded-md border bg-slate-50 px-2">
-                    <input
-                      type="checkbox"
-                      checked={indicator.visible}
-                      onChange={(event) => setEmaIndicators((current) => current.map((item) => item.id === indicator.id ? { ...item, visible: event.target.checked } : item))}
-                      aria-label={copy.marketReplay.emaLineToggle(indicator.length)}
-                      className="h-4 w-4 rounded border-slate-300"
-                    />
-                    <span className="h-2.5 w-2.5 rounded-full" style={{ backgroundColor: indicator.color }} aria-hidden="true" />
-                    <span className="whitespace-nowrap text-xs font-medium text-slate-700">{copy.marketReplay.emaShortName}</span>
-                    <Label htmlFor={`ema-length-${indicator.id}`} className="sr-only">{copy.marketReplay.emaLength}</Label>
-                    <Input
-                      key={`${indicator.id}-${indicator.length}`}
-                      id={`ema-length-${indicator.id}`}
-                      type="number"
-                      min={EMA_LENGTH_MIN}
-                      max={EMA_LENGTH_MAX}
-                      step="1"
-                      defaultValue={indicator.length}
-                      onBlur={(event) => {
-                        if (!setEmaLength(indicator.id, Number(event.currentTarget.value))) {
-                          event.currentTarget.value = String(indicator.length);
-                        }
-                      }}
-                      onKeyDown={(event) => { if (event.key === "Enter") event.currentTarget.blur(); }}
-                      className="h-8 w-20 bg-white font-mono text-xs"
-                    />
-                    <Button
-                      type="button"
-                      variant="ghost"
-                      size="icon"
-                      onClick={() => {
-                        setEmaIndicators((current) => current.filter((item) => item.id !== indicator.id));
-                        setEmaError(null);
-                      }}
-                      aria-label={copy.marketReplay.emaRemove(indicator.length)}
-                      className="h-7 w-7 text-slate-500"
-                    >
-                      <X className="h-3.5 w-3.5" />
-                    </Button>
-                  </div>
-                ))}
-                <Button type="button" variant="outline" size="sm" onClick={addEma} disabled={emaIndicators.length >= MAX_EMA_INDICATORS}>
-                  <Plus className="h-4 w-4" />{copy.marketReplay.emaAdd}
-                </Button>
-              </div>
-              {emaError ? <p className="text-xs text-red-600">{emaError}</p> : null}
-            </div>
-          </CardContent>
-        </Card>
-        <PaperAccountStrip snapshot={paperSnapshot} />
-        <div className="grid items-start gap-4 lg:grid-cols-[minmax(0,1fr)_20rem]">
+      <div className="flex h-full min-h-0 flex-col overflow-hidden rounded-lg border bg-white shadow-sm">
+        <div className="flex h-12 shrink-0 items-center gap-2 border-b px-3">
+          <Label htmlFor="display-interval" className="whitespace-nowrap text-xs text-slate-500">{copy.marketReplay.displayInterval}</Label>
+          <Select value={String(replay.displayIntervalSeconds)} onValueChange={(value) => void changeDisplayInterval(Number(value))}>
+            <SelectTrigger id="display-interval" className="h-8 w-24"><SelectValue /></SelectTrigger>
+            <SelectContent>
+              {DISPLAY_INTERVAL_PRESETS.filter((value) => dataset.sourceIntervalSeconds && isValidDisplayInterval(dataset.sourceIntervalSeconds, value)).map((value) => <SelectItem key={value} value={String(value)}>{formatInterval(value)}</SelectItem>)}
+              {!DISPLAY_INTERVAL_PRESETS.includes(replay.displayIntervalSeconds) ? <SelectItem value={String(replay.displayIntervalSeconds)}>{formatInterval(replay.displayIntervalSeconds)}</SelectItem> : null}
+            </SelectContent>
+          </Select>
+          <div className="hidden items-center gap-1 2xl:flex">
+            <Input aria-label={copy.marketReplay.customInterval} type="number" min="1" value={customInterval} onChange={(event) => setCustomInterval(event.target.value)} className="h-8 w-16" placeholder="9" />
+            <Select value={customIntervalUnit} onValueChange={(value) => setCustomIntervalUnit(value as "s" | "m" | "h")}>
+              <SelectTrigger className="h-8 w-20" aria-label={copy.marketReplay.intervalUnit}><SelectValue /></SelectTrigger>
+              <SelectContent><SelectItem value="s">{copy.marketReplay.intervalSeconds}</SelectItem><SelectItem value="m">{copy.marketReplay.intervalMinutes}</SelectItem><SelectItem value="h">{copy.marketReplay.intervalHours}</SelectItem></SelectContent>
+            </Select>
+            <Button type="button" variant="outline" size="sm" className="h-8" onClick={() => {
+              const multiplier = customIntervalUnit === "s" ? 1 : customIntervalUnit === "m" ? 60 : 3_600;
+              void changeDisplayInterval(Number(customInterval) * multiplier);
+            }}>{copy.marketReplay.customInterval}</Button>
+          </div>
+          <div className="mx-1 h-5 w-px bg-slate-200" />
+          <Button type="button" variant="ghost" size="sm" className="h-8" onClick={() => setSettingsDialog("indicators")}><Settings2 className="h-4 w-4" />{copy.marketReplay.indicators}</Button>
+          <Button type="button" variant="ghost" size="sm" className="h-8" onClick={() => setSettingsDialog("paper")}><WalletCards className="h-4 w-4" />{copy.marketReplay.accountSettings}</Button>
+          {paperSnapshot ? <div className="hidden items-center gap-3 text-xs text-slate-500 xl:flex"><span>{copy.paperTrading.equity} <strong className="font-medium text-slate-800">{paperSnapshot.stats.equity.toLocaleString("zh-CN", { maximumFractionDigits: 2 })} {paperSnapshot.session.currency}</strong></span><span>{copy.paperTrading.netPosition} <strong className="font-medium text-slate-800">{paperSnapshot.session.netQuantity}</strong></span></div> : null}
+          <div className="ml-auto flex items-center gap-1">
+            <Button type="button" variant="ghost" size="sm" className="h-8" disabled={draftActive} title={draftActive ? copy.paperTrading.draftLockedReplay : undefined} onClick={() => requestConfirmation("reset")}><RotateCcw className="h-4 w-4" /><span className="hidden xl:inline">{copy.marketReplay.reset}</span></Button>
+            <Button type="button" variant="ghost" size="sm" className="h-8" disabled={draftActive} title={draftActive ? copy.paperTrading.draftLockedReplay : undefined} onClick={() => requestConfirmation("change-start")}><span className="hidden xl:inline">{copy.marketReplay.chooseNewStart}</span><span className="xl:hidden">{copy.marketReplay.startAt}</span></Button>
+          </div>
+        </div>
+        <div className="min-h-0 flex-1">
           <ReplayChart
+            datasetId={dataset.id}
+            priceTickSize={dataset.priceTickSize}
             bars={bars}
             warmupBars={warmupBars}
             timezone={dataset.timezone}
             emaEnabled={emaEnabled}
             emaIndicators={emaIndicators}
             paperSnapshot={paperSnapshot}
+            paperBusy={paperBusy}
+            paperError={paperError}
+            onSubmitOrder={submitPaperOrder}
             onOrderPriceChange={updatePaperOrder}
-            onTradingInteraction={pauseForTrading}
+            onCancelOrder={cancelPaperOrder}
+            onClosePosition={closePaperPosition}
+            onDraftActiveChange={setDraftActive}
+            onOpenPaperAccount={() => setSettingsDialog("paper")}
           />
-          <PaperTradingPanel
-            snapshot={paperSnapshot}
-            currentBar={currentBar}
-            busy={paperBusy}
-            error={paperError}
-            onCreate={createPaperAccount}
-            onSubmit={submitPaperOrder}
-            onCancel={cancelPaperOrder}
-            onUpdate={updatePaperOrder}
-            onCancelScope={cancelPaperScope}
-            onClear={() => requestConfirmation("paper-clear")}
-          />
+        </div>
+        <div className="flex h-14 shrink-0 items-center gap-2 border-t bg-slate-50/80 px-3">
+          <Button type="button" size="sm" className="h-9" onClick={togglePlayback} disabled={replay.status === "finished"}>
+            {replay.status === "playing" ? <Pause className="h-4 w-4" /> : <Play className="h-4 w-4" />}{replay.status === "playing" ? copy.marketReplay.pause : copy.marketReplay.play}
+          </Button>
+          <Button type="button" size="sm" variant="outline" className="h-9" onClick={revealNextBar} disabled={replay.status === "finished" || replay.status === "playing"}>
+            <ChevronRight className="h-4 w-4" />{copy.marketReplay.nextBar}<kbd className="ml-1 hidden rounded border bg-white px-1.5 py-0.5 font-mono text-[10px] text-slate-500 lg:inline">{copy.marketReplay.nextBarShortcut}</kbd>
+          </Button>
+          <div className="mx-1 h-6 w-px bg-slate-200" />
+          <Label htmlFor="replay-speed" className="whitespace-nowrap text-xs text-slate-500">{copy.marketReplay.speed}</Label>
+          <Input id="replay-speed" type="range" min={MIN_PLAYBACK_RATE} max={MAX_PLAYBACK_RATE} value={replay.playbackRate} onChange={(event) => changeSpeed(Number(event.target.value))} className="h-8 w-24 border-0 bg-transparent px-0 lg:w-32" />
+          <Input aria-label={copy.marketReplay.speed} type="number" min={MIN_PLAYBACK_RATE} max={MAX_PLAYBACK_RATE} value={replay.playbackRate} onChange={(event) => changeSpeed(Math.max(MIN_PLAYBACK_RATE, Math.min(MAX_PLAYBACK_RATE, Number(event.target.value))))} className="h-8 w-20" />
+          <span className="text-xs font-medium text-slate-700">{copy.marketReplay.playbackRate(replay.playbackRate)}</span>
+          <div className="ml-auto hidden items-center gap-4 text-xs xl:flex">
+            <span className="text-slate-500">{copy.marketReplay.progress(revealedCount, replayCount)}</span>
+            <span className="font-medium text-slate-800">{currentBar ? formatReplayTime(currentBar.timestamp, dataset.timezone) : copy.marketReplay.waiting}</span>
+            <span className="hidden font-mono text-slate-600 2xl:inline">{currentBar ? `${currentBar.open} / ${currentBar.high} / ${currentBar.low} / ${currentBar.close}` : "–"}</span>
+            <span className="font-medium text-slate-700">{replay.status === "playing" ? copy.marketReplay.play : replay.status === "finished" ? copy.marketReplay.finished : copy.marketReplay.pause}{statusText ? ` · ${statusText}` : ""}</span>
+          </div>
         </div>
         <PaperTradingDetails snapshot={paperSnapshot} />
       </div>
+
+      <Dialog open={settingsDialog === "indicators"} title={copy.marketReplay.indicatorSettings} description={copy.marketReplay.indicatorSettingsDescription} onClose={() => setSettingsDialog(null)}>
+        <div className="space-y-4">
+          <div className="flex items-center justify-between rounded-md border bg-slate-50 p-3">
+            <div><p className="text-sm font-medium text-slate-950">{copy.marketReplay.emaTitle}</p><p className="mt-0.5 text-xs text-slate-500">{copy.marketReplay.emaDescription}</p></div>
+            <div className="flex items-center gap-2"><span className="text-xs text-slate-500">{emaEnabled ? copy.marketReplay.emaOn : copy.marketReplay.emaOff}</span><button type="button" role="switch" aria-checked={emaEnabled} aria-label={copy.marketReplay.emaMaster} onClick={() => setEmaEnabled((enabled) => !enabled)} className={`relative h-6 w-11 rounded-full transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-600 focus-visible:ring-offset-2 ${emaEnabled ? "bg-blue-600" : "bg-slate-300"}`}><span className={`absolute left-0 top-0.5 h-5 w-5 rounded-full bg-white shadow-sm transition-transform ${emaEnabled ? "translate-x-5" : "translate-x-0.5"}`} /></button></div>
+          </div>
+          <div className="space-y-2">{emaIndicators.map((indicator) => <div key={indicator.id} className="flex h-11 items-center gap-3 rounded-md border px-3"><input type="checkbox" checked={indicator.visible} onChange={(event) => setEmaIndicators((current) => current.map((item) => item.id === indicator.id ? { ...item, visible: event.target.checked } : item))} aria-label={copy.marketReplay.emaLineToggle(indicator.length)} className="h-4 w-4 rounded border-slate-300" /><span className="h-2.5 w-2.5 rounded-full" style={{ backgroundColor: indicator.color }} aria-hidden="true" /><span className="w-12 text-sm font-medium text-slate-700">{copy.marketReplay.emaShortName}</span><Label htmlFor={`ema-length-${indicator.id}`} className="text-xs text-slate-500">{copy.marketReplay.emaLength}</Label><Input key={`${indicator.id}-${indicator.length}`} id={`ema-length-${indicator.id}`} type="number" min={EMA_LENGTH_MIN} max={EMA_LENGTH_MAX} step="1" defaultValue={indicator.length} onBlur={(event) => { if (!setEmaLength(indicator.id, Number(event.currentTarget.value))) event.currentTarget.value = String(indicator.length); }} onKeyDown={(event) => { if (event.key === "Enter") event.currentTarget.blur(); }} className="h-8 w-24 font-mono text-xs" /><Button type="button" variant="ghost" size="icon" onClick={() => { setEmaIndicators((current) => current.filter((item) => item.id !== indicator.id)); setEmaError(null); }} aria-label={copy.marketReplay.emaRemove(indicator.length)} className="ml-auto h-8 w-8 text-slate-500"><X className="h-4 w-4" /></Button></div>)}</div>
+          <Button type="button" variant="outline" size="sm" onClick={addEma} disabled={emaIndicators.length >= MAX_EMA_INDICATORS}><Plus className="h-4 w-4" />{copy.marketReplay.emaAdd}</Button>
+          {emaError ? <p className="text-xs text-red-600">{emaError}</p> : null}
+        </div>
+      </Dialog>
+
+      <Dialog open={settingsDialog === "paper"} title={copy.marketReplay.accountSettings} description={copy.marketReplay.accountSettingsDescription} className="max-w-3xl" onClose={() => setSettingsDialog(null)}>
+        <div className="space-y-4">
+          <PaperAccountStrip snapshot={paperSnapshot} />
+          <PaperTradingPanel priceTickSize={dataset.priceTickSize} snapshot={paperSnapshot} currentBar={currentBar} busy={paperBusy} error={paperError} onCreate={createPaperAccount} onSubmit={submitPaperOrder} onCancel={cancelPaperOrder} onUpdate={updatePaperOrder} onCancelScope={cancelPaperScope} onClear={() => requestConfirmation("paper-clear")} />
+        </div>
+      </Dialog>
       <ConfirmDialog
         open={Boolean(confirmAction)}
         title={confirmAction === "reset" ? copy.marketReplay.resetTitle : confirmAction === "paper-clear" ? copy.paperTrading.resetAccountTitle : copy.marketReplay.changeStartTitle}

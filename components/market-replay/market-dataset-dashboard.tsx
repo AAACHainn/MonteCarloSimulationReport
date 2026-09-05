@@ -3,17 +3,20 @@
 import Link from "next/link";
 import { useEffect, useRef, useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
-import { ChartCandlestick, Loader2, Play, Trash2, Upload } from "lucide-react";
+import { ChartCandlestick, Loader2, PencilLine, Play, Trash2, Upload } from "lucide-react";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { ConfirmDialog } from "@/components/ui/confirm-dialog";
+import { Dialog } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Textarea } from "@/components/ui/textarea";
 import { copy } from "@/lib/i18n";
 import type { MarketDatasetSummary } from "@/lib/market-replay/types";
 import { formatInterval } from "@/lib/market-replay/types";
+import { formatPriceForTick } from "@/lib/market-replay/price-ticks";
 
 type ImportIssue = { row: number; reason: string };
 type ImportJob = { id: string; fileName: string; status: string; processedRows: number; errors: ImportIssue[]; totalErrors: number };
@@ -43,6 +46,9 @@ export function MarketDatasetDashboard({ datasets }: { datasets: MarketDatasetSu
   const [isDeleting, setIsDeleting] = useState(false);
   const [sessionMode, setSessionMode] = useState<"TWENTY_FOUR_SEVEN" | "DAILY_SESSION">("TWENTY_FOUR_SEVEN");
   const [importJobs, setImportJobs] = useState<ImportJob[]>([]);
+  const [tickDataset, setTickDataset] = useState<MarketDatasetSummary | null>(null);
+  const [tickValue, setTickValue] = useState("");
+  const [isSavingTick, setIsSavingTick] = useState(false);
 
   async function refreshImportJobs() {
     const response = await fetch("/api/market-dataset-imports");
@@ -70,7 +76,7 @@ export function MarketDatasetDashboard({ datasets }: { datasets: MarketDatasetSu
     const metadata = {
       name: formData.get("name"), description: formData.get("description"), symbol: formData.get("symbol"),
       timeframe: formatInterval(sourceIntervalSeconds), timezone: formData.get("timezone"),
-      sourceIntervalSeconds, sessionMode,
+      sourceIntervalSeconds, priceTickSize: Number(formData.get("priceTickSize")), sessionMode,
       sessionOpenMinute: sessionMode === "DAILY_SESSION" ? timeToMinute(formData.get("sessionOpen")) : null,
       sessionCloseMinute: sessionMode === "DAILY_SESSION" ? timeToMinute(formData.get("sessionClose")) : null,
       tradingWeekdays: sessionMode === "DAILY_SESSION" ? formData.getAll("tradingWeekdays").map(Number) : [1,2,3,4,5,6,7],
@@ -145,6 +151,25 @@ export function MarketDatasetDashboard({ datasets }: { datasets: MarketDatasetSu
     startTransition(() => router.refresh());
   }
 
+  async function savePriceTickSize(event: React.FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    if (!tickDataset) return;
+    setIsSavingTick(true); setMessage(null);
+    const response = await fetch(`/api/market-datasets/${tickDataset.id}`, {
+      method: "PATCH", headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ priceTickSize: Number(tickValue) }),
+    });
+    const data = await response.json().catch(() => null);
+    setIsSavingTick(false);
+    if (!response.ok) {
+      setMessage(data?.error ?? copy.marketReplay.importError);
+      return;
+    }
+    setTickDataset(null);
+    setMessage(copy.marketReplay.priceTickSizeSaved);
+    startTransition(() => router.refresh());
+  }
+
   return (
     <>
       <div className="grid gap-6 lg:grid-cols-[420px_1fr]">
@@ -173,15 +198,20 @@ export function MarketDatasetDashboard({ datasets }: { datasets: MarketDatasetSu
                 <p className="text-xs text-slate-500">{copy.marketReplay.sourceIntervalHint}</p>
               </div>
               <div className="space-y-2">
+                <Label htmlFor="market-price-tick-size">{copy.marketReplay.priceTickSize}</Label>
+                <Input id="market-price-tick-size" name="priceTickSize" type="number" min="0" step="any" required defaultValue="0.01" />
+                <p className="text-xs text-slate-500">{copy.marketReplay.priceTickSizeHint}</p>
+              </div>
+              <div className="space-y-2">
                 <Label htmlFor="market-timezone">{copy.marketReplay.timezone}</Label>
                 <Input id="market-timezone" name="timezone" required maxLength={100} defaultValue="Asia/Shanghai" placeholder={copy.marketReplay.timezonePlaceholder} />
               </div>
               <div className="space-y-2">
                 <Label htmlFor="market-session-mode">{copy.marketReplay.sessionMode}</Label>
-                <select id="market-session-mode" value={sessionMode} onChange={(event) => setSessionMode(event.target.value as typeof sessionMode)} className="h-10 w-full rounded-md border bg-white px-3 text-sm">
-                  <option value="TWENTY_FOUR_SEVEN">{copy.marketReplay.session247}</option>
-                  <option value="DAILY_SESSION">{copy.marketReplay.sessionDaily}</option>
-                </select>
+                <Select value={sessionMode} onValueChange={(value) => setSessionMode(value as typeof sessionMode)}>
+                  <SelectTrigger id="market-session-mode"><SelectValue /></SelectTrigger>
+                  <SelectContent><SelectItem value="TWENTY_FOUR_SEVEN">{copy.marketReplay.session247}</SelectItem><SelectItem value="DAILY_SESSION">{copy.marketReplay.sessionDaily}</SelectItem></SelectContent>
+                </Select>
               </div>
               {sessionMode === "DAILY_SESSION" ? (
                 <div className="space-y-3 rounded-lg border bg-slate-50 p-3">
@@ -245,10 +275,13 @@ export function MarketDatasetDashboard({ datasets }: { datasets: MarketDatasetSu
                         <div><dt className="inline font-medium text-slate-700">{copy.marketReplay.dateRange}：</dt><dd className="inline">{formatDatasetTime(dataset.startTime, dataset.timezone)} – {formatDatasetTime(dataset.endTime, dataset.timezone)}</dd></div>
                         <div><dt className="inline font-medium text-slate-700">{copy.marketReplay.recentProgress}：</dt><dd className="inline">{dataset.progress ? copy.marketReplay.progress(Math.max(0, dataset.progress.currentSequence - dataset.progress.startSequence + 1), dataset.barCount - dataset.progress.startSequence) : copy.marketReplay.notStarted}</dd></div>
                       </dl>
-                      <p className="mt-2 text-xs text-slate-500">{dataset.barCount.toLocaleString("zh-CN")} {copy.marketReplay.bars} · {dataset.timezone}</p>
+                      <p className="mt-2 text-xs text-slate-500">{dataset.barCount.toLocaleString("zh-CN")} {copy.marketReplay.bars} · {dataset.timezone} · {copy.marketReplay.priceTickSizeValue(formatPriceForTick(dataset.priceTickSize, dataset.priceTickSize))}</p>
                     </div>
                   </div>
                   <div className="flex flex-wrap justify-end gap-2">
+                    <Button type="button" variant="outline" size="sm" onClick={() => { setTickDataset(dataset); setTickValue(String(dataset.priceTickSize)); }}>
+                      <PencilLine className="h-4 w-4" />{copy.marketReplay.editPriceTickSize}
+                    </Button>
                     <Button asChild size="sm">
                       <Link href={`/market-replay/${dataset.id}`}><Play className="h-4 w-4" />{copy.marketReplay.open}</Link>
                     </Button>
@@ -262,6 +295,25 @@ export function MarketDatasetDashboard({ datasets }: { datasets: MarketDatasetSu
           </div>
         </section>
       </div>
+      <Dialog
+        open={Boolean(tickDataset)}
+        title={copy.marketReplay.editPriceTickSizeTitle}
+        description={copy.marketReplay.editPriceTickSizeDescription}
+        className="max-w-md"
+        onClose={() => { if (!isSavingTick) setTickDataset(null); }}
+      >
+        <form className="space-y-4" onSubmit={savePriceTickSize}>
+          <div className="space-y-2">
+            <Label htmlFor="edit-price-tick-size">{copy.marketReplay.priceTickSize}</Label>
+            <Input id="edit-price-tick-size" name="priceTickSize" type="number" min="0" step="any" required value={tickValue} onChange={(event) => setTickValue(event.target.value)} />
+            <p className="text-xs text-slate-500">{copy.marketReplay.priceTickSizeHint}</p>
+          </div>
+          <div className="flex justify-end gap-2">
+            <Button type="button" variant="outline" disabled={isSavingTick} onClick={() => setTickDataset(null)}>{copy.paperTrading.cancel}</Button>
+            <Button type="submit" disabled={isSavingTick}>{isSavingTick ? <Loader2 className="h-4 w-4 animate-spin" /> : null}{copy.marketReplay.savePriceTickSize}</Button>
+          </div>
+        </form>
+      </Dialog>
       <ConfirmDialog
         open={Boolean(deleteDataset)}
         title={copy.marketReplay.deleteTitle}

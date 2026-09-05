@@ -12,7 +12,7 @@ const state = (overrides: Partial<PaperSessionState> = {}): PaperSessionState =>
 });
 const order = (overrides: Partial<PaperOrderData> = {}): PaperOrderData => ({
   id: `order-${counter += 1}`, side: "BUY", type: "MARKET", status: "PENDING",
-  quantity: 1, price: null, stopLoss: null, takeProfit: null, reduceOnly: false,
+  quantity: 1, riskAmount: null, price: null, stopLoss: null, takeProfit: null, reduceOnly: false,
   isProtective: false, ocoGroupId: null, createdSequence: 9, activeFromSequence: 10,
   filledSequence: null, filledAt: null, filledPrice: null, cancelReason: null, ...overrides,
 });

@@ -1,0 +1,1 @@
+ALTER TABLE "MarketDataset" ADD COLUMN "priceTickSize" REAL NOT NULL DEFAULT 0.01;

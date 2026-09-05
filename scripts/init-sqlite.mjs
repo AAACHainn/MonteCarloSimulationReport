@@ -74,6 +74,7 @@ const createStatements = [
     "timezone" TEXT NOT NULL,
     "status" TEXT NOT NULL DEFAULT 'READY',
     "sourceIntervalSeconds" INTEGER,
+    "priceTickSize" REAL NOT NULL DEFAULT 0.01,
     "sessionMode" TEXT NOT NULL DEFAULT 'TWENTY_FOUR_SEVEN',
     "sessionOpenMinute" INTEGER,
     "sessionCloseMinute" INTEGER,
@@ -135,6 +136,7 @@ const createStatements = [
     "type" TEXT NOT NULL,
     "status" TEXT NOT NULL DEFAULT 'PENDING',
     "quantity" REAL NOT NULL,
+    "riskAmount" REAL,
     "price" REAL,
     "stopLoss" REAL,
     "takeProfit" REAL,
@@ -246,6 +248,7 @@ const tradeColumns = [
 const marketDatasetColumns = [
   ["status", "TEXT NOT NULL DEFAULT 'READY'"],
   ["sourceIntervalSeconds", "INTEGER"],
+  ["priceTickSize", "REAL NOT NULL DEFAULT 0.01"],
   ["sessionMode", "TEXT NOT NULL DEFAULT 'TWENTY_FOUR_SEVEN'"],
   ["sessionOpenMinute", "INTEGER"],
   ["sessionCloseMinute", "INTEGER"],
@@ -253,6 +256,7 @@ const marketDatasetColumns = [
 ];
 const replayProgressColumns = [["playbackRate", "INTEGER NOT NULL DEFAULT 1"], ["displayIntervalSeconds", "INTEGER"]];
 const paperSessionColumns = [["equitySampleStride", "INTEGER NOT NULL DEFAULT 1"]];
+const paperOrderColumns = [["riskAmount", "REAL"]];
 
 const indexStatements = [
   `CREATE INDEX IF NOT EXISTS "Trade_datasetId_idx" ON "Trade"("datasetId")`,
@@ -294,7 +298,7 @@ try {
     }
   }
 
-  for (const [table, columns] of [["MarketDataset", marketDatasetColumns], ["ReplayProgress", replayProgressColumns], ["PaperTradingSession", paperSessionColumns]]) {
+  for (const [table, columns] of [["MarketDataset", marketDatasetColumns], ["ReplayProgress", replayProgressColumns], ["PaperTradingSession", paperSessionColumns], ["PaperOrder", paperOrderColumns]]) {
     const existing = await prisma.$queryRawUnsafe(`PRAGMA table_info("${table}")`);
     const names = new Set(existing.map((column) => column.name));
     for (const [name, type] of columns) {

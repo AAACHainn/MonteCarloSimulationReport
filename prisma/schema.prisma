@@ -122,6 +122,7 @@ model MarketDataset {
   timezone     String
   status                String  @default("READY")
   sourceIntervalSeconds Int?
+  priceTickSize         Float   @default(0.01)
   sessionMode           String  @default("TWENTY_FOUR_SEVEN")
   sessionOpenMinute     Int?
   sessionCloseMinute    Int?
@@ -241,6 +242,7 @@ model PaperOrder {
   type               String
   status             String              @default("PENDING")
   quantity           Float
+  riskAmount         Float?
   price              Float?
   stopLoss           Float?
   takeProfit         Float?

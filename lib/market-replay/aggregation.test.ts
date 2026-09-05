@@ -20,6 +20,14 @@ describe("market bar aggregation", () => {
     expect(result).toEqual([expect.objectContaining({ open: 0.5, high: 5, low: 0, close: 4, volume: 4, sourceCount: 2, expectedCount: 5, status: "FORMING" })]);
   });
 
+  it("marks the current aggregate complete as soon as all source bars are revealed", () => {
+    const result = aggregateMarketBars({
+      bars: [bar(0, 0), bar(1, 1), bar(2, 2), bar(3, 3), bar(4, 4)],
+      sourceSeconds: 1, displaySeconds: 5, session: always, currentSequence: 4, finalSequence: 99,
+    });
+    expect(result[0]).toMatchObject({ sourceCount: 5, expectedCount: 5, status: "COMPLETE" });
+  });
+
   it("marks a closed candle with missing source bars incomplete", () => {
     const result = aggregateMarketBars({ bars: [bar(0, 0), bar(1, 2), bar(2, 5)], sourceSeconds: 1, displaySeconds: 5, session: always, currentSequence: 2, finalSequence: 99 });
     expect(result[0].status).toBe("INCOMPLETE");

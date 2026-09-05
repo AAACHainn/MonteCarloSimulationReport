@@ -116,7 +116,9 @@ export function aggregateMarketSegments({
 
   const currentTime = result.length ? new Date(result.at(-1)!.timestamp).getTime() : Number.NEGATIVE_INFINITY;
   for (const bar of result) {
-    const closed = new Date(bar.timestamp).getTime() < currentTime || currentSequence >= finalSequence;
+    const closed = bar.sourceCount === bar.expectedCount
+      || new Date(bar.timestamp).getTime() < currentTime
+      || currentSequence >= finalSequence;
     const status: AggregateBarStatus = !closed ? "FORMING" : bar.sourceCount === bar.expectedCount ? "COMPLETE" : "INCOMPLETE";
     bar.status = status;
   }
@@ -158,6 +160,7 @@ export function mergeSourceBar(
   last.close = source.close;
   last.sourceCount += 1;
   if (source.volume !== null) last.volume = (last.volume ?? 0) + source.volume;
-  if (source.sequence >= options.finalSequence) last.status = last.sourceCount === last.expectedCount ? "COMPLETE" : "INCOMPLETE";
+  if (last.sourceCount === last.expectedCount) last.status = "COMPLETE";
+  else if (source.sequence >= options.finalSequence) last.status = "INCOMPLETE";
   return next;
 }

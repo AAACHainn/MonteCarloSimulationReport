@@ -32,6 +32,7 @@ export type PaperOrderData = {
   type: PaperOrderType;
   status: PaperOrderStatus;
   quantity: number;
+  riskAmount: number | null;
   price: number | null;
   stopLoss: number | null;
   takeProfit: number | null;

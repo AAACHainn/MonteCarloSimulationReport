@@ -32,6 +32,7 @@ export function serializePaperSession(session: SessionRecord): PaperSessionState
 
 export function serializePaperOrder(order: {
   id: string; side: string; type: string; status: string; quantity: number; price: number | null;
+  riskAmount: number | null;
   stopLoss: number | null; takeProfit: number | null; reduceOnly: boolean; isProtective: boolean;
   ocoGroupId: string | null; createdSequence: number; activeFromSequence: number;
   filledSequence: number | null; filledAt: Date | null; filledPrice: number | null;

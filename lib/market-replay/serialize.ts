@@ -9,6 +9,7 @@ type DatasetRecord = {
   timezone: string;
   status: string;
   sourceIntervalSeconds: number | null;
+  priceTickSize: number;
   sessionMode: string;
   sessionOpenMinute: number | null;
   sessionCloseMinute: number | null;
