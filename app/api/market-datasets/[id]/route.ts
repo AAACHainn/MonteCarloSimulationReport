@@ -58,6 +58,7 @@ export async function PATCH(request: Request, context: RouteContext) {
     priceTickSize: parsed.data.priceTickSize,
     sessionOpenMinute: parsed.data.sessionOpenMinute ?? null, sessionCloseMinute: parsed.data.sessionCloseMinute ?? null,
     tradingWeekdays: parsed.data.tradingWeekdays.join(","),
+    dataVersion: { increment: 1 },
   } });
   return NextResponse.json({ ok: true });
 }

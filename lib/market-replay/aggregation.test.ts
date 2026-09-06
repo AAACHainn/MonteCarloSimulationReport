@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { aggregateMarketBars, aggregateMarketSegments, getAggregationBucket, mergeAggregatedBars, mergeSourceBar } from "./aggregation";
 import type { MarketBarData, TradingSessionConfig } from "./types";
+import { nextEma } from "./ema";
 
 const always: TradingSessionConfig = { mode: "TWENTY_FOUR_SEVEN", timezone: "UTC", openMinute: null, closeMinute: null, weekdays: [1,2,3,4,5,6,7] };
 const bar = (sequence: number, second: number, close = sequence + 1): MarketBarData => ({
@@ -94,5 +95,47 @@ describe("incremental replay aggregation", () => {
     const next = mergeSourceBar(original, bar(1, 1), { ...options, displaySeconds: 1 });
     expect(next[1].status).toBe("COMPLETE");
     expect(original).toHaveLength(1);
+  });
+
+  it("reveals a five-minute candle and its EMA through all 300 source seconds without future leakage", () => {
+    const seconds = Array.from({ length: 300 }, (_, index): MarketBarData => ({
+      sequence: index,
+      timestamp: new Date(index * 1_000).toISOString(),
+      open: 100 + index / 100,
+      high: index === 299 ? 1_000 : 101 + index / 100,
+      low: 99,
+      close: 100 + index / 100,
+      volume: 1,
+    }));
+    let aggregates = [] as ReturnType<typeof aggregateMarketBars>;
+    for (const source of seconds.slice(0, 150)) {
+      aggregates = mergeSourceBar(aggregates, source, {
+        sourceSeconds: 1, displaySeconds: 300, session: always, finalSequence: 299,
+      });
+    }
+    expect(aggregates[0]).toMatchObject({
+      sourceCount: 150,
+      expectedCount: 300,
+      status: "FORMING",
+      high: 102.49,
+      volume: 150,
+    });
+    expect(aggregates[0].high).toBeLessThan(1_000);
+    const formingEma = nextEma(95, aggregates[0].close, 20);
+
+    for (const source of seconds.slice(150)) {
+      aggregates = mergeSourceBar(aggregates, source, {
+        sourceSeconds: 1, displaySeconds: 300, session: always, finalSequence: 299,
+      });
+    }
+    expect(aggregates[0]).toMatchObject({
+      sourceCount: 300,
+      expectedCount: 300,
+      status: "COMPLETE",
+      high: 1_000,
+      close: 102.99,
+      volume: 300,
+    });
+    expect(nextEma(95, aggregates[0].close, 20)).not.toBe(formingEma);
   });
 });

@@ -5,6 +5,9 @@ export const MARKET_BAR_BLOCK_SIZE = 4_096;
 export const REPLAY_HISTORY_BARS = 200;
 export const MAX_REPLAY_ADVANCE_COUNT = 100;
 export const MAX_DISPLAY_ADVANCE_SOURCE_BARS = 86_400;
+export const MAX_REPLAY_SYNC_SOURCE_BARS = 100;
+export const MARKET_CACHE_BUDGET_BYTES = 256 * 1024 * 1024;
+export const MARKET_CACHE_EVICT_TO_RATIO = 0.8;
 export const MIN_PLAYBACK_RATE = 1;
 export const MAX_PLAYBACK_RATE = 100;
 export const MAX_DISPLAY_INTERVAL_SECONDS = 86_400;
@@ -83,6 +86,8 @@ export type ReplayProgressData = {
   currentSequence: number;
   playbackRate: PlaybackRate;
   displayIntervalSeconds: number;
+  generation: number;
+  syncVersion: number;
   updatedAt?: string;
 };
 
@@ -94,6 +99,7 @@ export type MarketDatasetSummary = {
   timeframe: string;
   timezone: string;
   status: string;
+  dataVersion: number;
   sourceIntervalSeconds: number | null;
   priceTickSize: number;
   sessionMode: SessionMode;
@@ -107,11 +113,31 @@ export type MarketDatasetSummary = {
   progress: ReplayProgressData | null;
 };
 
+export type MarketBarDayChunk = {
+  tradingDay: string;
+  rangeStart: string;
+  rangeEnd: string;
+  bars: MarketBarData[];
+};
+
+export type MarketBarChunksResponse = {
+  datasetId: string;
+  dataVersion: number;
+  symbol: string;
+  sourceIntervalSeconds: number;
+  requestStartDate: string;
+  requestEndDate: string;
+  coveredDates: string[];
+  chunks: MarketBarDayChunk[];
+  nextStartDate: string | null;
+};
+
 export type ReplayStatus = "paused" | "playing" | "finished";
 
 export type ReplayState = ReplayProgressData & {
   barCount: number;
   status: ReplayStatus;
+  confirmedSequence: number;
 };
 
 export function isPlaybackRate(value: number): value is PlaybackRate {

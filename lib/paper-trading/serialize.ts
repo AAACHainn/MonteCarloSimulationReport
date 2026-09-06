@@ -90,6 +90,26 @@ export async function getPaperSessionSnapshot(datasetId: string, db: Prisma.Tran
       ? db.marketBar.findUnique({ where: { datasetId_sequence: { datasetId, sequence: session.lastProcessedSequence } } })
       : Promise.resolve(null),
   ]);
+  const recentOrderIds = new Set(recentOrders.map((order) => order.id));
+  const recentParentSequences = new Set(recentOrders
+    .filter((order) => !order.isProtective && order.filledSequence !== null)
+    .map((order) => order.filledSequence!));
+  const missingParentSequences = [...new Set(activeOrders
+    .filter((order) => order.isProtective && !recentParentSequences.has(order.createdSequence))
+    .map((order) => order.createdSequence))];
+  const protectiveParents = missingParentSequences.length === 0
+    ? []
+    : await db.paperOrder.findMany({
+      where: {
+        sessionId: session.id,
+        isProtective: false,
+        filledSequence: { in: missingParentSequences },
+      },
+    });
+  const snapshotRecentOrders = [
+    ...recentOrders,
+    ...protectiveParents.filter((order) => !recentOrderIds.has(order.id)),
+  ];
   const unrealizedPnl = currentBar && session.averageEntryPrice !== null
     ? (currentBar.close - session.averageEntryPrice) * session.netQuantity : 0;
   const balance = session.initialCapital + session.realizedPnl - session.totalFees;
@@ -113,7 +133,7 @@ export async function getPaperSessionSnapshot(datasetId: string, db: Prisma.Tran
   return {
     session: serializePaperSession(session),
     activeOrders: activeOrders.map(serializePaperOrder),
-    recentOrders: recentOrders.map(serializePaperOrder),
+    recentOrders: snapshotRecentOrders.map(serializePaperOrder),
     recentFills: recentFills.map(serializePaperFill),
     recentTrades: recentTrades.map(serializePaperTrade),
     stats,

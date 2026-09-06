@@ -14,7 +14,7 @@ import {
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import { calculateEmaSeries } from "@/lib/market-replay/ema";
+import { calculateEmaSeries, nextEma } from "@/lib/market-replay/ema";
 import type { AggregatedMarketBarData, EmaIndicatorConfig } from "@/lib/market-replay/types";
 import { copy } from "@/lib/i18n";
 import { defaultReplayLogicalRange, rangeAfterNewReplayBar } from "@/lib/market-replay/chart-range";
@@ -26,6 +26,13 @@ import {
   targetPriceForR,
   type RiskSizingError,
 } from "@/lib/paper-trading/risk-sizing";
+import {
+  createBracketRReference,
+  formatRMultiple,
+  protectiveOrderRReference,
+  rMultipleAtPrice,
+  type PriceRReference,
+} from "@/lib/paper-trading/line-r-multiple";
 import type { PaperSessionSnapshot, PaperSide } from "@/lib/paper-trading/types";
 
 type DraftOrder = {
@@ -53,6 +60,7 @@ type LineTarget = {
   kind: "draft" | "order";
   field: "entryPrice" | "stopLoss" | "takeProfit" | "price";
   orderId?: string;
+  rReference?: PriceRReference;
 };
 type LineAction = {
   key: string;
@@ -63,6 +71,19 @@ type LineAction = {
   kind: "cancel" | "close";
   orderId?: string;
 };
+
+function sameLineActions(current: LineAction[], next: LineAction[]) {
+  return current.length === next.length && current.every((action, index) => {
+    const candidate = next[index];
+    return action.key === candidate.key
+      && action.price === candidate.price
+      && action.y === candidate.y
+      && action.color === candidate.color
+      && action.label === candidate.label
+      && action.kind === candidate.kind
+      && action.orderId === candidate.orderId;
+  });
+}
 
 function chartTime(timestamp: string) {
   return Math.floor(new Date(timestamp).getTime() / 1_000) as UTCTimestamp;
@@ -140,6 +161,7 @@ export function ReplayChart({
   onOpenPaperAccount: () => void;
 }) {
   const containerRef = useRef<HTMLDivElement | null>(null);
+  const interactionRef = useRef<HTMLDivElement | null>(null);
   const chartRef = useRef<IChartApi | null>(null);
   const candleRef = useRef<ISeriesApi<"Candlestick"> | null>(null);
   const volumeRef = useRef<ISeriesApi<"Histogram"> | null>(null);
@@ -147,6 +169,11 @@ export function ReplayChart({
   const lineTargetsRef = useRef(new Map<string, LineTarget>());
   const markersRef = useRef<ISeriesMarkersPluginApi<Time> | null>(null);
   const emaSeriesRef = useRef(new Map<string, ISeriesApi<"Line">>());
+  const emaStateRef = useRef(new Map<string, {
+    length: number;
+    bars: Array<{ timestamp: string; close: number }>;
+    values: Array<number | null>;
+  }>());
   const lastDataRef = useRef<AggregatedMarketBarData[]>([]);
   const [contextMenu, setContextMenu] = useState<ContextMenuState | null>(null);
   const [draft, setDraft] = useState<DraftOrder | null>(null);
@@ -172,10 +199,15 @@ export function ReplayChart({
   const syncLineActionCoordinates = useCallback(() => {
     const series = candleRef.current;
     if (!series) return;
-    setLineActions((current) => current.map((action) => {
-      const coordinate = series.priceToCoordinate(action.price);
-      return coordinate === null ? action : { ...action, y: Number(coordinate) };
-    }));
+    setLineActions((current) => {
+      const next = current.map((action) => {
+        const coordinate = series.priceToCoordinate(action.price);
+        return coordinate === null || Number(coordinate) === action.y
+          ? action
+          : { ...action, y: Number(coordinate) };
+      });
+      return sameLineActions(current, next) ? current : next;
+    });
   }, []);
 
   useEffect(() => {
@@ -217,6 +249,7 @@ export function ReplayChart({
     const priceLines = priceLinesRef.current;
     const lineTargets = lineTargetsRef.current;
     const emaSeries = emaSeriesRef.current;
+    const emaStates = emaStateRef.current;
     const chart = createChart(container, {
       width: container.clientWidth, height: container.clientHeight,
       layout: { background: { type: ColorType.Solid, color: "#fff" }, textColor: "#475569", attributionLogo: true, panes: { separatorColor: "#e2e8f0", separatorHoverColor: "#cbd5e1" } },
@@ -255,7 +288,7 @@ export function ReplayChart({
     return () => {
       observer.disconnect(); chart.timeScale().unsubscribeVisibleLogicalRangeChange(syncLineActionCoordinates);
       chart.remove(); chartRef.current = null; candleRef.current = null; volumeRef.current = null;
-      markersRef.current = null; priceLines.clear(); lineTargets.clear(); emaSeries.clear(); lastDataRef.current = [];
+      markersRef.current = null; priceLines.clear(); lineTargets.clear(); emaSeries.clear(); emaStates.clear(); lastDataRef.current = [];
     };
   }, [hasVolume, priceTickSize, syncLineActionCoordinates]);
 
@@ -279,13 +312,15 @@ export function ReplayChart({
     const next = bars;
     const samePrefix = previous.length > 0 && next.length >= previous.length
       && previous.slice(0, -1).every((bar, index) => bar.timestamp === next[index]?.timestamp);
-    if (samePrefix && next.length <= previous.length + 1) {
+    if (samePrefix) {
       const range = chart.timeScale().getVisibleLogicalRange();
       const previousLastIndex = previous.length - 1;
       for (const bar of next.slice(Math.max(0, previous.length - 1))) {
         series.update(candle(bar)); if (bar.volume !== null) volumeRef.current?.update(volume(bar));
       }
-      if (range && next.length > previous.length) chart.timeScale().setVisibleLogicalRange(rangeAfterNewReplayBar(range, previousLastIndex));
+      if (range && next.length > previous.length) {
+        chart.timeScale().setVisibleLogicalRange(rangeAfterNewReplayBar(range, previousLastIndex, next.length - previous.length));
+      }
     } else {
       const range = chart.timeScale().getVisibleLogicalRange();
       const previousLastIndex = previous.length - 1;
@@ -310,7 +345,11 @@ export function ReplayChart({
     const active = emaEnabled ? emaIndicators.filter((item) => item.visible) : [];
     const activeIds = new Set(active.map((item) => item.id));
     for (const [id, series] of emaSeriesRef.current) {
-      if (!activeIds.has(id)) { chart.removeSeries(series); emaSeriesRef.current.delete(id); }
+      if (!activeIds.has(id)) {
+        chart.removeSeries(series);
+        emaSeriesRef.current.delete(id);
+        emaStateRef.current.delete(id);
+      }
     }
     const all = [...warmupBars, ...bars];
     for (const indicator of active) {
@@ -320,8 +359,42 @@ export function ReplayChart({
         emaSeriesRef.current.set(indicator.id, series);
       }
       series.applyOptions({ color: indicator.color, title: copy.marketReplay.emaLine(indicator.length) });
-      const result = calculateEmaSeries(all, indicator.length, all.length - 1, warmupBars.length);
-      series.setData(result.points.map((point) => ({ time: chartTime(all[point.sequence].timestamp), value: point.value })));
+      const previous = emaStateRef.current.get(indicator.id);
+      const samePrefix = previous?.length === indicator.length
+        && all.length >= previous.bars.length
+        && previous.bars.slice(0, -1).every((bar, index) => bar.timestamp === all[index]?.timestamp);
+      if (!previous || !samePrefix) {
+        const result = calculateEmaSeries(all, indicator.length, all.length - 1, 0);
+        const values: Array<number | null> = Array(all.length).fill(null);
+        for (const point of result.points) values[point.sequence] = point.value;
+        series.setData(result.points.filter((point) => point.sequence >= warmupBars.length)
+          .map((point) => ({ time: chartTime(all[point.sequence].timestamp), value: point.value })));
+        emaStateRef.current.set(indicator.id, {
+          length: indicator.length,
+          bars: all.map((bar) => ({ timestamp: bar.timestamp, close: bar.close })),
+          values,
+        });
+        continue;
+      }
+      const values = previous.values.slice(0, all.length);
+      while (values.length < all.length) values.push(null);
+      const start = Math.max(indicator.length - 1, previous.bars.length - 1);
+      for (let index = start; index < all.length; index += 1) {
+        if (index === indicator.length - 1) {
+          values[index] = all.slice(0, indicator.length).reduce((sum, bar) => sum + bar.close, 0) / indicator.length;
+        } else {
+          const prior = values[index - 1];
+          values[index] = prior === null ? null : nextEma(prior, all[index].close, indicator.length);
+        }
+        if (values[index] !== null && index >= warmupBars.length) {
+          series.update({ time: chartTime(all[index].timestamp), value: values[index]! });
+        }
+      }
+      emaStateRef.current.set(indicator.id, {
+        length: indicator.length,
+        bars: all.map((bar) => ({ timestamp: bar.timestamp, close: bar.close })),
+        values,
+      });
     }
   }, [bars, emaEnabled, emaIndicators, warmupBars]);
 
@@ -359,40 +432,37 @@ export function ReplayChart({
       if (order.price !== null) {
         const isStop = order.isProtective && order.type === "STOP";
         const color = isStop ? "#dc2626" : order.isProtective ? "#16a34a" : order.side === "BUY" ? "#2563eb" : "#ea580c";
-        const title = order.isProtective ? isStop ? copy.paperTrading.stopLoss : copy.paperTrading.takeProfit : copy.paperTrading.orderLine(order.side === "BUY" ? copy.paperTrading.buy : copy.paperTrading.sell, order.type === "LIMIT" ? copy.paperTrading.limit : copy.paperTrading.stop);
-        addLine({ key: order.id, price: order.price, kind: "order", field: "price", orderId: order.id }, order.price, color, title, order.isProtective);
-        addAction({ key: order.id, price: order.price, color, label: `${title} · ${number(order.quantity)}`, kind: "cancel", orderId: order.id });
+        const rReference = order.isProtective ? protectiveOrderRReference(paperSnapshot!, order) : null;
+        const title = order.isProtective
+          ? formatRMultiple(rMultipleAtPrice(rReference, order.price))
+          : copy.paperTrading.orderLine(order.side === "BUY" ? copy.paperTrading.buy : copy.paperTrading.sell, order.type === "LIMIT" ? copy.paperTrading.limit : copy.paperTrading.stop);
+        addLine({ key: order.id, price: order.price, kind: "order", field: "price", orderId: order.id, rReference: rReference ?? undefined }, order.price, color, title, order.isProtective);
+        addAction({ key: order.id, price: order.price, color, label: order.isProtective ? title : `${title} · ${number(order.quantity)}`, kind: "cancel", orderId: order.id });
       }
       if (!order.isProtective && order.stopLoss !== null) {
-        const title = order.riskAmount == null ? copy.paperTrading.stopLoss : copy.paperTrading.stopLine(money(order.riskAmount, paperSnapshot!.session.currency));
+        const reference = order.price === null ? null : createBracketRReference(order.side, order.price, order.stopLoss);
+        const title = formatRMultiple(rMultipleAtPrice(reference, order.stopLoss));
         addLine({ key: `${order.id}:sl`, price: order.stopLoss, kind: "order", field: "stopLoss", orderId: order.id }, order.stopLoss, "#dc2626", title, true);
       }
       if (!order.isProtective && order.takeProfit !== null) {
-        let ratio = "—"; let profit = "—";
-        if (order.riskAmount != null && order.stopLoss !== null && order.price !== null && order.type !== "MARKET") {
-          const sizing = calculateRiskSizing({ side: order.side, type: order.type, entryPrice: order.price, stopLoss: order.stopLoss, takeProfit: order.takeProfit, riskAmount: order.riskAmount, commissionBps: paperSnapshot!.session.commissionBps, slippageBps: paperSnapshot!.session.slippageBps });
-          if (sizing.ok && sizing.value.projectedProfit !== null && sizing.value.rewardRiskRatio !== null) {
-            ratio = sizing.value.rewardRiskRatio.toFixed(2);
-            profit = money(sizing.value.projectedProfit, paperSnapshot!.session.currency);
-          }
-        }
-        addLine({ key: `${order.id}:tp`, price: order.takeProfit, kind: "order", field: "takeProfit", orderId: order.id }, order.takeProfit, "#16a34a", copy.paperTrading.targetLine(ratio, profit), true);
+        const reference = order.price === null || order.stopLoss === null ? null : createBracketRReference(order.side, order.price, order.stopLoss);
+        const title = formatRMultiple(rMultipleAtPrice(reference, order.takeProfit));
+        addLine({ key: `${order.id}:tp`, price: order.takeProfit, kind: "order", field: "takeProfit", orderId: order.id, rReference: reference ?? undefined }, order.takeProfit, "#16a34a", title, true);
       }
     }
     if (draft && paperSnapshot) {
       const side = draft.side === "BUY" ? copy.paperTrading.buy : copy.paperTrading.sell;
+      const reference = createBracketRReference(draft.side, draft.entryPrice, draft.stopLoss);
       addLine({ key: "draft:entry", price: draft.entryPrice, kind: "draft", field: "entryPrice" }, draft.entryPrice, "#2563eb", copy.paperTrading.orderLine(side, orderTypeLabel(draft.type)), true);
-      addLine({ key: "draft:sl", price: draft.stopLoss, kind: "draft", field: "stopLoss" }, draft.stopLoss, "#dc2626", copy.paperTrading.stopLine(money(draft.riskAmount, paperSnapshot.session.currency)), true);
-      const ratio = draftSizing?.ok && draftSizing.value.rewardRiskRatio !== null ? draftSizing.value.rewardRiskRatio.toFixed(2) : "—";
-      const profit = draftSizing?.ok && draftSizing.value.projectedProfit !== null ? money(draftSizing.value.projectedProfit, paperSnapshot.session.currency) : "—";
-      addLine({ key: "draft:tp", price: draft.takeProfit, kind: "draft", field: "takeProfit" }, draft.takeProfit, "#16a34a", copy.paperTrading.targetLine(ratio, profit), true);
+      addLine({ key: "draft:sl", price: draft.stopLoss, kind: "draft", field: "stopLoss" }, draft.stopLoss, "#dc2626", formatRMultiple(rMultipleAtPrice(reference, draft.stopLoss)), true);
+      addLine({ key: "draft:tp", price: draft.takeProfit, kind: "draft", field: "takeProfit" }, draft.takeProfit, "#16a34a", formatRMultiple(rMultipleAtPrice(reference, draft.takeProfit)), true);
     }
     markersRef.current?.setMarkers((paperSnapshot?.recentFills ?? []).flatMap((fill) => {
       const aggregate = bars.find((bar) => fill.sequence >= bar.firstSequence && fill.sequence <= bar.lastSequence);
       if (!aggregate) return [];
       return [{ time: chartTime(aggregate.timestamp), position: fill.side === "BUY" ? "belowBar" as const : "aboveBar" as const, shape: fill.side === "BUY" ? "arrowUp" as const : "arrowDown" as const, color: fill.side === "BUY" ? "#16a34a" : "#dc2626", text: fill.reason }];
     }));
-    setLineActions(nextLineActions);
+    setLineActions((current) => sameLineActions(current, nextLineActions) ? current : nextLineActions);
   }, [bars, draft, draftSizing, paperSnapshot]);
 
   const moveDraftLine = useCallback((current: DraftOrder, field: LineTarget["field"], price: number): DraftOrder => {
@@ -423,8 +493,8 @@ export function ReplayChart({
   }, [priceTickSize]);
 
   useEffect(() => {
-    const container = containerRef.current; const series = candleRef.current;
-    if (!container || !series) return;
+    const container = containerRef.current; const interaction = interactionRef.current; const series = candleRef.current;
+    if (!container || !interaction || !series) return;
     let dragging: { target: LineTarget; originalPrice: number; previewPrice: number } | null = null;
     const setLineCursor = (cursor: "" | "ns-resize") => {
       container.style.cursor = cursor;
@@ -437,11 +507,13 @@ export function ReplayChart({
     const down = (event: PointerEvent) => {
       if ((event.target as HTMLElement | null)?.closest("button,input,[data-context-menu]")) return;
       const y = event.clientY - container.getBoundingClientRect().top;
-      const candidate = nearestLine(y);
-      if (!candidate || Math.abs(Number(candidate.coordinate) - y) > 8) return;
+      const dragKey = (event.target as HTMLElement | null)?.closest<HTMLElement>("[data-line-drag-key]")?.dataset.lineDragKey;
+      const directTarget = dragKey ? lineTargetsRef.current.get(dragKey) : undefined;
+      const candidate = directTarget ? { target: directTarget, coordinate: series.priceToCoordinate(directTarget.price) } : nearestLine(y);
+      if (!candidate || candidate.coordinate === null || (!directTarget && Math.abs(Number(candidate.coordinate) - y) > 8)) return;
       event.preventDefault(); setLineCursor("ns-resize"); setContextMenu(null);
       dragging = { target: candidate.target, originalPrice: candidate.target.price, previewPrice: candidate.target.price };
-      container.setPointerCapture(event.pointerId);
+      interaction.setPointerCapture(event.pointerId);
     };
     const move = (event: PointerEvent) => {
       const y = event.clientY - container.getBoundingClientRect().top;
@@ -461,8 +533,9 @@ export function ReplayChart({
         });
       } else {
         dragging.previewPrice = price;
-        priceLinesRef.current.get(dragging.target.key)?.applyOptions({ price });
-        setLineActions((current) => current.map((action) => action.key === dragging!.target.key ? { ...action, price, y } : action));
+        const rLabel = dragging.target.rReference ? formatRMultiple(rMultipleAtPrice(dragging.target.rReference, price)) : null;
+        priceLinesRef.current.get(dragging.target.key)?.applyOptions({ price, ...(rLabel ? { title: rLabel } : {}) });
+        setLineActions((current) => current.map((action) => action.key === dragging!.target.key ? { ...action, price, y, ...(rLabel ? { label: rLabel } : {}) } : action));
       }
     };
     const finish = () => {
@@ -479,11 +552,11 @@ export function ReplayChart({
       }
     };
     const leave = () => { if (!dragging) setLineCursor(""); };
-    container.addEventListener("pointerdown", down); container.addEventListener("pointermove", move);
-    container.addEventListener("pointerup", finish); container.addEventListener("pointerleave", leave); window.addEventListener("keydown", key);
+    interaction.addEventListener("pointerdown", down); interaction.addEventListener("pointermove", move);
+    interaction.addEventListener("pointerup", finish); interaction.addEventListener("pointerleave", leave); window.addEventListener("keydown", key);
     return () => {
-      container.removeEventListener("pointerdown", down); container.removeEventListener("pointermove", move);
-      container.removeEventListener("pointerup", finish); container.removeEventListener("pointerleave", leave); window.removeEventListener("keydown", key);
+      interaction.removeEventListener("pointerdown", down); interaction.removeEventListener("pointermove", move);
+      interaction.removeEventListener("pointerup", finish); interaction.removeEventListener("pointerleave", leave); window.removeEventListener("keydown", key);
       setLineCursor("");
     };
   }, [moveDraftLine, priceTickSize, syncLineActionCoordinates]);
@@ -584,6 +657,7 @@ export function ReplayChart({
 
   return (
     <div
+      ref={interactionRef}
       className="relative h-full min-h-0 select-none"
       onContextMenu={openContextMenu}
       onPointerDown={(event: ReactPointerEvent<HTMLDivElement>) => {
@@ -601,7 +675,13 @@ export function ReplayChart({
           style={{ top: action.y, borderColor: `${action.color}66`, color: action.color }}
           onContextMenu={(event) => event.preventDefault()}
         >
-          <span className="truncate px-2 py-1 font-medium">{action.label}</span>
+          <span
+            data-line-drag-key={action.kind === "cancel" ? action.key : undefined}
+            className={action.kind === "cancel" ? "cursor-ns-resize touch-none truncate px-2 py-1 font-medium" : "truncate px-2 py-1 font-medium"}
+            title={action.kind === "cancel" ? copy.paperTrading.dragHint : undefined}
+          >
+            {action.label}
+          </span>
           <button
             type="button"
             className="flex shrink-0 items-center gap-1 border-l px-2 py-1 font-semibold hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-50"

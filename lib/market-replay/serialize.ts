@@ -8,6 +8,7 @@ type DatasetRecord = {
   timeframe: string;
   timezone: string;
   status: string;
+  dataVersion: number;
   sourceIntervalSeconds: number | null;
   priceTickSize: number;
   sessionMode: string;
@@ -24,6 +25,8 @@ type DatasetRecord = {
     intervalMs: number;
     playbackRate: number;
     displayIntervalSeconds: number | null;
+    generation: number;
+    syncVersion: number;
     updatedAt: Date;
   };
 };
@@ -43,6 +46,8 @@ export function serializeMarketDataset(dataset: DatasetRecord): MarketDatasetSum
       currentSequence: dataset.progress.currentSequence,
       playbackRate: dataset.progress.playbackRate,
       displayIntervalSeconds: dataset.progress.displayIntervalSeconds ?? sourceIntervalSeconds ?? 1,
+      generation: dataset.progress.generation,
+      syncVersion: dataset.progress.syncVersion,
       updatedAt: dataset.progress.updatedAt.toISOString(),
     } : null,
   };

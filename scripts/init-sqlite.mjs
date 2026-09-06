@@ -73,6 +73,8 @@ const createStatements = [
     "timeframe" TEXT NOT NULL,
     "timezone" TEXT NOT NULL,
     "status" TEXT NOT NULL DEFAULT 'READY',
+    "dataVersion" INTEGER NOT NULL DEFAULT 1,
+    "replayGeneration" INTEGER NOT NULL DEFAULT 0,
     "sourceIntervalSeconds" INTEGER,
     "priceTickSize" REAL NOT NULL DEFAULT 0.01,
     "sessionMode" TEXT NOT NULL DEFAULT 'TWENTY_FOUR_SEVEN',
@@ -104,6 +106,10 @@ const createStatements = [
     "intervalMs" INTEGER NOT NULL,
     "playbackRate" INTEGER NOT NULL DEFAULT 1,
     "displayIntervalSeconds" INTEGER,
+    "generation" INTEGER NOT NULL DEFAULT 1,
+    "syncVersion" INTEGER NOT NULL DEFAULT 0,
+    "lastSyncRequestId" TEXT,
+    "lastSyncResponse" TEXT,
     "createdAt" DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
     "updatedAt" DATETIME NOT NULL,
     CONSTRAINT "ReplayProgress_datasetId_fkey" FOREIGN KEY ("datasetId") REFERENCES "MarketDataset" ("id") ON DELETE CASCADE ON UPDATE CASCADE
@@ -247,6 +253,8 @@ const tradeColumns = [
 
 const marketDatasetColumns = [
   ["status", "TEXT NOT NULL DEFAULT 'READY'"],
+  ["dataVersion", "INTEGER NOT NULL DEFAULT 1"],
+  ["replayGeneration", "INTEGER NOT NULL DEFAULT 0"],
   ["sourceIntervalSeconds", "INTEGER"],
   ["priceTickSize", "REAL NOT NULL DEFAULT 0.01"],
   ["sessionMode", "TEXT NOT NULL DEFAULT 'TWENTY_FOUR_SEVEN'"],
@@ -254,7 +262,11 @@ const marketDatasetColumns = [
   ["sessionCloseMinute", "INTEGER"],
   ["tradingWeekdays", "TEXT NOT NULL DEFAULT '1,2,3,4,5,6,7'"],
 ];
-const replayProgressColumns = [["playbackRate", "INTEGER NOT NULL DEFAULT 1"], ["displayIntervalSeconds", "INTEGER"]];
+const replayProgressColumns = [
+  ["playbackRate", "INTEGER NOT NULL DEFAULT 1"], ["displayIntervalSeconds", "INTEGER"],
+  ["generation", "INTEGER NOT NULL DEFAULT 1"], ["syncVersion", "INTEGER NOT NULL DEFAULT 0"],
+  ["lastSyncRequestId", "TEXT"], ["lastSyncResponse", "TEXT"],
+];
 const paperSessionColumns = [["equitySampleStride", "INTEGER NOT NULL DEFAULT 1"]];
 const paperOrderColumns = [["riskAmount", "REAL"]];
 

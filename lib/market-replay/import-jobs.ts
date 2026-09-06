@@ -139,7 +139,10 @@ export async function processImportJob(jobId: string) {
     if (rowCount < 2) { totalIssues += 1; issues.push({ row: 1, reason: copy.marketReplay.validation.minimumRows }); }
     if (totalIssues || !firstTime || !lastTime) throw new Error(issues[0]?.reason ?? copy.marketReplay.importError);
     await prisma.$transaction([
-      prisma.marketDataset.update({ where: { id: dataset.id }, data: { status: "READY", barCount: rowCount, startTime: firstTime, endTime: lastTime } }),
+      prisma.marketDataset.update({
+        where: { id: dataset.id },
+        data: { status: "READY", barCount: rowCount, startTime: firstTime, endTime: lastTime, dataVersion: { increment: 1 } },
+      }),
       prisma.marketDatasetImport.update({ where: { id: jobId }, data: { status: "COMPLETED", processedRows: rowCount, expandedBytes, totalErrors: 0, errors: "[]" } }),
     ]);
     await rm(job.storedPath, { force: true });

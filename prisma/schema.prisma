@@ -121,6 +121,8 @@ model MarketDataset {
   timeframe    String
   timezone     String
   status                String  @default("READY")
+  dataVersion           Int     @default(1)
+  replayGeneration      Int     @default(0)
   sourceIntervalSeconds Int?
   priceTickSize         Float   @default(0.01)
   sessionMode           String  @default("TWENTY_FOUR_SEVEN")
@@ -202,6 +204,10 @@ model ReplayProgress {
   intervalMs      Int
   playbackRate    Int           @default(1)
   displayIntervalSeconds Int?
+  generation            Int           @default(1)
+  syncVersion           Int           @default(0)
+  lastSyncRequestId     String?
+  lastSyncResponse      String?
   createdAt       DateTime      @default(now())
   updatedAt       DateTime      @updatedAt
 }

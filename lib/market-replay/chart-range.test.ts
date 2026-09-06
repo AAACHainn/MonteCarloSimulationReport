@@ -20,12 +20,16 @@ describe("defaultReplayLogicalRange", () => {
     "uses a readable default at %i CSS pixels",
     (width, expectedBars) => {
       const range = defaultReplayLogicalRange(width, 1000);
-      expect(range).toEqual({ from: 1000 - expectedBars, to: 1003 });
+      const span = range.to - range.from;
+      expect(span).toBeCloseTo(expectedBars + 3);
+      expect((999 - range.from) / span).toBeCloseTo(0.618);
     },
   );
 
   it("keeps the default candle density even with only one revealed bar", () => {
-    expect(defaultReplayLogicalRange(1250, 1)).toEqual({ from: -249, to: 4 });
+    const range = defaultReplayLogicalRange(1250, 1);
+    expect(range.to - range.from).toBeCloseTo(253);
+    expect(-range.from / (range.to - range.from)).toBeCloseTo(0.618);
   });
 
   it("provides a valid range before the first revealed bar", () => {
@@ -38,6 +42,22 @@ describe("defaultReplayLogicalRange", () => {
     const initial = defaultReplayLogicalRange(1250, 300);
     const advanced = rangeAfterNewReplayBar(initial, 299, 10);
     expect({ from: advanced.from - 10, to: advanced.to - 10 }).toEqual(initial);
+  });
+
+  it("keeps the latest bar at the reset position over successive advances", () => {
+    let range = defaultReplayLogicalRange(1250, 300);
+    let lastIndex = 299;
+    for (const added of [1, 10, 1, 25]) {
+      range = rangeAfterNewReplayBar(range, lastIndex, added);
+      lastIndex += added;
+      expect((lastIndex - range.from) / (range.to - range.from)).toBeCloseTo(0.618);
+    }
+  });
+
+  it.each([-10, 10])("preserves manual panning by %i bars away from the reset position", (offset) => {
+    const initial = defaultReplayLogicalRange(1250, 300);
+    const panned = { from: initial.from + offset, to: initial.to + offset };
+    expect(rangeAfterNewReplayBar(panned, 299, 10)).toEqual(panned);
   });
 
   it("preserves historical panning when a batch arrives", () => {

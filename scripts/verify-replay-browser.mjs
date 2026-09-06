@@ -57,7 +57,7 @@ try {
   const port = await freePort(), browserPort = await freePort();
   const origin = "http://localhost:" + port;
   server = spawn(process.execPath, [resolve("node_modules/next/dist/bin/next"), "start", "--port", String(port)], {
-    env: { ...process.env, DATABASE_URL: databaseUrl }, windowsHide: true, stdio: ["ignore", "pipe", "pipe"],
+    env: { ...process.env, DATABASE_URL: databaseUrl, REPLAY_QUERY_METRICS: "1" }, windowsHide: true, stdio: ["ignore", "pipe", "pipe"],
   });
   server.stdout.on("data", (chunk) => { serverLog += chunk; });
   server.stderr.on("data", (chunk) => { serverLog += chunk; });
@@ -99,90 +99,155 @@ try {
     window.__qa = { records: [], inFlight: 0 };
     const originalFetch = window.fetch.bind(window);
     window.fetch = async (input, init) => {
-      const path = String(input), advance = path.includes("/replay/advance");
-      if (advance && window.__qa.conflictNext) {
+      const path = String(input), sync = path.includes("/replay/sync");
+      const initialProgressLoad = path.endsWith("/progress") && !(init?.method && init.method !== "GET") && !sessionStorage.getItem("qa-progress-delay-used");
+      if (sync && window.__qa.conflictNext) {
         window.__qa.conflictNext = false;
-        init = { ...init, body: JSON.stringify({ ...JSON.parse(init.body), expectedVersion: 1 }) };
+        init = { ...init, body: JSON.stringify({ ...JSON.parse(init.body), syncVersion: 999999 }) };
       }
       const start = performance.now();
-      if (advance) window.__qa.inFlight++;
+      if (sync) window.__qa.inFlight++;
       try {
         const response = await originalFetch(input, init);
         if (path.includes("/api/")) {
           const body = await response.clone().json();
-          window.__qa.records.push({ path, status: response.status, request: init?.body ? JSON.parse(init.body) : null, body, ms: performance.now() - start });
+          window.__qa.records.push({
+            path,
+            status: response.status,
+            request: init?.body ? JSON.parse(init.body) : null,
+            body,
+            ms: performance.now() - start,
+            databaseQueries: Number(response.headers.get("X-Replay-Database-Queries")) || 0,
+          });
         }
-        if (advance && window.__qa.delayNext) {
+        if (initialProgressLoad) {
+          sessionStorage.setItem("qa-progress-delay-used", "1");
+          await new Promise(resolve => setTimeout(resolve, 500));
+        }
+        if (sync && window.__qa.delayNext) {
           window.__qa.delayNext = false;
           await new Promise(resolve => setTimeout(resolve, 500));
         }
-        if (advance && window.__qa.dropNext) {
+        if (sync && window.__qa.dropNext) {
           window.__qa.dropNext = false;
-          throw new TypeError("Simulated lost advance response");
+          throw new TypeError("Simulated lost sync response");
         }
         return response;
-      } finally { if (advance) window.__qa.inFlight--; }
+      } finally { if (sync) window.__qa.inFlight--; }
     };
   };
   await send("Page.addScriptToEvaluateOnNewDocument", { source: "(" + instrument.toString() + ")()" });
   await send("Page.navigate", { url: origin + "/market-replay/" + id });
-  await until(() => evaluate("!![...document.querySelectorAll('button')].find(b=>b.textContent.includes('下一根')) && window.__qa.records.some(r=>r.path.endsWith('/paper-session'))"), "replay UI");
-  const step = (count = 1) => evaluate("(() => {const b=[...document.querySelectorAll('button')].find(b=>b.textContent.includes('下一根'));for(let i=0;i<" + count + ";i++)b.click()})()");
   const currentSequence = async () => (await prisma.replayProgress.findUniqueOrThrow({ where: { datasetId: id } })).currentSequence;
-  await step(30);
-  await until(async () => await currentSequence() === 8999 && await evaluate("window.__qa.inFlight === 0"), "30 rapid clicks", 60000);
+  await until(() => evaluate("!![...document.querySelectorAll('button')].find(b=>b.textContent.includes('下一根'))"), "replay UI");
+  await evaluate("[...document.querySelectorAll('button')].find(b=>b.textContent.trim()==='播放').click()");
+  await delay(100);
+  assert.ok(await evaluate("[...document.querySelectorAll('button')].some(b=>b.textContent.trim()==='暂停')"));
+  await until(() => evaluate("window.__qa.records.some(r=>r.path.endsWith('/progress'))"), "initial progress snapshot");
+  await until(async () => await currentSequence() > -1, "playback after paper snapshot");
+  await evaluate("[...document.querySelectorAll('button')].find(b=>b.textContent.trim()==='暂停')?.click()");
+  await until(() => evaluate("[...document.querySelectorAll('button')].some(b=>b.textContent.trim()==='播放')"), "initial pause");
+  console.log("PASS: play before paper snapshot resolves stays playing and advances");
+  await evaluate("new Promise(resolve => { const request = indexedDB.deleteDatabase('market-replay-bars-v1'); request.onsuccess = request.onerror = request.onblocked = () => resolve(); })");
+  await prisma.$transaction([
+    prisma.paperEquityPoint.deleteMany({ where: { session: { datasetId: id } } }),
+    prisma.paperFill.deleteMany({ where: { session: { datasetId: id } } }),
+    prisma.paperTrade.deleteMany({ where: { session: { datasetId: id } } }),
+    prisma.paperOrder.deleteMany({ where: { session: { datasetId: id } } }),
+    prisma.paperTradingSession.update({ where: { datasetId: id }, data: {
+      lastProcessedSequence: -1, netQuantity: 0, averageEntryPrice: null, realizedPnl: 0,
+      totalFees: 0, totalSlippage: 0, peakEquity: 100000, maxDrawdown: 0, version: 1,
+    } }),
+    prisma.replayProgress.update({ where: { datasetId: id }, data: {
+      currentSequence: -1, syncVersion: 0, lastSyncRequestId: null, lastSyncResponse: null,
+    } }),
+  ]);
+  await send("Page.navigate", { url: origin + "/market-replay/" + id });
+  await until(() => evaluate("!![...document.querySelectorAll('button')].find(b=>b.textContent.includes('下一根')) && window.__qa.records.some(r=>r.path.endsWith('/progress'))"), "replay reset for regression");
+  const step = (count = 1) => evaluate("(() => {const b=[...document.querySelectorAll('button')].find(b=>b.textContent.includes('下一根'));for(let i=0;i<" + count + ";i++)b.click()})()");
+  await step(5);
+  await until(async () => await currentSequence() === 1499 && await evaluate("window.__qa.inFlight === 0"), "5 rapid clicks", 60000);
   const records = await evaluate("window.__qa.records");
-  const advances = records.filter((r) => r.path.endsWith("/replay/advance"));
-  assert.equal(advances.length, 30);
-  assert.ok(advances.every((r, i) => r.status === 200 && r.request.expectedCurrentSequence === i * 300 - 1));
+  const syncs = records.filter((r) => r.path.endsWith("/replay/sync"));
+  assert.equal(syncs.length, 15);
+  assert.ok(syncs.every((r, i) => r.status === 200
+    && r.request.confirmedSequence === i * 100 - 1
+    && r.request.targetSequence === (i + 1) * 100 - 1));
   assert.equal(records.filter((r) => r.path.includes("/bars/window")).length, 1);
-  assert.ok(advances.every((r) => r.body.aggregatedBars.length === 1));
-  console.log("PASS: 30 rapid clicks, correct sequences, one initial window request");
+  assert.equal(records.filter((r) => r.path.includes("/bars/chunks")).length, 1);
+  console.log("PASS: 5 rapid clicks, 15 bounded syncs, one initial window and one daily source request");
 
-  await evaluate("for(let i=0;i<5;i++)document.body.dispatchEvent(new KeyboardEvent('keydown',{key:'ArrowRight',ctrlKey:true,bubbles:true}))");
-  await until(async () => await currentSequence() === 10499 && await evaluate("window.__qa.inFlight === 0"), "rapid keyboard steps");
-  console.log("PASS: 5 rapid keyboard steps");
+  const coldChunkMs = records.find((r) => r.path.includes("/bars/chunks")).ms;
+  await send("Page.navigate", { url: origin + "/market-replay/" + id });
+  await until(() => evaluate("!![...document.querySelectorAll('button')].find(b=>b.textContent.includes('下一根')) && window.__qa.records.some(r=>r.path.endsWith('/progress'))"), "cached replay UI");
+  await step();
+  await until(async () => await currentSequence() === 1799 && await evaluate("window.__qa.inFlight === 0"), "persistent cache replay");
+  assert.equal(await evaluate("window.__qa.records.filter(r=>r.path.includes('/bars/chunks')).length"), 0);
+  console.log(`PASS: cold daily source request ${coldChunkMs.toFixed(1)} ms; persistent IndexedDB hit made 0 source requests`);
 
-  async function failureRecovery(flag, expectedSequence) {
+  await evaluate("for(let i=0;i<4;i++)document.body.dispatchEvent(new KeyboardEvent('keydown',{key:'ArrowRight',ctrlKey:true,bubbles:true}))");
+  await until(async () => await currentSequence() === 2999 && await evaluate("window.__qa.inFlight === 0"), "rapid keyboard steps");
+  console.log("PASS: 4 rapid keyboard steps after cache restoration");
+
+  async function conflictRecovery(expectedSequence) {
     const before = await evaluate("window.__qa.records.filter(r=>r.path.endsWith('/progress') && !r.request).length");
-    await evaluate("window.__qa." + flag + " = true");
+    await evaluate("window.__qa.conflictNext = true");
     await step();
-    await until(() => evaluate("window.__qa.records.filter(r=>r.path.endsWith('/progress') && !r.request).length > " + before + " && window.__qa.inFlight === 0"), "recovery fetch");
+    await until(() => evaluate("window.__qa.records.filter(r=>r.path.endsWith('/progress') && !r.request).length > " + before + " && window.__qa.inFlight === 0"), "conflict recovery fetch");
     await delay(700);
     await step();
-    await until(async () => await currentSequence() === expectedSequence && await evaluate("window.__qa.inFlight === 0"), flag + " next click");
+    await until(async () => await currentSequence() === expectedSequence && await evaluate("window.__qa.inFlight === 0"), "conflict next click");
   }
-  await failureRecovery("dropNext", 11099);
-  console.log("PASS: lost response reconciles committed progress and next click works");
-  await failureRecovery("conflictNext", 11399);
+  await evaluate("window.__qa.dropNext = true");
+  await step();
+  await until(async () => await currentSequence() === 3299 && await evaluate("window.__qa.inFlight === 0"), "lost response retry");
+  const retriedRequestCount = await evaluate("(() => {const ids=window.__qa.records.filter(r=>r.path.endsWith('/replay/sync')).map(r=>r.request.requestId);return Math.max(...ids.map(id=>ids.filter(other=>other===id).length))})()");
+  assert.ok(retriedRequestCount >= 2);
+  console.log("PASS: lost response retries the same request id without duplicate processing");
+  await conflictRecovery(3599);
   console.log("PASS: 409 reconciles account and cursor, next click works");
 
   await evaluate("(() => {const c=document.querySelector('[aria-label=\"K 线回放图表\"]'),r=c.getBoundingClientRect();c.dispatchEvent(new MouseEvent('contextmenu',{bubbles:true,clientX:r.left+200,clientY:r.top+100}))})()");
   await until(() => evaluate("!!document.querySelector('[data-testid=\"context-reset-chart-view\"]')"), "reset view menu");
   await evaluate("document.querySelector('[data-testid=\"context-reset-chart-view\"]').click()");
-  assert.equal(await currentSequence(), 11399);
+  assert.equal(await currentSequence(), 3599);
   assert.equal(await evaluate("!!document.querySelector('[data-context-menu]')"), false);
 
   await evaluate("window.__qa.delayNext=true;[...document.querySelectorAll('button')].find(b=>b.textContent.trim()==='播放').click()");
   await until(() => evaluate("window.__qa.inFlight > 0"), "autoplay in-flight");
+  const persistedDuringDelay = await currentSequence();
+  const visibleBeforeDelay = await evaluate("Number((/已揭示\\s*([\\d,]+)/.exec(document.body.textContent)?.[1] ?? '-1').replaceAll(',','')) - 1");
+  await delay(300);
+  const visibleAfterDelay = await evaluate("Number((/已揭示\\s*([\\d,]+)/.exec(document.body.textContent)?.[1] ?? '-1').replaceAll(',','')) - 1");
+  assert.equal(await currentSequence(), persistedDuringDelay);
+  assert.ok(visibleAfterDelay > visibleBeforeDelay && visibleAfterDelay > persistedDuringDelay);
   await evaluate("[...document.querySelectorAll('button')].find(b=>b.textContent.trim()==='暂停').click()");
+  assert.ok(await evaluate("[...document.querySelectorAll('button')].some(b=>b.textContent.trim()==='播放')"));
   await until(() => evaluate("window.__qa.inFlight === 0"), "paused request completes");
   await delay(400);
   assert.ok(await evaluate("[...document.querySelectorAll('button')].some(b=>b.textContent.trim()==='播放')"));
   const paused = await currentSequence();
   await delay(500);
   assert.equal(await currentSequence(), paused);
-  const auto = await evaluate("window.__qa.records.filter(r=>r.path.endsWith('/replay/advance')).at(-1)");
-  assert.equal(auto.request.displayIntervalSeconds, 300);
-  assert.equal(auto.request.count, 1);
-  assert.equal(paused, 11699);
-  console.log("PASS: autoplay advances a complete displayed 5m candle, preserving source matching");
-  console.log("PASS: pause during an in-flight playback request stays paused");
+  const auto = await evaluate("window.__qa.records.filter(r=>r.path.endsWith('/replay/sync')).at(-1)");
+  assert.ok(auto.request.targetSequence - auto.request.confirmedSequence <= 100);
+  assert.ok(paused > 3699 && paused <= 3799);
+  assert.ok(await evaluate("document.body.textContent.includes('形成中')"));
+  console.log("PASS: 100x autoplay reveals a forming 5m candle through bounded source batches");
+  console.log("PASS: delayed sync does not block visible playback; pause is immediate and then flushes the visible cursor");
   assert.deepEqual(exceptions, []);
   const progress = await prisma.replayProgress.findUniqueOrThrow({ where: { datasetId: id } });
   const session = await prisma.paperTradingSession.findUniqueOrThrow({ where: { datasetId: id } });
   assert.equal(progress.currentSequence, session.lastProcessedSequence);
   assert.equal(session.version, session.lastProcessedSequence + 2);
+  const measured = await evaluate("({records:window.__qa.records,frames:performance.getEntriesByName('market-replay-source-frame').map(e=>e.duration)})");
+  const allRecords = [...records, ...measured.records];
+  const measuredSyncs = allRecords.filter((record) => record.path.endsWith("/replay/sync") && record.status === 200);
+  assert.ok(measuredSyncs.every((record) => record.databaseQueries <= 20));
+  const sortedFrames = measured.frames.toSorted((a, b) => a - b);
+  const p95FrameMs = sortedFrames[Math.max(0, Math.ceil(sortedFrames.length * 0.95) - 1)] ?? 0;
+  const databaseQueries = allRecords.reduce((total, record) => total + record.databaseQueries, 0);
+  console.log(`MEASURE: ${sortedFrames.length} source batches, p95 ${p95FrameMs.toFixed(2)} ms, max ${(sortedFrames.at(-1) ?? 0).toFixed(2)} ms; ${databaseQueries} Prisma query events`);
   console.log("PASS: no browser exceptions; account, version and cursor remain aligned");
 } catch (error) {
   console.error(serverLog.slice(-5000));

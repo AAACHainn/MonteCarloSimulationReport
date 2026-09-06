@@ -7,21 +7,33 @@ vi.mock("@/lib/db", async () => {
   const { tmpdir } = await import("node:os");
   const { join } = await import("node:path");
   const { randomUUID } = await import("node:crypto");
-  return { prisma: new PrismaClient({ datasourceUrl: `file:${join(tmpdir(), "replay-integration-" + randomUUID() + ".db")}` }) };
+  return {
+    prisma: new PrismaClient({ datasourceUrl: `file:${join(tmpdir(), "replay-integration-" + randomUUID() + ".db")}` }),
+    replayDatabaseQueryCount: () => null,
+  };
 });
 
 import { prisma } from "@/lib/db";
 import { POST } from "@/app/api/market-datasets/[id]/replay/advance/route";
+import { POST as syncPOST } from "@/app/api/market-datasets/[id]/replay/sync/route";
+import { POST as resetPOST } from "@/app/api/market-datasets/[id]/replay/reset/route";
 import { GET as progressGET, PUT as progressPUT } from "@/app/api/market-datasets/[id]/progress/route";
 import { advancePaperTrading } from "@/lib/paper-trading/engine";
-import { serializePaperSession, serializePaperOrder } from "@/lib/paper-trading/serialize";
+import { getPaperSessionSnapshot, serializePaperSession, serializePaperOrder } from "@/lib/paper-trading/serialize";
 import { serializeSourceBar } from "./dataset";
+import { createDeterministicEventIdFactory } from "@/lib/paper-trading/deterministic-id";
 import type { PaperFillData, PaperEquityPointData } from "@/lib/paper-trading/types";
 import { GET as windowGET } from "@/app/api/market-datasets/[id]/bars/window/route";
+import { GET as chunksGET } from "@/app/api/market-datasets/[id]/bars/chunks/route";
+import { applySpeculativeAdvance } from "@/lib/paper-trading/speculative";
+import { buildPaperReplayDelta, createPaperDeltaAccumulator, recordPaperAdvance } from "./client-sync";
 
 let databaseFile = "";
 const baseTime = Date.UTC(2026, 8, 1);
 const request = (body: unknown) => new Request("http://localhost/api/advance", {
+  method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body),
+});
+const syncRequest = (body: unknown) => new Request("http://localhost/api/sync", {
   method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body),
 });
 const context = (id: string) => ({ params: Promise.resolve({ id }) });
@@ -65,7 +77,165 @@ async function seed(id: string, seconds: number, count: number, start = -1, pape
   } });
 }
 
+async function clientSyncBody(id: string, targetSequence: number, requestId: string) {
+  const [dataset, progress, snapshot] = await Promise.all([
+    prisma.marketDataset.findUniqueOrThrow({ where: { id } }),
+    prisma.replayProgress.findUniqueOrThrow({ where: { datasetId: id } }),
+    getPaperSessionSnapshot(id),
+  ]);
+  const accumulator = createPaperDeltaAccumulator(progress.currentSequence);
+  let visible = snapshot;
+  if (visible) {
+    const bars = await prisma.marketBar.findMany({
+      where: { datasetId: id, sequence: { gt: progress.currentSequence, lte: targetSequence } },
+      orderBy: { sequence: "asc" },
+    });
+    for (const record of bars) {
+      const result = advancePaperTrading({
+        state: visible.session, orders: visible.activeOrders, bar: serializeSourceBar(record),
+        makeId: createDeterministicEventIdFactory(visible.session.id, progress.generation, record.sequence),
+      });
+      recordPaperAdvance(accumulator, visible, result,
+        result.fills.length > 0 || record.sequence === dataset.barCount - 1 || record.sequence % Math.max(1, Math.ceil(dataset.barCount / 20_000)) === 0);
+      visible = applySpeculativeAdvance(visible, result);
+    }
+  }
+  accumulator.toSequence = targetSequence;
+  return {
+    generation: progress.generation, requestId, confirmedSequence: progress.currentSequence,
+    syncVersion: progress.syncVersion, dataVersion: dataset.dataVersion,
+    expectedPaperVersion: snapshot?.session.version ?? null, targetSequence,
+    paperDelta: visible ? buildPaperReplayDelta(accumulator, visible) : null,
+  };
+}
+
 describe("replay advance with real SQLite", () => {
+  it("returns source bars as daily cache chunks and records empty weekly dates", async () => {
+    await seed("chunk-second", 1, 120, -1, false);
+    const daily = await chunksGET(new Request(
+      "http://localhost/api/chunks?version=1&startDate=2026-09-01",
+    ), context("chunk-second"));
+    expect(daily.status).toBe(200);
+    const dailyBody = await daily.json();
+    expect(dailyBody.coveredDates).toEqual(["2026-09-01"]);
+    expect(dailyBody.chunks[0].bars).toHaveLength(120);
+    expect(dailyBody.chunks[0].bars[0].sequence).toBe(0);
+
+    await seed("chunk-week", 300, 10, -1, false);
+    const weekly = await chunksGET(new Request(
+      "http://localhost/api/chunks?version=1&startDate=2026-09-01",
+    ), context("chunk-week"));
+    expect(weekly.status).toBe(200);
+    const weeklyBody = await weekly.json();
+    expect(weeklyBody.coveredDates).toHaveLength(7);
+    expect(weeklyBody.chunks).toHaveLength(7);
+    expect(weeklyBody.chunks[0].bars).toHaveLength(10);
+    expect(weeklyBody.chunks.slice(1).every((chunk: { bars: unknown[] }) => chunk.bars.length === 0)).toBe(true);
+
+    const stale = await chunksGET(new Request(
+      "http://localhost/api/chunks?version=2&startDate=2026-09-01",
+    ), context("chunk-week"));
+    expect(stale.status).toBe(409);
+  });
+
+  it("replays a lost sync response idempotently without duplicating source processing", async () => {
+    await seed("sync-idempotent", 1, 300);
+    const body = await clientSyncBody("sync-idempotent", 99, "same-request");
+    const first = await syncPOST(syncRequest(body), context("sync-idempotent"));
+    const retried = await syncPOST(syncRequest(body), context("sync-idempotent"));
+    expect(first.status).toBe(200);
+    expect(retried.status).toBe(200);
+    expect(await retried.json()).toEqual(await first.json());
+    expect(await prisma.paperEquityPoint.count({
+      where: { session: { datasetId: "sync-idempotent" } },
+    })).toBe(100);
+    const progress = await prisma.replayProgress.findUniqueOrThrow({ where: { datasetId: "sync-idempotent" } });
+    expect(progress).toMatchObject({ currentSequence: 99, syncVersion: 1, lastSyncRequestId: "same-request" });
+  });
+
+  it("rejects a tampered client accounting delta without moving the saved cursor", async () => {
+    await seed("sync-tampered", 1, 30);
+    const body = await clientSyncBody("sync-tampered", 9, "tampered");
+    if (!body.paperDelta) throw new Error("Expected a paper delta");
+    body.paperDelta.state.totalFees += 10;
+    const response = await syncPOST(syncRequest(body), context("sync-tampered"));
+    expect(response.status).toBe(400);
+    const [progress, session] = await Promise.all([
+      prisma.replayProgress.findUniqueOrThrow({ where: { datasetId: "sync-tampered" } }),
+      prisma.paperTradingSession.findUniqueOrThrow({ where: { datasetId: "sync-tampered" } }),
+    ]);
+    expect(progress).toMatchObject({ currentSequence: -1, syncVersion: 0 });
+    expect(session).toMatchObject({ lastProcessedSequence: -1, version: 1, totalFees: 0 });
+  });
+
+  it("rejects stale sync versions and requests from a reset generation", async () => {
+    await seed("sync-generation", 1, 300, -1, false);
+    const staleVersion = await syncPOST(syncRequest({
+      generation: 1, requestId: "version", confirmedSequence: -1, syncVersion: 1,
+      dataVersion: 1, expectedPaperVersion: null, targetSequence: 1, paperDelta: null,
+    }), context("sync-generation"));
+    expect(staleVersion.status).toBe(409);
+
+    const reset = await resetPOST(request({ action: "RESET" }), context("sync-generation"));
+    expect(reset.status).toBe(200);
+    const resetBody = await reset.json();
+    expect(resetBody.generation).toBe(2);
+    const staleGeneration = await syncPOST(syncRequest({
+      generation: 1, requestId: "old-generation", confirmedSequence: -1, syncVersion: 0,
+      dataVersion: 1, expectedPaperVersion: null, targetSequence: 1, paperDelta: null,
+    }), context("sync-generation"));
+    expect(staleGeneration.status).toBe(409);
+  });
+
+  it("limits browser sync batches to one hundred source bars", async () => {
+    await seed("sync-limit", 1, 300, -1, false);
+    const response = await syncPOST(syncRequest({
+      generation: 1, requestId: "too-many", confirmedSequence: -1, syncVersion: 0,
+      dataVersion: 1, expectedPaperVersion: null, targetSequence: 100, paperDelta: null,
+    }), context("sync-limit"));
+    expect(response.status).toBe(400);
+  });
+
+  it("matches browser-side deterministic fill and protective-order ids", async () => {
+    await seed("sync-deterministic", 1, 30);
+    const session = await prisma.paperTradingSession.findUniqueOrThrow({ where: { datasetId: "sync-deterministic" } });
+    await prisma.paperOrder.create({ data: {
+      id: "entry-sync", sessionId: session.id, side: "BUY", type: "MARKET", quantity: 2,
+      stopLoss: 95, takeProfit: 105, createdSequence: -1, activeFromSequence: 0,
+    } });
+    let state = serializePaperSession(session);
+    let orders = (await prisma.paperOrder.findMany({ where: { sessionId: session.id } })).map(serializePaperOrder);
+    const bars = await prisma.marketBar.findMany({
+      where: { datasetId: "sync-deterministic", sequence: { lte: 9 } },
+      orderBy: { sequence: "asc" },
+    });
+    const expectedFillIds: string[] = [];
+    for (const record of bars) {
+      const result = advancePaperTrading({
+        state,
+        orders,
+        bar: serializeSourceBar(record),
+        makeId: createDeterministicEventIdFactory(session.id, 1, record.sequence),
+      });
+      state = result.state;
+      orders = result.orders;
+      expectedFillIds.push(...result.fills.map((fill) => fill.id));
+    }
+    const response = await syncPOST(syncRequest(
+      await clientSyncBody("sync-deterministic", 9, "deterministic"),
+    ), context("sync-deterministic"));
+    expect(response.status).toBe(200);
+    const persistedFills = await prisma.paperFill.findMany({ where: { sessionId: session.id }, orderBy: { sequence: "asc" } });
+    const persistedProtective = await prisma.paperOrder.findMany({
+      where: { sessionId: session.id, isProtective: true },
+      orderBy: { id: "asc" },
+    });
+    expect(persistedFills.map((fill) => fill.id)).toEqual(expectedFillIds);
+    expect(persistedProtective.map((order) => order.id)).toEqual(
+      orders.filter((order) => order.isProtective).map((order) => order.id).sort(),
+    );
+  });
+
   it("advances a full displayed bar atomically", async () => {
     await seed("basic", 1, 600);
     const response = await POST(request({ expectedCurrentSequence: -1, expectedVersion: 1, count: 1, displayIntervalSeconds: 300 }), context("basic"));

@@ -24,6 +24,8 @@ export function createReplayState(
   playbackRate: PlaybackRate,
   displayIntervalSeconds: number,
   currentSequence = startSequence - 1,
+  generation = 1,
+  syncVersion = 0,
 ): ReplayState {
   const finished = currentSequence >= barCount - 1;
   return {
@@ -32,6 +34,9 @@ export function createReplayState(
     currentSequence,
     playbackRate,
     displayIntervalSeconds,
+    generation,
+    syncVersion,
+    confirmedSequence: currentSequence,
     status: finished ? "finished" : "paused",
   };
 }

@@ -9,6 +9,7 @@ import {
 import {
   MAX_DISPLAY_INTERVAL_SECONDS,
   MAX_REPLAY_ADVANCE_COUNT,
+  MAX_REPLAY_SYNC_SOURCE_BARS,
   isPlaybackRate,
 } from "./market-replay/types";
 
@@ -116,6 +117,81 @@ export const paperAdvanceSchema = z.object({
   expectedVersion: z.coerce.number().int().positive().optional().nullable(),
   count: z.coerce.number().int().min(1).max(MAX_REPLAY_ADVANCE_COUNT).default(1),
   displayIntervalSeconds: z.coerce.number().int().min(1).max(MAX_DISPLAY_INTERVAL_SECONDS).optional(),
+});
+
+export const replayChunksSchema = z.object({
+  version: z.coerce.number().int().positive(),
+  startDate: z.string().regex(/^\d{4}-\d{2}-\d{2}$/),
+});
+
+const paperSessionStateSchema = z.object({
+  id: z.string().min(1).max(120),
+  datasetId: z.string().min(1).max(120),
+  initialCapital: z.number().finite().positive(),
+  currency: z.string().min(1).max(12),
+  commissionBps: z.number().finite().min(0).max(10_000),
+  slippageBps: z.number().finite().min(0).max(10_000),
+  lastProcessedSequence: z.number().int().min(-1),
+  netQuantity: z.number().finite(),
+  averageEntryPrice: z.number().finite().nullable(),
+  realizedPnl: z.number().finite(),
+  totalFees: z.number().finite().min(0),
+  totalSlippage: z.number().finite().min(0),
+  peakEquity: z.number().finite(),
+  maxDrawdown: z.number().finite().min(0),
+  version: z.number().int().positive(),
+});
+
+const paperOrderDataSchema = z.object({
+  id: z.string().min(1).max(160), side: z.enum(["BUY", "SELL"]),
+  type: z.enum(["MARKET", "LIMIT", "STOP"]),
+  status: z.enum(["PENDING", "FILLED", "CANCELLED", "REJECTED"]),
+  quantity: z.number().finite().positive(), riskAmount: z.number().finite().positive().nullable(),
+  price: z.number().finite().nullable(), stopLoss: z.number().finite().nullable(),
+  takeProfit: z.number().finite().nullable(), reduceOnly: z.boolean(), isProtective: z.boolean(),
+  ocoGroupId: z.string().max(160).nullable(), createdSequence: z.number().int().min(-1),
+  activeFromSequence: z.number().int().min(0), filledSequence: z.number().int().min(0).nullable(),
+  filledAt: z.string().datetime().nullable(), filledPrice: z.number().finite().nullable(),
+  cancelReason: z.string().max(120).nullable(), createdAt: z.string().datetime().optional(),
+});
+
+const paperFillDataSchema = z.object({
+  id: z.string().min(1).max(160), orderId: z.string().min(1).max(160),
+  sequence: z.number().int().min(0), timestamp: z.string().datetime(), side: z.enum(["BUY", "SELL"]),
+  price: z.number().finite().positive(), quantity: z.number().finite().positive(),
+  fee: z.number().finite().min(0), slippageCost: z.number().finite().min(0), realizedPnl: z.number().finite(),
+  closedQuantity: z.number().finite().min(0), openedQuantity: z.number().finite().min(0),
+  netQuantityAfter: z.number().finite(), averagePriceAfter: z.number().finite().nullable(),
+  reason: z.enum(["ENTRY", "ADD", "REDUCE", "CLOSE", "REVERSE", "STOP_LOSS", "TAKE_PROFIT"]),
+});
+
+const paperEquityPointDataSchema = z.object({
+  sequence: z.number().int().min(0), timestamp: z.string().datetime(),
+  balance: z.number().finite(), equity: z.number().finite(), drawdown: z.number().finite().min(0),
+});
+
+const paperReplayDeltaSchema = z.object({
+  state: paperSessionStateSchema,
+  activeOrders: z.array(paperOrderDataSchema).max(10_000),
+  orderChanges: z.array(paperOrderDataSchema).max(10_000),
+  fills: z.array(paperFillDataSchema).max(10_000),
+  equityPoints: z.array(paperEquityPointDataSchema).max(MAX_REPLAY_SYNC_SOURCE_BARS),
+  fingerprint: z.string().min(1).max(100_000),
+});
+
+export const replaySyncSchema = z.object({
+  generation: z.coerce.number().int().positive(),
+  requestId: z.string().trim().min(1).max(120),
+  confirmedSequence: z.coerce.number().int().min(-1),
+  syncVersion: z.coerce.number().int().min(0),
+  dataVersion: z.coerce.number().int().positive(),
+  expectedPaperVersion: z.coerce.number().int().positive().optional().nullable(),
+  targetSequence: z.coerce.number().int().min(0),
+  paperDelta: paperReplayDeltaSchema.nullable(),
+}).superRefine((value, context) => {
+  if (value.targetSequence <= value.confirmedSequence || value.targetSequence - value.confirmedSequence > MAX_REPLAY_SYNC_SOURCE_BARS) {
+    context.addIssue({ code: z.ZodIssueCode.custom, message: copy.marketReplay.validation.progressInvalid });
+  }
 });
 
 export const paperResetSchema = z.object({ action: z.enum(["RESET", "CHANGE_START"]) });
