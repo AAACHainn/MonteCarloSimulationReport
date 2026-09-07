@@ -1,0 +1,1 @@
+ALTER TABLE "MarketDatasetImport" ADD COLUMN "importedBars" INTEGER NOT NULL DEFAULT 0;

@@ -3,6 +3,7 @@ import { tzOffset } from "@date-fns/tz";
 import { copy } from "@/lib/i18n";
 import { MAX_MARKET_BARS } from "./types";
 import { getAggregationBucket } from "./aggregation";
+import { isCmeQuarterlyLeadSymbol, isCmeQuarterlyOutrightSymbol } from "./cme-contracts";
 import type { TradingSessionConfig } from "./types";
 
 export type ParsedMarketBar = {
@@ -26,11 +27,23 @@ export class MarketCsvValidationError extends Error {
 export type CsvRow = Record<string, string | undefined>;
 type LocalParts = { year: number; month: number; day: number; hour: number; minute: number; second: number; millisecond: number };
 
-const requiredColumns = ["timestamp", "open", "high", "low", "close"] as const;
-export const MARKET_REQUIRED_COLUMNS = requiredColumns;
+const standardRequiredColumns = ["timestamp", "open", "high", "low", "close"] as const;
+const databentoCmeRequiredColumns = ["ts_event", "open", "high", "low", "close", "symbol"] as const;
+export type MarketCsvFormat = "STANDARD" | "DATABENTO_CME";
 
 function normalizeKey(value: string) {
   return value.trim().toLowerCase();
+}
+
+export function inspectMarketCsvHeaders(headers: string[]) {
+  const normalizedHeaders = headers.map(normalizeKey);
+  const format: MarketCsvFormat = normalizedHeaders.includes("ts_event") ? "DATABENTO_CME" : "STANDARD";
+  const requiredColumns = format === "DATABENTO_CME" ? databentoCmeRequiredColumns : standardRequiredColumns;
+  return {
+    format,
+    normalizedHeaders,
+    missingColumns: requiredColumns.filter((column) => !normalizedHeaders.includes(column)),
+  };
 }
 
 function readValue(row: CsvRow, key: string) {
@@ -116,6 +129,7 @@ export function parseMarketTimestamp(value: string | undefined, timezone: string
 export type MarketBarParseOptions = {
   sourceIntervalSeconds: number;
   session: TradingSessionConfig;
+  cmeRootSymbol?: string;
 };
 
 export function isMarketTimestampAligned(timestamp: Date, options: MarketBarParseOptions) {
@@ -126,22 +140,63 @@ export function isMarketTimestampAligned(timestamp: Date, options: MarketBarPars
 
 export function parseMarketCsvRow({
   row, rowNumber, sequence, timezone, options, previousTime = Number.NEGATIVE_INFINITY,
-  previousChartSecond = Number.NEGATIVE_INFINITY,
+  previousChartSecond = Number.NEGATIVE_INFINITY, format = "STANDARD",
 }: {
   row: CsvRow; rowNumber: number; sequence: number; timezone: string; options?: MarketBarParseOptions;
-  previousTime?: number; previousChartSecond?: number;
+  previousTime?: number; previousChartSecond?: number; format?: MarketCsvFormat;
 }) {
-  const timestamp = parseMarketTimestamp(readValue(row, "timestamp"), timezone);
+  const symbol = readValue(row, "symbol");
+  if (format === "DATABENTO_CME") {
+    if (!options?.cmeRootSymbol) {
+      return {
+        issues: [{ row: rowNumber, reason: copy.marketReplay.validation.cmeRootRequired }],
+        time: previousTime,
+        chartSecond: previousChartSecond,
+        bar: null,
+        skipped: false,
+      };
+    }
+    if (!isCmeQuarterlyOutrightSymbol(symbol, options.cmeRootSymbol)) {
+      return {
+        issues: [],
+        time: previousTime,
+        chartSecond: previousChartSecond,
+        bar: null,
+        skipped: true,
+      };
+    }
+  }
+
+  const timestamp = parseMarketTimestamp(readValue(row, format === "DATABENTO_CME" ? "ts_event" : "timestamp"), timezone);
+  if (format === "DATABENTO_CME" && !timestamp) {
+    return {
+      issues: [{ row: rowNumber, reason: copy.marketReplay.validation.invalidTimestamp }],
+      time: previousTime,
+      chartSecond: previousChartSecond,
+      bar: null,
+      skipped: false,
+    };
+  }
+  if (format === "DATABENTO_CME" && !isCmeQuarterlyLeadSymbol(symbol, options!.cmeRootSymbol!, timestamp!)) {
+    return {
+      issues: [],
+      time: previousTime,
+      chartSecond: previousChartSecond,
+      bar: null,
+      skipped: true,
+    };
+  }
+
   const open = parseFiniteNumber(readValue(row, "open"));
   const high = parseFiniteNumber(readValue(row, "high"));
   const low = parseFiniteNumber(readValue(row, "low"));
   const close = parseFiniteNumber(readValue(row, "close"));
   const volumeValue = readValue(row, "volume");
-  const volume = volumeValue ? parseFiniteNumber(volumeValue) : null;
+  const volume = format === "DATABENTO_CME" ? null : volumeValue ? parseFiniteNumber(volumeValue) : null;
   const reasons: string[] = [];
   if (!timestamp) reasons.push(copy.marketReplay.validation.invalidTimestamp);
   if ([open, high, low, close].some((value) => value === null)) reasons.push(copy.marketReplay.validation.invalidOhlc);
-  if (volumeValue && (volume === null || volume < 0)) reasons.push(copy.marketReplay.validation.invalidVolume);
+  if (format === "STANDARD" && volumeValue && (volume === null || volume < 0)) reasons.push(copy.marketReplay.validation.invalidVolume);
   if (open !== null && high !== null && low !== null && close !== null
     && (high < Math.max(open, close, low) || low > Math.min(open, close, high))) reasons.push(copy.marketReplay.validation.invalidPriceRelation);
   const chartSecond = timestamp ? Math.floor(timestamp.getTime() / 1_000) : Number.NaN;
@@ -151,6 +206,7 @@ export function parseMarketCsvRow({
     issues: reasons.map((reason) => ({ row: rowNumber, reason })),
     time: timestamp?.getTime() ?? previousTime, chartSecond,
     bar: reasons.length ? null : { sequence, timestamp: timestamp!, open: open!, high: high!, low: low!, close: close!, volume },
+    skipped: false,
   };
 }
 
@@ -169,12 +225,17 @@ export function parseMarketBarsCsv(csv: string, timezone: string, options?: Mark
   }
 
   if (rows.length < 2) throw new MarketCsvValidationError([{ row: 1, reason: copy.marketReplay.validation.minimumRows }]);
-  if (rows.length > MAX_MARKET_BARS) throw new MarketCsvValidationError([{ row: 1, reason: copy.marketReplay.validation.maximumRows(MAX_MARKET_BARS) }]);
 
-  const headers = rows[0] ? Object.keys(rows[0]).map(normalizeKey) : [];
-  const missingColumns = requiredColumns.filter((column) => !headers.includes(column));
+  const headers = rows[0] ? Object.keys(rows[0]) : [];
+  const { format, missingColumns } = inspectMarketCsvHeaders(headers);
   if (missingColumns.length) {
     throw new MarketCsvValidationError([{ row: 1, reason: copy.marketReplay.validation.missingColumns(missingColumns.join(", ")) }]);
+  }
+  if (format === "STANDARD" && rows.length > MAX_MARKET_BARS) {
+    throw new MarketCsvValidationError([{ row: 1, reason: copy.marketReplay.validation.maximumRows(MAX_MARKET_BARS) }]);
+  }
+  if (format === "DATABENTO_CME" && !options?.cmeRootSymbol) {
+    throw new MarketCsvValidationError([{ row: 1, reason: copy.marketReplay.validation.cmeRootRequired }]);
   }
 
   const issues: MarketCsvIssue[] = [];
@@ -184,9 +245,16 @@ export function parseMarketBarsCsv(csv: string, timezone: string, options?: Mark
 
   rows.forEach((row, index) => {
     const rowNumber = index + 2;
-    const parsed = parseMarketCsvRow({ row, rowNumber, sequence: index, timezone, options, previousTime, previousChartSecond });
+    const parsed = parseMarketCsvRow({
+      row, rowNumber, sequence: bars.length, timezone, options, previousTime, previousChartSecond, format,
+    });
+    if (parsed.skipped) return;
     if (parsed.issues.length || !parsed.bar) {
       issues.push(...parsed.issues);
+      return;
+    }
+    if (bars.length >= MAX_MARKET_BARS) {
+      issues.push({ row: rowNumber, reason: copy.marketReplay.validation.maximumRows(MAX_MARKET_BARS) });
       return;
     }
     previousTime = parsed.time;
@@ -195,5 +263,11 @@ export function parseMarketBarsCsv(csv: string, timezone: string, options?: Mark
   });
 
   if (issues.length) throw new MarketCsvValidationError(issues.slice(0, 20), issues.length);
+  if (bars.length < 2) {
+    throw new MarketCsvValidationError([{
+      row: 1,
+      reason: format === "DATABENTO_CME" ? copy.marketReplay.validation.minimumCmeBars : copy.marketReplay.validation.minimumRows,
+    }]);
+  }
   return bars;
 }

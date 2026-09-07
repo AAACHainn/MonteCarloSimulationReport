@@ -231,6 +231,7 @@ const createStatements = [
     "compressedBytes" BIGINT NOT NULL DEFAULT 0,
     "expandedBytes" BIGINT NOT NULL DEFAULT 0,
     "processedRows" INTEGER NOT NULL DEFAULT 0,
+    "importedBars" INTEGER NOT NULL DEFAULT 0,
     "totalErrors" INTEGER NOT NULL DEFAULT 0,
     "errors" TEXT NOT NULL DEFAULT '[]',
     "metadata" TEXT NOT NULL,
@@ -269,6 +270,7 @@ const replayProgressColumns = [
 ];
 const paperSessionColumns = [["equitySampleStride", "INTEGER NOT NULL DEFAULT 1"]];
 const paperOrderColumns = [["riskAmount", "REAL"]];
+const marketDatasetImportColumns = [["importedBars", "INTEGER NOT NULL DEFAULT 0"]];
 
 const indexStatements = [
   `CREATE INDEX IF NOT EXISTS "Trade_datasetId_idx" ON "Trade"("datasetId")`,
@@ -310,7 +312,13 @@ try {
     }
   }
 
-  for (const [table, columns] of [["MarketDataset", marketDatasetColumns], ["ReplayProgress", replayProgressColumns], ["PaperTradingSession", paperSessionColumns], ["PaperOrder", paperOrderColumns]]) {
+  for (const [table, columns] of [
+    ["MarketDataset", marketDatasetColumns],
+    ["ReplayProgress", replayProgressColumns],
+    ["PaperTradingSession", paperSessionColumns],
+    ["PaperOrder", paperOrderColumns],
+    ["MarketDatasetImport", marketDatasetImportColumns],
+  ]) {
     const existing = await prisma.$queryRawUnsafe(`PRAGMA table_info("${table}")`);
     const names = new Set(existing.map((column) => column.name));
     for (const [name, type] of columns) {

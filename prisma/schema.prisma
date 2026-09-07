@@ -172,6 +172,7 @@ model MarketDatasetImport {
   compressedBytes    BigInt        @default(0)
   expandedBytes      BigInt        @default(0)
   processedRows      Int           @default(0)
+  importedBars       Int           @default(0)
   totalErrors        Int           @default(0)
   errors             String        @default("[]")
   metadata           String

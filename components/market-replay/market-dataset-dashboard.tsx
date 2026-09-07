@@ -19,7 +19,10 @@ import { formatInterval } from "@/lib/market-replay/types";
 import { formatPriceForTick } from "@/lib/market-replay/price-ticks";
 
 type ImportIssue = { row: number; reason: string };
-type ImportJob = { id: string; fileName: string; status: string; processedRows: number; errors: ImportIssue[]; totalErrors: number };
+type ImportJob = {
+  id: string; fileName: string; status: string; processedRows: number; importedBars: number;
+  errors: ImportIssue[]; totalErrors: number;
+};
 
 function formatDatasetTime(value: string, timezone: string) {
   return new Intl.DateTimeFormat("zh-CN", {
@@ -115,7 +118,7 @@ export function MarketDatasetDashboard({ datasets }: { datasets: MarketDatasetSu
       return;
     }
 
-    setMessage(copy.marketReplay.imported(data.processedRows));
+    setMessage(copy.marketReplay.imported(data.importedBars, Math.max(0, data.processedRows - data.importedBars)));
     form.reset();
     if (fileRef.current) fileRef.current.value = "";
     startTransition(() => router.refresh());
@@ -125,10 +128,17 @@ export function MarketDatasetDashboard({ datasets }: { datasets: MarketDatasetSu
   async function retryImport(job: ImportJob) {
     setIsImporting(true); setMessage(copy.marketReplay.processing(job.processedRows));
     const response = await fetch(`/api/market-dataset-imports/${job.id}/process`, { method: "POST" });
-    const data = await response.json().catch(() => null);
+    let data = await response.json().catch(() => null);
+    if (response.ok) {
+      const statusResponse = await fetch(`/api/market-dataset-imports/${job.id}`);
+      data = await statusResponse.json().catch(() => data);
+    }
     setIsImporting(false);
     if (!response.ok) setMessage(data?.error ?? copy.marketReplay.importError);
-    else { setMessage(copy.marketReplay.imported(job.processedRows)); startTransition(() => router.refresh()); }
+    else {
+      setMessage(copy.marketReplay.imported(data.importedBars, Math.max(0, data.processedRows - data.importedBars)));
+      startTransition(() => router.refresh());
+    }
     await refreshImportJobs();
   }
 
@@ -191,6 +201,7 @@ export function MarketDatasetDashboard({ datasets }: { datasets: MarketDatasetSu
               <div className="space-y-2">
                 <Label htmlFor="market-symbol">{copy.marketReplay.symbol}</Label>
                 <Input id="market-symbol" name="symbol" required maxLength={80} placeholder={copy.marketReplay.symbolPlaceholder} />
+                <p className="text-xs text-slate-500">{copy.marketReplay.symbolHint}</p>
               </div>
               <div className="space-y-2">
                 <Label htmlFor="market-source-interval">{copy.marketReplay.sourceInterval}</Label>
@@ -239,7 +250,9 @@ export function MarketDatasetDashboard({ datasets }: { datasets: MarketDatasetSu
               ) : null}
               {importJobs.length ? <div className="space-y-2 rounded-lg border bg-slate-50 p-3">{importJobs.map((job) => (
                 <div key={job.id} className="flex flex-wrap items-center gap-2 text-xs text-slate-700">
-                  <span className="min-w-0 flex-1 truncate">{job.fileName} · {job.status} · {job.processedRows.toLocaleString("zh-CN")}</span>
+                  <span className="min-w-0 flex-1 truncate">
+                    {job.fileName} · {job.status} · {copy.marketReplay.importJobCounts(job.processedRows, job.importedBars)}
+                  </span>
                   {["FAILED", "INTERRUPTED", "UPLOADED"].includes(job.status) ? <Button type="button" size="sm" variant="outline" disabled={isImporting} onClick={() => void retryImport(job)}>{copy.marketReplay.retryImport}</Button> : null}
                   {job.status !== "PROCESSING" ? <Button type="button" size="sm" variant="ghost" onClick={() => void cancelImport(job.id)}>{copy.marketReplay.cancelImport}</Button> : null}
                 </div>
