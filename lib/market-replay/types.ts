@@ -19,7 +19,8 @@ export const MAX_EMA_INDICATORS = 5;
 export const REPLAY_INTERVALS = [10_000, 5_000, 3_000, 1_000, 500, 200, 100] as const;
 export type ReplayIntervalMs = (typeof REPLAY_INTERVALS)[number];
 export type PlaybackRate = number;
-export type SessionMode = "TWENTY_FOUR_SEVEN" | "DAILY_SESSION";
+export type SessionMode = "TWENTY_FOUR_SEVEN" | "DAILY_SESSION" | "OVERNIGHT_SESSION";
+export type DisplaySession = "ETH" | "RTH";
 export type AggregateBarStatus = "FORMING" | "COMPLETE" | "INCOMPLETE";
 
 export type TradingSessionConfig = {
@@ -86,6 +87,7 @@ export type ReplayProgressData = {
   currentSequence: number;
   playbackRate: PlaybackRate;
   displayIntervalSeconds: number;
+  displaySession: DisplaySession;
   generation: number;
   syncVersion: number;
   updatedAt?: string;
@@ -106,6 +108,7 @@ export type MarketDatasetSummary = {
   sessionOpenMinute: number | null;
   sessionCloseMinute: number | null;
   tradingWeekdays: number[];
+  availableDisplaySessions: DisplaySession[];
   barCount: number;
   startTime: string;
   endTime: string;

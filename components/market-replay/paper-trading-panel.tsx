@@ -1,7 +1,8 @@
 "use client";
 
-import { useEffect, useState } from "react";
-import { ChevronDown, ChevronUp, Loader2, Trash2 } from "lucide-react";
+import { useEffect, useRef, useState, type PointerEvent as ReactPointerEvent } from "react";
+import { createPortal } from "react-dom";
+import { ChevronDown, ChevronUp, GripHorizontal, Loader2, Trash2, X } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
@@ -37,6 +38,27 @@ type Props = {
   onCancelScope: (scope: "ALL" | "BRACKET") => Promise<boolean>;
   onClear: () => void;
 };
+
+type PanelSize = { width: number; height: number };
+type ResizeDirection = "n" | "ne" | "e" | "se" | "s" | "sw" | "w" | "nw";
+
+const PANEL_MARGIN = 8;
+const PANEL_MIN_WIDTH = 560;
+const PANEL_MIN_HEIGHT = 320;
+const RESIZE_HANDLES: Array<{ direction: ResizeDirection; className: string }> = [
+  { direction: "n", className: "-top-1 left-3 right-3 h-2 cursor-n-resize" },
+  { direction: "ne", className: "-right-1 -top-1 h-4 w-4 cursor-ne-resize" },
+  { direction: "e", className: "-right-1 bottom-3 top-3 w-2 cursor-e-resize" },
+  { direction: "se", className: "-bottom-1 -right-1 h-4 w-4 cursor-se-resize" },
+  { direction: "s", className: "-bottom-1 left-3 right-3 h-2 cursor-s-resize" },
+  { direction: "sw", className: "-bottom-1 -left-1 h-4 w-4 cursor-sw-resize" },
+  { direction: "w", className: "-left-1 bottom-3 top-3 w-2 cursor-w-resize" },
+  { direction: "nw", className: "-left-1 -top-1 h-4 w-4 cursor-nw-resize" },
+];
+
+function clamp(value: number, minimum: number, maximum: number) {
+  return Math.min(Math.max(value, minimum), maximum);
+}
 
 function optionalNumber(value: FormDataEntryValue | null) {
   const text = String(value ?? "").trim();
@@ -137,9 +159,183 @@ function ActiveOrders({ priceTickSize, orders, busy, onCancel, onUpdate }: { pri
 
 export function PaperTradingDetails({ snapshot }: { snapshot: PaperSessionSnapshot | null }) {
   const [tab, setTab] = useState<"orders" | "fills" | "stats">("orders");
-  const [expanded, setExpanded] = useState(false);
+  const [open, setOpen] = useState(false);
+  const [position, setPosition] = useState<{ x: number; y: number } | null>(null);
+  const [size, setSize] = useState<PanelSize | null>(null);
+  const panelRef = useRef<HTMLDivElement>(null);
+  const dragRef = useRef<{ pointerId: number; offsetX: number; offsetY: number } | null>(null);
+  const resizeRef = useRef<{
+    pointerId: number;
+    direction: ResizeDirection;
+    startX: number;
+    startY: number;
+    left: number;
+    top: number;
+    width: number;
+    height: number;
+  } | null>(null);
+
+  useEffect(() => {
+    if (!open) return;
+    const keepInViewport = () => {
+      const panel = panelRef.current;
+      if (!panel) return;
+      const rect = panel.getBoundingClientRect();
+      const maxWidth = Math.max(1, window.innerWidth - PANEL_MARGIN * 2);
+      const maxHeight = Math.max(1, window.innerHeight - PANEL_MARGIN * 2);
+      const width = clamp(rect.width, Math.min(PANEL_MIN_WIDTH, maxWidth), maxWidth);
+      const height = clamp(rect.height, Math.min(PANEL_MIN_HEIGHT, maxHeight), maxHeight);
+      setSize({ width, height });
+      setPosition((current) => {
+        const x = current?.x ?? rect.left;
+        const y = current?.y ?? rect.top;
+        return {
+          x: clamp(x, PANEL_MARGIN, Math.max(PANEL_MARGIN, window.innerWidth - width - PANEL_MARGIN)),
+          y: clamp(y, PANEL_MARGIN, Math.max(PANEL_MARGIN, window.innerHeight - height - PANEL_MARGIN)),
+        };
+      });
+    };
+    const frame = requestAnimationFrame(keepInViewport);
+    window.addEventListener("resize", keepInViewport);
+    return () => {
+      cancelAnimationFrame(frame);
+      window.removeEventListener("resize", keepInViewport);
+    };
+  }, [open]);
+
+  const startResize = (direction: ResizeDirection, event: ReactPointerEvent<HTMLDivElement>) => {
+    if (event.button !== 0) return;
+    const rect = panelRef.current?.getBoundingClientRect();
+    if (!rect) return;
+    resizeRef.current = {
+      pointerId: event.pointerId,
+      direction,
+      startX: event.clientX,
+      startY: event.clientY,
+      left: rect.left,
+      top: rect.top,
+      width: rect.width,
+      height: rect.height,
+    };
+    event.currentTarget.setPointerCapture(event.pointerId);
+    event.preventDefault();
+  };
+
+  const resizePanel = (event: ReactPointerEvent<HTMLDivElement>) => {
+    const resize = resizeRef.current;
+    if (!resize || resize.pointerId !== event.pointerId) return;
+    const minimumWidth = Math.min(PANEL_MIN_WIDTH, window.innerWidth - PANEL_MARGIN * 2);
+    const minimumHeight = Math.min(PANEL_MIN_HEIGHT, window.innerHeight - PANEL_MARGIN * 2);
+    const deltaX = event.clientX - resize.startX;
+    const deltaY = event.clientY - resize.startY;
+    let left = resize.left;
+    let top = resize.top;
+    let width = resize.width;
+    let height = resize.height;
+
+    if (resize.direction.includes("e")) {
+      width = clamp(resize.width + deltaX, minimumWidth, window.innerWidth - PANEL_MARGIN - resize.left);
+    }
+    if (resize.direction.includes("s")) {
+      height = clamp(resize.height + deltaY, minimumHeight, window.innerHeight - PANEL_MARGIN - resize.top);
+    }
+    if (resize.direction.includes("w")) {
+      const right = resize.left + resize.width;
+      left = clamp(resize.left + deltaX, PANEL_MARGIN, right - minimumWidth);
+      width = right - left;
+    }
+    if (resize.direction.includes("n")) {
+      const bottom = resize.top + resize.height;
+      top = clamp(resize.top + deltaY, PANEL_MARGIN, bottom - minimumHeight);
+      height = bottom - top;
+    }
+
+    setPosition({ x: left, y: top });
+    setSize({ width, height });
+  };
+
+  const stopResize = (event: ReactPointerEvent<HTMLDivElement>) => {
+    if (resizeRef.current?.pointerId !== event.pointerId) return;
+    resizeRef.current = null;
+    if (event.currentTarget.hasPointerCapture(event.pointerId)) {
+      event.currentTarget.releasePointerCapture(event.pointerId);
+    }
+  };
+
   if (!snapshot) return null;
-  return <Card className="shrink-0 overflow-hidden rounded-none border-x-0 border-b-0 shadow-none"><CardContent className="p-0"><div className="flex h-11 items-center gap-2 border-b px-3"><span className="mr-1 text-sm font-semibold text-slate-800">{copy.paperTrading.records}</span>{expanded ? <><Button size="sm" variant={tab === "orders" ? "default" : "ghost"} onClick={() => setTab("orders")}>{copy.paperTrading.ordersTab}</Button><Button size="sm" variant={tab === "fills" ? "default" : "ghost"} onClick={() => setTab("fills")}>{copy.paperTrading.fillsTab}</Button><Button size="sm" variant={tab === "stats" ? "default" : "ghost"} onClick={() => setTab("stats")}>{copy.paperTrading.statsTab}</Button></> : null}<Button type="button" variant="ghost" size="sm" className="ml-auto" onClick={() => setExpanded((value) => !value)} aria-expanded={expanded}>{expanded ? <ChevronDown className="h-4 w-4" /> : <ChevronUp className="h-4 w-4" />}{expanded ? copy.paperTrading.collapseRecords : copy.paperTrading.expandRecords}</Button></div>{expanded ? <div className="h-48 overflow-auto p-3">{tab === "orders" ? <OrderHistory snapshot={snapshot} /> : tab === "fills" ? <FillHistory snapshot={snapshot} /> : <Stats snapshot={snapshot} />}</div> : null}</CardContent></Card>;
+  return (
+    <>
+      <Button type="button" variant="outline" size="sm" className="h-9" onClick={() => setOpen(true)} aria-haspopup="dialog" aria-expanded={open}>
+        {copy.paperTrading.records}
+      </Button>
+      {open ? createPortal(
+        <div
+          ref={panelRef}
+          role="dialog"
+          aria-label={copy.paperTrading.records}
+          className="fixed z-[100] h-[min(44rem,calc(100vh-1rem))] w-[min(80rem,calc(100vw-1rem))]"
+          style={position && size
+            ? { left: position.x, top: position.y, width: size.width, height: size.height }
+            : { left: "50%", top: "50%", transform: "translate(-50%, -50%)" }}
+        >
+          <Card className="h-full overflow-hidden border-slate-300 bg-white shadow-2xl"><CardContent className="flex h-full flex-col p-0">
+            <div
+              className="flex h-12 shrink-0 touch-none select-none items-center gap-2 border-b bg-slate-50 px-3 cursor-move"
+              title={copy.paperTrading.dragRecords}
+              onPointerDown={(event) => {
+                if (event.button !== 0 || (event.target as HTMLElement).closest("button")) return;
+                const rect = panelRef.current?.getBoundingClientRect();
+                if (!rect) return;
+                dragRef.current = { pointerId: event.pointerId, offsetX: event.clientX - rect.left, offsetY: event.clientY - rect.top };
+                event.currentTarget.setPointerCapture(event.pointerId);
+              }}
+              onPointerMove={(event) => {
+                const drag = dragRef.current;
+                const panel = panelRef.current;
+                if (!drag || drag.pointerId !== event.pointerId || !panel) return;
+                const rect = panel.getBoundingClientRect();
+                setPosition({
+                  x: Math.min(Math.max(8, event.clientX - drag.offsetX), Math.max(8, window.innerWidth - rect.width - 8)),
+                  y: Math.min(Math.max(8, event.clientY - drag.offsetY), Math.max(8, window.innerHeight - rect.height - 8)),
+                });
+              }}
+              onPointerUp={(event) => {
+                if (dragRef.current?.pointerId !== event.pointerId) return;
+                dragRef.current = null;
+                event.currentTarget.releasePointerCapture(event.pointerId);
+              }}
+              onPointerCancel={() => { dragRef.current = null; }}
+            >
+              <GripHorizontal className="h-4 w-4 text-slate-400" aria-hidden="true" />
+              <span className="mr-1 text-sm font-semibold text-slate-800">{copy.paperTrading.records}</span>
+              <Button size="sm" variant={tab === "orders" ? "default" : "ghost"} onClick={() => setTab("orders")}>{copy.paperTrading.ordersTab}</Button>
+              <Button size="sm" variant={tab === "fills" ? "default" : "ghost"} onClick={() => setTab("fills")}>{copy.paperTrading.fillsTab}</Button>
+              <Button size="sm" variant={tab === "stats" ? "default" : "ghost"} onClick={() => setTab("stats")}>{copy.paperTrading.statsTab}</Button>
+              <Button type="button" variant="ghost" size="icon" className="ml-auto h-8 w-8" onClick={() => setOpen(false)} aria-label={copy.paperTrading.closeRecords}>
+                <X className="h-4 w-4" />
+              </Button>
+            </div>
+            <div className="min-h-0 flex-1 overflow-auto p-3">
+              {tab === "orders" ? <OrderHistory snapshot={snapshot} /> : tab === "fills" ? <FillHistory snapshot={snapshot} /> : <Stats snapshot={snapshot} />}
+            </div>
+          </CardContent></Card>
+          {RESIZE_HANDLES.map(({ direction, className }) => (
+            <div
+              key={direction}
+              className={`absolute z-10 touch-none select-none ${className}`}
+              title={copy.paperTrading.resizeRecords}
+              onPointerDown={(event) => startResize(direction, event)}
+              onPointerMove={resizePanel}
+              onPointerUp={stopResize}
+              onPointerCancel={stopResize}
+            />
+          ))}
+          <div className="pointer-events-none absolute bottom-1 right-1 h-3 w-3 border-b-2 border-r-2 border-slate-400/60" aria-hidden="true" />
+        </div>,
+        document.body,
+      ) : null}
+    </>
+  );
 }
 
 function OrderHistory({ snapshot }: { snapshot: PaperSessionSnapshot }) {

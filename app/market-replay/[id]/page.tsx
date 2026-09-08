@@ -13,7 +13,7 @@ export default async function MarketReplayDetailPage({ params }: { params: Promi
   if (!dataset) notFound();
   const serialized = serializeMarketDataset(dataset);
   return (
-    <div className="relative left-1/2 flex h-[calc(100dvh-8.3125rem)] w-[calc(100vw-2rem)] max-w-none -translate-x-1/2 flex-col gap-2 overflow-hidden sm:w-[calc(100vw-3rem)]">
+    <div className="relative left-1/2 flex h-[calc(100dvh-4.3125rem)] w-[calc(100vw-2rem)] max-w-none -translate-x-1/2 flex-col gap-2 overflow-hidden sm:w-[calc(100vw-3rem)]">
       <div className="shrink-0">
         <Breadcrumbs items={[{ label: copy.marketReplay.title, href: "/market-replay" }, { label: dataset.name }]} />
         <div className="mt-1 flex items-baseline gap-3">

@@ -13,6 +13,8 @@ import {
   isPlaybackRate,
 } from "./market-replay/types";
 
+const displaySessionSchema = z.enum(["ETH", "RTH"]);
+
 export const SIMULATION_WORK_LIMIT = 50_000_000;
 
 export const datasetSchema = z.object({
@@ -63,16 +65,19 @@ export const replayProgressSchema = z.object({
   currentSequence: z.coerce.number().int().min(-1),
   playbackRate: z.coerce.number().int().refine(isPlaybackRate, copy.marketReplay.validation.unsupportedSpeed),
   displayIntervalSeconds: z.coerce.number().int().min(1).max(MAX_DISPLAY_INTERVAL_SECONDS),
+  displaySession: displaySessionSchema.default("ETH"),
 });
 
 export const replayStartSchema = z.object({
   timestamp: z.string().datetime(),
   playbackRate: z.coerce.number().int().refine(isPlaybackRate),
   displayIntervalSeconds: z.coerce.number().int().min(1).max(MAX_DISPLAY_INTERVAL_SECONDS),
+  displaySession: displaySessionSchema.default("ETH"),
 });
 
 export const replayWindowSchema = z.object({
   displayIntervalSeconds: z.coerce.number().int().min(1).max(MAX_DISPLAY_INTERVAL_SECONDS),
+  displaySession: displaySessionSchema.default("ETH"),
   endSequence: z.coerce.number().int().min(-1),
   visibleCount: z.coerce.number().int().min(20).max(2_000).default(200),
   warmupCount: z.coerce.number().int().min(0).max(1_000).default(0),
@@ -117,6 +122,7 @@ export const paperAdvanceSchema = z.object({
   expectedVersion: z.coerce.number().int().positive().optional().nullable(),
   count: z.coerce.number().int().min(1).max(MAX_REPLAY_ADVANCE_COUNT).default(1),
   displayIntervalSeconds: z.coerce.number().int().min(1).max(MAX_DISPLAY_INTERVAL_SECONDS).optional(),
+  displaySession: displaySessionSchema.default("ETH"),
 });
 
 export const replayChunksSchema = z.object({

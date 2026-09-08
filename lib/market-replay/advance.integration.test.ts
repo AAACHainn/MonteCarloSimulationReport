@@ -22,11 +22,13 @@ import { advancePaperTrading } from "@/lib/paper-trading/engine";
 import { getPaperSessionSnapshot, serializePaperSession, serializePaperOrder } from "@/lib/paper-trading/serialize";
 import { serializeSourceBar } from "./dataset";
 import { createDeterministicEventIdFactory } from "@/lib/paper-trading/deterministic-id";
-import type { PaperFillData, PaperEquityPointData } from "@/lib/paper-trading/types";
+import type { PaperFillData, PaperEquityPointData, PaperSessionSnapshot } from "@/lib/paper-trading/types";
 import { GET as windowGET } from "@/app/api/market-datasets/[id]/bars/window/route";
 import { GET as chunksGET } from "@/app/api/market-datasets/[id]/bars/chunks/route";
-import { applySpeculativeAdvance } from "@/lib/paper-trading/speculative";
+import { applySpeculativeAdvance, paperStateFingerprint } from "@/lib/paper-trading/speculative";
 import { buildPaperReplayDelta, createPaperDeltaAccumulator, recordPaperAdvance } from "./client-sync";
+import { resolveDisplaySession } from "./chart-sessions";
+import { getAggregationBucket } from "./aggregation";
 
 let databaseFile = "";
 const baseTime = Date.UTC(2026, 8, 1);
@@ -53,17 +55,25 @@ afterAll(async () => {
   }
 });
 
-async function seed(id: string, seconds: number, count: number, start = -1, paper = true) {
+async function seed(
+  id: string,
+  seconds: number,
+  count: number,
+  start = -1,
+  paper = true,
+  options: { symbol?: string; startTimeMs?: number } = {},
+) {
+  const startTimeMs = options.startTimeMs ?? baseTime;
   await prisma.marketDataset.create({ data: {
-    id, name: id, symbol: "TEST", timeframe: `${seconds}s`, timezone: "UTC",
-    sourceIntervalSeconds: seconds, barCount: count, startTime: new Date(baseTime),
-    endTime: new Date(baseTime + (count - 1) * seconds * 1000),
+    id, name: id, symbol: options.symbol ?? "TEST", timeframe: `${seconds}s`, timezone: "UTC",
+    sourceIntervalSeconds: seconds, barCount: count, startTime: new Date(startTimeMs),
+    endTime: new Date(startTimeMs + (count - 1) * seconds * 1000),
   } });
   for (let from = 0; from < count; from += 1000) {
     await prisma.marketBar.createMany({ data: Array.from({ length: Math.min(1000, count - from) }, (_, offset) => {
       const sequence = from + offset;
       const close = 100 + Math.sin(sequence * seconds / 300);
-      return { datasetId: id, sequence, timestamp: new Date(baseTime + sequence * seconds * 1000),
+      return { datasetId: id, sequence, timestamp: new Date(startTimeMs + sequence * seconds * 1000),
         open: close, high: close + 1, low: close - 1, close, volume: 10 };
     }) });
   }
@@ -234,6 +244,73 @@ describe("replay advance with real SQLite", () => {
     expect(persistedProtective.map((order) => order.id)).toEqual(
       orders.filter((order) => order.isProtective).map((order) => order.id).sort(),
     );
+  });
+
+  it("ignores database-only order metadata on the sync after creating protective orders", async () => {
+    const id = "sync-protective-metadata";
+    await seed(id, 1, 30);
+    const [dataset, progress, initial] = await Promise.all([
+      prisma.marketDataset.findUniqueOrThrow({ where: { id } }),
+      prisma.replayProgress.findUniqueOrThrow({ where: { datasetId: id } }),
+      getPaperSessionSnapshot(id),
+    ]);
+    if (!initial) throw new Error("Expected a paper session");
+    await prisma.paperOrder.create({ data: {
+      id: "metadata-entry", sessionId: initial.session.id, side: "BUY", type: "MARKET", quantity: 2,
+      stopLoss: 95, takeProfit: 105, createdSequence: -1, activeFromSequence: 0,
+    } });
+    const starting = await getPaperSessionSnapshot(id);
+    if (!starting) throw new Error("Expected a paper session snapshot");
+
+    const advanceOne = async (snapshot: PaperSessionSnapshot, sequence: number) => {
+      const record = await prisma.marketBar.findUniqueOrThrow({ where: { datasetId_sequence: { datasetId: id, sequence } } });
+      const accumulator = createPaperDeltaAccumulator(sequence - 1);
+      const result = advancePaperTrading({
+        state: snapshot.session,
+        orders: snapshot.activeOrders,
+        bar: serializeSourceBar(record),
+        makeId: createDeterministicEventIdFactory(snapshot.session.id, progress.generation, sequence),
+      });
+      recordPaperAdvance(accumulator, snapshot, result, true);
+      const next = applySpeculativeAdvance(snapshot, result);
+      return { next, delta: buildPaperReplayDelta(accumulator, next) };
+    };
+
+    const first = await advanceOne(starting, 0);
+    const firstResponse = await syncPOST(syncRequest({
+      generation: progress.generation, requestId: "protective-first", confirmedSequence: -1,
+      syncVersion: progress.syncVersion, dataVersion: dataset.dataVersion,
+      expectedPaperVersion: starting.session.version, targetSequence: 0, paperDelta: first.delta,
+    }), context(id));
+    expect(firstResponse.status).toBe(200);
+    const firstReceipt = await firstResponse.json();
+    expect(first.next.activeOrders).toHaveLength(2);
+    expect(first.next.activeOrders.every((order) => order.createdAt === undefined)).toBe(true);
+    const persistedProtective = await prisma.paperOrder.findMany({ where: { sessionId: starting.session.id, status: "PENDING" } });
+    expect(persistedProtective.every((order) => order.createdAt instanceof Date)).toBe(true);
+
+    const second = await advanceOne(first.next, 1);
+    expect(second.delta.orderChanges).toEqual([]);
+    const tamperedDelta = {
+      ...second.delta,
+      activeOrders: second.delta.activeOrders.map((order, index) => (
+        index === 0 ? { ...order, price: Number(order.price) + 1 } : order
+      )),
+    };
+    tamperedDelta.fingerprint = paperStateFingerprint(tamperedDelta.state, tamperedDelta.activeOrders);
+    const tamperedResponse = await syncPOST(syncRequest({
+      generation: progress.generation, requestId: "protective-tampered", confirmedSequence: 0,
+      syncVersion: firstReceipt.syncVersion, dataVersion: dataset.dataVersion,
+      expectedPaperVersion: firstReceipt.paperVersion, targetSequence: 1, paperDelta: tamperedDelta,
+    }), context(id));
+    expect(tamperedResponse.status).toBe(400);
+
+    const secondResponse = await syncPOST(syncRequest({
+      generation: progress.generation, requestId: "protective-second", confirmedSequence: 0,
+      syncVersion: firstReceipt.syncVersion, dataVersion: dataset.dataVersion,
+      expectedPaperVersion: firstReceipt.paperVersion, targetSequence: 1, paperDelta: second.delta,
+    }), context(id));
+    expect(secondResponse.status).toBe(200);
   });
 
   it("advances a full displayed bar atomically", async () => {
@@ -407,6 +484,131 @@ describe("replay advance with real SQLite", () => {
     expect(body.aggregatedBars.map((bar: { sourceCount: number }) => bar.sourceCount)).toEqual([2, 1]);
     expect(body.lastSourceBar.sequence).toBe(2);
   });
+
+  it("builds RTH windows across trading days while ETH keeps overnight bars", async () => {
+    const startTimeMs = Date.parse("2021-09-12T22:00:00.000Z");
+    const endTimeMs = Date.parse("2021-09-14T20:15:00.000Z");
+    const count = Math.floor((endTimeMs - startTimeMs) / 60_000) + 1;
+    await seed("cme-window", 60, count, -1, false, { symbol: "ES1!", startTimeMs });
+
+    const rthResponse = await windowGET(new Request(
+      `http://localhost/api/window?displayIntervalSeconds=60&displaySession=RTH&endSequence=${count - 1}&visibleCount=500&warmupCount=100`,
+    ), context("cme-window"));
+    expect(rthResponse.status).toBe(200);
+    const rthBody = await rthResponse.json();
+    expect(rthBody.visibleBars).toHaveLength(500);
+    expect(rthBody.warmupBars).toHaveLength(100);
+    const record = await prisma.marketDataset.findUniqueOrThrow({ where: { id: "cme-window" } });
+    const rth = resolveDisplaySession(record, "RTH")!;
+    const rthBars = [...rthBody.warmupBars, ...rthBody.visibleBars];
+    expect(rthBars.every((bar: { timestamp: string }) => (
+      getAggregationBucket(Date.parse(bar.timestamp), 60, 60, rth) !== null
+    ))).toBe(true);
+    expect(new Set(rthBars.map((bar: { timestamp: string }) => bar.timestamp.slice(0, 10))).size).toBeGreaterThan(1);
+
+    const hourlyResponse = await windowGET(new Request(
+      `http://localhost/api/window?displayIntervalSeconds=3600&displaySession=RTH&endSequence=${count - 1}&visibleCount=20&warmupCount=0`,
+    ), context("cme-window"));
+    expect(hourlyResponse.status).toBe(200);
+    const hourlyBody = await hourlyResponse.json();
+    expect(hourlyBody.visibleBars).toHaveLength(14);
+    expect(hourlyBody.visibleBars[0].timestamp).toBe("2021-09-13T13:30:00.000Z");
+    expect(hourlyBody.visibleBars.at(-1)).toMatchObject({
+      timestamp: "2021-09-14T19:30:00.000Z",
+      sourceCount: 45,
+      expectedCount: 45,
+      status: "COMPLETE",
+    });
+
+    const ethResponse = await windowGET(new Request(
+      `http://localhost/api/window?displayIntervalSeconds=60&displaySession=ETH&endSequence=${count - 1}&visibleCount=500&warmupCount=0`,
+    ), context("cme-window"));
+    expect(ethResponse.status).toBe(200);
+    const ethBody = await ethResponse.json();
+    expect(ethBody.visibleBars).toHaveLength(500);
+    expect(ethBody.visibleBars.some((bar: { timestamp: string }) => (
+      getAggregationBucket(Date.parse(bar.timestamp), 60, 60, rth) === null
+    ))).toBe(true);
+
+    const saved = await progressPUT(new Request("http://localhost/api/progress", {
+      method: "PUT", headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ startSequence: 0, currentSequence: -1, playbackRate: 20, displayIntervalSeconds: 60, displaySession: "RTH" }),
+    }), context("cme-window"));
+    expect(saved.status).toBe(200);
+    const restored = await (await progressGET(new Request("http://localhost/api/progress"), context("cme-window"))).json();
+    expect(restored.progress.displaySession).toBe("RTH");
+
+    const unsupported = await windowGET(new Request(
+      "http://localhost/api/window?displayIntervalSeconds=300&displaySession=RTH&endSequence=9&visibleCount=5&warmupCount=0",
+    ), context("chunk-week"));
+    expect(unsupported.status).toBe(400);
+  });
+
+  it("fast-forwards hidden RTH bars without changing paper fills or equity", async () => {
+    const startTimeMs = Date.parse("2021-09-13T20:15:00.000Z");
+    const count = 1_041;
+    for (const id of ["cme-rth", "cme-eth"]) {
+      await seed(id, 60, count, -1, true, { symbol: "ES", startTimeMs });
+      const session = await prisma.paperTradingSession.findUniqueOrThrow({ where: { datasetId: id } });
+      await prisma.paperOrder.create({ data: {
+        id: `${id}-night-entry`, sessionId: session.id, side: "BUY", type: "MARKET", quantity: 2,
+        createdSequence: -1, activeFromSequence: 0,
+      } });
+    }
+
+    const rthResponse = await POST(request({
+      expectedCurrentSequence: -1, expectedVersion: 1, count: 1,
+      displayIntervalSeconds: 300, displaySession: "RTH",
+    }), context("cme-rth"));
+    expect(rthResponse.status).toBe(200);
+    const rthBody = await rthResponse.json();
+    expect(rthBody.reachedVisibleBucket).toBe(true);
+    expect(rthBody.currentSequence).toBe(1_039);
+    expect(rthBody.aggregatedBars).toHaveLength(1);
+    expect(rthBody.aggregatedBars[0]).toMatchObject({
+      timestamp: "2021-09-14T13:30:00.000Z", sourceCount: 5, expectedCount: 5,
+    });
+    expect(rthBody.snapshot.recentFills.some((fill: { sequence: number }) => fill.sequence === 0)).toBe(true);
+    expect(rthBody.aggregatedBars.some((bar: { firstSequence: number; lastSequence: number }) => (
+      0 >= bar.firstSequence && 0 <= bar.lastSequence
+    ))).toBe(false);
+
+    let currentSequence = -1;
+    let expectedVersion = 1;
+    let ethBody: Awaited<ReturnType<Response["json"]>> | null = null;
+    while (currentSequence < rthBody.currentSequence) {
+      const step = Math.min(100, rthBody.currentSequence - currentSequence);
+      const response = await POST(request({ expectedCurrentSequence: currentSequence, expectedVersion, count: step }), context("cme-eth"));
+      expect(response.status).toBe(200);
+      ethBody = await response.json();
+      currentSequence = ethBody!.currentSequence;
+      expectedVersion = ethBody!.snapshot.session.version;
+    }
+    expect(ethBody).not.toBeNull();
+    const sessionFields = (body: { snapshot: { session: {
+      balance: number; netQuantity: number; averageEntryPrice: number | null; realizedPnl: number;
+      totalFees: number; peakEquity: number; maxDrawdown: number; lastProcessedSequence: number;
+    } } }) => {
+      const session = body.snapshot.session;
+      return {
+        balance: session.balance,
+        netQuantity: session.netQuantity,
+        averageEntryPrice: session.averageEntryPrice,
+        realizedPnl: session.realizedPnl,
+        totalFees: session.totalFees,
+        peakEquity: session.peakEquity,
+        maxDrawdown: session.maxDrawdown,
+        lastProcessedSequence: session.lastProcessedSequence,
+      };
+    };
+    expect(sessionFields(ethBody!)).toEqual(sessionFields(rthBody));
+    expect(ethBody!.snapshot.stats).toEqual(rthBody.snapshot.stats);
+    expect(ethBody!.snapshot.recentFills.map((fill: PaperFillData) => ({
+      sequence: fill.sequence, side: fill.side, price: fill.price, quantity: fill.quantity, reason: fill.reason,
+    }))).toEqual(rthBody.snapshot.recentFills.map((fill: PaperFillData) => ({
+      sequence: fill.sequence, side: fill.side, price: fill.price, quantity: fill.quantity, reason: fill.reason,
+    })));
+  }, 15_000);
 
   it.skipIf(!process.env.REPLAY_BENCHMARK)("benchmarks 1s → 5m against native 5m", async () => {
     const report = [];

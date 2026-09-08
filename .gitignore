@@ -1,6 +1,9 @@
 node_modules
 .market-imports/
-.next
+.next/
+.vercel/
+.open-next/
+.output/
 .pnpm-store
 .codex/
 dist

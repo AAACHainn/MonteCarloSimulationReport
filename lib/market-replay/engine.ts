@@ -1,6 +1,7 @@
 import {
   REPLAY_HISTORY_BARS,
   type MarketBarData,
+  type DisplaySession,
   type PlaybackRate,
   type ReplayState,
 } from "./types";
@@ -26,6 +27,7 @@ export function createReplayState(
   currentSequence = startSequence - 1,
   generation = 1,
   syncVersion = 0,
+  displaySession: DisplaySession = "ETH",
 ): ReplayState {
   const finished = currentSequence >= barCount - 1;
   return {
@@ -34,6 +36,7 @@ export function createReplayState(
     currentSequence,
     playbackRate,
     displayIntervalSeconds,
+    displaySession,
     generation,
     syncVersion,
     confirmedSequence: currentSequence,
@@ -67,6 +70,10 @@ export function setPlaybackRate(state: ReplayState, playbackRate: PlaybackRate):
 
 export function setDisplayInterval(state: ReplayState, displayIntervalSeconds: number): ReplayState {
   return { ...state, displayIntervalSeconds };
+}
+
+export function setDisplaySession(state: ReplayState, displaySession: DisplaySession): ReplayState {
+  return { ...state, displaySession };
 }
 
 export function resetReplay(state: ReplayState): ReplayState {

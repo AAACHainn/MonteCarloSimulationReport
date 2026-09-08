@@ -22,12 +22,14 @@ import {
   playReplay,
   resetReplay,
   setDisplayInterval,
+  setDisplaySession,
   setPlaybackRate,
 } from "@/lib/market-replay/engine";
 import { getAggregationBucket, mergeSourceBar } from "@/lib/market-replay/aggregation";
 import { MarketBarCache, ReplayWindowMemoryCache } from "@/lib/market-replay/bar-cache";
 import { tradingDayForTimestamp } from "@/lib/market-replay/chunks";
 import { datasetSession } from "@/lib/market-replay/dataset";
+import { resolveDisplaySession } from "@/lib/market-replay/chart-sessions";
 import {
   UTC_OFFSET_OPTIONS,
   formatUtcDateTime,
@@ -45,6 +47,7 @@ import {
   isValidDisplayInterval,
   type AggregatedMarketBarData,
   type EmaIndicatorConfig,
+  type DisplaySession,
   type MarketBarData,
   type MarketDatasetSummary,
   type ReplayState,
@@ -70,6 +73,14 @@ type WindowPayload = {
   visibleBars: AggregatedMarketBarData[];
   warmupBars: AggregatedMarketBarData[];
   lastSourceBar: MarketBarData | null;
+};
+type ServerAdvancePayload = {
+  currentSequence: number;
+  reachedVisibleBucket: boolean;
+  lastSourceBar: MarketBarData | null;
+  snapshot: PaperSessionSnapshot | null;
+  generation: number;
+  syncVersion: number;
 };
 
 const EMA_SETTINGS_STORAGE_KEY = "market-replay-ema-settings-v1";
@@ -172,8 +183,17 @@ export function MarketReplayClient({ dataset }: { dataset: MarketDatasetSummary 
     utcOffsetMinutesForTimezone(dataset.startTime, dataset.timezone)
   ));
   const [displayTimezoneLoaded, setDisplayTimezoneLoaded] = useState(false);
+  const emaWarmupCount = emaEnabled
+    ? Math.max(0, ...emaIndicators.filter((indicator) => indicator.visible).map((indicator) => indicator.length))
+    : 0;
+  const emaWarmupCountRef = useRef(emaWarmupCount);
+  emaWarmupCountRef.current = emaWarmupCount;
+  const previousEmaWarmupCountRef = useRef<number | null>(null);
   const manualStepsRef = useRef(createReplayStepQueue());
   const marketSession = useMemo(() => datasetSession(dataset), [dataset]);
+  const displayMarketSession = useMemo(() => (
+    resolveDisplaySession(dataset, replay?.displaySession ?? "ETH") ?? marketSession
+  ), [dataset, marketSession, replay?.displaySession]);
   const marketCache = useMemo(() => new MarketBarCache(dataset), [dataset]);
   const windowCache = useRef(new ReplayWindowMemoryCache<WindowPayload>());
   const barsRef = useRef<AggregatedMarketBarData[]>([]);
@@ -181,6 +201,7 @@ export function MarketReplayClient({ dataset }: { dataset: MarketDatasetSummary 
   const recoveryRequiredRef = useRef(false);
   const viewChangingRef = useRef(false);
   const windowRequestRef = useRef(0);
+  const windowAbortRef = useRef<AbortController | null>(null);
   const pendingSaveRef = useRef<ReplayState | null>(null);
   const saveTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const lastSaveAtRef = useRef(0);
@@ -227,6 +248,7 @@ export function MarketReplayClient({ dataset }: { dataset: MarketDatasetSummary 
 
   useEffect(() => () => {
     if (bufferingTimerRef.current) clearTimeout(bufferingTimerRef.current);
+    windowAbortRef.current?.abort();
   }, []);
 
   const commitPaperSnapshot = useCallback((snapshot: PaperSessionSnapshot | null) => {
@@ -287,25 +309,37 @@ export function MarketReplayClient({ dataset }: { dataset: MarketDatasetSummary 
   const loadWindow = useCallback(async (
     endSequence: number,
     displayIntervalSeconds: number,
+    displaySession: DisplaySession,
     warmupCount: number,
     completedDisplayBucketStart: string | null = null,
   ) => {
     const requestId = ++windowRequestRef.current;
+    windowAbortRef.current?.abort();
+    windowAbortRef.current = null;
     const cacheKey = [
-      dataset.id, dataset.dataVersion, endSequence, displayIntervalSeconds,
+      dataset.id, dataset.dataVersion, endSequence, displayIntervalSeconds, displaySession,
       DEFAULT_REPLAY_MAX_VISIBLE_BARS, Math.min(EMA_LENGTH_MAX, warmupCount),
     ].join(":");
     const params = new URLSearchParams({
-      displayIntervalSeconds: String(displayIntervalSeconds), endSequence: String(endSequence),
+      displayIntervalSeconds: String(displayIntervalSeconds), displaySession, endSequence: String(endSequence),
       visibleCount: String(DEFAULT_REPLAY_MAX_VISIBLE_BARS), warmupCount: String(Math.min(EMA_LENGTH_MAX, warmupCount)),
     });
     let data = windowCache.current.get(cacheKey);
     if (!data) {
-      const response = await fetch(`/api/market-datasets/${dataset.id}/bars/window?${params}`);
-      const body = await response.json();
-      if (!response.ok) throw new Error(body?.error ?? copy.marketReplay.loadError);
-      data = body as WindowPayload;
-      windowCache.current.set(cacheKey, data);
+      const controller = new AbortController();
+      windowAbortRef.current = controller;
+      try {
+        const response = await fetch(`/api/market-datasets/${dataset.id}/bars/window?${params}`, { signal: controller.signal });
+        const body = await response.json();
+        if (!response.ok) throw new Error(body?.error ?? copy.marketReplay.loadError);
+        data = body as WindowPayload;
+        windowCache.current.set(cacheKey, data);
+      } catch (error) {
+        if (controller.signal.aborted) return;
+        throw error;
+      } finally {
+        if (windowAbortRef.current === controller) windowAbortRef.current = null;
+      }
     }
     if (requestId !== windowRequestRef.current) return;
     const closeCompletedBucket = (bar: AggregatedMarketBarData) => (
@@ -326,6 +360,7 @@ export function MarketReplayClient({ dataset }: { dataset: MarketDatasetSummary 
   }, [dataset.dataVersion, dataset.id, dataset.sourceIntervalSeconds, dataset.startTime, marketCache, marketSession]);
 
   useEffect(() => {
+    if (!emaSettingsLoaded) return;
     let cancelled = false;
     const initialize = async () => {
       if (!dataset.sourceIntervalSeconds) throw new Error(copy.marketReplay.invalidDisplayInterval);
@@ -342,18 +377,33 @@ export function MarketReplayClient({ dataset }: { dataset: MarketDatasetSummary 
         const next = createReplayState(
           dataset.barCount, progress.startSequence, progress.playbackRate,
           progress.displayIntervalSeconds ?? dataset.sourceIntervalSeconds, progress.currentSequence,
-          progress.generation, progress.syncVersion,
+          progress.generation, progress.syncVersion, progress.displaySession ?? "ETH",
         );
         if (!cancelled) setReplay(next);
         paperDeltaAccumulatorRef.current = createPaperDeltaAccumulator(next.currentSequence);
         lastSyncStartedAtRef.current = performance.now();
-        await loadWindow(next.currentSequence, next.displayIntervalSeconds, EMA_LENGTH_MAX);
+        await loadWindow(next.currentSequence, next.displayIntervalSeconds, next.displaySession, emaWarmupCountRef.current);
       }
     };
     initialize().catch((error) => { if (!cancelled) setLoadError(error instanceof Error ? error.message : copy.marketReplay.loadError); })
       .finally(() => { if (!cancelled) setIsLoading(false); });
     return () => { cancelled = true; };
-  }, [commitConfirmedPaperSnapshot, dataset, loadWindow, setReplay]);
+  }, [commitConfirmedPaperSnapshot, dataset, emaSettingsLoaded, loadWindow, setReplay]);
+
+  useEffect(() => {
+    if (!emaSettingsLoaded) return;
+    const previous = previousEmaWarmupCountRef.current;
+    previousEmaWarmupCountRef.current = emaWarmupCount;
+    if (previous === null || previous === emaWarmupCount) return;
+    const current = latestReplayRef.current;
+    if (!current) return;
+    void loadWindow(
+      current.currentSequence,
+      current.displayIntervalSeconds,
+      current.displaySession,
+      emaWarmupCount,
+    ).catch((error) => setEmaError(error instanceof Error ? error.message : copy.marketReplay.loadError));
+  }, [emaSettingsLoaded, emaWarmupCount, latestReplayRef, loadWindow]);
 
   useEffect(() => { paperSnapshotRef.current = paperSnapshot; }, [paperSnapshot]);
 
@@ -384,6 +434,7 @@ export function MarketReplayClient({ dataset }: { dataset: MarketDatasetSummary 
           currentSequence: next.currentSequence,
           playbackRate: next.playbackRate,
           displayIntervalSeconds: next.displayIntervalSeconds,
+          displaySession: next.displaySession,
         }),
       });
       if (!response.ok) throw new Error(copy.marketReplay.saveError);
@@ -414,9 +465,9 @@ export function MarketReplayClient({ dataset }: { dataset: MarketDatasetSummary 
     } else {
       const next = createReplayState(dataset.barCount, progress.startSequence, progress.playbackRate,
         progress.displayIntervalSeconds ?? dataset.sourceIntervalSeconds!, progress.currentSequence,
-        progress.generation, progress.syncVersion);
+        progress.generation, progress.syncVersion, progress.displaySession ?? "ETH");
       setReplay(next);
-      await loadWindow(next.currentSequence, next.displayIntervalSeconds, EMA_LENGTH_MAX);
+      await loadWindow(next.currentSequence, next.displayIntervalSeconds, next.displaySession, emaWarmupCountRef.current);
       setRecoveryNotice(visibleSequence > next.currentSequence ? copy.marketReplay.recoveredWithRollback(visibleSequence - next.currentSequence) : null);
     }
     recoveryRequiredRef.current = false;
@@ -524,6 +575,70 @@ export function MarketReplayClient({ dataset }: { dataset: MarketDatasetSummary 
     }
   }, [latestReplayRef, startSync]);
 
+  const fastForwardToNextVisibleBar = useCallback(async () => {
+    let current = latestReplayRef.current;
+    if (!current || viewChangingRef.current || advancingRef.current || paperMutationActiveRef.current) return false;
+    viewChangingRef.current = true;
+    beginBuffering();
+    try {
+      await advanceCompletionRef.current;
+      await paperMutationChainRef.current;
+      if (!(await flushVisible())) return false;
+      current = latestReplayRef.current;
+      if (!current) return false;
+      let next = current;
+      let snapshot = confirmedPaperSnapshotRef.current;
+      let lastSourceBar = currentSourceBarRef.current;
+      let reachedVisibleBucket = false;
+      for (let attempt = 0; attempt < 64 && next.currentSequence < next.barCount - 1; attempt += 1) {
+        const response = await fetch(`/api/market-datasets/${dataset.id}/replay/advance`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            expectedCurrentSequence: next.currentSequence,
+            expectedVersion: snapshot?.session.version ?? null,
+            count: 1,
+            displayIntervalSeconds: next.displayIntervalSeconds,
+            displaySession: next.displaySession,
+          }),
+        });
+        const data = await response.json() as ServerAdvancePayload & { error?: string };
+        if (!response.ok) throw new Error(data.error ?? copy.paperTrading.advanceFailed);
+        if (data.currentSequence <= next.currentSequence || data.generation !== next.generation) {
+          throw new Error(copy.marketReplay.syncMismatch);
+        }
+        next = {
+          ...next,
+          currentSequence: data.currentSequence,
+          confirmedSequence: data.currentSequence,
+          syncVersion: data.syncVersion,
+          status: data.currentSequence >= next.barCount - 1 ? "finished" : next.status,
+        };
+        snapshot = data.snapshot;
+        lastSourceBar = data.lastSourceBar;
+        reachedVisibleBucket = data.reachedVisibleBucket;
+        if (reachedVisibleBucket) break;
+      }
+      commitConfirmedPaperSnapshot(snapshot);
+      paperDeltaAccumulatorRef.current = createPaperDeltaAccumulator(next.currentSequence);
+      currentSourceBarRef.current = lastSourceBar;
+      setReplay(next);
+      setCurrentSourceBar(lastSourceBar);
+      await loadWindow(next.currentSequence, next.displayIntervalSeconds, next.displaySession, emaWarmupCountRef.current);
+      setRecoveryNotice(null);
+      return reachedVisibleBucket;
+    } catch (error) {
+      recoveryRequiredRef.current = true;
+      setPaperError(error instanceof Error ? error.message : copy.paperTrading.advanceFailed);
+      setReplay((value) => value ? pauseReplay(value) : value);
+      try { await recoverReplay(); } catch { /* A later action retries authoritative recovery. */ }
+      return false;
+    } finally {
+      endBuffering();
+      viewChangingRef.current = false;
+    }
+  }, [beginBuffering, commitConfirmedPaperSnapshot, dataset.id, endBuffering, flushVisible, latestReplayRef, loadWindow, recoverReplay, setReplay]);
+
   const processLocalBars = useCallback(async (requestedCount: number) => {
     const frameStartedAt = performance.now();
     let current = latestReplayRef.current;
@@ -578,7 +693,7 @@ export function MarketReplayClient({ dataset }: { dataset: MarketDatasetSummary 
         aggregates = mergeSourceBar(aggregates, source, {
           sourceSeconds: dataset.sourceIntervalSeconds,
           displaySeconds: current.displayIntervalSeconds,
-          session: marketSession,
+          session: displayMarketSession,
           finalSequence: dataset.barCount - 1,
         });
         if (snapshot) {
@@ -631,7 +746,7 @@ export function MarketReplayClient({ dataset }: { dataset: MarketDatasetSummary 
       advancingRef.current = false;
       resolveAdvance();
     }
-  }, [beginBuffering, dataset.barCount, dataset.sourceIntervalSeconds, dataset.startTime, endBuffering, latestReplayRef, marketCache, marketSession, recoverReplay, setReplay]);
+  }, [beginBuffering, dataset.barCount, dataset.sourceIntervalSeconds, dataset.startTime, displayMarketSession, endBuffering, latestReplayRef, marketCache, marketSession, recoverReplay, setReplay]);
 
   const replayStatus = replay?.status;
   useEffect(() => {
@@ -651,8 +766,28 @@ export function MarketReplayClient({ dataset }: { dataset: MarketDatasetSummary 
       playbackClockRef.current = now;
       playbackAccumulatorRef.current = advance.accumulator;
       if (advance.count > 0) {
-        const processed = await processLocalBars(advance.count);
-        playbackAccumulatorRef.current += Math.max(0, advance.count - processed);
+        let nextSource = marketCache.readMemoryBarsAfter(current.currentSequence, 1)[0];
+        if (!nextSource) {
+          const anchor = tradingDayForTimestamp(
+            currentSourceBarRef.current?.timestamp ?? dataset.startTime,
+            marketSession,
+          );
+          nextSource = (await marketCache.getBarsAfter(current.currentSequence, 1, anchor))[0];
+        }
+        const nextBucket = nextSource ? getAggregationBucket(
+          new Date(nextSource.timestamp).getTime(),
+          dataset.sourceIntervalSeconds,
+          current.displayIntervalSeconds,
+          displayMarketSession,
+        ) : undefined;
+        if (nextSource && !nextBucket) {
+          await fastForwardToNextVisibleBar();
+          playbackAccumulatorRef.current = 0;
+          playbackClockRef.current = performance.now();
+        } else {
+          const processed = await processLocalBars(advance.count);
+          playbackAccumulatorRef.current += Math.max(0, advance.count - processed);
+        }
       }
       const latest = latestReplayRef.current;
       if (latest && latest.currentSequence > latest.confirmedSequence && (
@@ -664,7 +799,7 @@ export function MarketReplayClient({ dataset }: { dataset: MarketDatasetSummary 
     };
     frame = requestAnimationFrame(tick);
     return () => { cancelled = true; cancelAnimationFrame(frame); };
-  }, [dataset.sourceIntervalSeconds, latestReplayRef, processLocalBars, replayStatus, startSync]);
+  }, [dataset.sourceIntervalSeconds, dataset.startTime, displayMarketSession, fastForwardToNextVisibleBar, latestReplayRef, marketCache, marketSession, processLocalBars, replayStatus, startSync]);
 
   useEffect(() => {
     const pauseWhenHidden = () => {
@@ -686,7 +821,7 @@ export function MarketReplayClient({ dataset }: { dataset: MarketDatasetSummary 
       void fetch(`/api/market-datasets/${dataset.id}/progress`, {
         method: "PUT",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ startSequence: current.startSequence, currentSequence: current.currentSequence, playbackRate: current.playbackRate, displayIntervalSeconds: current.displayIntervalSeconds }),
+        body: JSON.stringify({ startSequence: current.startSequence, currentSequence: current.currentSequence, playbackRate: current.playbackRate, displayIntervalSeconds: current.displayIntervalSeconds, displaySession: current.displaySession }),
         keepalive: true,
       });
     };
@@ -705,18 +840,16 @@ export function MarketReplayClient({ dataset }: { dataset: MarketDatasetSummary 
     if (!dataset.sourceIntervalSeconds) return setStartError(copy.marketReplay.invalidDisplayInterval);
     const response = await fetch(`/api/market-datasets/${dataset.id}/replay/start`, {
       method: "POST", headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ timestamp: new Date(selectedTimeToTimestamp(startValue, dataset.timezone)).toISOString(), playbackRate: 1, displayIntervalSeconds: dataset.sourceIntervalSeconds }),
+      body: JSON.stringify({ timestamp: new Date(selectedTimeToTimestamp(startValue, dataset.timezone)).toISOString(), playbackRate: 1, displayIntervalSeconds: dataset.sourceIntervalSeconds, displaySession: "ETH" }),
     });
     const data = await response.json();
     if (!response.ok) return setStartError(data?.error ?? copy.marketReplay.invalidStart);
-    const next = createReplayState(dataset.barCount, data.startSequence, data.playbackRate, data.displayIntervalSeconds, data.currentSequence);
-    next.generation = data.generation;
-    next.syncVersion = data.syncVersion;
+    const next = createReplayState(dataset.barCount, data.startSequence, data.playbackRate, data.displayIntervalSeconds, data.currentSequence, data.generation, data.syncVersion, data.displaySession ?? "ETH");
     next.confirmedSequence = data.currentSequence;
     paperDeltaAccumulatorRef.current = createPaperDeltaAccumulator(data.currentSequence);
     lastSyncStartedAtRef.current = performance.now();
     setStartError(null); setReplay(next);
-    await loadWindow(next.currentSequence, next.displayIntervalSeconds, EMA_LENGTH_MAX);
+    await loadWindow(next.currentSequence, next.displayIntervalSeconds, next.displaySession, emaWarmupCountRef.current);
   }
 
   function togglePlayback() {
@@ -755,9 +888,12 @@ export function MarketReplayClient({ dataset }: { dataset: MarketDatasetSummary 
         new Date(first.timestamp).getTime(),
         dataset.sourceIntervalSeconds,
         latest.displayIntervalSeconds,
-        marketSession,
+        displayMarketSession,
       );
-      if (!targetBucket) return;
+      if (!targetBucket) {
+        await fastForwardToNextVisibleBar();
+        return;
+      }
       while (true) {
         const current = latestReplayRef.current;
         if (!current || current.currentSequence >= current.barCount - 1) break;
@@ -771,7 +907,7 @@ export function MarketReplayClient({ dataset }: { dataset: MarketDatasetSummary 
             new Date(bar.timestamp).getTime(),
             dataset.sourceIntervalSeconds!,
             current.displayIntervalSeconds,
-            marketSession,
+            displayMarketSession,
           );
           return bucket?.start === targetBucket.start;
         });
@@ -781,7 +917,7 @@ export function MarketReplayClient({ dataset }: { dataset: MarketDatasetSummary 
         if (processed < inBucket.length || inBucket.length < candidates.length) break;
       }
     });
-  }, [dataset.sourceIntervalSeconds, dataset.startTime, flushVisible, latestReplayRef, marketCache, marketSession, processLocalBars]);
+  }, [dataset.sourceIntervalSeconds, dataset.startTime, displayMarketSession, fastForwardToNextVisibleBar, flushVisible, latestReplayRef, marketCache, marketSession, processLocalBars]);
 
   useEffect(() => {
     const onKeyDown = (event: KeyboardEvent) => {
@@ -819,11 +955,36 @@ export function MarketReplayClient({ dataset }: { dataset: MarketDatasetSummary 
       playbackClockRef.current = performance.now();
       const next = setDisplayInterval(current, value);
       setReplay(next); setEmaError(null); queueSave(next, true);
-      await loadWindow(next.currentSequence, value, EMA_LENGTH_MAX);
+      await loadWindow(next.currentSequence, value, next.displaySession, emaWarmupCountRef.current);
     } catch (error) {
       recoveryRequiredRef.current = true;
       setPaperError(error instanceof Error ? error.message : copy.marketReplay.loadError);
     } finally { viewChangingRef.current = false; }
+  }
+
+  async function changeChartSession(value: DisplaySession) {
+    if (!latestReplayRef.current || !dataset.availableDisplaySessions.includes(value) || viewChangingRef.current) return;
+    viewChangingRef.current = true;
+    manualStepsRef.current.cancel();
+    try {
+      await advanceCompletionRef.current;
+      if (!(await flushVisible())) return;
+      const current = latestReplayRef.current;
+      if (!current) return;
+      playbackAccumulatorRef.current = 0;
+      playbackClockRef.current = performance.now();
+      const next = setDisplaySession(current, value);
+      setReplay(next);
+      setEmaError(null);
+      queueSave(next, true);
+      await saveChainRef.current;
+      await loadWindow(next.currentSequence, next.displayIntervalSeconds, value, emaWarmupCountRef.current);
+    } catch (error) {
+      recoveryRequiredRef.current = true;
+      setPaperError(error instanceof Error ? error.message : copy.marketReplay.loadError);
+    } finally {
+      viewChangingRef.current = false;
+    }
   }
 
   function setEmaLength(id: string, value: number) {
@@ -902,7 +1063,7 @@ export function MarketReplayClient({ dataset }: { dataset: MarketDatasetSummary 
         reset.syncVersion = data.syncVersion;
         reset.confirmedSequence = data.currentSequence;
         setReplay(reset);
-        await loadWindow(reset.currentSequence, reset.displayIntervalSeconds, EMA_LENGTH_MAX);
+        await loadWindow(reset.currentSequence, reset.displayIntervalSeconds, reset.displaySession, emaWarmupCountRef.current);
       } else {
         setReplay(null); setBars([]); setWarmupBars([]); setCurrentSourceBar(null);
       }
@@ -1067,6 +1228,18 @@ export function MarketReplayClient({ dataset }: { dataset: MarketDatasetSummary 
               {!DISPLAY_INTERVAL_PRESETS.includes(replay.displayIntervalSeconds) ? <SelectItem value={String(replay.displayIntervalSeconds)}>{formatInterval(replay.displayIntervalSeconds)}</SelectItem> : null}
             </SelectContent>
           </Select>
+          {dataset.availableDisplaySessions.length > 1 ? (
+            <>
+              <Label htmlFor="display-session" className="whitespace-nowrap text-xs text-slate-500">{copy.marketReplay.displaySession}</Label>
+              <Select value={replay.displaySession} onValueChange={(value) => void changeChartSession(value as DisplaySession)}>
+                <SelectTrigger id="display-session" className="h-8 w-20" title={copy.marketReplay.displaySessionHint}><SelectValue /></SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="ETH">{copy.marketReplay.displaySessionEth}</SelectItem>
+                  <SelectItem value="RTH">{copy.marketReplay.displaySessionRth}</SelectItem>
+                </SelectContent>
+              </Select>
+            </>
+          ) : null}
           <div className="hidden items-center gap-1 2xl:flex">
             <Input aria-label={copy.marketReplay.customInterval} type="number" min="1" value={customInterval} onChange={(event) => setCustomInterval(event.target.value)} className="h-8 w-16" placeholder="9" />
             <Select value={customIntervalUnit} onValueChange={(value) => setCustomIntervalUnit(value as "s" | "m" | "h")}>
@@ -1127,6 +1300,7 @@ export function MarketReplayClient({ dataset }: { dataset: MarketDatasetSummary 
           <Button type="button" size="sm" variant="outline" className="h-9" onClick={revealNextBar} disabled={replay.status === "finished" || replay.status === "playing"}>
             <ChevronRight className="h-4 w-4" />{copy.marketReplay.nextBar}<kbd className="ml-1 hidden rounded border bg-white px-1.5 py-0.5 font-mono text-[10px] text-slate-500 lg:inline">{copy.marketReplay.nextBarShortcut}</kbd>
           </Button>
+          <PaperTradingDetails snapshot={paperSnapshot} />
           <div className="mx-1 h-6 w-px bg-slate-200" />
           <Label htmlFor="replay-speed" className="whitespace-nowrap text-xs text-slate-500">{copy.marketReplay.speed}</Label>
           <Input id="replay-speed" type="range" min={MIN_PLAYBACK_RATE} max={MAX_PLAYBACK_RATE} value={replay.playbackRate} onChange={(event) => changeSpeed(Number(event.target.value))} className="h-8 w-24 border-0 bg-transparent px-0 lg:w-32" />
@@ -1139,7 +1313,6 @@ export function MarketReplayClient({ dataset }: { dataset: MarketDatasetSummary 
             <span className="font-medium text-slate-700">{replay.status === "playing" ? copy.marketReplay.play : replay.status === "finished" ? copy.marketReplay.finished : copy.marketReplay.pause}{statusText ? ` · ${statusText}` : ""}</span>
           </div>
         </div>
-        <PaperTradingDetails snapshot={paperSnapshot} />
       </div>
 
       <Dialog open={settingsDialog === "indicators"} title={copy.marketReplay.indicatorSettings} description={copy.marketReplay.indicatorSettingsDescription} onClose={() => setSettingsDialog(null)}>

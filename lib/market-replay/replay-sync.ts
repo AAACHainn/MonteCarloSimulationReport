@@ -100,6 +100,26 @@ function closeEnough(actual: number | null, expected: number | null) {
   return Math.abs(actual - expected) <= ACCOUNTING_EPSILON * Math.max(1, Math.abs(actual), Math.abs(expected));
 }
 
+function activeOrdersMatch(expected: PaperOrderData[], received: PaperOrderData[]) {
+  if (expected.length !== received.length) return false;
+  const receivedById = new Map(received.map((order) => [order.id, order]));
+  return expected.every((order) => {
+    const candidate = receivedById.get(order.id);
+    return candidate !== undefined
+      && order.status === "PENDING" && candidate.status === "PENDING"
+      && order.side === candidate.side && order.type === candidate.type
+      && closeEnough(order.quantity, candidate.quantity)
+      && closeEnough(order.price, candidate.price)
+      && closeEnough(order.stopLoss, candidate.stopLoss)
+      && closeEnough(order.takeProfit, candidate.takeProfit)
+      && order.reduceOnly === candidate.reduceOnly
+      && order.isProtective === candidate.isProtective
+      && order.ocoGroupId === candidate.ocoGroupId
+      && order.createdSequence === candidate.createdSequence
+      && order.activeFromSequence === candidate.activeFromSequence;
+  });
+}
+
 function validateFillAccounting(start: PaperSessionState, delta: PaperReplayDelta) {
   let quantity = start.netQuantity;
   let average = start.averageEntryPrice;
@@ -186,7 +206,7 @@ function validateClientPaperDelta(
   const expectedActive = [...finalOrders.values()].filter((order) => order.status === "PENDING")
     .sort((a, b) => a.id.localeCompare(b.id));
   const receivedActive = [...delta.activeOrders].sort((a, b) => a.id.localeCompare(b.id));
-  if (JSON.stringify(expectedActive) !== JSON.stringify(receivedActive)) return false;
+  if (!activeOrdersMatch(expectedActive, receivedActive)) return false;
   const fillIds = new Set<string>();
   for (const fill of delta.fills) {
     if (

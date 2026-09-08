@@ -205,6 +205,7 @@ model ReplayProgress {
   intervalMs      Int
   playbackRate    Int           @default(1)
   displayIntervalSeconds Int?
+  displaySession         String        @default("ETH")
   generation            Int           @default(1)
   syncVersion           Int           @default(0)
   lastSyncRequestId     String?

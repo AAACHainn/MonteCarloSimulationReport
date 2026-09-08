@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import { prisma } from "@/lib/db";
 import { copy } from "@/lib/i18n";
 import { datasetSourceInterval } from "@/lib/market-replay/dataset";
+import { resolveDisplaySession } from "@/lib/market-replay/chart-sessions";
 import { isValidDisplayInterval } from "@/lib/market-replay/types";
 import { replayStartSchema } from "@/lib/validations";
 
@@ -16,6 +17,9 @@ export async function POST(request: Request, context: RouteContext) {
   const sourceSeconds = datasetSourceInterval(dataset);
   if (!sourceSeconds || !isValidDisplayInterval(sourceSeconds, parsed.data.displayIntervalSeconds)) {
     return NextResponse.json({ error: copy.marketReplay.invalidDisplayInterval }, { status: 400 });
+  }
+  if (!resolveDisplaySession(dataset, parsed.data.displaySession)) {
+    return NextResponse.json({ error: copy.marketReplay.unsupportedDisplaySession }, { status: 400 });
   }
   const first = await prisma.marketBar.findFirst({
     where: { datasetId: id, timestamp: { gte: new Date(parsed.data.timestamp) } },
@@ -41,11 +45,13 @@ export async function POST(request: Request, context: RouteContext) {
         datasetId: id, startSequence: first.sequence, currentSequence,
         intervalMs: 1_000, playbackRate: parsed.data.playbackRate,
         displayIntervalSeconds: parsed.data.displayIntervalSeconds,
+        displaySession: parsed.data.displaySession,
         generation: versioned.replayGeneration, syncVersion: 0,
       },
       update: {
         startSequence: first.sequence, currentSequence,
         playbackRate: parsed.data.playbackRate, displayIntervalSeconds: parsed.data.displayIntervalSeconds,
+        displaySession: parsed.data.displaySession,
         generation: versioned.replayGeneration, syncVersion: 0,
         lastSyncRequestId: null, lastSyncResponse: null,
       },
@@ -54,6 +60,7 @@ export async function POST(request: Request, context: RouteContext) {
   return NextResponse.json({
     startSequence: progress.startSequence, currentSequence: progress.currentSequence,
     playbackRate: progress.playbackRate, displayIntervalSeconds: progress.displayIntervalSeconds,
+    displaySession: progress.displaySession,
     generation: progress.generation, syncVersion: progress.syncVersion,
   });
 }

@@ -1,4 +1,5 @@
-import { parseSourceInterval, type MarketDatasetSummary, type SessionMode } from "./types";
+import { availableDisplaySessions } from "./chart-sessions";
+import { parseSourceInterval, type DisplaySession, type MarketDatasetSummary, type SessionMode } from "./types";
 
 type DatasetRecord = {
   id: string;
@@ -25,6 +26,7 @@ type DatasetRecord = {
     intervalMs: number;
     playbackRate: number;
     displayIntervalSeconds: number | null;
+    displaySession: string;
     generation: number;
     syncVersion: number;
     updatedAt: Date;
@@ -41,11 +43,13 @@ export function serializeMarketDataset(dataset: DatasetRecord): MarketDatasetSum
     sourceIntervalSeconds,
     sessionMode: dataset.sessionMode as SessionMode,
     tradingWeekdays: dataset.tradingWeekdays.split(",").map(Number).filter((value) => value >= 1 && value <= 7),
+    availableDisplaySessions: availableDisplaySessions(dataset.symbol),
     progress: dataset.progress ? {
       startSequence: dataset.progress.startSequence,
       currentSequence: dataset.progress.currentSequence,
       playbackRate: dataset.progress.playbackRate,
       displayIntervalSeconds: dataset.progress.displayIntervalSeconds ?? sourceIntervalSeconds ?? 1,
+      displaySession: dataset.progress.displaySession as DisplaySession,
       generation: dataset.progress.generation,
       syncVersion: dataset.progress.syncVersion,
       updatedAt: dataset.progress.updatedAt.toISOString(),

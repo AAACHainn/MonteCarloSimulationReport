@@ -106,6 +106,7 @@ const createStatements = [
     "intervalMs" INTEGER NOT NULL,
     "playbackRate" INTEGER NOT NULL DEFAULT 1,
     "displayIntervalSeconds" INTEGER,
+    "displaySession" TEXT NOT NULL DEFAULT 'ETH',
     "generation" INTEGER NOT NULL DEFAULT 1,
     "syncVersion" INTEGER NOT NULL DEFAULT 0,
     "lastSyncRequestId" TEXT,
@@ -265,6 +266,7 @@ const marketDatasetColumns = [
 ];
 const replayProgressColumns = [
   ["playbackRate", "INTEGER NOT NULL DEFAULT 1"], ["displayIntervalSeconds", "INTEGER"],
+  ["displaySession", "TEXT NOT NULL DEFAULT 'ETH'"],
   ["generation", "INTEGER NOT NULL DEFAULT 1"], ["syncVersion", "INTEGER NOT NULL DEFAULT 0"],
   ["lastSyncRequestId", "TEXT"], ["lastSyncResponse", "TEXT"],
 ];

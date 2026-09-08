@@ -8,21 +8,39 @@ import type {
 import { isValidDisplayInterval } from "./types";
 
 type Bucket = { start: number; end: number; expectedCount: number };
+const localPartFormatters = new Map<string, Intl.DateTimeFormat>();
+const sessionBoundsCache = new Map<string, { start: number; end: number }>();
 export type AggregationSegment = {
   firstSequence: number; lastSequence: number; timestamp: string; endTimestamp: string;
   open: number; high: number; low: number; close: number; volume: number | null; sourceCount: number;
 };
 
 function localParts(timestamp: number, timezone: string) {
-  const values = Object.fromEntries(new Intl.DateTimeFormat("en-CA", {
-    timeZone: timezone,
-    year: "numeric", month: "2-digit", day: "2-digit", weekday: "short",
-    hour: "2-digit", minute: "2-digit", second: "2-digit", hourCycle: "h23",
-  }).formatToParts(timestamp).filter((part) => part.type !== "literal").map((part) => [part.type, part.value]));
+  let formatter = localPartFormatters.get(timezone);
+  if (!formatter) {
+    formatter = new Intl.DateTimeFormat("en-CA", {
+      timeZone: timezone,
+      year: "numeric", month: "2-digit", day: "2-digit", weekday: "short",
+      hour: "2-digit", minute: "2-digit", second: "2-digit", hourCycle: "h23",
+    });
+    localPartFormatters.set(timezone, formatter);
+  }
+  const values = Object.fromEntries(formatter.formatToParts(timestamp)
+    .filter((part) => part.type !== "literal").map((part) => [part.type, part.value]));
   const weekday = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"].indexOf(values.weekday) + 1;
   return {
     year: Number(values.year), month: Number(values.month), day: Number(values.day),
     hour: Number(values.hour), minute: Number(values.minute), second: Number(values.second), weekday,
+  };
+}
+
+function shiftCalendarDate(date: { year: number; month: number; day: number }, days: number) {
+  const shifted = new Date(Date.UTC(date.year, date.month - 1, date.day + days));
+  return {
+    year: shifted.getUTCFullYear(),
+    month: shifted.getUTCMonth() + 1,
+    day: shifted.getUTCDate(),
+    weekday: ((shifted.getUTCDay() + 6) % 7) + 1,
   };
 }
 
@@ -41,15 +59,36 @@ export function getAggregationBucket(
     return { start, end: start + displayMs, expectedCount: displaySeconds / sourceSeconds };
   }
 
-  if (session.openMinute === null || session.closeMinute === null || session.openMinute >= session.closeMinute) return null;
+  if (session.openMinute === null || session.closeMinute === null) return null;
   const parts = localParts(timestampMs, session.timezone);
-  if (!session.weekdays.includes(parts.weekday)) return null;
   const openHour = Math.floor(session.openMinute / 60);
   const openMinute = session.openMinute % 60;
   const closeHour = Math.floor(session.closeMinute / 60);
   const closeMinute = session.closeMinute % 60;
-  const sessionStart = new TZDate(parts.year, parts.month - 1, parts.day, openHour, openMinute, 0, session.timezone).getTime();
-  const sessionEnd = new TZDate(parts.year, parts.month - 1, parts.day, closeHour, closeMinute, 0, session.timezone).getTime();
+  let tradingDate = { year: parts.year, month: parts.month, day: parts.day, weekday: parts.weekday };
+  let startDate = tradingDate;
+  if (session.mode === "OVERNIGHT_SESSION") {
+    const localMinute = parts.hour * 60 + parts.minute;
+    tradingDate = shiftCalendarDate(parts, localMinute >= session.openMinute ? 1 : 0);
+    startDate = shiftCalendarDate(tradingDate, -1);
+  } else if (session.openMinute >= session.closeMinute) return null;
+  if (!session.weekdays.includes(tradingDate.weekday)) return null;
+  const boundsKey = [
+    session.mode, session.timezone, session.openMinute, session.closeMinute,
+    startDate.year, startDate.month, startDate.day,
+    tradingDate.year, tradingDate.month, tradingDate.day,
+  ].join(":");
+  let bounds = sessionBoundsCache.get(boundsKey);
+  if (!bounds) {
+    bounds = {
+      start: new TZDate(startDate.year, startDate.month - 1, startDate.day, openHour, openMinute, 0, session.timezone).getTime(),
+      end: new TZDate(tradingDate.year, tradingDate.month - 1, tradingDate.day, closeHour, closeMinute, 0, session.timezone).getTime(),
+    };
+    if (sessionBoundsCache.size >= 10_000) sessionBoundsCache.clear();
+    sessionBoundsCache.set(boundsKey, bounds);
+  }
+  const sessionStart = bounds.start;
+  const sessionEnd = bounds.end;
   if (timestampMs < sessionStart || timestampMs >= sessionEnd || (timestampMs - sessionStart) % sourceMs !== 0) return null;
   const start = sessionStart + Math.floor((timestampMs - sessionStart) / displayMs) * displayMs;
   const end = Math.min(start + displayMs, sessionEnd);

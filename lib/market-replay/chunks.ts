@@ -31,15 +31,21 @@ export function tradingDayBounds(tradingDay: string, session: TradingSessionConf
     const start = Date.UTC(year, month - 1, day);
     return { start, end: start + 86_400_000 };
   }
-  if (session.openMinute === null || session.closeMinute === null || session.openMinute >= session.closeMinute) {
+  if (session.openMinute === null || session.closeMinute === null) {
     throw new RangeError("Invalid daily trading session.");
   }
   const openHour = Math.floor(session.openMinute / 60);
   const openMinute = session.openMinute % 60;
   const closeHour = Math.floor(session.closeMinute / 60);
   const closeMinute = session.closeMinute % 60;
+  const startDate = session.mode === "OVERNIGHT_SESSION"
+    ? parseTradingDate(addCalendarDays(tradingDay, -1))
+    : { year, month, day };
+  if (session.mode !== "OVERNIGHT_SESSION" && session.openMinute >= session.closeMinute) {
+    throw new RangeError("Invalid daily trading session.");
+  }
   return {
-    start: new TZDate(year, month - 1, day, openHour, openMinute, 0, session.timezone).getTime(),
+    start: new TZDate(startDate.year, startDate.month - 1, startDate.day, openHour, openMinute, 0, session.timezone).getTime(),
     end: new TZDate(year, month - 1, day, closeHour, closeMinute, 0, session.timezone).getTime(),
   };
 }
@@ -50,8 +56,13 @@ export function tradingDayForTimestamp(timestamp: string | number | Date, sessio
   if (session.mode === "TWENTY_FOUR_SEVEN") return date.toISOString().slice(0, 10);
   const values = Object.fromEntries(new Intl.DateTimeFormat("en-CA", {
     timeZone: session.timezone, year: "numeric", month: "2-digit", day: "2-digit",
+    hour: "2-digit", minute: "2-digit", hourCycle: "h23",
   }).formatToParts(date).filter((part) => part.type !== "literal").map((part) => [part.type, part.value]));
-  return `${values.year}-${values.month}-${values.day}`;
+  const localDate = `${values.year}-${values.month}-${values.day}`;
+  return session.mode === "OVERNIGHT_SESSION" && session.openMinute !== null
+    && Number(values.hour) * 60 + Number(values.minute) >= session.openMinute
+    ? addCalendarDays(localDate, 1)
+    : localDate;
 }
 
 export function chunkRequestBounds(startDate: string, sourceIntervalSeconds: number, session: TradingSessionConfig) {
