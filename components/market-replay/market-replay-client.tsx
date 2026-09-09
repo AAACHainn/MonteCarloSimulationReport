@@ -2,7 +2,7 @@
 
 import { TZDate } from "@date-fns/tz";
 import { startTransition, useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { ChevronRight, Loader2, Pause, Play, Plus, RotateCcw, Settings2, WalletCards, X } from "lucide-react";
+import { ChevronRight, Loader2, Pause, Play, Plus, RotateCcw, Ruler, Settings2, WalletCards, X } from "lucide-react";
 import { ReplayChart } from "@/components/market-replay/replay-chart";
 import { DEFAULT_REPLAY_MAX_VISIBLE_BARS } from "@/lib/market-replay/chart-range";
 import { PaperAccountStrip, PaperTradingDetails, PaperTradingPanel } from "@/components/market-replay/paper-trading-panel";
@@ -179,6 +179,7 @@ export function MarketReplayClient({ dataset }: { dataset: MarketDatasetSummary 
   const [buffering, setBuffering] = useState(false);
   const [recoveryNotice, setRecoveryNotice] = useState<string | null>(null);
   const [draftActive, setDraftActive] = useState(false);
+  const [measurementArmed, setMeasurementArmed] = useState(false);
   const [displayUtcOffsetMinutes, setDisplayUtcOffsetMinutes] = useState(() => (
     utcOffsetMinutesForTimezone(dataset.startTime, dataset.timezone)
   ));
@@ -1265,6 +1266,21 @@ export function MarketReplayClient({ dataset }: { dataset: MarketDatasetSummary 
             </SelectContent>
           </Select>
           <div className="mx-1 h-5 w-px bg-slate-200" />
+          <Button
+            type="button"
+            variant={measurementArmed ? "secondary" : "ghost"}
+            size="sm"
+            className="group relative h-8"
+            aria-pressed={measurementArmed}
+            aria-label={copy.marketReplay.measureHint}
+            onClick={() => setMeasurementArmed((current) => !current)}
+          >
+            <Ruler className="h-4 w-4" />
+            <span className="hidden xl:inline">{copy.marketReplay.measure}</span>
+            <span className="pointer-events-none absolute left-1/2 top-full z-50 mt-2 hidden -translate-x-1/2 rounded-md border border-slate-700 bg-slate-950 px-2.5 py-1.5 text-xs font-normal text-white shadow-lg group-hover:block group-focus-visible:block">
+              {copy.marketReplay.measureHint}
+            </span>
+          </Button>
           <Button type="button" variant="ghost" size="sm" className="h-8" onClick={() => setSettingsDialog("indicators")}><Settings2 className="h-4 w-4" />{copy.marketReplay.indicators}</Button>
           <Button type="button" variant="ghost" size="sm" className="h-8" onClick={() => setSettingsDialog("paper")}><WalletCards className="h-4 w-4" />{copy.marketReplay.accountSettings}</Button>
           {paperSnapshot ? <div className="hidden items-center gap-3 text-xs text-slate-500 xl:flex"><span>{copy.paperTrading.equity} <strong className="font-medium text-slate-800">{paperSnapshot.stats.equity.toLocaleString("zh-CN", { maximumFractionDigits: 2 })} {paperSnapshot.session.currency}</strong></span><span>{copy.paperTrading.netPosition} <strong className="font-medium text-slate-800">{paperSnapshot.session.netQuantity}</strong></span></div> : null}
@@ -1280,6 +1296,9 @@ export function MarketReplayClient({ dataset }: { dataset: MarketDatasetSummary 
             bars={bars}
             warmupBars={warmupBars}
             displayUtcOffsetMinutes={displayUtcOffsetMinutes}
+            displayIntervalSeconds={replay.displayIntervalSeconds}
+            measurementArmed={measurementArmed}
+            onMeasurementArmedChange={setMeasurementArmed}
             emaEnabled={emaEnabled}
             emaIndicators={emaIndicators}
             paperSnapshot={paperSnapshot}

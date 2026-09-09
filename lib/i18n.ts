@@ -146,6 +146,19 @@ export const dictionaries = {
       noVolume: "此数据集没有成交量数据。",
       chartAriaLabel: "K 线回放图表",
       resetChartView: "重置图表视图",
+      measure: "测量",
+      measureHint: "测量 · Shift + 点击图表",
+      measurementSpan: (bars: number, duration: string) => `${bars} 根 K 线，${duration}`,
+      measurementVolume: (volume: string) => `成交量 ${volume}`,
+      measurementDuration: ({ days, hours, minutes, seconds }: { days: number; hours: number; minutes: number; seconds: number }) => {
+        const parts = [
+          days > 0 ? `${days} 天` : "",
+          hours > 0 ? `${hours} 小时` : "",
+          minutes > 0 ? `${minutes} 分钟` : "",
+          seconds > 0 ? `${seconds} 秒` : "",
+        ].filter(Boolean);
+        return parts.join(" ") || "0 秒";
+      },
       ohlc: "开高低收",
       status: "状态",
       emaTitle: "EMA 指标",

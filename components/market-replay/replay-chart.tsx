@@ -18,6 +18,11 @@ import { calculateEmaSeries, nextEma } from "@/lib/market-replay/ema";
 import type { AggregatedMarketBarData, EmaIndicatorConfig } from "@/lib/market-replay/types";
 import { copy } from "@/lib/i18n";
 import { defaultReplayLogicalRange, rangeAfterNewReplayBar } from "@/lib/market-replay/chart-range";
+import {
+  calculateChartMeasurement,
+  measurementDurationParts,
+  type ChartMeasurementStats,
+} from "@/lib/market-replay/chart-measurement";
 import { formatUtcDateTime, utcDateParts } from "@/lib/market-replay/display-timezone";
 import { formatPriceForTick, priceDecimalsForTick, snapPriceToTick } from "@/lib/market-replay/price-ticks";
 import {
@@ -71,6 +76,21 @@ type LineAction = {
   kind: "cancel" | "close";
   orderId?: string;
 };
+type MeasurementPoint = {
+  index: number;
+  timestamp: string | null;
+  price: number;
+  x: number;
+  y: number;
+};
+type MeasurementState = {
+  phase: "tracking" | "fixed";
+  start: MeasurementPoint;
+  end: MeasurementPoint;
+  paneWidth: number;
+  paneHeight: number;
+  stats: ChartMeasurementStats;
+};
 
 function sameLineActions(current: LineAction[], next: LineAction[]) {
   return current.length === next.length && current.every((action, index) => {
@@ -122,6 +142,13 @@ function money(value: number, currency: string) {
   return `${new Intl.NumberFormat("zh-CN", { minimumFractionDigits: 2, maximumFractionDigits: 2 }).format(value)} ${currency}`;
 }
 
+function compactVolume(value: number) {
+  return new Intl.NumberFormat("en-US", {
+    notation: "compact",
+    maximumFractionDigits: 2,
+  }).format(value);
+}
+
 function sizingErrorText(error: RiskSizingError) {
   const labels: Record<RiskSizingError, string> = {
     INVALID_PRICE: copy.paperTrading.invalidPrice,
@@ -139,7 +166,8 @@ function orderTypeLabel(type: "LIMIT" | "STOP") {
 }
 
 export function ReplayChart({
-  datasetId, priceTickSize, bars, warmupBars, displayUtcOffsetMinutes, emaEnabled, emaIndicators, paperSnapshot,
+  datasetId, priceTickSize, bars, warmupBars, displayUtcOffsetMinutes, displayIntervalSeconds, measurementArmed,
+  onMeasurementArmedChange, emaEnabled, emaIndicators, paperSnapshot,
   paperBusy, paperError, onSubmitOrder, onOrderPriceChange,
   onCancelOrder, onClosePosition, onDraftActiveChange, onOpenPaperAccount,
 }: {
@@ -148,6 +176,9 @@ export function ReplayChart({
   bars: AggregatedMarketBarData[];
   warmupBars: AggregatedMarketBarData[];
   displayUtcOffsetMinutes: number;
+  displayIntervalSeconds: number;
+  measurementArmed: boolean;
+  onMeasurementArmedChange: (armed: boolean) => void;
   emaEnabled: boolean;
   emaIndicators: EmaIndicatorConfig[];
   paperSnapshot: PaperSessionSnapshot | null;
@@ -175,7 +206,12 @@ export function ReplayChart({
     values: Array<number | null>;
   }>());
   const lastDataRef = useRef<AggregatedMarketBarData[]>([]);
+  const barsRef = useRef(bars);
+  const measurementArmedRef = useRef(measurementArmed);
+  const onMeasurementArmedChangeRef = useRef(onMeasurementArmedChange);
   const [contextMenu, setContextMenu] = useState<ContextMenuState | null>(null);
+  const [measurement, setMeasurement] = useState<MeasurementState | null>(null);
+  const measurementRef = useRef<MeasurementState | null>(null);
   const [draft, setDraft] = useState<DraftOrder | null>(null);
   const [defaultRiskAmount, setDefaultRiskAmount] = useState<number | null>(null);
   const [defaultTargetR, setDefaultTargetR] = useState(2);
@@ -193,6 +229,10 @@ export function ReplayChart({
   const hasPendingClose = paperSnapshot?.activeOrders.some((order) => order.reduceOnly && !order.isProtective) ?? false;
 
   useEffect(() => { currentPriceRef.current = currentPrice; }, [currentPrice]);
+  useEffect(() => { barsRef.current = bars; }, [bars]);
+  useEffect(() => { measurementArmedRef.current = measurementArmed; }, [measurementArmed]);
+  useEffect(() => { onMeasurementArmedChangeRef.current = onMeasurementArmedChange; }, [onMeasurementArmedChange]);
+  useEffect(() => { measurementRef.current = measurement; }, [measurement]);
   useEffect(() => { displayUtcOffsetRef.current = displayUtcOffsetMinutes; }, [displayUtcOffsetMinutes]);
   useEffect(() => { onOrderPriceChangeRef.current = onOrderPriceChange; }, [onOrderPriceChange]);
 
@@ -209,6 +249,70 @@ export function ReplayChart({
       return sameLineActions(current, next) ? current : next;
     });
   }, []);
+
+  const setChartCursor = useCallback((cursor: "" | "crosshair" | "ns-resize") => {
+    const container = containerRef.current;
+    if (!container) return;
+    container.style.cursor = cursor;
+    container.querySelectorAll("canvas").forEach((canvas) => { canvas.style.cursor = cursor; });
+  }, []);
+
+  const syncMeasurementCoordinates = useCallback(() => {
+    const chart = chartRef.current;
+    const series = candleRef.current;
+    if (!chart || !series) return;
+    const current = measurementRef.current;
+    if (!current) return;
+    const currentBars = barsRef.current;
+    const startIndex = current.start.timestamp === null
+      ? current.start.index
+      : currentBars.findIndex((bar) => bar.timestamp === current.start.timestamp);
+    const endIndex = current.end.timestamp === null
+      ? current.end.index
+      : currentBars.findIndex((bar) => bar.timestamp === current.end.timestamp);
+    if (
+      (current.start.timestamp !== null && startIndex < 0)
+      || (current.end.timestamp !== null && endIndex < 0)
+    ) {
+      measurementRef.current = null;
+      setMeasurement(null);
+      measurementArmedRef.current = false;
+      onMeasurementArmedChangeRef.current(false);
+      chart.applyOptions({
+        crosshair: {
+          vertLine: { visible: true, labelVisible: true },
+          horzLine: { visible: true, labelVisible: true },
+        },
+      });
+      setChartCursor("");
+      return;
+    }
+    const startX = chart.timeScale().logicalToCoordinate(startIndex as never);
+    const endX = chart.timeScale().logicalToCoordinate(endIndex as never);
+    const startY = series.priceToCoordinate(current.start.price);
+    const endY = series.priceToCoordinate(current.end.price);
+    const paneHeight = chart.panes()[0]?.getHeight() ?? 0;
+    const paneWidth = chart.timeScale().width();
+    if (startX === null || endX === null || startY === null || endY === null || paneHeight <= 0 || paneWidth <= 0) return;
+    const next = {
+      ...current,
+      start: { ...current.start, index: startIndex, timestamp: currentBars[startIndex]?.timestamp ?? current.start.timestamp, x: Number(startX), y: Number(startY) },
+      end: { ...current.end, index: endIndex, timestamp: currentBars[endIndex]?.timestamp ?? current.end.timestamp, x: Number(endX), y: Number(endY) },
+      paneWidth,
+      paneHeight,
+      stats: calculateChartMeasurement({
+        bars: currentBars,
+        startIndex,
+        endIndex,
+        startPrice: current.start.price,
+        endPrice: current.end.price,
+        priceTickSize,
+        displayIntervalSeconds,
+      }),
+    };
+    measurementRef.current = next;
+    setMeasurement(next);
+  }, [displayIntervalSeconds, priceTickSize, setChartCursor]);
 
   useEffect(() => {
     if (!paperSessionId || paperInitialCapital === null) {
@@ -279,18 +383,22 @@ export function ReplayChart({
       if (entry?.contentRect.width && entry.contentRect.height) {
         chart.applyOptions({ width: entry.contentRect.width, height: entry.contentRect.height });
         syncLineActionCoordinates();
+        syncMeasurementCoordinates();
       }
     });
     observer.observe(container);
     chart.timeScale().subscribeVisibleLogicalRangeChange(syncLineActionCoordinates);
+    chart.timeScale().subscribeVisibleLogicalRangeChange(syncMeasurementCoordinates);
     chartRef.current = chart; candleRef.current = candles; volumeRef.current = volumes;
     markersRef.current = createSeriesMarkers(candles, []);
     return () => {
-      observer.disconnect(); chart.timeScale().unsubscribeVisibleLogicalRangeChange(syncLineActionCoordinates);
+      observer.disconnect();
+      chart.timeScale().unsubscribeVisibleLogicalRangeChange(syncLineActionCoordinates);
+      chart.timeScale().unsubscribeVisibleLogicalRangeChange(syncMeasurementCoordinates);
       chart.remove(); chartRef.current = null; candleRef.current = null; volumeRef.current = null;
       markersRef.current = null; priceLines.clear(); lineTargets.clear(); emaSeries.clear(); emaStates.clear(); lastDataRef.current = [];
     };
-  }, [hasVolume, priceTickSize, syncLineActionCoordinates]);
+  }, [hasVolume, priceTickSize, syncLineActionCoordinates, syncMeasurementCoordinates]);
 
   useEffect(() => {
     displayUtcOffsetRef.current = displayUtcOffsetMinutes;
@@ -337,7 +445,8 @@ export function ReplayChart({
       }
     }
     lastDataRef.current = next.map((bar) => ({ ...bar }));
-  }, [bars]);
+    requestAnimationFrame(syncMeasurementCoordinates);
+  }, [bars, syncMeasurementCoordinates]);
 
   useEffect(() => {
     const chart = chartRef.current;
@@ -493,33 +602,246 @@ export function ReplayChart({
   }, [priceTickSize]);
 
   useEffect(() => {
+    const container = containerRef.current;
+    const interaction = interactionRef.current;
+    const chart = chartRef.current;
+    const series = candleRef.current;
+    if (!container || !interaction || !chart || !series) return;
+
+    const pointAt = (clientX: number, clientY: number) => {
+      const currentBars = barsRef.current;
+      const paneWidth = chart.timeScale().width();
+      const paneHeight = chart.panes()[0]?.getHeight() ?? 0;
+      if (currentBars.length === 0 || paneWidth <= 0 || paneHeight <= 0) return null;
+      const rect = container.getBoundingClientRect();
+      const x = clientX - rect.left;
+      const y = clientY - rect.top;
+      if (x < 0 || x > paneWidth || y < 0 || y > paneHeight) return null;
+      const logical = chart.timeScale().coordinateToLogical(x as never);
+      const rawPrice = series.coordinateToPrice(y as never);
+      if (logical === null || rawPrice === null || !Number.isFinite(Number(rawPrice))) return null;
+      const index = Math.round(Number(logical));
+      const snappedX = chart.timeScale().logicalToCoordinate(index as never);
+      const price = snapPriceToTick(Number(rawPrice), priceTickSize);
+      const snappedY = series.priceToCoordinate(price);
+      if (snappedX === null || snappedY === null) return null;
+      return {
+        point: {
+          index,
+          timestamp: currentBars[index]?.timestamp ?? null,
+          price,
+          x: Number(snappedX),
+          y: Number(snappedY),
+        },
+        paneWidth,
+        paneHeight,
+      };
+    };
+
+    const setCrosshairVisible = (visible: boolean) => {
+      if (chartRef.current !== chart) return;
+      chart.applyOptions({
+        crosshair: {
+          vertLine: { visible, labelVisible: visible },
+          horzLine: { visible, labelVisible: visible },
+        },
+      });
+    };
+    const commitMeasurement = (next: MeasurementState | null) => {
+      measurementRef.current = next;
+      setMeasurement(next);
+    };
+    const clearMeasurement = (disarm: boolean) => {
+      commitMeasurement(null);
+      setCrosshairVisible(true);
+      if (disarm) {
+        measurementArmedRef.current = false;
+        onMeasurementArmedChangeRef.current(false);
+      }
+      setChartCursor(disarm ? "" : "crosshair");
+    };
+    const resolvePoint = (point: MeasurementPoint) => {
+      const currentBars = barsRef.current;
+      const index = point.timestamp === null
+        ? point.index
+        : currentBars.findIndex((bar) => bar.timestamp === point.timestamp);
+      if (point.timestamp !== null && index < 0) return null;
+      const x = chart.timeScale().logicalToCoordinate(index as never);
+      const y = series.priceToCoordinate(point.price);
+      if (x === null || y === null) return null;
+      return {
+        ...point,
+        index,
+        timestamp: currentBars[index]?.timestamp ?? point.timestamp,
+        x: Number(x),
+        y: Number(y),
+      };
+    };
+    const measurementState = (
+      phase: MeasurementState["phase"],
+      start: MeasurementPoint,
+      end: MeasurementPoint,
+      paneWidth: number,
+      paneHeight: number,
+    ): MeasurementState => ({
+      phase,
+      start,
+      end,
+      paneWidth,
+      paneHeight,
+      stats: calculateChartMeasurement({
+        bars: barsRef.current,
+        startIndex: start.index,
+        endIndex: end.index,
+        startPrice: start.price,
+        endPrice: end.price,
+        priceTickSize,
+        displayIntervalSeconds,
+      }),
+    });
+
+    const down = (event: PointerEvent) => {
+      if (event.pointerType !== "mouse" || event.button !== 0 || !container.contains(event.target as Node)) return;
+      const current = measurementRef.current;
+      if (!current && !event.shiftKey && !measurementArmedRef.current) return;
+      const positioned = pointAt(event.clientX, event.clientY);
+      if (!positioned) return;
+      event.preventDefault();
+      event.stopImmediatePropagation();
+      setContextMenu(null);
+
+      if (current?.phase === "fixed") {
+        clearMeasurement(true);
+        return;
+      }
+      if (current?.phase === "tracking") {
+        const start = resolvePoint(current.start);
+        if (!start) {
+          clearMeasurement(true);
+          return;
+        }
+        commitMeasurement(measurementState(
+          "fixed",
+          start,
+          positioned.point,
+          positioned.paneWidth,
+          positioned.paneHeight,
+        ));
+        return;
+      }
+
+      if (!measurementArmedRef.current) {
+        measurementArmedRef.current = true;
+        onMeasurementArmedChangeRef.current(true);
+      }
+      setChartCursor("crosshair");
+      setCrosshairVisible(false);
+      commitMeasurement(measurementState(
+        "tracking",
+        positioned.point,
+        positioned.point,
+        positioned.paneWidth,
+        positioned.paneHeight,
+      ));
+    };
+
+    const move = (event: PointerEvent) => {
+      const current = measurementRef.current;
+      if (!current || current.phase !== "tracking" || !container.contains(event.target as Node)) return;
+      const positioned = pointAt(event.clientX, event.clientY);
+      if (!positioned) return;
+      event.preventDefault();
+      event.stopImmediatePropagation();
+      const start = resolvePoint(current.start);
+      if (!start) {
+        clearMeasurement(true);
+        return;
+      }
+      commitMeasurement(measurementState(
+        "tracking",
+        start,
+        positioned.point,
+        positioned.paneWidth,
+        positioned.paneHeight,
+      ));
+    };
+
+    const up = (event: PointerEvent) => {
+      if (!measurementRef.current || !container.contains(event.target as Node)) return;
+      event.preventDefault();
+      event.stopImmediatePropagation();
+    };
+    const key = (event: KeyboardEvent) => {
+      if (event.key !== "Escape" || (!measurementRef.current && !measurementArmedRef.current)) return;
+      clearMeasurement(true);
+    };
+
+    interaction.addEventListener("pointerdown", down, true);
+    interaction.addEventListener("pointermove", move, true);
+    interaction.addEventListener("pointerup", up, true);
+    window.addEventListener("keydown", key);
+    return () => {
+      interaction.removeEventListener("pointerdown", down, true);
+      interaction.removeEventListener("pointermove", move, true);
+      interaction.removeEventListener("pointerup", up, true);
+      window.removeEventListener("keydown", key);
+      const hadMeasurement = measurementRef.current !== null;
+      commitMeasurement(null);
+      if (hadMeasurement) {
+        measurementArmedRef.current = false;
+        onMeasurementArmedChangeRef.current(false);
+      }
+      setCrosshairVisible(true);
+      setChartCursor("");
+    };
+  }, [displayIntervalSeconds, hasVolume, priceTickSize, setChartCursor]);
+
+  useEffect(() => {
+    if (measurementArmed || !measurementRef.current) return;
+    measurementRef.current = null;
+    setMeasurement(null);
+    chartRef.current?.applyOptions({
+      crosshair: {
+        vertLine: { visible: true, labelVisible: true },
+        horzLine: { visible: true, labelVisible: true },
+      },
+    });
+    setChartCursor("");
+  }, [measurementArmed, setChartCursor]);
+
+  useEffect(() => {
+    if (!measurement) setChartCursor(measurementArmed ? "crosshair" : "");
+  }, [measurement, measurementArmed, setChartCursor]);
+
+  useEffect(() => {
     const container = containerRef.current; const interaction = interactionRef.current; const series = candleRef.current;
     if (!container || !interaction || !series) return;
     let dragging: { target: LineTarget; originalPrice: number; previewPrice: number } | null = null;
-    const setLineCursor = (cursor: "" | "ns-resize") => {
-      container.style.cursor = cursor;
-      container.querySelectorAll("canvas").forEach((canvas) => { canvas.style.cursor = cursor; });
-    };
     const nearestLine = (y: number) => [...lineTargetsRef.current.values()]
       .map((target) => ({ target, coordinate: series.priceToCoordinate(target.price) }))
       .filter((item) => item.coordinate !== null)
       .sort((a, b) => Math.abs(Number(a.coordinate) - y) - Math.abs(Number(b.coordinate) - y))[0];
     const down = (event: PointerEvent) => {
+      if (event.shiftKey || measurementArmedRef.current) return;
       if ((event.target as HTMLElement | null)?.closest("button,input,[data-context-menu]")) return;
       const y = event.clientY - container.getBoundingClientRect().top;
       const dragKey = (event.target as HTMLElement | null)?.closest<HTMLElement>("[data-line-drag-key]")?.dataset.lineDragKey;
       const directTarget = dragKey ? lineTargetsRef.current.get(dragKey) : undefined;
       const candidate = directTarget ? { target: directTarget, coordinate: series.priceToCoordinate(directTarget.price) } : nearestLine(y);
       if (!candidate || candidate.coordinate === null || (!directTarget && Math.abs(Number(candidate.coordinate) - y) > 8)) return;
-      event.preventDefault(); setLineCursor("ns-resize"); setContextMenu(null);
+      event.preventDefault(); setChartCursor("ns-resize"); setContextMenu(null);
       dragging = { target: candidate.target, originalPrice: candidate.target.price, previewPrice: candidate.target.price };
       interaction.setPointerCapture(event.pointerId);
     };
     const move = (event: PointerEvent) => {
       const y = event.clientY - container.getBoundingClientRect().top;
       if (!dragging) {
+        if (event.shiftKey || measurementArmedRef.current) {
+          setChartCursor("crosshair");
+          return;
+        }
         const candidate = nearestLine(y);
-        setLineCursor(candidate && Math.abs(Number(candidate.coordinate) - y) <= 8 ? "ns-resize" : "");
+        setChartCursor(candidate && Math.abs(Number(candidate.coordinate) - y) <= 8 ? "ns-resize" : "");
         return;
       }
       const price = snapPriceToTick(Number(series.coordinateToPrice((event.clientY - container.getBoundingClientRect().top) as never)), priceTickSize);
@@ -540,7 +862,7 @@ export function ReplayChart({
     };
     const finish = () => {
       if (!dragging) return;
-      const value = dragging; dragging = null; setLineCursor("");
+      const value = dragging; dragging = null; setChartCursor("");
       if (value.target.kind === "order" && value.target.orderId && value.previewPrice !== value.originalPrice) {
         void onOrderPriceChangeRef.current(value.target.orderId, { [value.target.field]: value.previewPrice });
       }
@@ -548,18 +870,18 @@ export function ReplayChart({
     const key = (event: KeyboardEvent) => {
       if (event.key === "Escape" && dragging) {
         if (dragging.target.kind === "order") priceLinesRef.current.get(dragging.target.key)?.applyOptions({ price: dragging.originalPrice });
-        dragging = null; setLineCursor(""); syncLineActionCoordinates();
+        dragging = null; setChartCursor(""); syncLineActionCoordinates();
       }
     };
-    const leave = () => { if (!dragging) setLineCursor(""); };
+    const leave = () => { if (!dragging) setChartCursor(measurementArmedRef.current ? "crosshair" : ""); };
     interaction.addEventListener("pointerdown", down); interaction.addEventListener("pointermove", move);
     interaction.addEventListener("pointerup", finish); interaction.addEventListener("pointerleave", leave); window.addEventListener("keydown", key);
     return () => {
       interaction.removeEventListener("pointerdown", down); interaction.removeEventListener("pointermove", move);
       interaction.removeEventListener("pointerup", finish); interaction.removeEventListener("pointerleave", leave); window.removeEventListener("keydown", key);
-      setLineCursor("");
+      setChartCursor("");
     };
-  }, [moveDraftLine, priceTickSize, syncLineActionCoordinates]);
+  }, [moveDraftLine, priceTickSize, setChartCursor, syncLineActionCoordinates]);
 
   function openContextMenu(event: ReactMouseEvent<HTMLDivElement>) {
     event.preventDefault();
@@ -654,6 +976,28 @@ export function ReplayChart({
   }
 
   const menuBelowCurrent = currentPrice !== null && contextMenu !== null && contextMenu.price < currentPrice;
+  const measurementColor = measurement
+    ? measurement.stats.priceChange > 0 ? "#2962ff" : measurement.stats.priceChange < 0 ? "#f23645" : "#64748b"
+    : "#64748b";
+  const measurementDuration = measurement
+    ? copy.marketReplay.measurementDuration(measurementDurationParts(measurement.stats.elapsedMilliseconds))
+    : "";
+  const measurementLabelLeft = measurement
+    ? measurement.paneWidth >= 192
+      ? Math.max(96, Math.min(measurement.end.x, measurement.paneWidth - 96))
+      : measurement.paneWidth / 2
+    : 0;
+  const measurementLabelTop = (() => {
+    if (!measurement) return 0;
+    const labelHeight = measurement.stats.volume === null ? 58 : 76;
+    const gap = 10;
+    let top = measurement.stats.priceChange >= 0
+      ? measurement.end.y - labelHeight - gap
+      : measurement.end.y + gap;
+    if (top < 8) top = measurement.end.y + gap;
+    if (top + labelHeight > measurement.paneHeight - 8) top = measurement.end.y - labelHeight - gap;
+    return Math.max(8, Math.min(top, Math.max(8, measurement.paneHeight - labelHeight - 8)));
+  })();
 
   return (
     <div
@@ -665,6 +1009,54 @@ export function ReplayChart({
       }}
     >
       <div ref={containerRef} className="h-full min-h-[240px] w-full overflow-hidden bg-white" aria-label={copy.marketReplay.chartAriaLabel} />
+
+      {measurement ? (
+        <div
+          data-testid="chart-measurement"
+          className="pointer-events-none absolute left-0 top-0 z-10 overflow-hidden"
+          style={{ width: measurement.paneWidth, height: measurement.paneHeight }}
+        >
+          <svg
+            aria-hidden="true"
+            className="absolute inset-0"
+            width={measurement.paneWidth}
+            height={measurement.paneHeight}
+            viewBox={`0 0 ${measurement.paneWidth} ${measurement.paneHeight}`}
+          >
+            <line x1={measurement.end.x} y1={0} x2={measurement.end.x} y2={measurement.paneHeight} stroke={measurementColor} strokeWidth="1" strokeDasharray="5 5" opacity="0.72" />
+            <line x1={0} y1={measurement.end.y} x2={measurement.paneWidth} y2={measurement.end.y} stroke={measurementColor} strokeWidth="1" strokeDasharray="5 5" opacity="0.72" />
+            <rect
+              x={Math.min(measurement.start.x, measurement.end.x)}
+              y={Math.min(measurement.start.y, measurement.end.y)}
+              width={Math.abs(measurement.end.x - measurement.start.x)}
+              height={Math.abs(measurement.end.y - measurement.start.y)}
+              fill={measurementColor}
+              fillOpacity="0.16"
+              stroke={measurementColor}
+              strokeWidth="1"
+              strokeOpacity="0.72"
+            />
+            <line x1={measurement.start.x} y1={measurement.end.y} x2={measurement.end.x} y2={measurement.end.y} stroke={measurementColor} strokeWidth="1.5" />
+            <line x1={measurement.end.x} y1={measurement.start.y} x2={measurement.end.x} y2={measurement.end.y} stroke={measurementColor} strokeWidth="1.5" />
+            <circle cx={measurement.start.x} cy={measurement.start.y} r="2.5" fill="#fff" stroke={measurementColor} strokeWidth="1.5" />
+            <circle cx={measurement.end.x} cy={measurement.end.y} r="2.5" fill="#fff" stroke={measurementColor} strokeWidth="1.5" />
+          </svg>
+          <div
+            className="absolute min-w-[176px] -translate-x-1/2 rounded-md px-3 py-2 text-center text-xs font-medium leading-5 text-white shadow-lg"
+            style={{ left: measurementLabelLeft, top: measurementLabelTop, backgroundColor: measurementColor }}
+          >
+            <div className="font-mono font-semibold">
+              {formatPriceForTick(measurement.stats.priceChange, priceTickSize)}
+              {" "}({measurement.stats.percentageChange.toFixed(2)}%){" "}
+              {measurement.stats.tickChange.toLocaleString("zh-CN")}
+            </div>
+            <div>{copy.marketReplay.measurementSpan(measurement.stats.barCount, measurementDuration)}</div>
+            {measurement.stats.volume !== null ? (
+              <div>{copy.marketReplay.measurementVolume(compactVolume(measurement.stats.volume))}</div>
+            ) : null}
+          </div>
+        </div>
+      ) : null}
 
       {lineActions.map((action) => (
         <div
