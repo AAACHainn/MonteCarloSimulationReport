@@ -2,7 +2,8 @@
 
 import { TZDate } from "@date-fns/tz";
 import { startTransition, useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { ChevronRight, Loader2, Pause, Play, Plus, RotateCcw, Ruler, Settings2, WalletCards, X } from "lucide-react";
+import { ChevronRight, ListTree, Loader2, Pause, Play, Plus, RotateCcw, Ruler, Settings2, Trash2, TrendingUp, WalletCards, X } from "lucide-react";
+import * as Popover from "@radix-ui/react-popover";
 import { ReplayChart } from "@/components/market-replay/replay-chart";
 import { DEFAULT_REPLAY_MAX_VISIBLE_BARS } from "@/lib/market-replay/chart-range";
 import { PaperAccountStrip, PaperTradingDetails, PaperTradingPanel } from "@/components/market-replay/paper-trading-panel";
@@ -67,6 +68,13 @@ import {
 
 import { useReplayState } from "@/lib/market-replay/use-replay-state";
 import { createReplayStepQueue } from "@/lib/market-replay/step-queue";
+import {
+  DEFAULT_TREND_LINE_STYLE,
+  DRAWING_TYPE_TREND_LINE,
+  type TrendLineDrawing,
+  type TrendLineGeometry,
+  type TrendLineStyle,
+} from "@/lib/market-replay/chart-drawings";
 
 type SaveStatus = "idle" | "saving" | "saved" | "error";
 type WindowPayload = {
@@ -94,6 +102,12 @@ const DEFAULT_EMA_INDICATORS: EmaIndicatorConfig[] = [
 const DISPLAY_INTERVAL_PRESETS = [1, 5, 10, 15, 30, 60, 120, 180, 300, 600, 900, 1_800, 2_700, 3_600, 7_200, 14_400, 21_600, 43_200, 86_400];
 const REPLAY_SYNC_BATCH_SIZE = 100;
 const REPLAY_SYNC_HARD_CAP = 200;
+let temporaryDrawingSequence = 0;
+
+function createTemporaryDrawingId() {
+  temporaryDrawingSequence += 1;
+  return `temporary-${Date.now().toString(36)}-${temporaryDrawingSequence.toString(36)}`;
+}
 
 function replaySyncCapacity(state: ReplayState, sourceIntervalSeconds: number, syncing: boolean, latencyMs: number) {
   if (!syncing) return REPLAY_SYNC_BATCH_SIZE;
@@ -180,6 +194,15 @@ export function MarketReplayClient({ dataset }: { dataset: MarketDatasetSummary 
   const [recoveryNotice, setRecoveryNotice] = useState<string | null>(null);
   const [draftActive, setDraftActive] = useState(false);
   const [measurementArmed, setMeasurementArmed] = useState(false);
+  const [drawingToolOpen, setDrawingToolOpen] = useState(false);
+  const [drawingTool, setDrawingTool] = useState<"TREND_LINE" | null>(null);
+  const [drawings, setDrawings] = useState<TrendLineDrawing[]>([]);
+  const [drawingError, setDrawingError] = useState<string | null>(null);
+  const [selectedDrawingId, setSelectedDrawingId] = useState<string | null>(null);
+  const [drawingObjectsOpen, setDrawingObjectsOpen] = useState(false);
+  const [styleDrawingId, setStyleDrawingId] = useState<string | null>(null);
+  const [styleDraft, setStyleDraft] = useState<TrendLineStyle | null>(null);
+  const [pendingDrawingIds, setPendingDrawingIds] = useState<Set<string>>(() => new Set());
   const [displayUtcOffsetMinutes, setDisplayUtcOffsetMinutes] = useState(() => (
     utcOffsetMinutesForTimezone(dataset.startTime, dataset.timezone)
   ));
@@ -306,6 +329,144 @@ export function MarketReplayClient({ dataset }: { dataset: MarketDatasetSummary 
       // Browser storage can be unavailable; EMA controls still work for the current page session.
     }
   }, [emaEnabled, emaIndicators, emaSettingsLoaded]);
+
+  const setDrawingPending = useCallback((id: string, pending: boolean) => {
+    setPendingDrawingIds((current) => {
+      const next = new Set(current);
+      if (pending) next.add(id); else next.delete(id);
+      return next;
+    });
+  }, []);
+
+  useEffect(() => {
+    const controller = new AbortController();
+    void (async () => {
+      try {
+        const response = await fetch(`/api/market-datasets/${dataset.id}/drawings`, { signal: controller.signal });
+        const data = await response.json() as { drawings?: TrendLineDrawing[]; error?: string };
+        if (!response.ok || !Array.isArray(data.drawings)) throw new Error(data.error);
+        setDrawings(data.drawings);
+        setDrawingError(null);
+      } catch (error) {
+        if (controller.signal.aborted) return;
+        setDrawingError(error instanceof Error && error.message ? error.message : copy.marketReplay.drawingLoadError);
+      }
+    })();
+    return () => controller.abort();
+  }, [dataset.id]);
+
+  const armTrendLine = useCallback(() => {
+    setMeasurementArmed(false);
+    setDrawingTool("TREND_LINE");
+    setDrawingToolOpen(false);
+    setSelectedDrawingId(null);
+    setDrawingError(null);
+  }, []);
+
+  const createTrendLine = useCallback(async (geometry: TrendLineGeometry) => {
+    const temporaryId = createTemporaryDrawingId();
+    const now = new Date().toISOString();
+    const optimistic: TrendLineDrawing = {
+      id: temporaryId,
+      datasetId: dataset.id,
+      type: DRAWING_TYPE_TREND_LINE,
+      geometry,
+      style: DEFAULT_TREND_LINE_STYLE,
+      createdAt: now,
+      updatedAt: now,
+    };
+    setDrawings((current) => [...current, optimistic]);
+    setSelectedDrawingId(temporaryId);
+    setDrawingPending(temporaryId, true);
+    try {
+      const response = await fetch(`/api/market-datasets/${dataset.id}/drawings`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ type: DRAWING_TYPE_TREND_LINE, geometry, style: DEFAULT_TREND_LINE_STYLE }),
+      });
+      const data = await response.json() as { drawing?: TrendLineDrawing; error?: string };
+      if (!response.ok || !data.drawing) throw new Error(data.error);
+      setDrawings((current) => current.map((drawing) => drawing.id === temporaryId ? data.drawing! : drawing));
+      setSelectedDrawingId((current) => current === temporaryId ? data.drawing!.id : current);
+      setDrawingError(null);
+    } catch {
+      setDrawings((current) => current.filter((drawing) => drawing.id !== temporaryId));
+      setSelectedDrawingId((current) => current === temporaryId ? null : current);
+      setDrawingError(copy.marketReplay.drawingSaveError);
+    } finally {
+      setDrawingPending(temporaryId, false);
+    }
+  }, [dataset.id, setDrawingPending]);
+
+  const updateTrendLine = useCallback(async (
+    id: string,
+    patch: { geometry?: TrendLineGeometry; style?: TrendLineStyle },
+  ) => {
+    const previous = drawings.find((drawing) => drawing.id === id);
+    if (!previous || id.startsWith("temporary-") || pendingDrawingIds.has(id)) return false;
+    const optimistic = { ...previous, ...patch, updatedAt: new Date().toISOString() };
+    setDrawings((current) => current.map((drawing) => drawing.id === id ? optimistic : drawing));
+    setDrawingPending(id, true);
+    try {
+      const response = await fetch(`/api/market-datasets/${dataset.id}/drawings/${id}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(patch),
+      });
+      const data = await response.json() as { drawing?: TrendLineDrawing; error?: string };
+      if (!response.ok || !data.drawing) throw new Error(data.error);
+      setDrawings((current) => current.map((drawing) => drawing.id === id ? data.drawing! : drawing));
+      setDrawingError(null);
+      return true;
+    } catch {
+      setDrawings((current) => current.map((drawing) => drawing.id === id ? previous : drawing));
+      setDrawingError(copy.marketReplay.drawingSaveError);
+      return false;
+    } finally {
+      setDrawingPending(id, false);
+    }
+  }, [dataset.id, drawings, pendingDrawingIds, setDrawingPending]);
+
+  const deleteTrendLine = useCallback(async (id: string) => {
+    const index = drawings.findIndex((drawing) => drawing.id === id);
+    if (index < 0 || id.startsWith("temporary-") || pendingDrawingIds.has(id)) return;
+    const previous = drawings[index];
+    setDrawings((current) => current.filter((drawing) => drawing.id !== id));
+    setSelectedDrawingId((current) => current === id ? null : current);
+    if (styleDrawingId === id) {
+      setStyleDrawingId(null);
+      setStyleDraft(null);
+    }
+    setDrawingPending(id, true);
+    try {
+      const response = await fetch(`/api/market-datasets/${dataset.id}/drawings/${id}`, { method: "DELETE" });
+      if (!response.ok) throw new Error();
+      setDrawingError(null);
+    } catch {
+      setDrawings((current) => {
+        const next = [...current];
+        next.splice(Math.min(index, next.length), 0, previous);
+        return next;
+      });
+      setDrawingError(copy.marketReplay.drawingDeleteError);
+    } finally {
+      setDrawingPending(id, false);
+    }
+  }, [dataset.id, drawings, pendingDrawingIds, setDrawingPending, styleDrawingId]);
+
+  const openTrendLineStyle = useCallback((id: string) => {
+    const drawing = drawings.find((item) => item.id === id);
+    if (!drawing) return;
+    setSelectedDrawingId(id);
+    setStyleDrawingId(id);
+    setStyleDraft({ ...drawing.style });
+  }, [drawings]);
+
+  const displayedDrawings = useMemo(() => (
+    styleDrawingId && styleDraft
+      ? drawings.map((drawing) => drawing.id === styleDrawingId ? { ...drawing, style: styleDraft } : drawing)
+      : drawings
+  ), [drawings, styleDraft, styleDrawingId]);
 
   const loadWindow = useCallback(async (
     endSequence: number,
@@ -932,6 +1093,21 @@ export function MarketReplayClient({ dataset }: { dataset: MarketDatasetSummary 
     return () => window.removeEventListener("keydown", onKeyDown);
   }, [confirmAction, revealNextBar, settingsDialog]);
 
+  useEffect(() => {
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (!event.altKey || event.ctrlKey || event.shiftKey || event.metaKey || event.key.toLowerCase() !== "t") return;
+      const target = event.target as HTMLElement | null;
+      if (
+        settingsDialog || confirmAction || styleDrawingId
+        || target?.closest("input, textarea, select, [contenteditable='true'], [role='dialog']")
+      ) return;
+      event.preventDefault();
+      armTrendLine();
+    };
+    window.addEventListener("keydown", onKeyDown);
+    return () => window.removeEventListener("keydown", onKeyDown);
+  }, [armTrendLine, confirmAction, settingsDialog, styleDrawingId]);
+
   function changeSpeed(value: number) {
     const current = latestReplayRef.current;
     if (!current) return;
@@ -1266,6 +1442,52 @@ export function MarketReplayClient({ dataset }: { dataset: MarketDatasetSummary 
             </SelectContent>
           </Select>
           <div className="mx-1 h-5 w-px bg-slate-200" />
+          <Popover.Root open={drawingToolOpen} onOpenChange={setDrawingToolOpen}>
+            <Popover.Trigger asChild>
+              <Button
+                type="button"
+                variant={drawingTool ? "secondary" : "ghost"}
+                size="sm"
+                className="h-8"
+                aria-pressed={Boolean(drawingTool)}
+                aria-label={copy.marketReplay.drawingToolsHint}
+              >
+                <TrendingUp className="h-4 w-4" />
+                <span className="hidden xl:inline">{copy.marketReplay.drawingTools}</span>
+              </Button>
+            </Popover.Trigger>
+            <Popover.Portal>
+              <Popover.Content
+                side="bottom"
+                align="start"
+                sideOffset={6}
+                collisionPadding={8}
+                className="z-[80] w-60 rounded-lg border border-slate-200 bg-white p-1.5 shadow-xl"
+              >
+                <button
+                  type="button"
+                  className="flex w-full items-center gap-3 rounded-md px-3 py-2 text-left text-sm text-slate-700 hover:bg-slate-100 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-600"
+                  onClick={armTrendLine}
+                >
+                  <TrendingUp className="h-4 w-4 text-slate-600" />
+                  <span className="font-medium">{copy.marketReplay.trendLine}</span>
+                  <kbd className="ml-auto font-mono text-[11px] text-slate-400">{copy.marketReplay.trendLineShortcut}</kbd>
+                </button>
+              </Popover.Content>
+            </Popover.Portal>
+          </Popover.Root>
+          <Button
+            type="button"
+            variant={drawingObjectsOpen ? "secondary" : "ghost"}
+            size="sm"
+            className="h-8"
+            aria-pressed={drawingObjectsOpen}
+            title={copy.marketReplay.drawingObjectsHint}
+            onClick={() => setDrawingObjectsOpen((current) => !current)}
+          >
+            <ListTree className="h-4 w-4" />
+            <span className="hidden xl:inline">{copy.marketReplay.drawingObjects}</span>
+          </Button>
           <Button
             type="button"
             variant={measurementArmed ? "secondary" : "ghost"}
@@ -1289,7 +1511,7 @@ export function MarketReplayClient({ dataset }: { dataset: MarketDatasetSummary 
             <Button type="button" variant="ghost" size="sm" className="h-8" disabled={draftActive} title={draftActive ? copy.paperTrading.draftLockedReplay : undefined} onClick={() => requestConfirmation("change-start")}><span className="hidden xl:inline">{copy.marketReplay.chooseNewStart}</span><span className="xl:hidden">{copy.marketReplay.startAt}</span></Button>
           </div>
         </div>
-        <div className="min-h-0 flex-1">
+        <div className="relative min-h-0 flex-1">
           <ReplayChart
             datasetId={dataset.id}
             priceTickSize={dataset.priceTickSize}
@@ -1299,6 +1521,15 @@ export function MarketReplayClient({ dataset }: { dataset: MarketDatasetSummary 
             displayIntervalSeconds={replay.displayIntervalSeconds}
             measurementArmed={measurementArmed}
             onMeasurementArmedChange={setMeasurementArmed}
+            drawingTool={drawingTool}
+            onDrawingToolChange={setDrawingTool}
+            drawings={displayedDrawings}
+            selectedDrawingId={selectedDrawingId}
+            onSelectedDrawingIdChange={setSelectedDrawingId}
+            onCreateTrendLine={(geometry) => void createTrendLine(geometry)}
+            onUpdateTrendLine={(id, geometry) => void updateTrendLine(id, { geometry })}
+            onDeleteTrendLine={(id) => void deleteTrendLine(id)}
+            onOpenTrendLineStyle={openTrendLineStyle}
             emaEnabled={emaEnabled}
             emaIndicators={emaIndicators}
             paperSnapshot={paperSnapshot}
@@ -1311,6 +1542,64 @@ export function MarketReplayClient({ dataset }: { dataset: MarketDatasetSummary 
             onDraftActiveChange={setDraftActive}
             onOpenPaperAccount={() => setSettingsDialog("paper")}
           />
+          {drawingError ? (
+            <div className="pointer-events-none absolute left-3 top-3 z-40 max-w-sm rounded-md border border-red-200 bg-red-50/95 px-3 py-2 text-xs text-red-700 shadow-sm">
+              {drawingError}
+            </div>
+          ) : null}
+          {drawingObjectsOpen ? (
+            <aside className="absolute right-3 top-3 z-50 flex max-h-[calc(100%-1.5rem)] w-72 flex-col overflow-hidden rounded-lg border border-slate-200 bg-white/95 shadow-xl backdrop-blur">
+              <header className="flex items-center gap-2 border-b px-3 py-2.5">
+                <ListTree className="h-4 w-4 text-slate-500" />
+                <h3 className="text-sm font-semibold text-slate-950">{copy.marketReplay.drawingObjects}</h3>
+                <button
+                  type="button"
+                  className="ml-auto rounded p-1 text-slate-400 hover:bg-slate-100 hover:text-slate-700"
+                  aria-label={copy.marketReplay.closeDrawingObjects}
+                  onClick={() => setDrawingObjectsOpen(false)}
+                >
+                  <X className="h-4 w-4" />
+                </button>
+              </header>
+              <div className="min-h-0 flex-1 overflow-y-auto p-1.5">
+                {drawings.length ? drawings.map((drawing, index) => {
+                  const pending = pendingDrawingIds.has(drawing.id);
+                  const selected = selectedDrawingId === drawing.id;
+                  return (
+                    <div
+                      key={drawing.id}
+                      role="button"
+                      tabIndex={0}
+                      className={`group flex items-center gap-2 rounded-md px-2 py-2 text-sm outline-none transition-colors ${selected ? "bg-blue-50 text-blue-800" : "text-slate-700 hover:bg-slate-100"}`}
+                      onClick={() => setSelectedDrawingId(drawing.id)}
+                      onDoubleClick={() => openTrendLineStyle(drawing.id)}
+                      onKeyDown={(event) => {
+                        if (event.key === "Enter" || event.key === " ") {
+                          event.preventDefault();
+                          setSelectedDrawingId(drawing.id);
+                        }
+                      }}
+                    >
+                      <TrendingUp className="h-4 w-4 shrink-0" style={{ color: drawing.style.color, opacity: drawing.style.opacity / 100 }} />
+                      <span className="min-w-0 flex-1 truncate font-medium">{copy.marketReplay.drawingObjectName(index + 1)}</span>
+                      <button
+                        type="button"
+                        disabled={pending}
+                        aria-label={copy.marketReplay.drawingDelete}
+                        className="rounded p-1 text-slate-400 hover:bg-red-50 hover:text-red-600 disabled:opacity-40"
+                        onClick={(event) => {
+                          event.stopPropagation();
+                          void deleteTrendLine(drawing.id);
+                        }}
+                      >
+                        {pending ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Trash2 className="h-3.5 w-3.5" />}
+                      </button>
+                    </div>
+                  );
+                }) : <p className="px-3 py-8 text-center text-xs text-slate-500">{copy.marketReplay.drawingObjectsEmpty}</p>}
+              </div>
+            </aside>
+          ) : null}
         </div>
         <div className="flex h-14 shrink-0 items-center gap-2 border-t bg-slate-50/80 px-3">
           <Button type="button" size="sm" className="h-9" title={copy.marketReplay.playbackTiming(dataset.sourceIntervalSeconds / replay.playbackRate)} onClick={togglePlayback} disabled={replay.status === "finished"}>
@@ -1351,6 +1640,120 @@ export function MarketReplayClient({ dataset }: { dataset: MarketDatasetSummary 
           <PaperAccountStrip snapshot={paperSnapshot} />
           <PaperTradingPanel priceTickSize={dataset.priceTickSize} snapshot={paperSnapshot} currentBar={currentBar} busy={paperBusy} error={paperError} onCreate={createPaperAccount} onSubmit={submitPaperOrder} onCancel={cancelPaperOrder} onUpdate={updatePaperOrder} onCancelScope={cancelPaperScope} onClear={() => requestConfirmation("paper-clear")} />
         </div>
+      </Dialog>
+      <Dialog
+        open={Boolean(styleDrawingId && styleDraft)}
+        title={copy.marketReplay.trendLineSettings}
+        description={copy.marketReplay.trendLineSettingsDescription}
+        className="max-w-md"
+        onClose={() => {
+          setStyleDrawingId(null);
+          setStyleDraft(null);
+        }}
+      >
+        {styleDraft ? (
+          <div className="space-y-5">
+            <div className="grid grid-cols-[7rem_1fr] items-center gap-3">
+              <Label htmlFor="trend-line-color">{copy.marketReplay.lineColor}</Label>
+              <div className="flex items-center gap-2">
+                <Input
+                  id="trend-line-color"
+                  type="color"
+                  value={styleDraft.color}
+                  onChange={(event) => setStyleDraft((current) => current ? { ...current, color: event.target.value.toUpperCase() } : current)}
+                  className="h-9 w-14 cursor-pointer p-1"
+                />
+                <span className="font-mono text-xs text-slate-500">{styleDraft.color.toUpperCase()}</span>
+              </div>
+            </div>
+            <div className="grid grid-cols-[7rem_1fr] items-center gap-3">
+              <Label htmlFor="trend-line-opacity">{copy.marketReplay.lineOpacity}</Label>
+              <div className="flex items-center gap-3">
+                <Input
+                  id="trend-line-opacity"
+                  type="range"
+                  min="0"
+                  max="100"
+                  step="1"
+                  value={styleDraft.opacity}
+                  onChange={(event) => setStyleDraft((current) => current ? { ...current, opacity: Number(event.target.value) } : current)}
+                  className="h-8 flex-1 border-0 px-0"
+                />
+                <span className="w-10 text-right text-xs tabular-nums text-slate-500">{styleDraft.opacity}%</span>
+              </div>
+            </div>
+            <div className="grid grid-cols-[7rem_1fr] items-center gap-3">
+              <Label>{copy.marketReplay.lineWidth}</Label>
+              <div className="flex gap-1">
+                {[1, 2, 3, 4].map((width) => (
+                  <button
+                    key={width}
+                    type="button"
+                    aria-pressed={styleDraft.width === width}
+                    onClick={() => setStyleDraft((current) => current ? { ...current, width } : current)}
+                    className={`flex h-9 w-10 items-center justify-center rounded-md border ${styleDraft.width === width ? "border-blue-600 bg-blue-50" : "border-slate-200 hover:bg-slate-50"}`}
+                  >
+                    <span className="block w-5 bg-slate-700" style={{ height: width }} />
+                  </button>
+                ))}
+              </div>
+            </div>
+            <div className="grid grid-cols-[7rem_1fr] items-center gap-3">
+              <Label>{copy.marketReplay.lineStyle}</Label>
+              <div className="grid grid-cols-3 gap-1">
+                {([
+                  ["SOLID", copy.marketReplay.lineSolid],
+                  ["DASHED", copy.marketReplay.lineDashed],
+                  ["DOTTED", copy.marketReplay.lineDotted],
+                ] as const).map(([lineStyle, label]) => (
+                  <button
+                    key={lineStyle}
+                    type="button"
+                    aria-pressed={styleDraft.lineStyle === lineStyle}
+                    onClick={() => setStyleDraft((current) => current ? { ...current, lineStyle } : current)}
+                    className={`rounded-md border px-2 py-2 text-xs ${styleDraft.lineStyle === lineStyle ? "border-blue-600 bg-blue-50 text-blue-700" : "border-slate-200 text-slate-600 hover:bg-slate-50"}`}
+                  >
+                    {label}
+                  </button>
+                ))}
+              </div>
+            </div>
+            <div className="space-y-2 rounded-md border bg-slate-50 p-3">
+              <label className="flex items-center gap-2 text-sm text-slate-700">
+                <input
+                  type="checkbox"
+                  checked={styleDraft.showStartPrice}
+                  onChange={(event) => setStyleDraft((current) => current ? { ...current, showStartPrice: event.target.checked } : current)}
+                  className="h-4 w-4 rounded border-slate-300"
+                />
+                {copy.marketReplay.showStartPrice}
+              </label>
+              <label className="flex items-center gap-2 text-sm text-slate-700">
+                <input
+                  type="checkbox"
+                  checked={styleDraft.showEndPrice}
+                  onChange={(event) => setStyleDraft((current) => current ? { ...current, showEndPrice: event.target.checked } : current)}
+                  className="h-4 w-4 rounded border-slate-300"
+                />
+                {copy.marketReplay.showEndPrice}
+              </label>
+            </div>
+            <div className="flex justify-end gap-2 border-t pt-4">
+              <Button type="button" variant="outline" onClick={() => {
+                setStyleDrawingId(null);
+                setStyleDraft(null);
+              }}>{copy.marketReplay.drawingCancel}</Button>
+              <Button type="button" onClick={() => {
+                if (!styleDrawingId) return;
+                const id = styleDrawingId;
+                const style = styleDraft;
+                void updateTrendLine(id, { style });
+                setStyleDrawingId(null);
+                setStyleDraft(null);
+              }}>{copy.marketReplay.drawingConfirm}</Button>
+            </div>
+          </div>
+        ) : null}
       </Dialog>
       <ConfirmDialog
         open={Boolean(confirmAction)}

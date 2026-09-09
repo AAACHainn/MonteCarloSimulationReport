@@ -23,6 +23,15 @@ import {
   measurementDurationParts,
   type ChartMeasurementStats,
 } from "@/lib/market-replay/chart-measurement";
+import {
+  anchorForLogicalIndex,
+  logicalIndexForAnchor,
+  snapScreenPointTo45,
+  trendLineDashArray,
+  type DrawingAnchor,
+  type TrendLineDrawing,
+  type TrendLineGeometry,
+} from "@/lib/market-replay/chart-drawings";
 import { formatUtcDateTime, utcDateParts } from "@/lib/market-replay/display-timezone";
 import { formatPriceForTick, priceDecimalsForTick, snapPriceToTick } from "@/lib/market-replay/price-ticks";
 import {
@@ -90,6 +99,15 @@ type MeasurementState = {
   paneWidth: number;
   paneHeight: number;
   stats: ChartMeasurementStats;
+};
+type DrawingCoordinate = {
+  drawing: TrendLineDrawing;
+  start: { x: number; y: number };
+  end: { x: number; y: number };
+};
+type DrawingDraft = {
+  start: DrawingAnchor;
+  end: DrawingAnchor;
 };
 
 function sameLineActions(current: LineAction[], next: LineAction[]) {
@@ -167,7 +185,9 @@ function orderTypeLabel(type: "LIMIT" | "STOP") {
 
 export function ReplayChart({
   datasetId, priceTickSize, bars, warmupBars, displayUtcOffsetMinutes, displayIntervalSeconds, measurementArmed,
-  onMeasurementArmedChange, emaEnabled, emaIndicators, paperSnapshot,
+  onMeasurementArmedChange, drawingTool, onDrawingToolChange, drawings, selectedDrawingId,
+  onSelectedDrawingIdChange, onCreateTrendLine, onUpdateTrendLine, onDeleteTrendLine,
+  onOpenTrendLineStyle, emaEnabled, emaIndicators, paperSnapshot,
   paperBusy, paperError, onSubmitOrder, onOrderPriceChange,
   onCancelOrder, onClosePosition, onDraftActiveChange, onOpenPaperAccount,
 }: {
@@ -179,6 +199,15 @@ export function ReplayChart({
   displayIntervalSeconds: number;
   measurementArmed: boolean;
   onMeasurementArmedChange: (armed: boolean) => void;
+  drawingTool: "TREND_LINE" | null;
+  onDrawingToolChange: (tool: "TREND_LINE" | null) => void;
+  drawings: TrendLineDrawing[];
+  selectedDrawingId: string | null;
+  onSelectedDrawingIdChange: (id: string | null) => void;
+  onCreateTrendLine: (geometry: TrendLineGeometry) => void;
+  onUpdateTrendLine: (id: string, geometry: TrendLineGeometry) => void;
+  onDeleteTrendLine: (id: string) => void;
+  onOpenTrendLineStyle: (id: string) => void;
   emaEnabled: boolean;
   emaIndicators: EmaIndicatorConfig[];
   paperSnapshot: PaperSessionSnapshot | null;
@@ -209,9 +238,27 @@ export function ReplayChart({
   const barsRef = useRef(bars);
   const measurementArmedRef = useRef(measurementArmed);
   const onMeasurementArmedChangeRef = useRef(onMeasurementArmedChange);
+  const drawingToolRef = useRef(drawingTool);
+  const drawingsRef = useRef(drawings);
+  const selectedDrawingIdRef = useRef(selectedDrawingId);
+  const onDrawingToolChangeRef = useRef(onDrawingToolChange);
+  const onSelectedDrawingIdChangeRef = useRef(onSelectedDrawingIdChange);
+  const onCreateTrendLineRef = useRef(onCreateTrendLine);
+  const onUpdateTrendLineRef = useRef(onUpdateTrendLine);
+  const onDeleteTrendLineRef = useRef(onDeleteTrendLine);
+  const onOpenTrendLineStyleRef = useRef(onOpenTrendLineStyle);
+  const displayIntervalSecondsRef = useRef(displayIntervalSeconds);
   const [contextMenu, setContextMenu] = useState<ContextMenuState | null>(null);
   const [measurement, setMeasurement] = useState<MeasurementState | null>(null);
   const measurementRef = useRef<MeasurementState | null>(null);
+  const [drawingDraft, setDrawingDraft] = useState<DrawingDraft | null>(null);
+  const drawingDraftRef = useRef<DrawingDraft | null>(null);
+  const [drawingDraftCoordinate, setDrawingDraftCoordinate] = useState<{ start: { x: number; y: number }; end: { x: number; y: number } } | null>(null);
+  const drawingDraftCoordinateRef = useRef<typeof drawingDraftCoordinate>(null);
+  const [drawingPreview, setDrawingPreview] = useState<{ id: string; geometry: TrendLineGeometry } | null>(null);
+  const drawingPreviewRef = useRef<{ id: string; geometry: TrendLineGeometry } | null>(null);
+  const [drawingCoordinates, setDrawingCoordinates] = useState<DrawingCoordinate[]>([]);
+  const drawingCoordinatesRef = useRef<DrawingCoordinate[]>([]);
   const [draft, setDraft] = useState<DraftOrder | null>(null);
   const [defaultRiskAmount, setDefaultRiskAmount] = useState<number | null>(null);
   const [defaultTargetR, setDefaultTargetR] = useState(2);
@@ -233,6 +280,18 @@ export function ReplayChart({
   useEffect(() => { measurementArmedRef.current = measurementArmed; }, [measurementArmed]);
   useEffect(() => { onMeasurementArmedChangeRef.current = onMeasurementArmedChange; }, [onMeasurementArmedChange]);
   useEffect(() => { measurementRef.current = measurement; }, [measurement]);
+  useEffect(() => { drawingToolRef.current = drawingTool; }, [drawingTool]);
+  useEffect(() => { drawingsRef.current = drawings; }, [drawings]);
+  useEffect(() => { selectedDrawingIdRef.current = selectedDrawingId; }, [selectedDrawingId]);
+  useEffect(() => { onDrawingToolChangeRef.current = onDrawingToolChange; }, [onDrawingToolChange]);
+  useEffect(() => { onSelectedDrawingIdChangeRef.current = onSelectedDrawingIdChange; }, [onSelectedDrawingIdChange]);
+  useEffect(() => { onCreateTrendLineRef.current = onCreateTrendLine; }, [onCreateTrendLine]);
+  useEffect(() => { onUpdateTrendLineRef.current = onUpdateTrendLine; }, [onUpdateTrendLine]);
+  useEffect(() => { onDeleteTrendLineRef.current = onDeleteTrendLine; }, [onDeleteTrendLine]);
+  useEffect(() => { onOpenTrendLineStyleRef.current = onOpenTrendLineStyle; }, [onOpenTrendLineStyle]);
+  useEffect(() => { displayIntervalSecondsRef.current = displayIntervalSeconds; }, [displayIntervalSeconds]);
+  useEffect(() => { drawingDraftRef.current = drawingDraft; }, [drawingDraft]);
+  useEffect(() => { drawingPreviewRef.current = drawingPreview; }, [drawingPreview]);
   useEffect(() => { displayUtcOffsetRef.current = displayUtcOffsetMinutes; }, [displayUtcOffsetMinutes]);
   useEffect(() => { onOrderPriceChangeRef.current = onOrderPriceChange; }, [onOrderPriceChange]);
 
@@ -250,12 +309,62 @@ export function ReplayChart({
     });
   }, []);
 
-  const setChartCursor = useCallback((cursor: "" | "crosshair" | "ns-resize") => {
+  const syncDrawingCoordinates = useCallback(() => {
+    const chart = chartRef.current;
+    const series = candleRef.current;
+    if (!chart || !series) return;
+    const currentBars = barsRef.current;
+    const interval = displayIntervalSecondsRef.current;
+    const preview = drawingPreviewRef.current;
+    const next = drawingsRef.current.flatMap((drawing) => {
+      const geometry = preview?.id === drawing.id ? preview.geometry : drawing.geometry;
+      const startIndex = logicalIndexForAnchor(geometry.start, currentBars, interval);
+      const endIndex = logicalIndexForAnchor(geometry.end, currentBars, interval);
+      if (startIndex === null || endIndex === null) return [];
+      const startX = chart.timeScale().logicalToCoordinate(startIndex as never);
+      const endX = chart.timeScale().logicalToCoordinate(endIndex as never);
+      const startY = series.priceToCoordinate(geometry.start.price);
+      const endY = series.priceToCoordinate(geometry.end.price);
+      if (startX === null || endX === null || startY === null || endY === null) return [];
+      return [{
+        drawing: preview?.id === drawing.id ? { ...drawing, geometry } : drawing,
+        start: { x: Number(startX), y: Number(startY) },
+        end: { x: Number(endX), y: Number(endY) },
+      }];
+    });
+    drawingCoordinatesRef.current = next;
+    setDrawingCoordinates(next);
+    const draft = drawingDraftRef.current;
+    if (draft) {
+      const startIndex = logicalIndexForAnchor(draft.start, currentBars, interval);
+      const endIndex = logicalIndexForAnchor(draft.end, currentBars, interval);
+      if (startIndex !== null && endIndex !== null) {
+        const startX = chart.timeScale().logicalToCoordinate(startIndex as never);
+        const endX = chart.timeScale().logicalToCoordinate(endIndex as never);
+        const startY = series.priceToCoordinate(draft.start.price);
+        const endY = series.priceToCoordinate(draft.end.price);
+        if (startX !== null && endX !== null && startY !== null && endY !== null) {
+          const coordinate = {
+            start: { x: Number(startX), y: Number(startY) },
+            end: { x: Number(endX), y: Number(endY) },
+          };
+          drawingDraftCoordinateRef.current = coordinate;
+          setDrawingDraftCoordinate(coordinate);
+        }
+      }
+    }
+  }, []);
+
+  const setChartCursor = useCallback((cursor: "" | "crosshair" | "ns-resize" | "move" | "pointer") => {
     const container = containerRef.current;
     if (!container) return;
     container.style.cursor = cursor;
     container.querySelectorAll("canvas").forEach((canvas) => { canvas.style.cursor = cursor; });
   }, []);
+
+  useEffect(() => {
+    requestAnimationFrame(syncDrawingCoordinates);
+  }, [drawings, syncDrawingCoordinates]);
 
   const syncMeasurementCoordinates = useCallback(() => {
     const chart = chartRef.current;
@@ -384,21 +493,24 @@ export function ReplayChart({
         chart.applyOptions({ width: entry.contentRect.width, height: entry.contentRect.height });
         syncLineActionCoordinates();
         syncMeasurementCoordinates();
+        syncDrawingCoordinates();
       }
     });
     observer.observe(container);
     chart.timeScale().subscribeVisibleLogicalRangeChange(syncLineActionCoordinates);
     chart.timeScale().subscribeVisibleLogicalRangeChange(syncMeasurementCoordinates);
+    chart.timeScale().subscribeVisibleLogicalRangeChange(syncDrawingCoordinates);
     chartRef.current = chart; candleRef.current = candles; volumeRef.current = volumes;
     markersRef.current = createSeriesMarkers(candles, []);
     return () => {
       observer.disconnect();
       chart.timeScale().unsubscribeVisibleLogicalRangeChange(syncLineActionCoordinates);
       chart.timeScale().unsubscribeVisibleLogicalRangeChange(syncMeasurementCoordinates);
+      chart.timeScale().unsubscribeVisibleLogicalRangeChange(syncDrawingCoordinates);
       chart.remove(); chartRef.current = null; candleRef.current = null; volumeRef.current = null;
       markersRef.current = null; priceLines.clear(); lineTargets.clear(); emaSeries.clear(); emaStates.clear(); lastDataRef.current = [];
     };
-  }, [hasVolume, priceTickSize, syncLineActionCoordinates, syncMeasurementCoordinates]);
+  }, [hasVolume, priceTickSize, syncDrawingCoordinates, syncLineActionCoordinates, syncMeasurementCoordinates]);
 
   useEffect(() => {
     displayUtcOffsetRef.current = displayUtcOffsetMinutes;
@@ -412,6 +524,11 @@ export function ReplayChart({
       },
     });
   }, [displayUtcOffsetMinutes]);
+
+  useEffect(() => {
+    displayIntervalSecondsRef.current = displayIntervalSeconds;
+    requestAnimationFrame(syncDrawingCoordinates);
+  }, [displayIntervalSeconds, syncDrawingCoordinates]);
 
   useEffect(() => {
     const chart = chartRef.current; const series = candleRef.current;
@@ -446,7 +563,8 @@ export function ReplayChart({
     }
     lastDataRef.current = next.map((bar) => ({ ...bar }));
     requestAnimationFrame(syncMeasurementCoordinates);
-  }, [bars, syncMeasurementCoordinates]);
+    requestAnimationFrame(syncDrawingCoordinates);
+  }, [bars, syncDrawingCoordinates, syncMeasurementCoordinates]);
 
   useEffect(() => {
     const chart = chartRef.current;
@@ -608,6 +726,282 @@ export function ReplayChart({
     const series = candleRef.current;
     if (!container || !interaction || !chart || !series) return;
 
+    type PositionedAnchor = { anchor: DrawingAnchor; coordinate: { x: number; y: number } };
+    let dragging: {
+      id: string;
+      kind: "start" | "end" | "line";
+      clientX: number;
+      clientY: number;
+      geometry: TrendLineGeometry;
+      start: { x: number; y: number };
+      end: { x: number; y: number };
+    } | null = null;
+
+    const pointAtCoordinate = (x: number, y: number, requireInside: boolean): PositionedAnchor | null => {
+      const currentBars = barsRef.current;
+      const paneWidth = chart.timeScale().width();
+      const paneHeight = chart.panes()[0]?.getHeight() ?? 0;
+      if (!currentBars.length || paneWidth <= 0 || paneHeight <= 0) return null;
+      if (requireInside && (x < 0 || x > paneWidth || y < 0 || y > paneHeight)) return null;
+      const logical = chart.timeScale().coordinateToLogical(x as never);
+      const rawPrice = series.coordinateToPrice(y as never);
+      if (logical === null || rawPrice === null || !Number.isFinite(Number(rawPrice))) return null;
+      const index = Math.round(Number(logical));
+      const price = snapPriceToTick(Number(rawPrice), priceTickSize);
+      if (!Number.isFinite(price)) return null;
+      const snappedX = chart.timeScale().logicalToCoordinate(index as never);
+      const snappedY = series.priceToCoordinate(price);
+      if (snappedX === null || snappedY === null) return null;
+      return {
+        anchor: anchorForLogicalIndex({
+          logicalIndex: index,
+          price,
+          bars: currentBars,
+          displayIntervalSeconds: displayIntervalSecondsRef.current,
+        }),
+        coordinate: { x: Number(snappedX), y: Number(snappedY) },
+      };
+    };
+    const pointAt = (clientX: number, clientY: number, requireInside = true) => {
+      const rect = container.getBoundingClientRect();
+      return pointAtCoordinate(clientX - rect.left, clientY - rect.top, requireInside);
+    };
+    const commitDraft = (next: DrawingDraft | null, coordinate: typeof drawingDraftCoordinate) => {
+      drawingDraftRef.current = next;
+      drawingDraftCoordinateRef.current = coordinate;
+      setDrawingDraft(next);
+      setDrawingDraftCoordinate(coordinate);
+    };
+    const commitPreview = (next: typeof drawingPreview) => {
+      drawingPreviewRef.current = next;
+      setDrawingPreview(next);
+      requestAnimationFrame(syncDrawingCoordinates);
+    };
+    const stopEvent = (event: Event) => {
+      event.preventDefault();
+      event.stopImmediatePropagation();
+      setContextMenu(null);
+    };
+
+    const down = (event: PointerEvent) => {
+      if (event.pointerType !== "mouse" || event.button !== 0 || !container.contains(event.target as Node)) return;
+      const target = event.target as HTMLElement;
+      if (target.closest("button,input,[data-context-menu],[data-order-ticket],[data-line-action]")) return;
+
+      if (drawingToolRef.current === "TREND_LINE") {
+        const initial = pointAt(event.clientX, event.clientY);
+        if (!initial) return;
+        stopEvent(event);
+        const current = drawingDraftRef.current;
+        if (!current) {
+          commitDraft(
+            { start: initial.anchor, end: initial.anchor },
+            { start: initial.coordinate, end: initial.coordinate },
+          );
+          onSelectedDrawingIdChangeRef.current(null);
+          setChartCursor("crosshair");
+          return;
+        }
+        let end = initial;
+        const draftCoordinate = drawingDraftCoordinateRef.current;
+        if (event.shiftKey && draftCoordinate) {
+          const rect = container.getBoundingClientRect();
+          const snapped = snapScreenPointTo45(draftCoordinate.start, {
+            x: event.clientX - rect.left,
+            y: event.clientY - rect.top,
+          });
+          end = pointAtCoordinate(snapped.x, snapped.y, false) ?? initial;
+        }
+        onCreateTrendLineRef.current({ start: current.start, end: end.anchor });
+        commitDraft(null, null);
+        drawingToolRef.current = null;
+        onDrawingToolChangeRef.current(null);
+        setChartCursor("");
+        return;
+      }
+
+      const hit = target.closest<SVGElement>("[data-drawing-id]");
+      const id = hit?.dataset.drawingId;
+      if (!id) {
+        if (!event.shiftKey) onSelectedDrawingIdChangeRef.current(null);
+        return;
+      }
+      const drawing = drawingsRef.current.find((item) => item.id === id);
+      const coordinate = drawingCoordinatesRef.current.find((item) => item.drawing.id === id);
+      if (!drawing || !coordinate || id.startsWith("temporary-")) return;
+      stopEvent(event);
+      onSelectedDrawingIdChangeRef.current(id);
+      selectedDrawingIdRef.current = id;
+      dragging = {
+        id,
+        kind: hit.dataset.drawingHandle === "start" ? "start" : hit.dataset.drawingHandle === "end" ? "end" : "line",
+        clientX: event.clientX,
+        clientY: event.clientY,
+        geometry: drawing.geometry,
+        start: coordinate.start,
+        end: coordinate.end,
+      };
+      interaction.setPointerCapture(event.pointerId);
+      setChartCursor(dragging.kind === "line" ? "move" : "crosshair");
+    };
+
+    const move = (event: PointerEvent) => {
+      const draft = drawingDraftRef.current;
+      if (drawingToolRef.current === "TREND_LINE" && draft) {
+        const initial = pointAt(event.clientX, event.clientY);
+        if (!initial) return;
+        let end = initial;
+        const currentCoordinate = drawingDraftCoordinateRef.current;
+        if (event.shiftKey && currentCoordinate) {
+          const rect = container.getBoundingClientRect();
+          const snapped = snapScreenPointTo45(currentCoordinate.start, {
+            x: event.clientX - rect.left,
+            y: event.clientY - rect.top,
+          });
+          end = pointAtCoordinate(snapped.x, snapped.y, false) ?? initial;
+        }
+        stopEvent(event);
+        commitDraft(
+          { start: draft.start, end: end.anchor },
+          { start: drawingDraftCoordinateRef.current?.start ?? end.coordinate, end: end.coordinate },
+        );
+        return;
+      }
+      if (!dragging) return;
+      stopEvent(event);
+      let geometry: TrendLineGeometry | null = null;
+      if (dragging.kind === "line") {
+        const dx = event.clientX - dragging.clientX;
+        const dy = event.clientY - dragging.clientY;
+        const start = pointAtCoordinate(dragging.start.x + dx, dragging.start.y + dy, false);
+        const end = pointAtCoordinate(dragging.end.x + dx, dragging.end.y + dy, false);
+        if (start && end) geometry = { start: start.anchor, end: end.anchor };
+      } else {
+        const movingStart = dragging.kind === "start";
+        const otherCoordinate = movingStart ? dragging.end : dragging.start;
+        const rect = container.getBoundingClientRect();
+        let coordinate = { x: event.clientX - rect.left, y: event.clientY - rect.top };
+        if (event.shiftKey) coordinate = snapScreenPointTo45(otherCoordinate, coordinate);
+        const point = pointAtCoordinate(coordinate.x, coordinate.y, false);
+        if (point) {
+          geometry = movingStart
+            ? { start: point.anchor, end: dragging.geometry.end }
+            : { start: dragging.geometry.start, end: point.anchor };
+        }
+      }
+      if (geometry) commitPreview({ id: dragging.id, geometry });
+    };
+
+    const finish = (event: PointerEvent) => {
+      if (!dragging) return;
+      stopEvent(event);
+      const preview = drawingPreviewRef.current;
+      if (preview?.id === dragging.id) onUpdateTrendLineRef.current(preview.id, preview.geometry);
+      dragging = null;
+      requestAnimationFrame(() => commitPreview(null));
+      if (interaction.hasPointerCapture(event.pointerId)) interaction.releasePointerCapture(event.pointerId);
+      setChartCursor("");
+    };
+    const cancelDrag = () => {
+      dragging = null;
+      commitPreview(null);
+      setChartCursor(drawingToolRef.current ? "crosshair" : "");
+    };
+    const doubleClick = (event: MouseEvent) => {
+      const target = event.target as HTMLElement;
+      const id = target.closest<SVGElement>("[data-drawing-id]")?.dataset.drawingId;
+      if (!id || id.startsWith("temporary-")) return;
+      stopEvent(event);
+      onOpenTrendLineStyleRef.current(id);
+    };
+    const key = (event: KeyboardEvent) => {
+      const target = event.target as HTMLElement | null;
+      if (target?.closest("input,textarea,select,[contenteditable='true'],[role='dialog']")) return;
+      if (event.key === "Escape" && dragging) {
+        stopEvent(event);
+        cancelDrag();
+        return;
+      }
+      if (event.key === "Escape" && (drawingToolRef.current || drawingDraftRef.current)) {
+        stopEvent(event);
+        commitDraft(null, null);
+        drawingToolRef.current = null;
+        onDrawingToolChangeRef.current(null);
+        setChartCursor("");
+        return;
+      }
+      if (event.key === "Escape" && selectedDrawingIdRef.current) {
+        onSelectedDrawingIdChangeRef.current(null);
+        return;
+      }
+      if (event.key === "Delete" && selectedDrawingIdRef.current) {
+        stopEvent(event);
+        onDeleteTrendLineRef.current(selectedDrawingIdRef.current);
+      }
+    };
+
+    interaction.addEventListener("pointerdown", down, true);
+    window.addEventListener("pointermove", move, true);
+    window.addEventListener("pointerup", finish, true);
+    window.addEventListener("pointercancel", cancelDrag, true);
+    window.addEventListener("blur", cancelDrag);
+    interaction.addEventListener("dblclick", doubleClick, true);
+    window.addEventListener("keydown", key, true);
+    return () => {
+      interaction.removeEventListener("pointerdown", down, true);
+      window.removeEventListener("pointermove", move, true);
+      window.removeEventListener("pointerup", finish, true);
+      window.removeEventListener("pointercancel", cancelDrag, true);
+      window.removeEventListener("blur", cancelDrag);
+      interaction.removeEventListener("dblclick", doubleClick, true);
+      window.removeEventListener("keydown", key, true);
+    };
+  }, [priceTickSize, setChartCursor, syncDrawingCoordinates]);
+
+  useEffect(() => {
+    if (drawingTool) {
+      setChartCursor("crosshair");
+      return;
+    }
+    if (drawingDraftRef.current) {
+      drawingDraftRef.current = null;
+      drawingDraftCoordinateRef.current = null;
+      setDrawingDraft(null);
+      setDrawingDraftCoordinate(null);
+    }
+    if (!measurementRef.current) setChartCursor("");
+  }, [drawingTool, setChartCursor]);
+
+  useEffect(() => {
+    const interaction = interactionRef.current;
+    if (!interaction) return;
+    let frame: number | null = null;
+    const schedule = () => {
+      if (!drawingsRef.current.length && !drawingDraftRef.current) return;
+      if (frame !== null) cancelAnimationFrame(frame);
+      frame = requestAnimationFrame(() => {
+        frame = null;
+        syncDrawingCoordinates();
+      });
+    };
+    interaction.addEventListener("wheel", schedule);
+    interaction.addEventListener("pointermove", schedule);
+    interaction.addEventListener("pointerup", schedule);
+    return () => {
+      interaction.removeEventListener("wheel", schedule);
+      interaction.removeEventListener("pointermove", schedule);
+      interaction.removeEventListener("pointerup", schedule);
+      if (frame !== null) cancelAnimationFrame(frame);
+    };
+  }, [syncDrawingCoordinates]);
+
+  useEffect(() => {
+    const container = containerRef.current;
+    const interaction = interactionRef.current;
+    const chart = chartRef.current;
+    const series = candleRef.current;
+    if (!container || !interaction || !chart || !series) return;
+
     const pointAt = (clientX: number, clientY: number) => {
       const currentBars = barsRef.current;
       const paneWidth = chart.timeScale().width();
@@ -702,6 +1096,7 @@ export function ReplayChart({
 
     const down = (event: PointerEvent) => {
       if (event.pointerType !== "mouse" || event.button !== 0 || !container.contains(event.target as Node)) return;
+      if (drawingToolRef.current || drawingDraftRef.current || drawingPreviewRef.current) return;
       const current = measurementRef.current;
       if (!current && !event.shiftKey && !measurementArmedRef.current) return;
       const positioned = pointAt(event.clientX, event.clientY);
@@ -822,7 +1217,7 @@ export function ReplayChart({
       .filter((item) => item.coordinate !== null)
       .sort((a, b) => Math.abs(Number(a.coordinate) - y) - Math.abs(Number(b.coordinate) - y))[0];
     const down = (event: PointerEvent) => {
-      if (event.shiftKey || measurementArmedRef.current) return;
+      if (event.shiftKey || measurementArmedRef.current || drawingToolRef.current || drawingDraftRef.current || drawingPreviewRef.current) return;
       if ((event.target as HTMLElement | null)?.closest("button,input,[data-context-menu]")) return;
       const y = event.clientY - container.getBoundingClientRect().top;
       const dragKey = (event.target as HTMLElement | null)?.closest<HTMLElement>("[data-line-drag-key]")?.dataset.lineDragKey;
@@ -885,6 +1280,7 @@ export function ReplayChart({
 
   function openContextMenu(event: ReactMouseEvent<HTMLDivElement>) {
     event.preventDefault();
+    if (drawingToolRef.current || drawingDraftRef.current || drawingPreviewRef.current) return;
     if ((event.target as HTMLElement).closest("[data-order-ticket],[data-context-menu],[data-line-action]")) return;
     const series = candleRef.current;
     const root = event.currentTarget.getBoundingClientRect();
@@ -906,6 +1302,7 @@ export function ReplayChart({
     volumeRef.current?.priceScale().applyOptions({ autoScale: true });
     setContextMenu(null);
     requestAnimationFrame(syncLineActionCoordinates);
+    requestAnimationFrame(syncDrawingCoordinates);
   }
 
   function createDraft(side: PaperSide, type: "LIMIT" | "STOP") {
@@ -998,6 +1395,12 @@ export function ReplayChart({
     if (top + labelHeight > measurement.paneHeight - 8) top = measurement.end.y - labelHeight - gap;
     return Math.max(8, Math.min(top, Math.max(8, measurement.paneHeight - labelHeight - 8)));
   })();
+  const drawingPaneWidth = chartRef.current?.timeScale().width() ?? 0;
+  const drawingPaneHeight = chartRef.current?.panes()[0]?.getHeight() ?? 0;
+  const drawingPriceLabelStyle = (point: { x: number; y: number }) => ({
+    left: Math.max(6, Math.min(point.x + 7, Math.max(6, drawingPaneWidth - 92))),
+    top: Math.max(4, Math.min(point.y - 12, Math.max(4, drawingPaneHeight - 26))),
+  });
 
   return (
     <div
@@ -1009,6 +1412,120 @@ export function ReplayChart({
       }}
     >
       <div ref={containerRef} className="h-full min-h-[240px] w-full overflow-hidden bg-white" aria-label={copy.marketReplay.chartAriaLabel} />
+
+      {(drawingCoordinates.length > 0 || drawingDraftCoordinate) && drawingPaneWidth > 0 && drawingPaneHeight > 0 ? (
+        <div
+          data-testid="chart-drawings"
+          className="pointer-events-none absolute left-0 top-0 z-[15] overflow-hidden"
+          style={{ width: drawingPaneWidth, height: drawingPaneHeight }}
+        >
+          <svg
+            aria-label={copy.marketReplay.drawingObjects}
+            className="absolute inset-0"
+            width={drawingPaneWidth}
+            height={drawingPaneHeight}
+            viewBox={`0 0 ${drawingPaneWidth} ${drawingPaneHeight}`}
+          >
+            {drawingCoordinates.map(({ drawing, start, end }) => {
+              const selected = selectedDrawingId === drawing.id;
+              const opacity = drawing.style.opacity / 100;
+              const dash = trendLineDashArray(drawing.style.lineStyle);
+              return (
+                <g key={drawing.id}>
+                  {selected ? (
+                    <line
+                      x1={start.x}
+                      y1={start.y}
+                      x2={end.x}
+                      y2={end.y}
+                      stroke="#fff"
+                      strokeWidth={drawing.style.width + 3}
+                      opacity={0.9}
+                    />
+                  ) : null}
+                  <line
+                    x1={start.x}
+                    y1={start.y}
+                    x2={end.x}
+                    y2={end.y}
+                    stroke={drawing.style.color}
+                    strokeWidth={drawing.style.width}
+                    strokeDasharray={dash}
+                    strokeLinecap="round"
+                    opacity={opacity}
+                  />
+                  <line
+                    data-drawing-id={drawing.id}
+                    x1={start.x}
+                    y1={start.y}
+                    x2={end.x}
+                    y2={end.y}
+                    stroke="transparent"
+                    strokeWidth="12"
+                    strokeLinecap="round"
+                    className="pointer-events-auto cursor-move"
+                  />
+                  {selected ? (
+                    <>
+                      <circle
+                        data-drawing-id={drawing.id}
+                        data-drawing-handle="start"
+                        cx={start.x}
+                        cy={start.y}
+                        r="5"
+                        fill="#fff"
+                        stroke={drawing.style.color}
+                        strokeWidth="2"
+                        className="pointer-events-auto cursor-crosshair"
+                      />
+                      <circle
+                        data-drawing-id={drawing.id}
+                        data-drawing-handle="end"
+                        cx={end.x}
+                        cy={end.y}
+                        r="5"
+                        fill="#fff"
+                        stroke={drawing.style.color}
+                        strokeWidth="2"
+                        className="pointer-events-auto cursor-crosshair"
+                      />
+                    </>
+                  ) : null}
+                </g>
+              );
+            })}
+            {drawingDraftCoordinate ? (
+              <line
+                x1={drawingDraftCoordinate.start.x}
+                y1={drawingDraftCoordinate.start.y}
+                x2={drawingDraftCoordinate.end.x}
+                y2={drawingDraftCoordinate.end.y}
+                stroke="#2962FF"
+                strokeWidth="2"
+                strokeLinecap="round"
+              />
+            ) : null}
+          </svg>
+          {drawingCoordinates.flatMap(({ drawing, start, end }) => {
+            const labels: Array<{ key: string; point: { x: number; y: number }; price: number }> = [];
+            if (drawing.style.showStartPrice) labels.push({ key: `${drawing.id}:start`, point: start, price: drawing.geometry.start.price });
+            if (drawing.style.showEndPrice) labels.push({ key: `${drawing.id}:end`, point: end, price: drawing.geometry.end.price });
+            return labels.map((label) => (
+              <div
+                key={label.key}
+                className="absolute rounded px-1.5 py-0.5 font-mono text-[10px] font-semibold text-white shadow-sm"
+                style={{
+                  ...drawingPriceLabelStyle(label.point),
+                  backgroundColor: drawing.style.color,
+                  opacity: drawing.style.opacity / 100,
+                }}
+              >
+                {formatPriceForTick(label.price, priceTickSize)}
+              </div>
+            ));
+          })}
+        </div>
+      ) : null}
 
       {measurement ? (
         <div

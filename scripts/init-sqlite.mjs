@@ -240,6 +240,16 @@ const createStatements = [
     "updatedAt" DATETIME NOT NULL,
     CONSTRAINT "MarketDatasetImport_datasetId_fkey" FOREIGN KEY ("datasetId") REFERENCES "MarketDataset" ("id") ON DELETE SET NULL ON UPDATE CASCADE
   )`,
+  `CREATE TABLE IF NOT EXISTS "MarketDrawing" (
+    "id" TEXT NOT NULL PRIMARY KEY,
+    "datasetId" TEXT NOT NULL,
+    "type" TEXT NOT NULL,
+    "geometry" TEXT NOT NULL,
+    "style" TEXT NOT NULL,
+    "createdAt" DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    "updatedAt" DATETIME NOT NULL,
+    CONSTRAINT "MarketDrawing_datasetId_fkey" FOREIGN KEY ("datasetId") REFERENCES "MarketDataset" ("id") ON DELETE CASCADE ON UPDATE CASCADE
+  )`,
 ];
 
 const tradeColumns = [
@@ -297,6 +307,7 @@ const indexStatements = [
   `CREATE INDEX IF NOT EXISTS "PaperTrade_sessionId_openedSequence_idx" ON "PaperTrade"("sessionId", "openedSequence")`,
   `CREATE INDEX IF NOT EXISTS "MarketBarBlock_datasetId_startTime_endTime_idx" ON "MarketBarBlock"("datasetId", "startTime", "endTime")`,
   `CREATE INDEX IF NOT EXISTS "MarketDatasetImport_status_createdAt_idx" ON "MarketDatasetImport"("status", "createdAt")`,
+  `CREATE INDEX IF NOT EXISTS "MarketDrawing_datasetId_createdAt_idx" ON "MarketDrawing"("datasetId", "createdAt")`,
   `CREATE UNIQUE INDEX IF NOT EXISTS "_TradeToTradeTag_AB_unique" ON "_TradeToTradeTag"("A", "B")`,
   `CREATE INDEX IF NOT EXISTS "_TradeToTradeTag_B_index" ON "_TradeToTradeTag"("B")`,
 ];
