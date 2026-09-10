@@ -254,6 +254,12 @@ export function ReplayChart({
   const barsRef = useRef(bars);
   const candlestickStyleRef = useRef(candlestickStyle);
   candlestickStyleRef.current = candlestickStyle;
+  const priceTickSizeRef = useRef(priceTickSize);
+  priceTickSizeRef.current = priceTickSize;
+  const trendLineDraftStyleRef = useRef(trendLineDraftStyle);
+  trendLineDraftStyleRef.current = trendLineDraftStyle;
+  const fibonacciDraftStyleRef = useRef(fibonacciDraftStyle);
+  fibonacciDraftStyleRef.current = fibonacciDraftStyle;
   const measurementArmedRef = useRef(measurementArmed);
   const onMeasurementArmedChangeRef = useRef(onMeasurementArmedChange);
   const drawingToolRef = useRef(drawingTool);
@@ -326,22 +332,22 @@ export function ReplayChart({
       selectedDrawingId: selectedDrawingIdRef.current,
       preview: drawingPreviewRef.current,
       draft: drawingToolRef.current === DRAWING_TYPE_TREND_LINE ? drawingDraftRef.current : null,
-      draftStyle: trendLineDraftStyle,
+      draftStyle: trendLineDraftStyleRef.current,
       bars: barsRef.current,
       displayIntervalSeconds: displayIntervalSecondsRef.current,
-      priceTickSize,
+      priceTickSize: priceTickSizeRef.current,
     });
     fibonacciPrimitiveRef.current?.setDrawings({
       drawings: drawingsRef.current.filter((drawing): drawing is FibonacciRetracementDrawing => drawing.type === DRAWING_TYPE_FIB_RETRACEMENT),
       selectedDrawingId: selectedDrawingIdRef.current,
       preview: drawingPreviewRef.current,
       draft: drawingToolRef.current === DRAWING_TYPE_FIB_RETRACEMENT ? drawingDraftRef.current : null,
-      draftStyle: fibonacciDraftStyle,
+      draftStyle: fibonacciDraftStyleRef.current,
       bars: barsRef.current,
       displayIntervalSeconds: displayIntervalSecondsRef.current,
-      priceTickSize,
+      priceTickSize: priceTickSizeRef.current,
     });
-  }, [fibonacciDraftStyle, priceTickSize, trendLineDraftStyle]);
+  }, []);
 
   const setChartCursor = useCallback((cursor: "" | "crosshair" | "ns-resize" | "move" | "pointer") => {
     const container = containerRef.current;
@@ -403,13 +409,13 @@ export function ReplayChart({
         endIndex,
         startPrice: current.start.price,
         endPrice: current.end.price,
-        priceTickSize,
-        displayIntervalSeconds,
+        priceTickSize: priceTickSizeRef.current,
+        displayIntervalSeconds: displayIntervalSecondsRef.current,
       }),
     };
     measurementRef.current = next;
     setMeasurement(next);
-  }, [displayIntervalSeconds, priceTickSize, setChartCursor]);
+  }, [setChartCursor]);
 
   useEffect(() => {
     if (!paperSessionId || paperInitialCapital === null) {
@@ -444,6 +450,9 @@ export function ReplayChart({
     return () => window.removeEventListener("keydown", close);
   }, []);
 
+  // Keep the chart instance stable. Window data, display interval, volume availability,
+  // and drawing preferences must update the existing instance so pointer handlers never
+  // retain a removed chart or series.
   useEffect(() => {
     const container = containerRef.current;
     if (!container) return;
@@ -474,12 +483,6 @@ export function ReplayChart({
     const fibonacciPrimitive = new FibonacciRetracementPrimitive();
     candles.attachPrimitive(trendLinePrimitive);
     candles.attachPrimitive(fibonacciPrimitive);
-    let volumes: ISeriesApi<"Histogram"> | null = null;
-    if (hasVolume) {
-      const pane = chart.addPane();
-      chart.panes()[0]?.setStretchFactor(4); pane.setStretchFactor(1);
-      volumes = pane.addSeries(HistogramSeries, { priceFormat: { type: "volume" }, priceLineVisible: false, lastValueVisible: false });
-    }
     const observer = new ResizeObserver(([entry]) => {
       if (entry?.contentRect.width && entry.contentRect.height) {
         chart.applyOptions({ width: entry.contentRect.width, height: entry.contentRect.height });
@@ -490,7 +493,7 @@ export function ReplayChart({
     observer.observe(container);
     chart.timeScale().subscribeVisibleLogicalRangeChange(syncLineActionCoordinates);
     chart.timeScale().subscribeVisibleLogicalRangeChange(syncMeasurementCoordinates);
-    chartRef.current = chart; candleRef.current = candles; volumeRef.current = volumes;
+    chartRef.current = chart; candleRef.current = candles; volumeRef.current = null;
     trendLinePrimitiveRef.current = trendLinePrimitive;
     fibonacciPrimitiveRef.current = fibonacciPrimitive;
     syncDrawingPrimitive();
@@ -506,7 +509,22 @@ export function ReplayChart({
       chart.remove(); chartRef.current = null; candleRef.current = null; volumeRef.current = null;
       markersRef.current = null; priceLines.clear(); lineTargets.clear(); emaSeries.clear(); emaStates.clear(); lastDataRef.current = [];
     };
-  }, [hasVolume, priceTickSize, syncDrawingPrimitive, syncLineActionCoordinates, syncMeasurementCoordinates]);
+  }, [priceTickSize, syncDrawingPrimitive, syncLineActionCoordinates, syncMeasurementCoordinates]);
+
+  useEffect(() => {
+    const chart = chartRef.current;
+    if (!chart || !hasVolume || volumeRef.current) return;
+    const pane = chart.addPane();
+    chart.panes()[0]?.setStretchFactor(4);
+    pane.setStretchFactor(1);
+    const volumes = pane.addSeries(HistogramSeries, {
+      priceFormat: { type: "volume" },
+      priceLineVisible: false,
+      lastValueVisible: false,
+    });
+    volumeRef.current = volumes;
+    volumes.setData(barsRef.current.filter((bar) => bar.volume !== null).map(volume));
+  }, [hasVolume, priceTickSize]);
 
   useEffect(() => {
     candleRef.current?.applyOptions(candlestickSeriesStyleOptions(candlestickStyle));
@@ -528,7 +546,12 @@ export function ReplayChart({
   useEffect(() => {
     displayIntervalSecondsRef.current = displayIntervalSeconds;
     requestAnimationFrame(syncDrawingPrimitive);
-  }, [displayIntervalSeconds, syncDrawingPrimitive]);
+    requestAnimationFrame(syncMeasurementCoordinates);
+  }, [displayIntervalSeconds, syncDrawingPrimitive, syncMeasurementCoordinates]);
+
+  useEffect(() => {
+    requestAnimationFrame(syncDrawingPrimitive);
+  }, [fibonacciDraftStyle, syncDrawingPrimitive, trendLineDraftStyle]);
 
   useEffect(() => {
     const chart = chartRef.current; const series = candleRef.current;

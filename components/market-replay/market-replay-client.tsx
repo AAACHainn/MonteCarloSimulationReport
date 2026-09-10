@@ -5,6 +5,7 @@ import { startTransition, useCallback, useEffect, useMemo, useRef, useState } fr
 import { ChevronRight, ListTree, Loader2, Palette, Pause, Play, Plus, RotateCcw, Ruler, Settings2, Trash2, TrendingUp, WalletCards, X } from "lucide-react";
 import * as Popover from "@radix-ui/react-popover";
 import { ReplayChart } from "@/components/market-replay/replay-chart";
+import { ReplayStartDialog } from "@/components/market-replay/replay-start-dialog";
 import { DEFAULT_REPLAY_MAX_VISIBLE_BARS } from "@/lib/market-replay/chart-range";
 import {
   DEFAULT_CANDLESTICK_STYLE,
@@ -208,9 +209,13 @@ export function MarketReplayClient({ dataset }: { dataset: MarketDatasetSummary 
   const [loadError, setLoadError] = useState<string | null>(null);
   const [replay, setReplay, latestReplayRef] = useReplayState();
   const [startValue, setStartValue] = useState(() => dateTimeLocalValue(dataset.startTime, dataset.timezone));
+  const [startDialogOpen, setStartDialogOpen] = useState(false);
+  const [startDialogValue, setStartDialogValue] = useState(startValue);
+  const [startDialogBusy, setStartDialogBusy] = useState(false);
+  const resumeReplayAfterStartDialogRef = useRef(false);
   const [startError, setStartError] = useState<string | null>(null);
   const [saveStatus, setSaveStatus] = useState<SaveStatus>("idle");
-  const [confirmAction, setConfirmAction] = useState<"reset" | "change-start" | "paper-clear" | null>(null);
+  const [confirmAction, setConfirmAction] = useState<"reset" | "paper-clear" | null>(null);
   const [settingsDialog, setSettingsDialog] = useState<"candlesticks" | "indicators" | "paper" | null>(null);
   const [candlestickStyle, setCandlestickStyle] = useState<CandlestickStyle>(DEFAULT_CANDLESTICK_STYLE);
   const [candlestickStyleDraft, setCandlestickStyleDraft] = useState<CandlestickStyle | null>(null);
@@ -1136,21 +1141,41 @@ export function MarketReplayClient({ dataset }: { dataset: MarketDatasetSummary 
     };
   }, [dataset.id, latestReplayRef, startSync]);
 
-  async function beginReplay(event: React.FormEvent<HTMLFormElement>) {
-    event.preventDefault();
+  async function startReplayAt(value: string) {
     if (!dataset.sourceIntervalSeconds) return setStartError(copy.marketReplay.invalidDisplayInterval);
+    const timestamp = selectedTimeToTimestamp(value, dataset.timezone);
+    if (!Number.isFinite(timestamp)) {
+      setStartError(copy.marketReplay.invalidStart);
+      return false;
+    }
     const response = await fetch(`/api/market-datasets/${dataset.id}/replay/start`, {
       method: "POST", headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ timestamp: new Date(selectedTimeToTimestamp(startValue, dataset.timezone)).toISOString(), playbackRate: 1, displayIntervalSeconds: dataset.sourceIntervalSeconds, displaySession: "ETH" }),
+      body: JSON.stringify({ timestamp: new Date(timestamp).toISOString(), playbackRate: 1, displayIntervalSeconds: dataset.sourceIntervalSeconds, displaySession: "ETH" }),
     });
     const data = await response.json();
-    if (!response.ok) return setStartError(data?.error ?? copy.marketReplay.invalidStart);
+    if (!response.ok) {
+      setStartError(data?.error ?? copy.marketReplay.invalidStart);
+      return false;
+    }
     const next = createReplayState(dataset.barCount, data.startSequence, data.playbackRate, data.displayIntervalSeconds, data.currentSequence, data.generation, data.syncVersion, data.displaySession ?? "ETH");
     next.confirmedSequence = data.currentSequence;
     paperDeltaAccumulatorRef.current = createPaperDeltaAccumulator(data.currentSequence);
     lastSyncStartedAtRef.current = performance.now();
+    setStartValue(value);
+    resumeReplayAfterStartDialogRef.current = false;
     setStartError(null); setReplay(next);
+    commitConfirmedPaperSnapshot(null);
     await loadWindow(next.currentSequence, next.displayIntervalSeconds, next.displaySession, emaWarmupCountRef.current);
+    return true;
+  }
+
+  async function beginReplay(event: React.FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    try {
+      await startReplayAt(startValue);
+    } catch (error) {
+      setStartError(error instanceof Error && error.message ? error.message : copy.marketReplay.loadError);
+    }
   }
 
   function togglePlayback() {
@@ -1224,13 +1249,13 @@ export function MarketReplayClient({ dataset }: { dataset: MarketDatasetSummary 
     const onKeyDown = (event: KeyboardEvent) => {
       if (!event.ctrlKey || event.altKey || event.shiftKey || event.metaKey || event.key !== "ArrowRight") return;
       const target = event.target as HTMLElement | null;
-      if (settingsDialog || confirmAction || target?.closest("input, textarea, [contenteditable='true']")) return;
+      if (settingsDialog || startDialogOpen || confirmAction || target?.closest("input, textarea, [contenteditable='true']")) return;
       event.preventDefault();
       revealNextBar();
     };
     window.addEventListener("keydown", onKeyDown);
     return () => window.removeEventListener("keydown", onKeyDown);
-  }, [confirmAction, revealNextBar, settingsDialog]);
+  }, [confirmAction, revealNextBar, settingsDialog, startDialogOpen]);
 
   useEffect(() => {
     const onKeyDown = (event: KeyboardEvent) => {
@@ -1238,7 +1263,7 @@ export function MarketReplayClient({ dataset }: { dataset: MarketDatasetSummary 
       if (!event.altKey || event.ctrlKey || event.shiftKey || event.metaKey || (key !== "t" && key !== "f")) return;
       const target = event.target as HTMLElement | null;
       if (
-        settingsDialog || confirmAction || styleDrawingId
+        settingsDialog || startDialogOpen || confirmAction || styleDrawingId
         || target?.closest("input, textarea, select, [contenteditable='true'], [role='dialog']")
       ) return;
       event.preventDefault();
@@ -1246,7 +1271,7 @@ export function MarketReplayClient({ dataset }: { dataset: MarketDatasetSummary 
     };
     window.addEventListener("keydown", onKeyDown);
     return () => window.removeEventListener("keydown", onKeyDown);
-  }, [armFibonacciRetracement, armTrendLine, confirmAction, settingsDialog, styleDrawingId]);
+  }, [armFibonacciRetracement, armTrendLine, confirmAction, settingsDialog, startDialogOpen, styleDrawingId]);
 
   function changeSpeed(value: number) {
     const current = latestReplayRef.current;
@@ -1334,7 +1359,7 @@ export function MarketReplayClient({ dataset }: { dataset: MarketDatasetSummary 
     setEmaError(null);
   }
 
-  function requestConfirmation(action: "reset" | "change-start" | "paper-clear") {
+  function requestConfirmation(action: "reset" | "paper-clear") {
     const current = latestReplayRef.current;
     if (!current) return;
     if (current.status === "playing") {
@@ -1342,6 +1367,52 @@ export function MarketReplayClient({ dataset }: { dataset: MarketDatasetSummary 
       setReplay(paused);
     }
     setConfirmAction(action);
+  }
+
+  function openStartDialog() {
+    const current = latestReplayRef.current;
+    if (!current) return;
+    resumeReplayAfterStartDialogRef.current = current.status === "playing";
+    if (current.status === "playing") setReplay(pauseReplay(current));
+    setStartDialogValue(startValue);
+    setStartError(null);
+    setStartDialogOpen(true);
+  }
+
+  function closeStartDialog() {
+    if (startDialogBusy) return;
+    setStartDialogOpen(false);
+    setStartError(null);
+    if (!resumeReplayAfterStartDialogRef.current) return;
+    resumeReplayAfterStartDialogRef.current = false;
+    const current = latestReplayRef.current;
+    if (!current || current.status !== "paused") return;
+    setReplay(playReplay(current));
+    playbackClockRef.current = performance.now();
+    lastSyncStartedAtRef.current = performance.now();
+  }
+
+  async function applyNewReplayStart() {
+    if (!latestReplayRef.current || startDialogBusy) return;
+    setStartDialogBusy(true);
+    manualStepsRef.current.cancel();
+    try {
+      await advanceCompletionRef.current;
+      if (!(await flushVisible())) return;
+      windowRequestRef.current += 1;
+      if (saveTimerRef.current) clearTimeout(saveTimerRef.current);
+      saveTimerRef.current = null;
+      pendingSaveRef.current = null;
+      await saveChainRef.current.catch(() => undefined);
+      if (await startReplayAt(startDialogValue)) {
+        setStartDialogOpen(false);
+        setSaveStatus("idle");
+      }
+    } catch (error) {
+      setStartError(error instanceof Error && error.message ? error.message : copy.marketReplay.loadError);
+    } finally {
+      setStartDialogBusy(false);
+    }
   }
 
   async function applyConfirmedAction() {
@@ -1365,7 +1436,7 @@ export function MarketReplayClient({ dataset }: { dataset: MarketDatasetSummary 
       const response = await fetch(`/api/market-datasets/${dataset.id}/replay/reset`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ action: confirmAction === "reset" ? "RESET" : "CHANGE_START" }),
+        body: JSON.stringify({ action: "RESET" }),
       });
       const data = await response.json().catch(() => null);
       if (!response.ok) {
@@ -1374,18 +1445,14 @@ export function MarketReplayClient({ dataset }: { dataset: MarketDatasetSummary 
         return;
       }
       commitConfirmedPaperSnapshot(null);
-      if (confirmAction === "reset") {
-        const current = latestReplayRef.current;
-        if (!current) return;
-        const reset = resetReplay(current);
-        reset.generation = data.generation;
-        reset.syncVersion = data.syncVersion;
-        reset.confirmedSequence = data.currentSequence;
-        setReplay(reset);
-        await loadWindow(reset.currentSequence, reset.displayIntervalSeconds, reset.displaySession, emaWarmupCountRef.current);
-      } else {
-        setReplay(null); setBars([]); setWarmupBars([]); setCurrentSourceBar(null);
-      }
+      const current = latestReplayRef.current;
+      if (!current) return;
+      const reset = resetReplay(current);
+      reset.generation = data.generation;
+      reset.syncVersion = data.syncVersion;
+      reset.confirmedSequence = data.currentSequence;
+      setReplay(reset);
+      await loadWindow(reset.currentSequence, reset.displayIntervalSeconds, reset.displaySession, emaWarmupCountRef.current);
       setSaveStatus("idle");
     }
     setConfirmAction(null);
@@ -1672,7 +1739,7 @@ export function MarketReplayClient({ dataset }: { dataset: MarketDatasetSummary 
           {paperSnapshot ? <div className="hidden items-center gap-3 text-xs text-slate-500 xl:flex"><span>{copy.paperTrading.equity} <strong className="font-medium text-slate-800">{paperSnapshot.stats.equity.toLocaleString("zh-CN", { maximumFractionDigits: 2 })} {paperSnapshot.session.currency}</strong></span><span>{copy.paperTrading.netPosition} <strong className="font-medium text-slate-800">{paperSnapshot.session.netQuantity}</strong></span></div> : null}
           <div className="ml-auto flex items-center gap-1">
             <Button type="button" variant="ghost" size="sm" className="h-8" disabled={draftActive} title={draftActive ? copy.paperTrading.draftLockedReplay : undefined} onClick={() => requestConfirmation("reset")}><RotateCcw className="h-4 w-4" /><span className="hidden xl:inline">{copy.marketReplay.reset}</span></Button>
-            <Button type="button" variant="ghost" size="sm" className="h-8" disabled={draftActive} title={draftActive ? copy.paperTrading.draftLockedReplay : undefined} onClick={() => requestConfirmation("change-start")}><span className="hidden xl:inline">{copy.marketReplay.chooseNewStart}</span><span className="xl:hidden">{copy.marketReplay.startAt}</span></Button>
+            <Button type="button" variant="ghost" size="sm" className="h-8" disabled={draftActive} title={draftActive ? copy.paperTrading.draftLockedReplay : undefined} onClick={openStartDialog}><span className="hidden xl:inline">{copy.marketReplay.chooseNewStart}</span><span className="xl:hidden">{copy.marketReplay.startAt}</span></Button>
           </div>
         </div>
         <div className="relative min-h-0 flex-1">
@@ -2263,10 +2330,22 @@ export function MarketReplayClient({ dataset }: { dataset: MarketDatasetSummary 
       </Dialog>
       <ConfirmDialog
         open={Boolean(confirmAction)}
-        title={confirmAction === "reset" ? copy.marketReplay.resetTitle : confirmAction === "paper-clear" ? copy.paperTrading.resetAccountTitle : copy.marketReplay.changeStartTitle}
-        description={confirmAction === "reset" ? copy.marketReplay.resetConfirm : confirmAction === "paper-clear" ? copy.paperTrading.resetAccountConfirm : copy.marketReplay.changeStartConfirm}
+        title={confirmAction === "paper-clear" ? copy.paperTrading.resetAccountTitle : copy.marketReplay.resetTitle}
+        description={confirmAction === "paper-clear" ? copy.paperTrading.resetAccountConfirm : copy.marketReplay.resetConfirm}
         onCancel={() => setConfirmAction(null)}
         onConfirm={applyConfirmedAction}
+      />
+      <ReplayStartDialog
+        open={startDialogOpen}
+        value={startDialogValue}
+        minimum={dateTimeLocalValue(dataset.startTime, dataset.timezone)}
+        maximum={dateTimeLocalValue(dataset.endTime, dataset.timezone)}
+        timezone={dataset.timezone}
+        busy={startDialogBusy}
+        error={startError}
+        onChange={setStartDialogValue}
+        onCancel={closeStartDialog}
+        onConfirm={() => void applyNewReplayStart()}
       />
     </>
   );
