@@ -71,9 +71,11 @@ import { createReplayStepQueue } from "@/lib/market-replay/step-queue";
 import {
   DEFAULT_TREND_LINE_STYLE,
   DRAWING_TYPE_TREND_LINE,
+  parseTrendLinePreferences,
   type TrendLineDrawing,
   type TrendLineGeometry,
   type TrendLineStyle,
+  type TrendLineTemplate,
 } from "@/lib/market-replay/chart-drawings";
 
 type SaveStatus = "idle" | "saving" | "saved" | "error";
@@ -93,6 +95,7 @@ type ServerAdvancePayload = {
 
 const EMA_SETTINGS_STORAGE_KEY = "market-replay-ema-settings-v1";
 const DISPLAY_TIMEZONE_STORAGE_KEY = "market-replay-display-timezone-v1";
+const TREND_LINE_PREFERENCES_STORAGE_KEY = "market-replay-trend-line-preferences-v1";
 const EMA_COLORS = ["#f59e0b", "#2563eb", "#7c3aed", "#0f766e", "#e11d48"];
 const DEFAULT_EMA_INDICATORS: EmaIndicatorConfig[] = [
   { id: "ema-default-20", length: 20, color: EMA_COLORS[0], visible: true },
@@ -102,11 +105,11 @@ const DEFAULT_EMA_INDICATORS: EmaIndicatorConfig[] = [
 const DISPLAY_INTERVAL_PRESETS = [1, 5, 10, 15, 30, 60, 120, 180, 300, 600, 900, 1_800, 2_700, 3_600, 7_200, 14_400, 21_600, 43_200, 86_400];
 const REPLAY_SYNC_BATCH_SIZE = 100;
 const REPLAY_SYNC_HARD_CAP = 200;
-let temporaryDrawingSequence = 0;
+let localDrawingSequence = 0;
 
-function createTemporaryDrawingId() {
-  temporaryDrawingSequence += 1;
-  return `temporary-${Date.now().toString(36)}-${temporaryDrawingSequence.toString(36)}`;
+function createLocalDrawingId(prefix: "temporary" | "template") {
+  localDrawingSequence += 1;
+  return `${prefix}-${Date.now().toString(36)}-${localDrawingSequence.toString(36)}`;
 }
 
 function replaySyncCapacity(state: ReplayState, sourceIntervalSeconds: number, syncing: boolean, latencyMs: number) {
@@ -202,6 +205,12 @@ export function MarketReplayClient({ dataset }: { dataset: MarketDatasetSummary 
   const [drawingObjectsOpen, setDrawingObjectsOpen] = useState(false);
   const [styleDrawingId, setStyleDrawingId] = useState<string | null>(null);
   const [styleDraft, setStyleDraft] = useState<TrendLineStyle | null>(null);
+  const [defaultTrendLineStyle, setDefaultTrendLineStyle] = useState<TrendLineStyle>(DEFAULT_TREND_LINE_STYLE);
+  const [trendLineTemplates, setTrendLineTemplates] = useState<TrendLineTemplate[]>([]);
+  const [drawingPreferencesLoaded, setDrawingPreferencesLoaded] = useState(false);
+  const [selectedTemplateId, setSelectedTemplateId] = useState("");
+  const [templateDialogOpen, setTemplateDialogOpen] = useState(false);
+  const [templateName, setTemplateName] = useState("");
   const [pendingDrawingIds, setPendingDrawingIds] = useState<Set<string>>(() => new Set());
   const [displayUtcOffsetMinutes, setDisplayUtcOffsetMinutes] = useState(() => (
     utcOffsetMinutesForTimezone(dataset.startTime, dataset.timezone)
@@ -330,6 +339,30 @@ export function MarketReplayClient({ dataset }: { dataset: MarketDatasetSummary 
     }
   }, [emaEnabled, emaIndicators, emaSettingsLoaded]);
 
+  useEffect(() => {
+    let preferences = parseTrendLinePreferences(null);
+    try {
+      preferences = parseTrendLinePreferences(window.localStorage.getItem(TREND_LINE_PREFERENCES_STORAGE_KEY));
+    } catch {
+      // Browser storage can be unavailable; defaults still work for this page session.
+    }
+    setDefaultTrendLineStyle(preferences.defaultStyle);
+    setTrendLineTemplates(preferences.templates);
+    setDrawingPreferencesLoaded(true);
+  }, []);
+
+  useEffect(() => {
+    if (!drawingPreferencesLoaded) return;
+    try {
+      window.localStorage.setItem(TREND_LINE_PREFERENCES_STORAGE_KEY, JSON.stringify({
+        defaultStyle: defaultTrendLineStyle,
+        templates: trendLineTemplates,
+      }));
+    } catch {
+      // Drawing preferences still apply until this page closes.
+    }
+  }, [defaultTrendLineStyle, drawingPreferencesLoaded, trendLineTemplates]);
+
   const setDrawingPending = useCallback((id: string, pending: boolean) => {
     setPendingDrawingIds((current) => {
       const next = new Set(current);
@@ -364,14 +397,14 @@ export function MarketReplayClient({ dataset }: { dataset: MarketDatasetSummary 
   }, []);
 
   const createTrendLine = useCallback(async (geometry: TrendLineGeometry) => {
-    const temporaryId = createTemporaryDrawingId();
+    const temporaryId = createLocalDrawingId("temporary");
     const now = new Date().toISOString();
     const optimistic: TrendLineDrawing = {
       id: temporaryId,
       datasetId: dataset.id,
       type: DRAWING_TYPE_TREND_LINE,
       geometry,
-      style: DEFAULT_TREND_LINE_STYLE,
+      style: { ...defaultTrendLineStyle },
       createdAt: now,
       updatedAt: now,
     };
@@ -382,7 +415,7 @@ export function MarketReplayClient({ dataset }: { dataset: MarketDatasetSummary 
       const response = await fetch(`/api/market-datasets/${dataset.id}/drawings`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ type: DRAWING_TYPE_TREND_LINE, geometry, style: DEFAULT_TREND_LINE_STYLE }),
+        body: JSON.stringify({ type: DRAWING_TYPE_TREND_LINE, geometry, style: defaultTrendLineStyle }),
       });
       const data = await response.json() as { drawing?: TrendLineDrawing; error?: string };
       if (!response.ok || !data.drawing) throw new Error(data.error);
@@ -396,7 +429,7 @@ export function MarketReplayClient({ dataset }: { dataset: MarketDatasetSummary 
     } finally {
       setDrawingPending(temporaryId, false);
     }
-  }, [dataset.id, setDrawingPending]);
+  }, [dataset.id, defaultTrendLineStyle, setDrawingPending]);
 
   const updateTrendLine = useCallback(async (
     id: string,
@@ -460,7 +493,33 @@ export function MarketReplayClient({ dataset }: { dataset: MarketDatasetSummary 
     setSelectedDrawingId(id);
     setStyleDrawingId(id);
     setStyleDraft({ ...drawing.style });
+    setSelectedTemplateId("");
   }, [drawings]);
+
+  const saveTrendLineTemplate = useCallback(() => {
+    const name = templateName.trim();
+    if (!name || !styleDraft) return;
+    const existing = trendLineTemplates.find((template) => template.name.toLocaleLowerCase("zh-CN") === name.toLocaleLowerCase("zh-CN"));
+    if (!existing && trendLineTemplates.length >= 50) {
+      setDrawingError(copy.marketReplay.drawingTemplateLimit);
+      return;
+    }
+    const id = existing?.id ?? createLocalDrawingId("template");
+    const template: TrendLineTemplate = { id, name, style: { ...styleDraft } };
+    setTrendLineTemplates((current) => existing
+      ? current.map((item) => item.id === existing.id ? template : item)
+      : [...current, template]);
+    setSelectedTemplateId(id);
+    setTemplateName("");
+    setTemplateDialogOpen(false);
+    setDrawingError(null);
+  }, [styleDraft, templateName, trendLineTemplates]);
+
+  const deleteSelectedTrendLineTemplate = useCallback(() => {
+    if (!selectedTemplateId) return;
+    setTrendLineTemplates((current) => current.filter((template) => template.id !== selectedTemplateId));
+    setSelectedTemplateId("");
+  }, [selectedTemplateId]);
 
   const displayedDrawings = useMemo(() => (
     styleDrawingId && styleDraft
@@ -1642,17 +1701,56 @@ export function MarketReplayClient({ dataset }: { dataset: MarketDatasetSummary 
         </div>
       </Dialog>
       <Dialog
-        open={Boolean(styleDrawingId && styleDraft)}
+        open={Boolean(styleDrawingId && styleDraft && !templateDialogOpen)}
         title={copy.marketReplay.trendLineSettings}
         description={copy.marketReplay.trendLineSettingsDescription}
         className="max-w-md"
         onClose={() => {
           setStyleDrawingId(null);
           setStyleDraft(null);
+          setSelectedTemplateId("");
         }}
       >
         {styleDraft ? (
           <div className="space-y-5">
+            <div className="grid grid-cols-[7rem_1fr] items-center gap-3">
+              <Label>{copy.marketReplay.drawingTemplate}</Label>
+              <div className="flex min-w-0 gap-2">
+                <Select
+                  value={selectedTemplateId || "__none"}
+                  onValueChange={(value) => {
+                    if (value === "__none") return;
+                    const template = trendLineTemplates.find((item) => item.id === value);
+                    if (!template) return;
+                    setSelectedTemplateId(value);
+                    setStyleDraft({ ...template.style });
+                  }}
+                >
+                  <SelectTrigger className="min-w-0 flex-1">
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="__none" disabled>
+                      {trendLineTemplates.length ? copy.marketReplay.chooseDrawingTemplate : copy.marketReplay.noDrawingTemplates}
+                    </SelectItem>
+                    {trendLineTemplates.map((template) => (
+                      <SelectItem key={template.id} value={template.id}>{template.name}</SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+                <Button
+                  type="button"
+                  variant="ghost"
+                  size="icon"
+                  disabled={!selectedTemplateId}
+                  aria-label={copy.marketReplay.deleteDrawingTemplate}
+                  onClick={deleteSelectedTrendLineTemplate}
+                  className="shrink-0 text-slate-500 hover:text-red-600"
+                >
+                  <Trash2 className="h-4 w-4" />
+                </Button>
+              </div>
+            </div>
             <div className="grid grid-cols-[7rem_1fr] items-center gap-3">
               <Label htmlFor="trend-line-color">{copy.marketReplay.lineColor}</Label>
               <div className="flex items-center gap-2">
@@ -1738,22 +1836,70 @@ export function MarketReplayClient({ dataset }: { dataset: MarketDatasetSummary 
                 {copy.marketReplay.showEndPrice}
               </label>
             </div>
-            <div className="flex justify-end gap-2 border-t pt-4">
+            <p className="text-xs text-slate-500">{copy.marketReplay.nextTrendLineStyleHint}</p>
+            <div className="flex items-center justify-between gap-3 border-t pt-4">
               <Button type="button" variant="outline" onClick={() => {
-                setStyleDrawingId(null);
-                setStyleDraft(null);
-              }}>{copy.marketReplay.drawingCancel}</Button>
-              <Button type="button" onClick={() => {
-                if (!styleDrawingId) return;
-                const id = styleDrawingId;
-                const style = styleDraft;
-                void updateTrendLine(id, { style });
-                setStyleDrawingId(null);
-                setStyleDraft(null);
-              }}>{copy.marketReplay.drawingConfirm}</Button>
+                setTemplateName("");
+                setTemplateDialogOpen(true);
+              }}>{copy.marketReplay.saveDrawingTemplate}</Button>
+              <div className="flex gap-2">
+                <Button type="button" variant="outline" onClick={() => {
+                  setStyleDrawingId(null);
+                  setStyleDraft(null);
+                  setSelectedTemplateId("");
+                }}>{copy.marketReplay.drawingCancel}</Button>
+                <Button type="button" onClick={() => {
+                  if (!styleDrawingId) return;
+                  const id = styleDrawingId;
+                  const style = styleDraft;
+                  setDefaultTrendLineStyle({ ...style });
+                  void updateTrendLine(id, { style });
+                  setStyleDrawingId(null);
+                  setStyleDraft(null);
+                  setSelectedTemplateId("");
+                }}>{copy.marketReplay.drawingConfirm}</Button>
+              </div>
             </div>
           </div>
         ) : null}
+      </Dialog>
+      <Dialog
+        open={templateDialogOpen}
+        title={copy.marketReplay.saveDrawingTemplateTitle}
+        className="max-w-md"
+        onClose={() => {
+          setTemplateDialogOpen(false);
+          setTemplateName("");
+        }}
+      >
+        <div className="space-y-5">
+          <div className="space-y-2">
+            <Label htmlFor="trend-line-template-name">{copy.marketReplay.drawingTemplateName}</Label>
+            <Input
+              id="trend-line-template-name"
+              value={templateName}
+              maxLength={50}
+              autoFocus
+              placeholder={copy.marketReplay.drawingTemplateNamePlaceholder}
+              onChange={(event) => setTemplateName(event.target.value)}
+              onKeyDown={(event) => {
+                if (event.key === "Enter" && templateName.trim()) {
+                  event.preventDefault();
+                  saveTrendLineTemplate();
+                }
+              }}
+            />
+          </div>
+          <div className="flex justify-end gap-2 border-t pt-4">
+            <Button type="button" variant="outline" onClick={() => {
+              setTemplateDialogOpen(false);
+              setTemplateName("");
+            }}>{copy.marketReplay.drawingCancel}</Button>
+            <Button type="button" disabled={!templateName.trim()} onClick={saveTrendLineTemplate}>
+              {copy.marketReplay.saveDrawingTemplate}
+            </Button>
+          </div>
+        </div>
       </Dialog>
       <ConfirmDialog
         open={Boolean(confirmAction)}

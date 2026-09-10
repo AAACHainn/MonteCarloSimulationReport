@@ -25,13 +25,12 @@ import {
 } from "@/lib/market-replay/chart-measurement";
 import {
   anchorForLogicalIndex,
-  logicalIndexForAnchor,
   snapScreenPointTo45,
-  trendLineDashArray,
   type DrawingAnchor,
   type TrendLineDrawing,
   type TrendLineGeometry,
 } from "@/lib/market-replay/chart-drawings";
+import { TrendLinePrimitive } from "@/lib/market-replay/trend-line-primitive";
 import { formatUtcDateTime, utcDateParts } from "@/lib/market-replay/display-timezone";
 import { formatPriceForTick, priceDecimalsForTick, snapPriceToTick } from "@/lib/market-replay/price-ticks";
 import {
@@ -100,14 +99,13 @@ type MeasurementState = {
   paneHeight: number;
   stats: ChartMeasurementStats;
 };
-type DrawingCoordinate = {
-  drawing: TrendLineDrawing;
-  start: { x: number; y: number };
-  end: { x: number; y: number };
-};
 type DrawingDraft = {
   start: DrawingAnchor;
   end: DrawingAnchor;
+};
+type DrawingSegmentCoordinate = {
+  start: { x: number; y: number };
+  end: { x: number; y: number };
 };
 
 function sameLineActions(current: LineAction[], next: LineAction[]) {
@@ -228,6 +226,7 @@ export function ReplayChart({
   const priceLinesRef = useRef(new Map<string, IPriceLine>());
   const lineTargetsRef = useRef(new Map<string, LineTarget>());
   const markersRef = useRef<ISeriesMarkersPluginApi<Time> | null>(null);
+  const trendLinePrimitiveRef = useRef<TrendLinePrimitive | null>(null);
   const emaSeriesRef = useRef(new Map<string, ISeriesApi<"Line">>());
   const emaStateRef = useRef(new Map<string, {
     length: number;
@@ -251,14 +250,9 @@ export function ReplayChart({
   const [contextMenu, setContextMenu] = useState<ContextMenuState | null>(null);
   const [measurement, setMeasurement] = useState<MeasurementState | null>(null);
   const measurementRef = useRef<MeasurementState | null>(null);
-  const [drawingDraft, setDrawingDraft] = useState<DrawingDraft | null>(null);
   const drawingDraftRef = useRef<DrawingDraft | null>(null);
-  const [drawingDraftCoordinate, setDrawingDraftCoordinate] = useState<{ start: { x: number; y: number }; end: { x: number; y: number } } | null>(null);
-  const drawingDraftCoordinateRef = useRef<typeof drawingDraftCoordinate>(null);
-  const [drawingPreview, setDrawingPreview] = useState<{ id: string; geometry: TrendLineGeometry } | null>(null);
+  const drawingDraftCoordinateRef = useRef<DrawingSegmentCoordinate | null>(null);
   const drawingPreviewRef = useRef<{ id: string; geometry: TrendLineGeometry } | null>(null);
-  const [drawingCoordinates, setDrawingCoordinates] = useState<DrawingCoordinate[]>([]);
-  const drawingCoordinatesRef = useRef<DrawingCoordinate[]>([]);
   const [draft, setDraft] = useState<DraftOrder | null>(null);
   const [defaultRiskAmount, setDefaultRiskAmount] = useState<number | null>(null);
   const [defaultTargetR, setDefaultTargetR] = useState(2);
@@ -290,8 +284,6 @@ export function ReplayChart({
   useEffect(() => { onDeleteTrendLineRef.current = onDeleteTrendLine; }, [onDeleteTrendLine]);
   useEffect(() => { onOpenTrendLineStyleRef.current = onOpenTrendLineStyle; }, [onOpenTrendLineStyle]);
   useEffect(() => { displayIntervalSecondsRef.current = displayIntervalSeconds; }, [displayIntervalSeconds]);
-  useEffect(() => { drawingDraftRef.current = drawingDraft; }, [drawingDraft]);
-  useEffect(() => { drawingPreviewRef.current = drawingPreview; }, [drawingPreview]);
   useEffect(() => { displayUtcOffsetRef.current = displayUtcOffsetMinutes; }, [displayUtcOffsetMinutes]);
   useEffect(() => { onOrderPriceChangeRef.current = onOrderPriceChange; }, [onOrderPriceChange]);
 
@@ -309,51 +301,17 @@ export function ReplayChart({
     });
   }, []);
 
-  const syncDrawingCoordinates = useCallback(() => {
-    const chart = chartRef.current;
-    const series = candleRef.current;
-    if (!chart || !series) return;
-    const currentBars = barsRef.current;
-    const interval = displayIntervalSecondsRef.current;
-    const preview = drawingPreviewRef.current;
-    const next = drawingsRef.current.flatMap((drawing) => {
-      const geometry = preview?.id === drawing.id ? preview.geometry : drawing.geometry;
-      const startIndex = logicalIndexForAnchor(geometry.start, currentBars, interval);
-      const endIndex = logicalIndexForAnchor(geometry.end, currentBars, interval);
-      if (startIndex === null || endIndex === null) return [];
-      const startX = chart.timeScale().logicalToCoordinate(startIndex as never);
-      const endX = chart.timeScale().logicalToCoordinate(endIndex as never);
-      const startY = series.priceToCoordinate(geometry.start.price);
-      const endY = series.priceToCoordinate(geometry.end.price);
-      if (startX === null || endX === null || startY === null || endY === null) return [];
-      return [{
-        drawing: preview?.id === drawing.id ? { ...drawing, geometry } : drawing,
-        start: { x: Number(startX), y: Number(startY) },
-        end: { x: Number(endX), y: Number(endY) },
-      }];
+  const syncDrawingPrimitive = useCallback(() => {
+    trendLinePrimitiveRef.current?.setDrawings({
+      drawings: drawingsRef.current,
+      selectedDrawingId: selectedDrawingIdRef.current,
+      preview: drawingPreviewRef.current,
+      draft: drawingDraftRef.current,
+      bars: barsRef.current,
+      displayIntervalSeconds: displayIntervalSecondsRef.current,
+      priceTickSize,
     });
-    drawingCoordinatesRef.current = next;
-    setDrawingCoordinates(next);
-    const draft = drawingDraftRef.current;
-    if (draft) {
-      const startIndex = logicalIndexForAnchor(draft.start, currentBars, interval);
-      const endIndex = logicalIndexForAnchor(draft.end, currentBars, interval);
-      if (startIndex !== null && endIndex !== null) {
-        const startX = chart.timeScale().logicalToCoordinate(startIndex as never);
-        const endX = chart.timeScale().logicalToCoordinate(endIndex as never);
-        const startY = series.priceToCoordinate(draft.start.price);
-        const endY = series.priceToCoordinate(draft.end.price);
-        if (startX !== null && endX !== null && startY !== null && endY !== null) {
-          const coordinate = {
-            start: { x: Number(startX), y: Number(startY) },
-            end: { x: Number(endX), y: Number(endY) },
-          };
-          drawingDraftCoordinateRef.current = coordinate;
-          setDrawingDraftCoordinate(coordinate);
-        }
-      }
-    }
-  }, []);
+  }, [priceTickSize]);
 
   const setChartCursor = useCallback((cursor: "" | "crosshair" | "ns-resize" | "move" | "pointer") => {
     const container = containerRef.current;
@@ -363,8 +321,8 @@ export function ReplayChart({
   }, []);
 
   useEffect(() => {
-    requestAnimationFrame(syncDrawingCoordinates);
-  }, [drawings, syncDrawingCoordinates]);
+    requestAnimationFrame(syncDrawingPrimitive);
+  }, [drawings, selectedDrawingId, syncDrawingPrimitive]);
 
   const syncMeasurementCoordinates = useCallback(() => {
     const chart = chartRef.current;
@@ -482,6 +440,8 @@ export function ReplayChart({
       upColor: "#16a34a", downColor: "#dc2626", wickUpColor: "#16a34a", wickDownColor: "#dc2626", borderVisible: true,
       priceFormat: { type: "price", minMove: priceTickSize, precision: priceDecimalsForTick(priceTickSize) },
     });
+    const trendLinePrimitive = new TrendLinePrimitive();
+    candles.attachPrimitive(trendLinePrimitive);
     let volumes: ISeriesApi<"Histogram"> | null = null;
     if (hasVolume) {
       const pane = chart.addPane();
@@ -493,24 +453,25 @@ export function ReplayChart({
         chart.applyOptions({ width: entry.contentRect.width, height: entry.contentRect.height });
         syncLineActionCoordinates();
         syncMeasurementCoordinates();
-        syncDrawingCoordinates();
       }
     });
     observer.observe(container);
     chart.timeScale().subscribeVisibleLogicalRangeChange(syncLineActionCoordinates);
     chart.timeScale().subscribeVisibleLogicalRangeChange(syncMeasurementCoordinates);
-    chart.timeScale().subscribeVisibleLogicalRangeChange(syncDrawingCoordinates);
     chartRef.current = chart; candleRef.current = candles; volumeRef.current = volumes;
+    trendLinePrimitiveRef.current = trendLinePrimitive;
+    syncDrawingPrimitive();
     markersRef.current = createSeriesMarkers(candles, []);
     return () => {
       observer.disconnect();
       chart.timeScale().unsubscribeVisibleLogicalRangeChange(syncLineActionCoordinates);
       chart.timeScale().unsubscribeVisibleLogicalRangeChange(syncMeasurementCoordinates);
-      chart.timeScale().unsubscribeVisibleLogicalRangeChange(syncDrawingCoordinates);
+      candles.detachPrimitive(trendLinePrimitive);
+      trendLinePrimitiveRef.current = null;
       chart.remove(); chartRef.current = null; candleRef.current = null; volumeRef.current = null;
       markersRef.current = null; priceLines.clear(); lineTargets.clear(); emaSeries.clear(); emaStates.clear(); lastDataRef.current = [];
     };
-  }, [hasVolume, priceTickSize, syncDrawingCoordinates, syncLineActionCoordinates, syncMeasurementCoordinates]);
+  }, [hasVolume, priceTickSize, syncDrawingPrimitive, syncLineActionCoordinates, syncMeasurementCoordinates]);
 
   useEffect(() => {
     displayUtcOffsetRef.current = displayUtcOffsetMinutes;
@@ -527,8 +488,8 @@ export function ReplayChart({
 
   useEffect(() => {
     displayIntervalSecondsRef.current = displayIntervalSeconds;
-    requestAnimationFrame(syncDrawingCoordinates);
-  }, [displayIntervalSeconds, syncDrawingCoordinates]);
+    requestAnimationFrame(syncDrawingPrimitive);
+  }, [displayIntervalSeconds, syncDrawingPrimitive]);
 
   useEffect(() => {
     const chart = chartRef.current; const series = candleRef.current;
@@ -563,8 +524,8 @@ export function ReplayChart({
     }
     lastDataRef.current = next.map((bar) => ({ ...bar }));
     requestAnimationFrame(syncMeasurementCoordinates);
-    requestAnimationFrame(syncDrawingCoordinates);
-  }, [bars, syncDrawingCoordinates, syncMeasurementCoordinates]);
+    requestAnimationFrame(syncDrawingPrimitive);
+  }, [bars, syncDrawingPrimitive, syncMeasurementCoordinates]);
 
   useEffect(() => {
     const chart = chartRef.current;
@@ -766,16 +727,14 @@ export function ReplayChart({
       const rect = container.getBoundingClientRect();
       return pointAtCoordinate(clientX - rect.left, clientY - rect.top, requireInside);
     };
-    const commitDraft = (next: DrawingDraft | null, coordinate: typeof drawingDraftCoordinate) => {
+    const commitDraft = (next: DrawingDraft | null, coordinate: DrawingSegmentCoordinate | null) => {
       drawingDraftRef.current = next;
       drawingDraftCoordinateRef.current = coordinate;
-      setDrawingDraft(next);
-      setDrawingDraftCoordinate(coordinate);
+      syncDrawingPrimitive();
     };
-    const commitPreview = (next: typeof drawingPreview) => {
+    const commitPreview = (next: { id: string; geometry: TrendLineGeometry } | null) => {
       drawingPreviewRef.current = next;
-      setDrawingPreview(next);
-      requestAnimationFrame(syncDrawingCoordinates);
+      syncDrawingPrimitive();
     };
     const stopEvent = (event: Event) => {
       event.preventDefault();
@@ -784,7 +743,7 @@ export function ReplayChart({
     };
 
     const down = (event: PointerEvent) => {
-      if (event.pointerType !== "mouse" || event.button !== 0 || !container.contains(event.target as Node)) return;
+      if (event.pointerType !== "mouse" || event.button !== 0 || !interaction.contains(event.target as Node)) return;
       const target = event.target as HTMLElement;
       if (target.closest("button,input,[data-context-menu],[data-order-ticket],[data-line-action]")) return;
 
@@ -820,21 +779,25 @@ export function ReplayChart({
         return;
       }
 
-      const hit = target.closest<SVGElement>("[data-drawing-id]");
-      const id = hit?.dataset.drawingId;
-      if (!id) {
+      const rect = container.getBoundingClientRect();
+      const hit = trendLinePrimitiveRef.current?.hitTestAt({
+        x: event.clientX - rect.left,
+        y: event.clientY - rect.top,
+      });
+      if (!hit) {
         if (!event.shiftKey) onSelectedDrawingIdChangeRef.current(null);
         return;
       }
+      const id = hit.drawingId;
       const drawing = drawingsRef.current.find((item) => item.id === id);
-      const coordinate = drawingCoordinatesRef.current.find((item) => item.drawing.id === id);
+      const coordinate = trendLinePrimitiveRef.current?.getDrawingCoordinates(id);
       if (!drawing || !coordinate || id.startsWith("temporary-")) return;
       stopEvent(event);
       onSelectedDrawingIdChangeRef.current(id);
       selectedDrawingIdRef.current = id;
       dragging = {
         id,
-        kind: hit.dataset.drawingHandle === "start" ? "start" : hit.dataset.drawingHandle === "end" ? "end" : "line",
+        kind: hit.part,
         clientX: event.clientX,
         clientY: event.clientY,
         geometry: drawing.geometry,
@@ -842,6 +805,7 @@ export function ReplayChart({
         end: coordinate.end,
       };
       interaction.setPointerCapture(event.pointerId);
+      chart.applyOptions({ handleScroll: false });
       setChartCursor(dragging.kind === "line" ? "move" : "crosshair");
     };
 
@@ -900,16 +864,21 @@ export function ReplayChart({
       dragging = null;
       requestAnimationFrame(() => commitPreview(null));
       if (interaction.hasPointerCapture(event.pointerId)) interaction.releasePointerCapture(event.pointerId);
+      chart.applyOptions({ handleScroll: true });
       setChartCursor("");
     };
     const cancelDrag = () => {
       dragging = null;
       commitPreview(null);
+      chart.applyOptions({ handleScroll: true });
       setChartCursor(drawingToolRef.current ? "crosshair" : "");
     };
     const doubleClick = (event: MouseEvent) => {
-      const target = event.target as HTMLElement;
-      const id = target.closest<SVGElement>("[data-drawing-id]")?.dataset.drawingId;
+      const rect = container.getBoundingClientRect();
+      const id = trendLinePrimitiveRef.current?.hitTestAt({
+        x: event.clientX - rect.left,
+        y: event.clientY - rect.top,
+      })?.drawingId;
       if (!id || id.startsWith("temporary-")) return;
       stopEvent(event);
       onOpenTrendLineStyleRef.current(id);
@@ -956,7 +925,7 @@ export function ReplayChart({
       interaction.removeEventListener("dblclick", doubleClick, true);
       window.removeEventListener("keydown", key, true);
     };
-  }, [priceTickSize, setChartCursor, syncDrawingCoordinates]);
+  }, [priceTickSize, setChartCursor, syncDrawingPrimitive]);
 
   useEffect(() => {
     if (drawingTool) {
@@ -966,34 +935,10 @@ export function ReplayChart({
     if (drawingDraftRef.current) {
       drawingDraftRef.current = null;
       drawingDraftCoordinateRef.current = null;
-      setDrawingDraft(null);
-      setDrawingDraftCoordinate(null);
+      syncDrawingPrimitive();
     }
     if (!measurementRef.current) setChartCursor("");
-  }, [drawingTool, setChartCursor]);
-
-  useEffect(() => {
-    const interaction = interactionRef.current;
-    if (!interaction) return;
-    let frame: number | null = null;
-    const schedule = () => {
-      if (!drawingsRef.current.length && !drawingDraftRef.current) return;
-      if (frame !== null) cancelAnimationFrame(frame);
-      frame = requestAnimationFrame(() => {
-        frame = null;
-        syncDrawingCoordinates();
-      });
-    };
-    interaction.addEventListener("wheel", schedule);
-    interaction.addEventListener("pointermove", schedule);
-    interaction.addEventListener("pointerup", schedule);
-    return () => {
-      interaction.removeEventListener("wheel", schedule);
-      interaction.removeEventListener("pointermove", schedule);
-      interaction.removeEventListener("pointerup", schedule);
-      if (frame !== null) cancelAnimationFrame(frame);
-    };
-  }, [syncDrawingCoordinates]);
+  }, [drawingTool, setChartCursor, syncDrawingPrimitive]);
 
   useEffect(() => {
     const container = containerRef.current;
@@ -1302,7 +1247,7 @@ export function ReplayChart({
     volumeRef.current?.priceScale().applyOptions({ autoScale: true });
     setContextMenu(null);
     requestAnimationFrame(syncLineActionCoordinates);
-    requestAnimationFrame(syncDrawingCoordinates);
+    requestAnimationFrame(() => trendLinePrimitiveRef.current?.requestRedraw());
   }
 
   function createDraft(side: PaperSide, type: "LIMIT" | "STOP") {
@@ -1395,13 +1340,6 @@ export function ReplayChart({
     if (top + labelHeight > measurement.paneHeight - 8) top = measurement.end.y - labelHeight - gap;
     return Math.max(8, Math.min(top, Math.max(8, measurement.paneHeight - labelHeight - 8)));
   })();
-  const drawingPaneWidth = chartRef.current?.timeScale().width() ?? 0;
-  const drawingPaneHeight = chartRef.current?.panes()[0]?.getHeight() ?? 0;
-  const drawingPriceLabelStyle = (point: { x: number; y: number }) => ({
-    left: Math.max(6, Math.min(point.x + 7, Math.max(6, drawingPaneWidth - 92))),
-    top: Math.max(4, Math.min(point.y - 12, Math.max(4, drawingPaneHeight - 26))),
-  });
-
   return (
     <div
       ref={interactionRef}
@@ -1412,120 +1350,6 @@ export function ReplayChart({
       }}
     >
       <div ref={containerRef} className="h-full min-h-[240px] w-full overflow-hidden bg-white" aria-label={copy.marketReplay.chartAriaLabel} />
-
-      {(drawingCoordinates.length > 0 || drawingDraftCoordinate) && drawingPaneWidth > 0 && drawingPaneHeight > 0 ? (
-        <div
-          data-testid="chart-drawings"
-          className="pointer-events-none absolute left-0 top-0 z-[15] overflow-hidden"
-          style={{ width: drawingPaneWidth, height: drawingPaneHeight }}
-        >
-          <svg
-            aria-label={copy.marketReplay.drawingObjects}
-            className="absolute inset-0"
-            width={drawingPaneWidth}
-            height={drawingPaneHeight}
-            viewBox={`0 0 ${drawingPaneWidth} ${drawingPaneHeight}`}
-          >
-            {drawingCoordinates.map(({ drawing, start, end }) => {
-              const selected = selectedDrawingId === drawing.id;
-              const opacity = drawing.style.opacity / 100;
-              const dash = trendLineDashArray(drawing.style.lineStyle);
-              return (
-                <g key={drawing.id}>
-                  {selected ? (
-                    <line
-                      x1={start.x}
-                      y1={start.y}
-                      x2={end.x}
-                      y2={end.y}
-                      stroke="#fff"
-                      strokeWidth={drawing.style.width + 3}
-                      opacity={0.9}
-                    />
-                  ) : null}
-                  <line
-                    x1={start.x}
-                    y1={start.y}
-                    x2={end.x}
-                    y2={end.y}
-                    stroke={drawing.style.color}
-                    strokeWidth={drawing.style.width}
-                    strokeDasharray={dash}
-                    strokeLinecap="round"
-                    opacity={opacity}
-                  />
-                  <line
-                    data-drawing-id={drawing.id}
-                    x1={start.x}
-                    y1={start.y}
-                    x2={end.x}
-                    y2={end.y}
-                    stroke="transparent"
-                    strokeWidth="12"
-                    strokeLinecap="round"
-                    className="pointer-events-auto cursor-move"
-                  />
-                  {selected ? (
-                    <>
-                      <circle
-                        data-drawing-id={drawing.id}
-                        data-drawing-handle="start"
-                        cx={start.x}
-                        cy={start.y}
-                        r="5"
-                        fill="#fff"
-                        stroke={drawing.style.color}
-                        strokeWidth="2"
-                        className="pointer-events-auto cursor-crosshair"
-                      />
-                      <circle
-                        data-drawing-id={drawing.id}
-                        data-drawing-handle="end"
-                        cx={end.x}
-                        cy={end.y}
-                        r="5"
-                        fill="#fff"
-                        stroke={drawing.style.color}
-                        strokeWidth="2"
-                        className="pointer-events-auto cursor-crosshair"
-                      />
-                    </>
-                  ) : null}
-                </g>
-              );
-            })}
-            {drawingDraftCoordinate ? (
-              <line
-                x1={drawingDraftCoordinate.start.x}
-                y1={drawingDraftCoordinate.start.y}
-                x2={drawingDraftCoordinate.end.x}
-                y2={drawingDraftCoordinate.end.y}
-                stroke="#2962FF"
-                strokeWidth="2"
-                strokeLinecap="round"
-              />
-            ) : null}
-          </svg>
-          {drawingCoordinates.flatMap(({ drawing, start, end }) => {
-            const labels: Array<{ key: string; point: { x: number; y: number }; price: number }> = [];
-            if (drawing.style.showStartPrice) labels.push({ key: `${drawing.id}:start`, point: start, price: drawing.geometry.start.price });
-            if (drawing.style.showEndPrice) labels.push({ key: `${drawing.id}:end`, point: end, price: drawing.geometry.end.price });
-            return labels.map((label) => (
-              <div
-                key={label.key}
-                className="absolute rounded px-1.5 py-0.5 font-mono text-[10px] font-semibold text-white shadow-sm"
-                style={{
-                  ...drawingPriceLabelStyle(label.point),
-                  backgroundColor: drawing.style.color,
-                  opacity: drawing.style.opacity / 100,
-                }}
-              >
-                {formatPriceForTick(label.price, priceTickSize)}
-              </div>
-            ));
-          })}
-        </div>
-      ) : null}
 
       {measurement ? (
         <div

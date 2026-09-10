@@ -34,6 +34,17 @@ export type TrendLineDrawing = {
   updatedAt: string;
 };
 
+export type TrendLineTemplate = {
+  id: string;
+  name: string;
+  style: TrendLineStyle;
+};
+
+export type TrendLinePreferences = {
+  defaultStyle: TrendLineStyle;
+  templates: TrendLineTemplate[];
+};
+
 export const DEFAULT_TREND_LINE_STYLE: TrendLineStyle = {
   color: "#2962FF",
   opacity: 100,
@@ -62,6 +73,15 @@ export const trendLineStyleSchema = z.object({
   lineStyle: z.enum(TREND_LINE_STYLES),
   showStartPrice: z.boolean(),
   showEndPrice: z.boolean(),
+}).strict();
+
+export const trendLinePreferencesSchema = z.object({
+  defaultStyle: trendLineStyleSchema,
+  templates: z.array(z.object({
+    id: z.string().min(1),
+    name: z.string().trim().min(1).max(50),
+    style: trendLineStyleSchema,
+  }).strict()).max(50),
 }).strict();
 
 export const createMarketDrawingSchema = z.object({
@@ -96,6 +116,17 @@ export function serializeMarketDrawing(record: StoredDrawing): TrendLineDrawing 
     createdAt: record.createdAt.toISOString(),
     updatedAt: record.updatedAt.toISOString(),
   };
+}
+
+export function parseTrendLinePreferences(value: string | null): TrendLinePreferences {
+  if (!value) return { defaultStyle: DEFAULT_TREND_LINE_STYLE, templates: [] };
+  try {
+    const parsed = trendLinePreferencesSchema.safeParse(JSON.parse(value));
+    if (parsed.success) return parsed.data;
+  } catch {
+    // Invalid browser storage falls back to the default drawing style.
+  }
+  return { defaultStyle: DEFAULT_TREND_LINE_STYLE, templates: [] };
 }
 
 export function anchorForLogicalIndex({
@@ -183,4 +214,10 @@ export function trendLineDashArray(style: TrendLineStyle["lineStyle"]) {
   if (style === "DASHED") return "8 6";
   if (style === "DOTTED") return "2 5";
   return undefined;
+}
+
+export function trendLineCanvasDashArray(style: TrendLineStyle["lineStyle"]) {
+  if (style === "DASHED") return [8, 6];
+  if (style === "DOTTED") return [2, 5];
+  return [];
 }

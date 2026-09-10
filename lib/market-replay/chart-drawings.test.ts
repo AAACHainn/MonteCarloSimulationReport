@@ -4,7 +4,9 @@ import {
   createMarketDrawingSchema,
   distanceToSegment,
   logicalIndexForAnchor,
+  parseTrendLinePreferences,
   snapScreenPointTo45,
+  trendLineCanvasDashArray,
   trendLineDashArray,
 } from "@/lib/market-replay/chart-drawings";
 import type { AggregatedMarketBarData } from "@/lib/market-replay/types";
@@ -79,5 +81,38 @@ describe("chart drawing geometry", () => {
     expect(trendLineDashArray("SOLID")).toBeUndefined();
     expect(trendLineDashArray("DASHED")).toBe("8 6");
     expect(trendLineDashArray("DOTTED")).toBe("2 5");
+    expect(trendLineCanvasDashArray("SOLID")).toEqual([]);
+    expect(trendLineCanvasDashArray("DASHED")).toEqual([8, 6]);
+    expect(trendLineCanvasDashArray("DOTTED")).toEqual([2, 5]);
+  });
+
+  it("loads valid template preferences and falls back from invalid storage", () => {
+    const stored = {
+      defaultStyle: {
+        color: "#F23645",
+        opacity: 60,
+        width: 3,
+        lineStyle: "DOTTED",
+        showStartPrice: true,
+        showEndPrice: false,
+      },
+      templates: [{
+        id: "template-1",
+        name: "回调线",
+        style: {
+          color: "#2962FF",
+          opacity: 100,
+          width: 2,
+          lineStyle: "SOLID",
+          showStartPrice: false,
+          showEndPrice: false,
+        },
+      }],
+    };
+    expect(parseTrendLinePreferences(JSON.stringify(stored))).toEqual(stored);
+    expect(parseTrendLinePreferences("{broken")).toMatchObject({
+      defaultStyle: { color: "#2962FF", width: 2 },
+      templates: [],
+    });
   });
 });
