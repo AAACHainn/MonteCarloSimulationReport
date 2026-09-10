@@ -15,9 +15,14 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { calculateEmaSeries, nextEma } from "@/lib/market-replay/ema";
+import { emaSeriesStyleOptions } from "@/lib/market-replay/ema-style";
 import type { AggregatedMarketBarData, EmaIndicatorConfig } from "@/lib/market-replay/types";
 import { copy } from "@/lib/i18n";
 import { defaultReplayLogicalRange, rangeAfterNewReplayBar } from "@/lib/market-replay/chart-range";
+import {
+  candlestickSeriesStyleOptions,
+  type CandlestickStyle,
+} from "@/lib/market-replay/candlestick-style";
 import {
   calculateChartMeasurement,
   measurementDurationParts,
@@ -25,12 +30,19 @@ import {
 } from "@/lib/market-replay/chart-measurement";
 import {
   anchorForLogicalIndex,
+  DRAWING_TYPE_FIB_RETRACEMENT,
+  DRAWING_TYPE_TREND_LINE,
   snapScreenPointTo45,
   type DrawingAnchor,
+  type DrawingTool,
+  type FibonacciRetracementDrawing,
+  type FibonacciRetracementStyle,
+  type MarketDrawing,
   type TrendLineDrawing,
   type TrendLineGeometry,
 } from "@/lib/market-replay/chart-drawings";
 import { TrendLinePrimitive } from "@/lib/market-replay/trend-line-primitive";
+import { FibonacciRetracementPrimitive } from "@/lib/market-replay/fibonacci-retracement-primitive";
 import { formatUtcDateTime, utcDateParts } from "@/lib/market-replay/display-timezone";
 import { formatPriceForTick, priceDecimalsForTick, snapPriceToTick } from "@/lib/market-replay/price-ticks";
 import {
@@ -183,9 +195,10 @@ function orderTypeLabel(type: "LIMIT" | "STOP") {
 
 export function ReplayChart({
   datasetId, priceTickSize, bars, warmupBars, displayUtcOffsetMinutes, displayIntervalSeconds, measurementArmed,
-  onMeasurementArmedChange, drawingTool, onDrawingToolChange, drawings, selectedDrawingId,
-  onSelectedDrawingIdChange, onCreateTrendLine, onUpdateTrendLine, onDeleteTrendLine,
-  onOpenTrendLineStyle, emaEnabled, emaIndicators, paperSnapshot,
+  candlestickStyle,
+  onMeasurementArmedChange, drawingTool, onDrawingToolChange, trendLineDraftStyle, fibonacciDraftStyle, drawings, selectedDrawingId,
+  onSelectedDrawingIdChange, onCreateDrawing, onUpdateDrawing, onDeleteDrawing,
+  onOpenDrawingStyle, emaEnabled, emaIndicators, paperSnapshot,
   paperBusy, paperError, onSubmitOrder, onOrderPriceChange,
   onCancelOrder, onClosePosition, onDraftActiveChange, onOpenPaperAccount,
 }: {
@@ -196,16 +209,19 @@ export function ReplayChart({
   displayUtcOffsetMinutes: number;
   displayIntervalSeconds: number;
   measurementArmed: boolean;
+  candlestickStyle: CandlestickStyle;
   onMeasurementArmedChange: (armed: boolean) => void;
-  drawingTool: "TREND_LINE" | null;
-  onDrawingToolChange: (tool: "TREND_LINE" | null) => void;
-  drawings: TrendLineDrawing[];
+  drawingTool: DrawingTool | null;
+  onDrawingToolChange: (tool: DrawingTool | null) => void;
+  trendLineDraftStyle: TrendLineDrawing["style"];
+  fibonacciDraftStyle: FibonacciRetracementStyle;
+  drawings: MarketDrawing[];
   selectedDrawingId: string | null;
   onSelectedDrawingIdChange: (id: string | null) => void;
-  onCreateTrendLine: (geometry: TrendLineGeometry) => void;
-  onUpdateTrendLine: (id: string, geometry: TrendLineGeometry) => void;
-  onDeleteTrendLine: (id: string) => void;
-  onOpenTrendLineStyle: (id: string) => void;
+  onCreateDrawing: (type: DrawingTool, geometry: TrendLineGeometry) => void;
+  onUpdateDrawing: (id: string, geometry: TrendLineGeometry) => void;
+  onDeleteDrawing: (id: string) => void;
+  onOpenDrawingStyle: (id: string) => void;
   emaEnabled: boolean;
   emaIndicators: EmaIndicatorConfig[];
   paperSnapshot: PaperSessionSnapshot | null;
@@ -227,6 +243,7 @@ export function ReplayChart({
   const lineTargetsRef = useRef(new Map<string, LineTarget>());
   const markersRef = useRef<ISeriesMarkersPluginApi<Time> | null>(null);
   const trendLinePrimitiveRef = useRef<TrendLinePrimitive | null>(null);
+  const fibonacciPrimitiveRef = useRef<FibonacciRetracementPrimitive | null>(null);
   const emaSeriesRef = useRef(new Map<string, ISeriesApi<"Line">>());
   const emaStateRef = useRef(new Map<string, {
     length: number;
@@ -235,6 +252,8 @@ export function ReplayChart({
   }>());
   const lastDataRef = useRef<AggregatedMarketBarData[]>([]);
   const barsRef = useRef(bars);
+  const candlestickStyleRef = useRef(candlestickStyle);
+  candlestickStyleRef.current = candlestickStyle;
   const measurementArmedRef = useRef(measurementArmed);
   const onMeasurementArmedChangeRef = useRef(onMeasurementArmedChange);
   const drawingToolRef = useRef(drawingTool);
@@ -242,10 +261,10 @@ export function ReplayChart({
   const selectedDrawingIdRef = useRef(selectedDrawingId);
   const onDrawingToolChangeRef = useRef(onDrawingToolChange);
   const onSelectedDrawingIdChangeRef = useRef(onSelectedDrawingIdChange);
-  const onCreateTrendLineRef = useRef(onCreateTrendLine);
-  const onUpdateTrendLineRef = useRef(onUpdateTrendLine);
-  const onDeleteTrendLineRef = useRef(onDeleteTrendLine);
-  const onOpenTrendLineStyleRef = useRef(onOpenTrendLineStyle);
+  const onCreateDrawingRef = useRef(onCreateDrawing);
+  const onUpdateDrawingRef = useRef(onUpdateDrawing);
+  const onDeleteDrawingRef = useRef(onDeleteDrawing);
+  const onOpenDrawingStyleRef = useRef(onOpenDrawingStyle);
   const displayIntervalSecondsRef = useRef(displayIntervalSeconds);
   const [contextMenu, setContextMenu] = useState<ContextMenuState | null>(null);
   const [measurement, setMeasurement] = useState<MeasurementState | null>(null);
@@ -279,10 +298,10 @@ export function ReplayChart({
   useEffect(() => { selectedDrawingIdRef.current = selectedDrawingId; }, [selectedDrawingId]);
   useEffect(() => { onDrawingToolChangeRef.current = onDrawingToolChange; }, [onDrawingToolChange]);
   useEffect(() => { onSelectedDrawingIdChangeRef.current = onSelectedDrawingIdChange; }, [onSelectedDrawingIdChange]);
-  useEffect(() => { onCreateTrendLineRef.current = onCreateTrendLine; }, [onCreateTrendLine]);
-  useEffect(() => { onUpdateTrendLineRef.current = onUpdateTrendLine; }, [onUpdateTrendLine]);
-  useEffect(() => { onDeleteTrendLineRef.current = onDeleteTrendLine; }, [onDeleteTrendLine]);
-  useEffect(() => { onOpenTrendLineStyleRef.current = onOpenTrendLineStyle; }, [onOpenTrendLineStyle]);
+  useEffect(() => { onCreateDrawingRef.current = onCreateDrawing; }, [onCreateDrawing]);
+  useEffect(() => { onUpdateDrawingRef.current = onUpdateDrawing; }, [onUpdateDrawing]);
+  useEffect(() => { onDeleteDrawingRef.current = onDeleteDrawing; }, [onDeleteDrawing]);
+  useEffect(() => { onOpenDrawingStyleRef.current = onOpenDrawingStyle; }, [onOpenDrawingStyle]);
   useEffect(() => { displayIntervalSecondsRef.current = displayIntervalSeconds; }, [displayIntervalSeconds]);
   useEffect(() => { displayUtcOffsetRef.current = displayUtcOffsetMinutes; }, [displayUtcOffsetMinutes]);
   useEffect(() => { onOrderPriceChangeRef.current = onOrderPriceChange; }, [onOrderPriceChange]);
@@ -303,15 +322,26 @@ export function ReplayChart({
 
   const syncDrawingPrimitive = useCallback(() => {
     trendLinePrimitiveRef.current?.setDrawings({
-      drawings: drawingsRef.current,
+      drawings: drawingsRef.current.filter((drawing): drawing is TrendLineDrawing => drawing.type === DRAWING_TYPE_TREND_LINE),
       selectedDrawingId: selectedDrawingIdRef.current,
       preview: drawingPreviewRef.current,
-      draft: drawingDraftRef.current,
+      draft: drawingToolRef.current === DRAWING_TYPE_TREND_LINE ? drawingDraftRef.current : null,
+      draftStyle: trendLineDraftStyle,
       bars: barsRef.current,
       displayIntervalSeconds: displayIntervalSecondsRef.current,
       priceTickSize,
     });
-  }, [priceTickSize]);
+    fibonacciPrimitiveRef.current?.setDrawings({
+      drawings: drawingsRef.current.filter((drawing): drawing is FibonacciRetracementDrawing => drawing.type === DRAWING_TYPE_FIB_RETRACEMENT),
+      selectedDrawingId: selectedDrawingIdRef.current,
+      preview: drawingPreviewRef.current,
+      draft: drawingToolRef.current === DRAWING_TYPE_FIB_RETRACEMENT ? drawingDraftRef.current : null,
+      draftStyle: fibonacciDraftStyle,
+      bars: barsRef.current,
+      displayIntervalSeconds: displayIntervalSecondsRef.current,
+      priceTickSize,
+    });
+  }, [fibonacciDraftStyle, priceTickSize, trendLineDraftStyle]);
 
   const setChartCursor = useCallback((cursor: "" | "crosshair" | "ns-resize" | "move" | "pointer") => {
     const container = containerRef.current;
@@ -437,11 +467,13 @@ export function ReplayChart({
       rightPriceScale: { borderColor: "#e2e8f0" },
     });
     const candles = chart.addSeries(CandlestickSeries, {
-      upColor: "#16a34a", downColor: "#dc2626", wickUpColor: "#16a34a", wickDownColor: "#dc2626", borderVisible: true,
+      ...candlestickSeriesStyleOptions(candlestickStyleRef.current),
       priceFormat: { type: "price", minMove: priceTickSize, precision: priceDecimalsForTick(priceTickSize) },
     });
     const trendLinePrimitive = new TrendLinePrimitive();
+    const fibonacciPrimitive = new FibonacciRetracementPrimitive();
     candles.attachPrimitive(trendLinePrimitive);
+    candles.attachPrimitive(fibonacciPrimitive);
     let volumes: ISeriesApi<"Histogram"> | null = null;
     if (hasVolume) {
       const pane = chart.addPane();
@@ -460,6 +492,7 @@ export function ReplayChart({
     chart.timeScale().subscribeVisibleLogicalRangeChange(syncMeasurementCoordinates);
     chartRef.current = chart; candleRef.current = candles; volumeRef.current = volumes;
     trendLinePrimitiveRef.current = trendLinePrimitive;
+    fibonacciPrimitiveRef.current = fibonacciPrimitive;
     syncDrawingPrimitive();
     markersRef.current = createSeriesMarkers(candles, []);
     return () => {
@@ -467,11 +500,17 @@ export function ReplayChart({
       chart.timeScale().unsubscribeVisibleLogicalRangeChange(syncLineActionCoordinates);
       chart.timeScale().unsubscribeVisibleLogicalRangeChange(syncMeasurementCoordinates);
       candles.detachPrimitive(trendLinePrimitive);
+      candles.detachPrimitive(fibonacciPrimitive);
       trendLinePrimitiveRef.current = null;
+      fibonacciPrimitiveRef.current = null;
       chart.remove(); chartRef.current = null; candleRef.current = null; volumeRef.current = null;
       markersRef.current = null; priceLines.clear(); lineTargets.clear(); emaSeries.clear(); emaStates.clear(); lastDataRef.current = [];
     };
   }, [hasVolume, priceTickSize, syncDrawingPrimitive, syncLineActionCoordinates, syncMeasurementCoordinates]);
+
+  useEffect(() => {
+    candleRef.current?.applyOptions(candlestickSeriesStyleOptions(candlestickStyle));
+  }, [candlestickStyle]);
 
   useEffect(() => {
     displayUtcOffsetRef.current = displayUtcOffsetMinutes;
@@ -543,10 +582,18 @@ export function ReplayChart({
     for (const indicator of active) {
       let series = emaSeriesRef.current.get(indicator.id);
       if (!series) {
-        series = chart.addSeries(LineSeries, { color: indicator.color, title: copy.marketReplay.emaLine(indicator.length), lineWidth: 2, priceLineVisible: false, crosshairMarkerVisible: false });
+        series = chart.addSeries(LineSeries, {
+          ...emaSeriesStyleOptions(indicator),
+          title: copy.marketReplay.emaLine(indicator.length),
+          priceLineVisible: false,
+          crosshairMarkerVisible: false,
+        });
         emaSeriesRef.current.set(indicator.id, series);
       }
-      series.applyOptions({ color: indicator.color, title: copy.marketReplay.emaLine(indicator.length) });
+      series.applyOptions({
+        ...emaSeriesStyleOptions(indicator),
+        title: copy.marketReplay.emaLine(indicator.length),
+      });
       const previous = emaStateRef.current.get(indicator.id);
       const samePrefix = previous?.length === indicator.length
         && all.length >= previous.bars.length
@@ -741,13 +788,27 @@ export function ReplayChart({
       event.stopImmediatePropagation();
       setContextMenu(null);
     };
+    const hitDrawingAt = (point: { x: number; y: number }) => {
+      const trend = trendLinePrimitiveRef.current?.hitTestAt(point) ?? null;
+      const fibonacci = fibonacciPrimitiveRef.current?.hitTestAt(point) ?? null;
+      if (!trend) return fibonacci;
+      if (!fibonacci) return trend;
+      if (trend.priority !== fibonacci.priority) return trend.priority > fibonacci.priority ? trend : fibonacci;
+      return trend.distance <= fibonacci.distance ? trend : fibonacci;
+    };
+    const drawingCoordinates = (drawing: MarketDrawing) => (
+      drawing.type === DRAWING_TYPE_TREND_LINE
+        ? trendLinePrimitiveRef.current?.getDrawingCoordinates(drawing.id)
+        : fibonacciPrimitiveRef.current?.getDrawingCoordinates(drawing.id)
+    );
 
     const down = (event: PointerEvent) => {
       if (event.pointerType !== "mouse" || event.button !== 0 || !interaction.contains(event.target as Node)) return;
       const target = event.target as HTMLElement;
       if (target.closest("button,input,[data-context-menu],[data-order-ticket],[data-line-action]")) return;
 
-      if (drawingToolRef.current === "TREND_LINE") {
+      if (drawingToolRef.current) {
+        const activeTool = drawingToolRef.current;
         const initial = pointAt(event.clientX, event.clientY);
         if (!initial) return;
         stopEvent(event);
@@ -763,7 +824,7 @@ export function ReplayChart({
         }
         let end = initial;
         const draftCoordinate = drawingDraftCoordinateRef.current;
-        if (event.shiftKey && draftCoordinate) {
+        if (activeTool === DRAWING_TYPE_TREND_LINE && event.shiftKey && draftCoordinate) {
           const rect = container.getBoundingClientRect();
           const snapped = snapScreenPointTo45(draftCoordinate.start, {
             x: event.clientX - rect.left,
@@ -771,7 +832,7 @@ export function ReplayChart({
           });
           end = pointAtCoordinate(snapped.x, snapped.y, false) ?? initial;
         }
-        onCreateTrendLineRef.current({ start: current.start, end: end.anchor });
+        onCreateDrawingRef.current(activeTool, { start: current.start, end: end.anchor });
         commitDraft(null, null);
         drawingToolRef.current = null;
         onDrawingToolChangeRef.current(null);
@@ -780,7 +841,7 @@ export function ReplayChart({
       }
 
       const rect = container.getBoundingClientRect();
-      const hit = trendLinePrimitiveRef.current?.hitTestAt({
+      const hit = hitDrawingAt({
         x: event.clientX - rect.left,
         y: event.clientY - rect.top,
       });
@@ -790,7 +851,7 @@ export function ReplayChart({
       }
       const id = hit.drawingId;
       const drawing = drawingsRef.current.find((item) => item.id === id);
-      const coordinate = trendLinePrimitiveRef.current?.getDrawingCoordinates(id);
+      const coordinate = drawing ? drawingCoordinates(drawing) : null;
       if (!drawing || !coordinate || id.startsWith("temporary-")) return;
       stopEvent(event);
       onSelectedDrawingIdChangeRef.current(id);
@@ -811,12 +872,12 @@ export function ReplayChart({
 
     const move = (event: PointerEvent) => {
       const draft = drawingDraftRef.current;
-      if (drawingToolRef.current === "TREND_LINE" && draft) {
+      if (drawingToolRef.current && draft) {
         const initial = pointAt(event.clientX, event.clientY);
         if (!initial) return;
         let end = initial;
         const currentCoordinate = drawingDraftCoordinateRef.current;
-        if (event.shiftKey && currentCoordinate) {
+        if (drawingToolRef.current === DRAWING_TYPE_TREND_LINE && event.shiftKey && currentCoordinate) {
           const rect = container.getBoundingClientRect();
           const snapped = snapScreenPointTo45(currentCoordinate.start, {
             x: event.clientX - rect.left,
@@ -845,7 +906,9 @@ export function ReplayChart({
         const otherCoordinate = movingStart ? dragging.end : dragging.start;
         const rect = container.getBoundingClientRect();
         let coordinate = { x: event.clientX - rect.left, y: event.clientY - rect.top };
-        if (event.shiftKey) coordinate = snapScreenPointTo45(otherCoordinate, coordinate);
+        if (dragging && drawingsRef.current.find((item) => item.id === dragging!.id)?.type === DRAWING_TYPE_TREND_LINE && event.shiftKey) {
+          coordinate = snapScreenPointTo45(otherCoordinate, coordinate);
+        }
         const point = pointAtCoordinate(coordinate.x, coordinate.y, false);
         if (point) {
           geometry = movingStart
@@ -860,7 +923,7 @@ export function ReplayChart({
       if (!dragging) return;
       stopEvent(event);
       const preview = drawingPreviewRef.current;
-      if (preview?.id === dragging.id) onUpdateTrendLineRef.current(preview.id, preview.geometry);
+      if (preview?.id === dragging.id) onUpdateDrawingRef.current(preview.id, preview.geometry);
       dragging = null;
       requestAnimationFrame(() => commitPreview(null));
       if (interaction.hasPointerCapture(event.pointerId)) interaction.releasePointerCapture(event.pointerId);
@@ -875,13 +938,13 @@ export function ReplayChart({
     };
     const doubleClick = (event: MouseEvent) => {
       const rect = container.getBoundingClientRect();
-      const id = trendLinePrimitiveRef.current?.hitTestAt({
+      const id = hitDrawingAt({
         x: event.clientX - rect.left,
         y: event.clientY - rect.top,
       })?.drawingId;
       if (!id || id.startsWith("temporary-")) return;
       stopEvent(event);
-      onOpenTrendLineStyleRef.current(id);
+      onOpenDrawingStyleRef.current(id);
     };
     const key = (event: KeyboardEvent) => {
       const target = event.target as HTMLElement | null;
@@ -905,7 +968,7 @@ export function ReplayChart({
       }
       if (event.key === "Delete" && selectedDrawingIdRef.current) {
         stopEvent(event);
-        onDeleteTrendLineRef.current(selectedDrawingIdRef.current);
+        onDeleteDrawingRef.current(selectedDrawingIdRef.current);
       }
     };
 
@@ -1247,7 +1310,10 @@ export function ReplayChart({
     volumeRef.current?.priceScale().applyOptions({ autoScale: true });
     setContextMenu(null);
     requestAnimationFrame(syncLineActionCoordinates);
-    requestAnimationFrame(() => trendLinePrimitiveRef.current?.requestRedraw());
+    requestAnimationFrame(() => {
+      trendLinePrimitiveRef.current?.requestRedraw();
+      fibonacciPrimitiveRef.current?.requestRedraw();
+    });
   }
 
   function createDraft(side: PaperSide, type: "LIMIT" | "STOP") {

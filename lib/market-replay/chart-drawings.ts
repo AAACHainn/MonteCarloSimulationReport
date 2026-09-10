@@ -2,7 +2,12 @@ import { z } from "zod";
 import type { AggregatedMarketBarData } from "@/lib/market-replay/types";
 
 export const DRAWING_TYPE_TREND_LINE = "TREND_LINE" as const;
+export const DRAWING_TYPE_FIB_RETRACEMENT = "FIB_RETRACEMENT" as const;
 export const TREND_LINE_STYLES = ["SOLID", "DASHED", "DOTTED"] as const;
+export const DRAWING_TYPES = [DRAWING_TYPE_TREND_LINE, DRAWING_TYPE_FIB_RETRACEMENT] as const;
+
+export type DrawingType = (typeof DRAWING_TYPES)[number];
+export type DrawingTool = DrawingType;
 
 export type DrawingAnchor = {
   timestamp: string;
@@ -34,6 +39,31 @@ export type TrendLineDrawing = {
   updatedAt: string;
 };
 
+export type FibonacciLevel = {
+  value: number;
+  enabled: boolean;
+  color: string;
+};
+
+export type FibonacciRetracementStyle = {
+  width: number;
+  lineStyle: (typeof TREND_LINE_STYLES)[number];
+  levels: FibonacciLevel[];
+};
+
+export type FibonacciRetracementDrawing = {
+  id: string;
+  datasetId: string;
+  type: typeof DRAWING_TYPE_FIB_RETRACEMENT;
+  geometry: TrendLineGeometry;
+  style: FibonacciRetracementStyle;
+  createdAt: string;
+  updatedAt: string;
+};
+
+export type MarketDrawing = TrendLineDrawing | FibonacciRetracementDrawing;
+export type MarketDrawingStyle = TrendLineStyle | FibonacciRetracementStyle;
+
 export type TrendLineTemplate = {
   id: string;
   name: string;
@@ -45,6 +75,17 @@ export type TrendLinePreferences = {
   templates: TrendLineTemplate[];
 };
 
+export type FibonacciRetracementTemplate = {
+  id: string;
+  name: string;
+  style: FibonacciRetracementStyle;
+};
+
+export type FibonacciRetracementPreferences = {
+  defaultStyle: FibonacciRetracementStyle;
+  templates: FibonacciRetracementTemplate[];
+};
+
 export const DEFAULT_TREND_LINE_STYLE: TrendLineStyle = {
   color: "#2962FF",
   opacity: 100,
@@ -52,6 +93,23 @@ export const DEFAULT_TREND_LINE_STYLE: TrendLineStyle = {
   lineStyle: "SOLID",
   showStartPrice: false,
   showEndPrice: false,
+};
+
+export const DEFAULT_FIBONACCI_RETRACEMENT_STYLE: FibonacciRetracementStyle = {
+  width: 1,
+  lineStyle: "SOLID",
+  levels: [
+    { value: 0, enabled: true, color: "#787B86" },
+    { value: 0.236, enabled: true, color: "#F23645" },
+    { value: 0.382, enabled: true, color: "#FF9800" },
+    { value: 0.5, enabled: true, color: "#4CAF50" },
+    { value: 0.618, enabled: true, color: "#089981" },
+    { value: 0.786, enabled: true, color: "#2962FF" },
+    { value: 1, enabled: true, color: "#787B86" },
+    { value: 1.272, enabled: false, color: "#7B1FA2" },
+    { value: 1.618, enabled: false, color: "#9C27B0" },
+    { value: 2.618, enabled: false, color: "#E91E63" },
+  ],
 };
 
 const finiteNumber = z.number().finite();
@@ -75,6 +133,21 @@ export const trendLineStyleSchema = z.object({
   showEndPrice: z.boolean(),
 }).strict();
 
+export const fibonacciLevelSchema = z.object({
+  value: finiteNumber.min(-10).max(10),
+  enabled: z.boolean(),
+  color: z.string().regex(/^#[0-9a-f]{6}$/i),
+}).strict();
+
+export const fibonacciRetracementStyleSchema = z.object({
+  width: z.number().int().min(1).max(4),
+  lineStyle: z.enum(TREND_LINE_STYLES),
+  levels: z.array(fibonacciLevelSchema).min(1).max(10),
+}).strict().refine(
+  (style) => new Set(style.levels.map((level) => level.value)).size === style.levels.length,
+  { message: "Fibonacci levels must be unique", path: ["levels"] },
+);
+
 export const trendLinePreferencesSchema = z.object({
   defaultStyle: trendLineStyleSchema,
   templates: z.array(z.object({
@@ -84,15 +157,31 @@ export const trendLinePreferencesSchema = z.object({
   }).strict()).max(50),
 }).strict();
 
-export const createMarketDrawingSchema = z.object({
-  type: z.literal(DRAWING_TYPE_TREND_LINE),
-  geometry: trendLineGeometrySchema,
-  style: trendLineStyleSchema.default(DEFAULT_TREND_LINE_STYLE),
+export const fibonacciRetracementPreferencesSchema = z.object({
+  defaultStyle: fibonacciRetracementStyleSchema,
+  templates: z.array(z.object({
+    id: z.string().min(1),
+    name: z.string().trim().min(1).max(50),
+    style: fibonacciRetracementStyleSchema,
+  }).strict()).max(50),
 }).strict();
+
+export const createMarketDrawingSchema = z.discriminatedUnion("type", [
+  z.object({
+    type: z.literal(DRAWING_TYPE_TREND_LINE),
+    geometry: trendLineGeometrySchema,
+    style: trendLineStyleSchema.default(DEFAULT_TREND_LINE_STYLE),
+  }).strict(),
+  z.object({
+    type: z.literal(DRAWING_TYPE_FIB_RETRACEMENT),
+    geometry: trendLineGeometrySchema,
+    style: fibonacciRetracementStyleSchema.default(DEFAULT_FIBONACCI_RETRACEMENT_STYLE),
+  }).strict(),
+]);
 
 export const updateMarketDrawingSchema = z.object({
   geometry: trendLineGeometrySchema.optional(),
-  style: trendLineStyleSchema.optional(),
+  style: z.union([trendLineStyleSchema, fibonacciRetracementStyleSchema]).optional(),
 }).strict().refine((value) => value.geometry !== undefined || value.style !== undefined);
 
 type StoredDrawing = {
@@ -105,17 +194,25 @@ type StoredDrawing = {
   updatedAt: Date;
 };
 
-export function serializeMarketDrawing(record: StoredDrawing): TrendLineDrawing {
-  if (record.type !== DRAWING_TYPE_TREND_LINE) throw new Error("Unsupported drawing type");
-  return {
+export function serializeMarketDrawing(record: StoredDrawing): MarketDrawing {
+  const base = {
     id: record.id,
     datasetId: record.datasetId,
-    type: DRAWING_TYPE_TREND_LINE,
     geometry: trendLineGeometrySchema.parse(JSON.parse(record.geometry)),
-    style: trendLineStyleSchema.parse(JSON.parse(record.style)),
     createdAt: record.createdAt.toISOString(),
     updatedAt: record.updatedAt.toISOString(),
   };
+  if (record.type === DRAWING_TYPE_TREND_LINE) return {
+    ...base,
+    type: DRAWING_TYPE_TREND_LINE,
+    style: trendLineStyleSchema.parse(JSON.parse(record.style)),
+  };
+  if (record.type === DRAWING_TYPE_FIB_RETRACEMENT) return {
+    ...base,
+    type: DRAWING_TYPE_FIB_RETRACEMENT,
+    style: fibonacciRetracementStyleSchema.parse(JSON.parse(record.style)),
+  };
+  throw new Error("Unsupported drawing type");
 }
 
 export function parseTrendLinePreferences(value: string | null): TrendLinePreferences {
@@ -127,6 +224,27 @@ export function parseTrendLinePreferences(value: string | null): TrendLinePrefer
     // Invalid browser storage falls back to the default drawing style.
   }
   return { defaultStyle: DEFAULT_TREND_LINE_STYLE, templates: [] };
+}
+
+export function parseFibonacciRetracementPreferences(value: string | null): FibonacciRetracementPreferences {
+  if (!value) return { defaultStyle: DEFAULT_FIBONACCI_RETRACEMENT_STYLE, templates: [] };
+  try {
+    const parsed = fibonacciRetracementPreferencesSchema.safeParse(JSON.parse(value));
+    if (parsed.success) return parsed.data;
+  } catch {
+    // Invalid browser storage falls back to the default Fibonacci style.
+  }
+  return { defaultStyle: DEFAULT_FIBONACCI_RETRACEMENT_STYLE, templates: [] };
+}
+
+export function drawingStyleMatchesType(type: DrawingType, style: MarketDrawingStyle) {
+  return type === DRAWING_TYPE_TREND_LINE
+    ? trendLineStyleSchema.safeParse(style).success
+    : fibonacciRetracementStyleSchema.safeParse(style).success;
+}
+
+export function fibonacciPriceAtLevel(geometry: TrendLineGeometry, level: number) {
+  return geometry.start.price + (geometry.end.price - geometry.start.price) * level;
 }
 
 export function anchorForLogicalIndex({

@@ -24,7 +24,7 @@ vi.mock("@/lib/db", () => ({
 
 import { GET, POST } from "@/app/api/market-datasets/[id]/drawings/route";
 import { DELETE, PATCH } from "@/app/api/market-datasets/[id]/drawings/[drawingId]/route";
-import { DEFAULT_TREND_LINE_STYLE } from "@/lib/market-replay/chart-drawings";
+import { DEFAULT_FIBONACCI_RETRACEMENT_STYLE, DEFAULT_TREND_LINE_STYLE } from "@/lib/market-replay/chart-drawings";
 
 const geometry = {
   start: { timestamp: "2026-01-01T00:00:00.000Z", sourceSequence: 10, price: 100 },
@@ -73,6 +73,28 @@ describe("market drawing API", () => {
         type: "TREND_LINE",
         geometry: JSON.stringify(geometry),
         style: JSON.stringify(DEFAULT_TREND_LINE_STYLE),
+      },
+    });
+  });
+
+  it("creates a validated Fibonacci retracement", async () => {
+    const fibonacciRecord = {
+      ...record,
+      type: "FIB_RETRACEMENT",
+      style: JSON.stringify(DEFAULT_FIBONACCI_RETRACEMENT_STYLE),
+    };
+    mocks.drawingCreate.mockResolvedValueOnce(fibonacciRecord);
+    const response = await POST(new Request("http://localhost/api/drawings", {
+      method: "POST",
+      body: JSON.stringify({ type: "FIB_RETRACEMENT", geometry, style: DEFAULT_FIBONACCI_RETRACEMENT_STYLE }),
+    }), collectionContext);
+    expect(response.status).toBe(201);
+    expect(mocks.drawingCreate).toHaveBeenCalledWith({
+      data: {
+        datasetId: "dataset-1",
+        type: "FIB_RETRACEMENT",
+        geometry: JSON.stringify(geometry),
+        style: JSON.stringify(DEFAULT_FIBONACCI_RETRACEMENT_STYLE),
       },
     });
   });

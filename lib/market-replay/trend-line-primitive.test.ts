@@ -3,9 +3,11 @@ import {
   decodeTrendLineHitId,
   encodeTrendLineHitId,
   hitTestTrendLines,
+  TrendLinePrimitive,
   type TrendLineProjectedDrawing,
 } from "@/lib/market-replay/trend-line-primitive";
-import type { TrendLineDrawing } from "@/lib/market-replay/chart-drawings";
+import type { TrendLineDrawing, TrendLineStyle } from "@/lib/market-replay/chart-drawings";
+import type { AggregatedMarketBarData } from "@/lib/market-replay/types";
 
 function drawing(id: string, width = 2): TrendLineDrawing {
   return {
@@ -67,5 +69,47 @@ describe("trend line primitive hit testing", () => {
       [projected("first"), projected("last")],
       { x: 50, y: 10 },
     )).toMatchObject({ drawingId: "last", part: "line" });
+  });
+
+  it("renders the draft with the configured default style", () => {
+    const bars: AggregatedMarketBarData[] = [0, 1].map((index) => ({
+      timestamp: `2026-01-01T00:0${index * 5}:00.000Z`,
+      bucketEnd: `2026-01-01T00:${String(index * 5 + 5).padStart(2, "0")}:00.000Z`,
+      firstSequence: index,
+      lastSequence: index,
+      open: 100, high: 110, low: 90, close: 105, volume: 1,
+      sourceCount: 1, expectedCount: 1, status: "COMPLETE",
+    }));
+    const draftStyle: TrendLineStyle = {
+      color: "#F23645",
+      opacity: 45,
+      width: 4,
+      lineStyle: "DOTTED",
+      showStartPrice: true,
+      showEndPrice: true,
+    };
+    const primitive = new TrendLinePrimitive();
+    primitive.attached({
+      chart: {
+        timeScale: () => ({ logicalToCoordinate: (index: number) => index * 100, width: () => 500 }),
+        panes: () => [{ getHeight: () => 300 }],
+      },
+      series: { priceToCoordinate: (price: number) => price },
+      requestUpdate: () => undefined,
+    } as never);
+    primitive.setDrawings({
+      drawings: [], selectedDrawingId: null, preview: null,
+      draft: {
+        start: { timestamp: bars[0].timestamp, sourceSequence: 0, price: 100 },
+        end: { timestamp: bars[1].timestamp, sourceSequence: 1, price: 110 },
+      },
+      draftStyle,
+      bars,
+      displayIntervalSeconds: 300,
+      priceTickSize: 0.01,
+    });
+    primitive.updateAllViews();
+    const snapshot = primitive as unknown as { projected: { draftStyle: TrendLineStyle } };
+    expect(snapshot.projected.draftStyle).toEqual(draftStyle);
   });
 });

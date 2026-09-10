@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import { prisma } from "@/lib/db";
 import { copy } from "@/lib/i18n";
 import {
+  drawingStyleMatchesType,
   serializeMarketDrawing,
   updateMarketDrawingSchema,
 } from "@/lib/market-replay/chart-drawings";
@@ -16,6 +17,12 @@ export async function PATCH(request: Request, context: RouteContext) {
   }
   const existing = await prisma.marketDrawing.findFirst({ where: { id: drawingId, datasetId: id } });
   if (!existing) return NextResponse.json({ error: copy.marketReplay.drawingNotFound }, { status: 404 });
+  if (parsed.data.style && (
+    (existing.type !== "TREND_LINE" && existing.type !== "FIB_RETRACEMENT")
+    || !drawingStyleMatchesType(existing.type, parsed.data.style)
+  )) {
+    return NextResponse.json({ error: copy.marketReplay.invalidDrawing }, { status: 400 });
+  }
   const drawing = await prisma.marketDrawing.update({
     where: { id: drawingId },
     data: {

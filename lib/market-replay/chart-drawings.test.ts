@@ -1,9 +1,12 @@
 import { describe, expect, it } from "vitest";
 import {
+  DEFAULT_FIBONACCI_RETRACEMENT_STYLE,
   anchorForLogicalIndex,
   createMarketDrawingSchema,
   distanceToSegment,
+  fibonacciPriceAtLevel,
   logicalIndexForAnchor,
+  parseFibonacciRetracementPreferences,
   parseTrendLinePreferences,
   snapScreenPointTo45,
   trendLineCanvasDashArray,
@@ -86,6 +89,27 @@ describe("chart drawing geometry", () => {
     expect(trendLineCanvasDashArray("DOTTED")).toEqual([2, 5]);
   });
 
+  it("validates a Fibonacci retracement with at most ten configurable levels", () => {
+    const candidate = {
+      type: "FIB_RETRACEMENT",
+      geometry: {
+        start: { timestamp: bars[0].timestamp, sourceSequence: 0, price: 100 },
+        end: { timestamp: bars[1].timestamp, sourceSequence: 5, price: 120 },
+      },
+      style: DEFAULT_FIBONACCI_RETRACEMENT_STYLE,
+    };
+    expect(createMarketDrawingSchema.safeParse(candidate).success).toBe(true);
+    expect(fibonacciPriceAtLevel(candidate.geometry, 0.618)).toBeCloseTo(112.36);
+    expect(createMarketDrawingSchema.safeParse({
+      ...candidate,
+      style: { ...candidate.style, levels: [...candidate.style.levels, { value: 3, enabled: false, color: "#000000" }] },
+    }).success).toBe(false);
+    expect(createMarketDrawingSchema.safeParse({
+      ...candidate,
+      style: { ...candidate.style, levels: candidate.style.levels.map((level, index) => index === 1 ? { ...level, value: 0 } : level) },
+    }).success).toBe(false);
+  });
+
   it("loads valid template preferences and falls back from invalid storage", () => {
     const stored = {
       defaultStyle: {
@@ -112,6 +136,18 @@ describe("chart drawing geometry", () => {
     expect(parseTrendLinePreferences(JSON.stringify(stored))).toEqual(stored);
     expect(parseTrendLinePreferences("{broken")).toMatchObject({
       defaultStyle: { color: "#2962FF", width: 2 },
+      templates: [],
+    });
+  });
+
+  it("loads Fibonacci template preferences and isolates invalid storage", () => {
+    const stored = {
+      defaultStyle: DEFAULT_FIBONACCI_RETRACEMENT_STYLE,
+      templates: [{ id: "fib-template-1", name: "常用回撤", style: DEFAULT_FIBONACCI_RETRACEMENT_STYLE }],
+    };
+    expect(parseFibonacciRetracementPreferences(JSON.stringify(stored))).toEqual(stored);
+    expect(parseFibonacciRetracementPreferences("{broken")).toEqual({
+      defaultStyle: DEFAULT_FIBONACCI_RETRACEMENT_STYLE,
       templates: [],
     });
   });

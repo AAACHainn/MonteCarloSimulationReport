@@ -30,6 +30,7 @@ export type TrendLinePrimitiveSnapshot = {
   selectedDrawingId: string | null;
   preview: { id: string; geometry: TrendLineGeometry } | null;
   draft: TrendLineGeometry | null;
+  draftStyle: TrendLineStyle;
   bars: AggregatedMarketBarData[];
   displayIntervalSeconds: number;
   priceTickSize: number;
@@ -43,17 +44,18 @@ export type TrendLineHit = {
 type ProjectedSnapshot = {
   drawings: TrendLineProjectedDrawing[];
   draft: { start: TrendLinePoint; end: TrendLinePoint } | null;
+  draftStyle: TrendLineStyle;
   paneWidth: number;
   paneHeight: number;
   priceTickSize: number;
 };
 
-const EMPTY_PROJECTED_SNAPSHOT: ProjectedSnapshot = {
-  drawings: [], draft: null, paneWidth: 0, paneHeight: 0, priceTickSize: 0.01,
-};
 const DEFAULT_DRAFT_STYLE: TrendLineStyle = {
   color: "#2962FF", opacity: 100, width: 2, lineStyle: "SOLID",
   showStartPrice: false, showEndPrice: false,
+};
+const EMPTY_PROJECTED_SNAPSHOT: ProjectedSnapshot = {
+  drawings: [], draft: null, draftStyle: DEFAULT_DRAFT_STYLE, paneWidth: 0, paneHeight: 0, priceTickSize: 0.01,
 };
 const LINE_HIT_RADIUS = 6;
 const HANDLE_HIT_RADIUS = 7;
@@ -193,7 +195,7 @@ class TrendLinePaneRenderer implements IPrimitivePaneRenderer {
         }
         drawLine(context, item.start, item.end, item.drawing.style);
       }
-      if (snapshot.draft) drawLine(context, snapshot.draft.start, snapshot.draft.end, DEFAULT_DRAFT_STYLE);
+      if (snapshot.draft) drawLine(context, snapshot.draft.start, snapshot.draft.end, snapshot.draftStyle);
       for (const item of snapshot.drawings) {
         if (item.selected) {
           for (const point of [item.start, item.end]) {
@@ -246,6 +248,7 @@ export class TrendLinePrimitive implements ISeriesPrimitive<Time> {
     selectedDrawingId: null,
     preview: null,
     draft: null,
+    draftStyle: DEFAULT_DRAFT_STYLE,
     bars: [],
     displayIntervalSeconds: 1,
     priceTickSize: 0.01,
@@ -319,6 +322,7 @@ export class TrendLinePrimitive implements ISeriesPrimitive<Time> {
     this.projected = {
       drawings: [...unselected, ...selected],
       draft: this.snapshot.draft ? projectGeometry(this.snapshot.draft) : null,
+      draftStyle: this.snapshot.draftStyle,
       paneWidth,
       paneHeight,
       priceTickSize: this.snapshot.priceTickSize,

@@ -2,10 +2,15 @@
 
 import { TZDate } from "@date-fns/tz";
 import { startTransition, useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { ChevronRight, ListTree, Loader2, Pause, Play, Plus, RotateCcw, Ruler, Settings2, Trash2, TrendingUp, WalletCards, X } from "lucide-react";
+import { ChevronRight, ListTree, Loader2, Palette, Pause, Play, Plus, RotateCcw, Ruler, Settings2, Trash2, TrendingUp, WalletCards, X } from "lucide-react";
 import * as Popover from "@radix-ui/react-popover";
 import { ReplayChart } from "@/components/market-replay/replay-chart";
 import { DEFAULT_REPLAY_MAX_VISIBLE_BARS } from "@/lib/market-replay/chart-range";
+import {
+  DEFAULT_CANDLESTICK_STYLE,
+  parseCandlestickStyle,
+  type CandlestickStyle,
+} from "@/lib/market-replay/candlestick-style";
 import { PaperAccountStrip, PaperTradingDetails, PaperTradingPanel } from "@/components/market-replay/paper-trading-panel";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { Button } from "@/components/ui/button";
@@ -39,8 +44,16 @@ import {
   utcOffsetMinutesForTimezone,
 } from "@/lib/market-replay/display-timezone";
 import {
+  DEFAULT_EMA_LINE_STYLE,
+  DEFAULT_EMA_LINE_WIDTH,
+  normalizeEmaLineStyle,
+  normalizeEmaLineWidth,
+} from "@/lib/market-replay/ema-style";
+import {
   EMA_LENGTH_MAX,
   EMA_LENGTH_MIN,
+  EMA_LINE_STYLES,
+  EMA_LINE_WIDTHS,
   MAX_EMA_INDICATORS,
   MAX_PLAYBACK_RATE,
   MIN_PLAYBACK_RATE,
@@ -69,10 +82,18 @@ import {
 import { useReplayState } from "@/lib/market-replay/use-replay-state";
 import { createReplayStepQueue } from "@/lib/market-replay/step-queue";
 import {
+  DEFAULT_FIBONACCI_RETRACEMENT_STYLE,
   DEFAULT_TREND_LINE_STYLE,
+  DRAWING_TYPE_FIB_RETRACEMENT,
   DRAWING_TYPE_TREND_LINE,
+  drawingStyleMatchesType,
+  parseFibonacciRetracementPreferences,
   parseTrendLinePreferences,
-  type TrendLineDrawing,
+  type DrawingTool,
+  type FibonacciRetracementStyle,
+  type FibonacciRetracementTemplate,
+  type MarketDrawing,
+  type MarketDrawingStyle,
   type TrendLineGeometry,
   type TrendLineStyle,
   type TrendLineTemplate,
@@ -95,12 +116,14 @@ type ServerAdvancePayload = {
 
 const EMA_SETTINGS_STORAGE_KEY = "market-replay-ema-settings-v1";
 const DISPLAY_TIMEZONE_STORAGE_KEY = "market-replay-display-timezone-v1";
+const CANDLESTICK_STYLE_STORAGE_KEY = "market-replay-candlestick-style-v1";
 const TREND_LINE_PREFERENCES_STORAGE_KEY = "market-replay-trend-line-preferences-v1";
+const FIBONACCI_PREFERENCES_STORAGE_KEY = "market-replay-fibonacci-preferences-v1";
 const EMA_COLORS = ["#f59e0b", "#2563eb", "#7c3aed", "#0f766e", "#e11d48"];
 const DEFAULT_EMA_INDICATORS: EmaIndicatorConfig[] = [
-  { id: "ema-default-20", length: 20, color: EMA_COLORS[0], visible: true },
-  { id: "ema-default-60", length: 60, color: EMA_COLORS[1], visible: true },
-  { id: "ema-default-200", length: 200, color: EMA_COLORS[2], visible: true },
+  { id: "ema-default-20", length: 20, color: EMA_COLORS[0], lineWidth: DEFAULT_EMA_LINE_WIDTH, lineStyle: DEFAULT_EMA_LINE_STYLE, visible: true },
+  { id: "ema-default-60", length: 60, color: EMA_COLORS[1], lineWidth: DEFAULT_EMA_LINE_WIDTH, lineStyle: DEFAULT_EMA_LINE_STYLE, visible: true },
+  { id: "ema-default-200", length: 200, color: EMA_COLORS[2], lineWidth: DEFAULT_EMA_LINE_WIDTH, lineStyle: DEFAULT_EMA_LINE_STYLE, visible: true },
 ];
 const DISPLAY_INTERVAL_PRESETS = [1, 5, 10, 15, 30, 60, 120, 180, 300, 600, 900, 1_800, 2_700, 3_600, 7_200, 14_400, 21_600, 43_200, 86_400];
 const REPLAY_SYNC_BATCH_SIZE = 100;
@@ -110,6 +133,10 @@ let localDrawingSequence = 0;
 function createLocalDrawingId(prefix: "temporary" | "template") {
   localDrawingSequence += 1;
   return `${prefix}-${Date.now().toString(36)}-${localDrawingSequence.toString(36)}`;
+}
+
+function cloneFibonacciStyle(style: FibonacciRetracementStyle): FibonacciRetracementStyle {
+  return { ...style, levels: style.levels.map((level) => ({ ...level })) };
 }
 
 function replaySyncCapacity(state: ReplayState, sourceIntervalSeconds: number, syncing: boolean, latencyMs: number) {
@@ -138,6 +165,8 @@ function loadEmaSettings() {
         id: candidate.id,
         length: candidate.length,
         color: typeof candidate.color === "string" ? candidate.color : EMA_COLORS[index],
+        lineWidth: normalizeEmaLineWidth(candidate.lineWidth),
+        lineStyle: normalizeEmaLineStyle(candidate.lineStyle),
         visible: typeof candidate.visible === "boolean" ? candidate.visible : true,
       }];
     });
@@ -182,7 +211,10 @@ export function MarketReplayClient({ dataset }: { dataset: MarketDatasetSummary 
   const [startError, setStartError] = useState<string | null>(null);
   const [saveStatus, setSaveStatus] = useState<SaveStatus>("idle");
   const [confirmAction, setConfirmAction] = useState<"reset" | "change-start" | "paper-clear" | null>(null);
-  const [settingsDialog, setSettingsDialog] = useState<"indicators" | "paper" | null>(null);
+  const [settingsDialog, setSettingsDialog] = useState<"candlesticks" | "indicators" | "paper" | null>(null);
+  const [candlestickStyle, setCandlestickStyle] = useState<CandlestickStyle>(DEFAULT_CANDLESTICK_STYLE);
+  const [candlestickStyleDraft, setCandlestickStyleDraft] = useState<CandlestickStyle | null>(null);
+  const [candlestickStyleLoaded, setCandlestickStyleLoaded] = useState(false);
   const [emaEnabled, setEmaEnabled] = useState(false);
   const [emaIndicators, setEmaIndicators] = useState<EmaIndicatorConfig[]>(DEFAULT_EMA_INDICATORS);
   const [emaSettingsLoaded, setEmaSettingsLoaded] = useState(false);
@@ -198,15 +230,17 @@ export function MarketReplayClient({ dataset }: { dataset: MarketDatasetSummary 
   const [draftActive, setDraftActive] = useState(false);
   const [measurementArmed, setMeasurementArmed] = useState(false);
   const [drawingToolOpen, setDrawingToolOpen] = useState(false);
-  const [drawingTool, setDrawingTool] = useState<"TREND_LINE" | null>(null);
-  const [drawings, setDrawings] = useState<TrendLineDrawing[]>([]);
+  const [drawingTool, setDrawingTool] = useState<DrawingTool | null>(null);
+  const [drawings, setDrawings] = useState<MarketDrawing[]>([]);
   const [drawingError, setDrawingError] = useState<string | null>(null);
   const [selectedDrawingId, setSelectedDrawingId] = useState<string | null>(null);
   const [drawingObjectsOpen, setDrawingObjectsOpen] = useState(false);
   const [styleDrawingId, setStyleDrawingId] = useState<string | null>(null);
-  const [styleDraft, setStyleDraft] = useState<TrendLineStyle | null>(null);
+  const [styleDraft, setStyleDraft] = useState<MarketDrawingStyle | null>(null);
   const [defaultTrendLineStyle, setDefaultTrendLineStyle] = useState<TrendLineStyle>(DEFAULT_TREND_LINE_STYLE);
   const [trendLineTemplates, setTrendLineTemplates] = useState<TrendLineTemplate[]>([]);
+  const [defaultFibonacciStyle, setDefaultFibonacciStyle] = useState<FibonacciRetracementStyle>(() => cloneFibonacciStyle(DEFAULT_FIBONACCI_RETRACEMENT_STYLE));
+  const [fibonacciTemplates, setFibonacciTemplates] = useState<FibonacciRetracementTemplate[]>([]);
   const [drawingPreferencesLoaded, setDrawingPreferencesLoaded] = useState(false);
   const [selectedTemplateId, setSelectedTemplateId] = useState("");
   const [templateDialogOpen, setTemplateDialogOpen] = useState(false);
@@ -307,6 +341,24 @@ export function MarketReplayClient({ dataset }: { dataset: MarketDatasetSummary 
   }, []);
 
   useEffect(() => {
+    try {
+      setCandlestickStyle(parseCandlestickStyle(window.localStorage.getItem(CANDLESTICK_STYLE_STORAGE_KEY)));
+    } catch {
+      setCandlestickStyle(DEFAULT_CANDLESTICK_STYLE);
+    }
+    setCandlestickStyleLoaded(true);
+  }, []);
+
+  useEffect(() => {
+    if (!candlestickStyleLoaded) return;
+    try {
+      window.localStorage.setItem(CANDLESTICK_STYLE_STORAGE_KEY, JSON.stringify(candlestickStyle));
+    } catch {
+      // Browser storage can be unavailable; the style still applies to this page session.
+    }
+  }, [candlestickStyle, candlestickStyleLoaded]);
+
+  useEffect(() => {
     const fallback = utcOffsetMinutesForTimezone(dataset.startTime, dataset.timezone);
     try {
       const storedValue = window.localStorage.getItem(`${DISPLAY_TIMEZONE_STORAGE_KEY}:${dataset.id}`);
@@ -341,13 +393,17 @@ export function MarketReplayClient({ dataset }: { dataset: MarketDatasetSummary 
 
   useEffect(() => {
     let preferences = parseTrendLinePreferences(null);
+    let fibonacciPreferences = parseFibonacciRetracementPreferences(null);
     try {
       preferences = parseTrendLinePreferences(window.localStorage.getItem(TREND_LINE_PREFERENCES_STORAGE_KEY));
+      fibonacciPreferences = parseFibonacciRetracementPreferences(window.localStorage.getItem(FIBONACCI_PREFERENCES_STORAGE_KEY));
     } catch {
       // Browser storage can be unavailable; defaults still work for this page session.
     }
     setDefaultTrendLineStyle(preferences.defaultStyle);
     setTrendLineTemplates(preferences.templates);
+    setDefaultFibonacciStyle(cloneFibonacciStyle(fibonacciPreferences.defaultStyle));
+    setFibonacciTemplates(fibonacciPreferences.templates);
     setDrawingPreferencesLoaded(true);
   }, []);
 
@@ -358,10 +414,14 @@ export function MarketReplayClient({ dataset }: { dataset: MarketDatasetSummary 
         defaultStyle: defaultTrendLineStyle,
         templates: trendLineTemplates,
       }));
+      window.localStorage.setItem(FIBONACCI_PREFERENCES_STORAGE_KEY, JSON.stringify({
+        defaultStyle: defaultFibonacciStyle,
+        templates: fibonacciTemplates,
+      }));
     } catch {
       // Drawing preferences still apply until this page closes.
     }
-  }, [defaultTrendLineStyle, drawingPreferencesLoaded, trendLineTemplates]);
+  }, [defaultFibonacciStyle, defaultTrendLineStyle, drawingPreferencesLoaded, fibonacciTemplates, trendLineTemplates]);
 
   const setDrawingPending = useCallback((id: string, pending: boolean) => {
     setPendingDrawingIds((current) => {
@@ -376,7 +436,7 @@ export function MarketReplayClient({ dataset }: { dataset: MarketDatasetSummary 
     void (async () => {
       try {
         const response = await fetch(`/api/market-datasets/${dataset.id}/drawings`, { signal: controller.signal });
-        const data = await response.json() as { drawings?: TrendLineDrawing[]; error?: string };
+        const data = await response.json() as { drawings?: MarketDrawing[]; error?: string };
         if (!response.ok || !Array.isArray(data.drawings)) throw new Error(data.error);
         setDrawings(data.drawings);
         setDrawingError(null);
@@ -388,26 +448,25 @@ export function MarketReplayClient({ dataset }: { dataset: MarketDatasetSummary 
     return () => controller.abort();
   }, [dataset.id]);
 
-  const armTrendLine = useCallback(() => {
+  const armDrawing = useCallback((tool: DrawingTool) => {
     setMeasurementArmed(false);
-    setDrawingTool("TREND_LINE");
+    setDrawingTool(tool);
     setDrawingToolOpen(false);
     setSelectedDrawingId(null);
     setDrawingError(null);
   }, []);
+  const armTrendLine = useCallback(() => armDrawing(DRAWING_TYPE_TREND_LINE), [armDrawing]);
+  const armFibonacciRetracement = useCallback(() => armDrawing(DRAWING_TYPE_FIB_RETRACEMENT), [armDrawing]);
 
-  const createTrendLine = useCallback(async (geometry: TrendLineGeometry) => {
+  const createDrawing = useCallback(async (type: DrawingTool, geometry: TrendLineGeometry) => {
     const temporaryId = createLocalDrawingId("temporary");
     const now = new Date().toISOString();
-    const optimistic: TrendLineDrawing = {
-      id: temporaryId,
-      datasetId: dataset.id,
-      type: DRAWING_TYPE_TREND_LINE,
-      geometry,
-      style: { ...defaultTrendLineStyle },
-      createdAt: now,
-      updatedAt: now,
-    };
+    const style = type === DRAWING_TYPE_TREND_LINE
+      ? { ...defaultTrendLineStyle }
+      : cloneFibonacciStyle(defaultFibonacciStyle);
+    const optimistic = {
+      id: temporaryId, datasetId: dataset.id, type, geometry, style, createdAt: now, updatedAt: now,
+    } as MarketDrawing;
     setDrawings((current) => [...current, optimistic]);
     setSelectedDrawingId(temporaryId);
     setDrawingPending(temporaryId, true);
@@ -415,9 +474,9 @@ export function MarketReplayClient({ dataset }: { dataset: MarketDatasetSummary 
       const response = await fetch(`/api/market-datasets/${dataset.id}/drawings`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ type: DRAWING_TYPE_TREND_LINE, geometry, style: defaultTrendLineStyle }),
+        body: JSON.stringify({ type, geometry, style }),
       });
-      const data = await response.json() as { drawing?: TrendLineDrawing; error?: string };
+      const data = await response.json() as { drawing?: MarketDrawing; error?: string };
       if (!response.ok || !data.drawing) throw new Error(data.error);
       setDrawings((current) => current.map((drawing) => drawing.id === temporaryId ? data.drawing! : drawing));
       setSelectedDrawingId((current) => current === temporaryId ? data.drawing!.id : current);
@@ -429,15 +488,16 @@ export function MarketReplayClient({ dataset }: { dataset: MarketDatasetSummary 
     } finally {
       setDrawingPending(temporaryId, false);
     }
-  }, [dataset.id, defaultTrendLineStyle, setDrawingPending]);
+  }, [dataset.id, defaultFibonacciStyle, defaultTrendLineStyle, setDrawingPending]);
 
-  const updateTrendLine = useCallback(async (
+  const updateDrawing = useCallback(async (
     id: string,
-    patch: { geometry?: TrendLineGeometry; style?: TrendLineStyle },
+    patch: { geometry?: TrendLineGeometry; style?: MarketDrawingStyle },
   ) => {
     const previous = drawings.find((drawing) => drawing.id === id);
     if (!previous || id.startsWith("temporary-") || pendingDrawingIds.has(id)) return false;
-    const optimistic = { ...previous, ...patch, updatedAt: new Date().toISOString() };
+    if (patch.style && !drawingStyleMatchesType(previous.type, patch.style)) return false;
+    const optimistic = { ...previous, ...patch, updatedAt: new Date().toISOString() } as MarketDrawing;
     setDrawings((current) => current.map((drawing) => drawing.id === id ? optimistic : drawing));
     setDrawingPending(id, true);
     try {
@@ -446,7 +506,7 @@ export function MarketReplayClient({ dataset }: { dataset: MarketDatasetSummary 
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(patch),
       });
-      const data = await response.json() as { drawing?: TrendLineDrawing; error?: string };
+      const data = await response.json() as { drawing?: MarketDrawing; error?: string };
       if (!response.ok || !data.drawing) throw new Error(data.error);
       setDrawings((current) => current.map((drawing) => drawing.id === id ? data.drawing! : drawing));
       setDrawingError(null);
@@ -460,7 +520,7 @@ export function MarketReplayClient({ dataset }: { dataset: MarketDatasetSummary 
     }
   }, [dataset.id, drawings, pendingDrawingIds, setDrawingPending]);
 
-  const deleteTrendLine = useCallback(async (id: string) => {
+  const deleteDrawing = useCallback(async (id: string) => {
     const index = drawings.findIndex((drawing) => drawing.id === id);
     if (index < 0 || id.startsWith("temporary-") || pendingDrawingIds.has(id)) return;
     const previous = drawings[index];
@@ -487,43 +547,63 @@ export function MarketReplayClient({ dataset }: { dataset: MarketDatasetSummary 
     }
   }, [dataset.id, drawings, pendingDrawingIds, setDrawingPending, styleDrawingId]);
 
-  const openTrendLineStyle = useCallback((id: string) => {
+  const openDrawingStyle = useCallback((id: string) => {
     const drawing = drawings.find((item) => item.id === id);
     if (!drawing) return;
     setSelectedDrawingId(id);
     setStyleDrawingId(id);
-    setStyleDraft({ ...drawing.style });
+    setStyleDraft(drawing.type === DRAWING_TYPE_TREND_LINE
+      ? { ...drawing.style }
+      : cloneFibonacciStyle(drawing.style));
     setSelectedTemplateId("");
   }, [drawings]);
 
-  const saveTrendLineTemplate = useCallback(() => {
+  const saveDrawingTemplate = useCallback(() => {
     const name = templateName.trim();
     if (!name || !styleDraft) return;
-    const existing = trendLineTemplates.find((template) => template.name.toLocaleLowerCase("zh-CN") === name.toLocaleLowerCase("zh-CN"));
-    if (!existing && trendLineTemplates.length >= 50) {
+    const drawing = drawings.find((item) => item.id === styleDrawingId);
+    if (!drawing || !drawingStyleMatchesType(drawing.type, styleDraft)) return;
+    const isTrendLine = drawing.type === DRAWING_TYPE_TREND_LINE;
+    const templates = isTrendLine ? trendLineTemplates : fibonacciTemplates;
+    const existing = templates.find((template) => template.name.toLocaleLowerCase("zh-CN") === name.toLocaleLowerCase("zh-CN"));
+    if (!existing && templates.length >= 50) {
       setDrawingError(copy.marketReplay.drawingTemplateLimit);
       return;
     }
     const id = existing?.id ?? createLocalDrawingId("template");
-    const template: TrendLineTemplate = { id, name, style: { ...styleDraft } };
-    setTrendLineTemplates((current) => existing
-      ? current.map((item) => item.id === existing.id ? template : item)
-      : [...current, template]);
+    if (isTrendLine) {
+      const template: TrendLineTemplate = { id, name, style: { ...styleDraft } as TrendLineStyle };
+      setTrendLineTemplates((current) => existing
+        ? current.map((item) => item.id === existing.id ? template : item)
+        : [...current, template]);
+    } else {
+      const template: FibonacciRetracementTemplate = { id, name, style: cloneFibonacciStyle(styleDraft as FibonacciRetracementStyle) };
+      setFibonacciTemplates((current) => existing
+        ? current.map((item) => item.id === existing.id ? template : item)
+        : [...current, template]);
+    }
     setSelectedTemplateId(id);
     setTemplateName("");
     setTemplateDialogOpen(false);
     setDrawingError(null);
-  }, [styleDraft, templateName, trendLineTemplates]);
+  }, [drawings, fibonacciTemplates, styleDraft, styleDrawingId, templateName, trendLineTemplates]);
 
-  const deleteSelectedTrendLineTemplate = useCallback(() => {
+  const deleteSelectedDrawingTemplate = useCallback(() => {
     if (!selectedTemplateId) return;
-    setTrendLineTemplates((current) => current.filter((template) => template.id !== selectedTemplateId));
+    const drawing = drawings.find((item) => item.id === styleDrawingId);
+    if (drawing?.type === DRAWING_TYPE_FIB_RETRACEMENT) {
+      setFibonacciTemplates((current) => current.filter((template) => template.id !== selectedTemplateId));
+    } else {
+      setTrendLineTemplates((current) => current.filter((template) => template.id !== selectedTemplateId));
+    }
     setSelectedTemplateId("");
-  }, [selectedTemplateId]);
+  }, [drawings, selectedTemplateId, styleDrawingId]);
 
   const displayedDrawings = useMemo(() => (
     styleDrawingId && styleDraft
-      ? drawings.map((drawing) => drawing.id === styleDrawingId ? { ...drawing, style: styleDraft } : drawing)
+      ? drawings.map((drawing) => drawing.id === styleDrawingId && drawingStyleMatchesType(drawing.type, styleDraft)
+        ? { ...drawing, style: styleDraft } as MarketDrawing
+        : drawing)
       : drawings
   ), [drawings, styleDraft, styleDrawingId]);
 
@@ -1154,18 +1234,19 @@ export function MarketReplayClient({ dataset }: { dataset: MarketDatasetSummary 
 
   useEffect(() => {
     const onKeyDown = (event: KeyboardEvent) => {
-      if (!event.altKey || event.ctrlKey || event.shiftKey || event.metaKey || event.key.toLowerCase() !== "t") return;
+      const key = event.key.toLowerCase();
+      if (!event.altKey || event.ctrlKey || event.shiftKey || event.metaKey || (key !== "t" && key !== "f")) return;
       const target = event.target as HTMLElement | null;
       if (
         settingsDialog || confirmAction || styleDrawingId
         || target?.closest("input, textarea, select, [contenteditable='true'], [role='dialog']")
       ) return;
       event.preventDefault();
-      armTrendLine();
+      if (key === "f") armFibonacciRetracement(); else armTrendLine();
     };
     window.addEventListener("keydown", onKeyDown);
     return () => window.removeEventListener("keydown", onKeyDown);
-  }, [armTrendLine, confirmAction, settingsDialog, styleDrawingId]);
+  }, [armFibonacciRetracement, armTrendLine, confirmAction, settingsDialog, styleDrawingId]);
 
   function changeSpeed(value: number) {
     const current = latestReplayRef.current;
@@ -1246,6 +1327,8 @@ export function MarketReplayClient({ dataset }: { dataset: MarketDatasetSummary 
       id: `ema-${Date.now()}`,
       length,
       color: EMA_COLORS[current.length % EMA_COLORS.length],
+      lineWidth: DEFAULT_EMA_LINE_WIDTH,
+      lineStyle: DEFAULT_EMA_LINE_STYLE,
       visible: true,
     }]);
     setEmaError(null);
@@ -1532,6 +1615,15 @@ export function MarketReplayClient({ dataset }: { dataset: MarketDatasetSummary 
                   <span className="font-medium">{copy.marketReplay.trendLine}</span>
                   <kbd className="ml-auto font-mono text-[11px] text-slate-400">{copy.marketReplay.trendLineShortcut}</kbd>
                 </button>
+                <button
+                  type="button"
+                  className="flex w-full items-center gap-3 rounded-md px-3 py-2 text-left text-sm text-slate-700 hover:bg-slate-100 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-600"
+                  onClick={armFibonacciRetracement}
+                >
+                  <span className="flex h-4 w-4 items-center justify-center font-mono text-[10px] font-bold text-slate-600">Fib</span>
+                  <span className="font-medium">{copy.marketReplay.fibonacciRetracement}</span>
+                  <kbd className="ml-auto font-mono text-[11px] text-slate-400">{copy.marketReplay.fibonacciRetracementShortcut}</kbd>
+                </button>
               </Popover.Content>
             </Popover.Portal>
           </Popover.Root>
@@ -1562,6 +1654,19 @@ export function MarketReplayClient({ dataset }: { dataset: MarketDatasetSummary 
               {copy.marketReplay.measureHint}
             </span>
           </Button>
+          <Button
+            type="button"
+            variant={settingsDialog === "candlesticks" ? "secondary" : "ghost"}
+            size="sm"
+            className="h-8"
+            onClick={() => {
+              setCandlestickStyleDraft({ ...candlestickStyle });
+              setSettingsDialog("candlesticks");
+            }}
+          >
+            <Palette className="h-4 w-4" />
+            <span className="hidden xl:inline">{copy.marketReplay.candlestickStyle}</span>
+          </Button>
           <Button type="button" variant="ghost" size="sm" className="h-8" onClick={() => setSettingsDialog("indicators")}><Settings2 className="h-4 w-4" />{copy.marketReplay.indicators}</Button>
           <Button type="button" variant="ghost" size="sm" className="h-8" onClick={() => setSettingsDialog("paper")}><WalletCards className="h-4 w-4" />{copy.marketReplay.accountSettings}</Button>
           {paperSnapshot ? <div className="hidden items-center gap-3 text-xs text-slate-500 xl:flex"><span>{copy.paperTrading.equity} <strong className="font-medium text-slate-800">{paperSnapshot.stats.equity.toLocaleString("zh-CN", { maximumFractionDigits: 2 })} {paperSnapshot.session.currency}</strong></span><span>{copy.paperTrading.netPosition} <strong className="font-medium text-slate-800">{paperSnapshot.session.netQuantity}</strong></span></div> : null}
@@ -1579,16 +1684,19 @@ export function MarketReplayClient({ dataset }: { dataset: MarketDatasetSummary 
             displayUtcOffsetMinutes={displayUtcOffsetMinutes}
             displayIntervalSeconds={replay.displayIntervalSeconds}
             measurementArmed={measurementArmed}
+            candlestickStyle={candlestickStyleDraft ?? candlestickStyle}
             onMeasurementArmedChange={setMeasurementArmed}
             drawingTool={drawingTool}
             onDrawingToolChange={setDrawingTool}
+            trendLineDraftStyle={defaultTrendLineStyle}
+            fibonacciDraftStyle={defaultFibonacciStyle}
             drawings={displayedDrawings}
             selectedDrawingId={selectedDrawingId}
             onSelectedDrawingIdChange={setSelectedDrawingId}
-            onCreateTrendLine={(geometry) => void createTrendLine(geometry)}
-            onUpdateTrendLine={(id, geometry) => void updateTrendLine(id, { geometry })}
-            onDeleteTrendLine={(id) => void deleteTrendLine(id)}
-            onOpenTrendLineStyle={openTrendLineStyle}
+            onCreateDrawing={(type, geometry) => void createDrawing(type, geometry)}
+            onUpdateDrawing={(id, geometry) => void updateDrawing(id, { geometry })}
+            onDeleteDrawing={(id) => void deleteDrawing(id)}
+            onOpenDrawingStyle={openDrawingStyle}
             emaEnabled={emaEnabled}
             emaIndicators={emaIndicators}
             paperSnapshot={paperSnapshot}
@@ -1624,6 +1732,9 @@ export function MarketReplayClient({ dataset }: { dataset: MarketDatasetSummary 
                 {drawings.length ? drawings.map((drawing, index) => {
                   const pending = pendingDrawingIds.has(drawing.id);
                   const selected = selectedDrawingId === drawing.id;
+                  const drawingColor = drawing.type === DRAWING_TYPE_TREND_LINE
+                    ? drawing.style.color
+                    : drawing.style.levels.find((level) => level.enabled)?.color ?? "#787B86";
                   return (
                     <div
                       key={drawing.id}
@@ -1631,7 +1742,7 @@ export function MarketReplayClient({ dataset }: { dataset: MarketDatasetSummary 
                       tabIndex={0}
                       className={`group flex items-center gap-2 rounded-md px-2 py-2 text-sm outline-none transition-colors ${selected ? "bg-blue-50 text-blue-800" : "text-slate-700 hover:bg-slate-100"}`}
                       onClick={() => setSelectedDrawingId(drawing.id)}
-                      onDoubleClick={() => openTrendLineStyle(drawing.id)}
+                      onDoubleClick={() => openDrawingStyle(drawing.id)}
                       onKeyDown={(event) => {
                         if (event.key === "Enter" || event.key === " ") {
                           event.preventDefault();
@@ -1639,16 +1750,20 @@ export function MarketReplayClient({ dataset }: { dataset: MarketDatasetSummary 
                         }
                       }}
                     >
-                      <TrendingUp className="h-4 w-4 shrink-0" style={{ color: drawing.style.color, opacity: drawing.style.opacity / 100 }} />
-                      <span className="min-w-0 flex-1 truncate font-medium">{copy.marketReplay.drawingObjectName(index + 1)}</span>
+                      {drawing.type === DRAWING_TYPE_TREND_LINE
+                        ? <TrendingUp className="h-4 w-4 shrink-0" style={{ color: drawingColor, opacity: drawing.style.opacity / 100 }} />
+                        : <span className="flex h-4 w-4 shrink-0 items-center justify-center font-mono text-[9px] font-bold" style={{ color: drawingColor }}>Fib</span>}
+                      <span className="min-w-0 flex-1 truncate font-medium">{drawing.type === DRAWING_TYPE_TREND_LINE
+                        ? copy.marketReplay.trendLineObjectName(index + 1)
+                        : copy.marketReplay.fibonacciObjectName(index + 1)}</span>
                       <button
                         type="button"
                         disabled={pending}
-                        aria-label={copy.marketReplay.drawingDelete}
+                        aria-label={drawing.type === DRAWING_TYPE_TREND_LINE ? copy.marketReplay.trendLineDelete : copy.marketReplay.fibonacciDelete}
                         className="rounded p-1 text-slate-400 hover:bg-red-50 hover:text-red-600 disabled:opacity-40"
                         onClick={(event) => {
                           event.stopPropagation();
-                          void deleteTrendLine(drawing.id);
+                          void deleteDrawing(drawing.id);
                         }}
                       >
                         {pending ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Trash2 className="h-3.5 w-3.5" />}
@@ -1682,13 +1797,190 @@ export function MarketReplayClient({ dataset }: { dataset: MarketDatasetSummary 
         </div>
       </div>
 
+      <Dialog
+        open={settingsDialog === "candlesticks"}
+        title={copy.marketReplay.candlestickSettings}
+        description={copy.marketReplay.candlestickSettingsDescription}
+        className="max-w-md"
+        onClose={() => {
+          setCandlestickStyleDraft(null);
+          setSettingsDialog(null);
+        }}
+      >
+        {candlestickStyleDraft ? (
+          <div className="space-y-5">
+            <div className="grid grid-cols-[7rem_1fr_1fr] items-center gap-3 px-1 text-center text-xs font-medium text-slate-500">
+              <span />
+              <span>{copy.marketReplay.bullishCandle}</span>
+              <span>{copy.marketReplay.bearishCandle}</span>
+            </div>
+            <div className="space-y-2">
+              {([
+                { visible: "bodyVisible", up: "upColor", down: "downColor", label: copy.marketReplay.candleBody },
+                { visible: "borderVisible", up: "borderUpColor", down: "borderDownColor", label: copy.marketReplay.candleBorder },
+                { visible: "wickVisible", up: "wickUpColor", down: "wickDownColor", label: copy.marketReplay.candleWick },
+              ] as const).map((row) => (
+                <div key={row.visible} className="grid grid-cols-[7rem_1fr_1fr] items-center gap-3 rounded-md border px-3 py-2.5">
+                  <label className="flex items-center gap-2 text-sm font-medium text-slate-700">
+                    <input
+                      type="checkbox"
+                      checked={candlestickStyleDraft[row.visible]}
+                      onChange={(event) => setCandlestickStyleDraft((current) => current ? {
+                        ...current,
+                        [row.visible]: event.target.checked,
+                      } : current)}
+                      className="h-4 w-4 rounded border-slate-300"
+                    />
+                    {row.label}
+                  </label>
+                  <Input
+                    type="color"
+                    value={candlestickStyleDraft[row.up]}
+                    aria-label={copy.marketReplay.candlestickColorLabel(row.label, copy.marketReplay.bullishCandle)}
+                    onChange={(event) => setCandlestickStyleDraft((current) => current ? {
+                      ...current,
+                      [row.up]: event.target.value.toUpperCase(),
+                    } : current)}
+                    className="mx-auto h-9 w-12 cursor-pointer p-1"
+                  />
+                  <Input
+                    type="color"
+                    value={candlestickStyleDraft[row.down]}
+                    aria-label={copy.marketReplay.candlestickColorLabel(row.label, copy.marketReplay.bearishCandle)}
+                    onChange={(event) => setCandlestickStyleDraft((current) => current ? {
+                      ...current,
+                      [row.down]: event.target.value.toUpperCase(),
+                    } : current)}
+                    className="mx-auto h-9 w-12 cursor-pointer p-1"
+                  />
+                </div>
+              ))}
+            </div>
+            <div className="flex justify-end gap-2 border-t pt-4">
+              <Button type="button" variant="outline" onClick={() => {
+                setCandlestickStyleDraft(null);
+                setSettingsDialog(null);
+              }}>{copy.marketReplay.drawingCancel}</Button>
+              <Button type="button" onClick={() => {
+                setCandlestickStyle({ ...candlestickStyleDraft });
+                setCandlestickStyleDraft(null);
+                setSettingsDialog(null);
+              }}>{copy.marketReplay.drawingConfirm}</Button>
+            </div>
+          </div>
+        ) : null}
+      </Dialog>
+
       <Dialog open={settingsDialog === "indicators"} title={copy.marketReplay.indicatorSettings} description={copy.marketReplay.indicatorSettingsDescription} onClose={() => setSettingsDialog(null)}>
         <div className="space-y-4">
           <div className="flex items-center justify-between rounded-md border bg-slate-50 p-3">
             <div><p className="text-sm font-medium text-slate-950">{copy.marketReplay.emaTitle}</p><p className="mt-0.5 text-xs text-slate-500">{copy.marketReplay.emaDescription}</p></div>
             <div className="flex items-center gap-2"><span className="text-xs text-slate-500">{emaEnabled ? copy.marketReplay.emaOn : copy.marketReplay.emaOff}</span><button type="button" role="switch" aria-checked={emaEnabled} aria-label={copy.marketReplay.emaMaster} onClick={() => setEmaEnabled((enabled) => !enabled)} className={`relative h-6 w-11 rounded-full transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-600 focus-visible:ring-offset-2 ${emaEnabled ? "bg-blue-600" : "bg-slate-300"}`}><span className={`absolute left-0 top-0.5 h-5 w-5 rounded-full bg-white shadow-sm transition-transform ${emaEnabled ? "translate-x-5" : "translate-x-0.5"}`} /></button></div>
           </div>
-          <div className="space-y-2">{emaIndicators.map((indicator) => <div key={indicator.id} className="flex h-11 items-center gap-3 rounded-md border px-3"><input type="checkbox" checked={indicator.visible} onChange={(event) => setEmaIndicators((current) => current.map((item) => item.id === indicator.id ? { ...item, visible: event.target.checked } : item))} aria-label={copy.marketReplay.emaLineToggle(indicator.length)} className="h-4 w-4 rounded border-slate-300" /><span className="h-2.5 w-2.5 rounded-full" style={{ backgroundColor: indicator.color }} aria-hidden="true" /><span className="w-12 text-sm font-medium text-slate-700">{copy.marketReplay.emaShortName}</span><Label htmlFor={`ema-length-${indicator.id}`} className="text-xs text-slate-500">{copy.marketReplay.emaLength}</Label><Input key={`${indicator.id}-${indicator.length}`} id={`ema-length-${indicator.id}`} type="number" min={EMA_LENGTH_MIN} max={EMA_LENGTH_MAX} step="1" defaultValue={indicator.length} onBlur={(event) => { if (!setEmaLength(indicator.id, Number(event.currentTarget.value))) event.currentTarget.value = String(indicator.length); }} onKeyDown={(event) => { if (event.key === "Enter") event.currentTarget.blur(); }} className="h-8 w-24 font-mono text-xs" /><Button type="button" variant="ghost" size="icon" onClick={() => { setEmaIndicators((current) => current.filter((item) => item.id !== indicator.id)); setEmaError(null); }} aria-label={copy.marketReplay.emaRemove(indicator.length)} className="ml-auto h-8 w-8 text-slate-500"><X className="h-4 w-4" /></Button></div>)}</div>
+          <div className="space-y-3">
+            {emaIndicators.map((indicator) => (
+              <div key={indicator.id} className="space-y-3 rounded-md border p-3">
+                <div className="flex items-center gap-3">
+                  <input
+                    type="checkbox"
+                    checked={indicator.visible}
+                    onChange={(event) => setEmaIndicators((current) => current.map((item) => (
+                      item.id === indicator.id ? { ...item, visible: event.target.checked } : item
+                    )))}
+                    aria-label={copy.marketReplay.emaLineToggle(indicator.length)}
+                    className="h-4 w-4 rounded border-slate-300"
+                  />
+                  <span className="h-2.5 w-2.5 rounded-full" style={{ backgroundColor: indicator.color }} aria-hidden="true" />
+                  <span className="w-12 text-sm font-medium text-slate-700">{copy.marketReplay.emaShortName}</span>
+                  <Label htmlFor={`ema-length-${indicator.id}`} className="text-xs text-slate-500">{copy.marketReplay.emaLength}</Label>
+                  <Input
+                    key={`${indicator.id}-${indicator.length}`}
+                    id={`ema-length-${indicator.id}`}
+                    type="number"
+                    min={EMA_LENGTH_MIN}
+                    max={EMA_LENGTH_MAX}
+                    step="1"
+                    defaultValue={indicator.length}
+                    onBlur={(event) => {
+                      if (!setEmaLength(indicator.id, Number(event.currentTarget.value))) {
+                        event.currentTarget.value = String(indicator.length);
+                      }
+                    }}
+                    onKeyDown={(event) => { if (event.key === "Enter") event.currentTarget.blur(); }}
+                    className="h-8 w-24 font-mono text-xs"
+                  />
+                  <Button
+                    type="button"
+                    variant="ghost"
+                    size="icon"
+                    onClick={() => {
+                      setEmaIndicators((current) => current.filter((item) => item.id !== indicator.id));
+                      setEmaError(null);
+                    }}
+                    aria-label={copy.marketReplay.emaRemove(indicator.length)}
+                    className="ml-auto h-8 w-8 text-slate-500"
+                  >
+                    <X className="h-4 w-4" />
+                  </Button>
+                </div>
+                <div className="grid gap-3 border-t pt-3 sm:grid-cols-[6rem_1fr] sm:items-center">
+                  <Label htmlFor={`ema-color-${indicator.id}`} className="text-xs text-slate-500">{copy.marketReplay.lineColor}</Label>
+                  <div className="flex items-center gap-2">
+                    <Input
+                      id={`ema-color-${indicator.id}`}
+                      type="color"
+                      value={indicator.color}
+                      onChange={(event) => setEmaIndicators((current) => current.map((item) => (
+                        item.id === indicator.id ? { ...item, color: event.target.value.toUpperCase() } : item
+                      )))}
+                      className="h-9 w-14 cursor-pointer p-1"
+                    />
+                    <span className="font-mono text-xs text-slate-500">{indicator.color.toUpperCase()}</span>
+                  </div>
+                  <Label className="text-xs text-slate-500">{copy.marketReplay.lineWidth}</Label>
+                  <div className="flex gap-1">
+                    {EMA_LINE_WIDTHS.map((lineWidth) => (
+                      <button
+                        key={lineWidth}
+                        type="button"
+                        aria-label={`${copy.marketReplay.lineWidth} ${lineWidth}`}
+                        aria-pressed={indicator.lineWidth === lineWidth}
+                        onClick={() => setEmaIndicators((current) => current.map((item) => (
+                          item.id === indicator.id ? { ...item, lineWidth } : item
+                        )))}
+                        className={`flex h-9 w-10 items-center justify-center rounded-md border ${indicator.lineWidth === lineWidth ? "border-blue-600 bg-blue-50" : "border-slate-200 hover:bg-slate-50"}`}
+                      >
+                        <span className="block w-5 bg-slate-700" style={{ height: lineWidth }} />
+                      </button>
+                    ))}
+                  </div>
+                  <Label className="text-xs text-slate-500">{copy.marketReplay.lineStyle}</Label>
+                  <div className="grid grid-cols-3 gap-1">
+                    {EMA_LINE_STYLES.map((lineStyle) => {
+                      const label = lineStyle === "SOLID"
+                        ? copy.marketReplay.lineSolid
+                        : lineStyle === "DASHED"
+                          ? copy.marketReplay.lineDashed
+                          : copy.marketReplay.lineDotted;
+                      return (
+                        <button
+                          key={lineStyle}
+                          type="button"
+                          aria-pressed={indicator.lineStyle === lineStyle}
+                          onClick={() => setEmaIndicators((current) => current.map((item) => (
+                            item.id === indicator.id ? { ...item, lineStyle } : item
+                          )))}
+                          className={`rounded-md border px-2 py-2 text-xs ${indicator.lineStyle === lineStyle ? "border-blue-600 bg-blue-50 text-blue-700" : "border-slate-200 text-slate-600 hover:bg-slate-50"}`}
+                        >
+                          {label}
+                        </button>
+                      );
+                    })}
+                  </div>
+                </div>
+              </div>
+            ))}
+          </div>
           <Button type="button" variant="outline" size="sm" onClick={addEma} disabled={emaIndicators.length >= MAX_EMA_INDICATORS}><Plus className="h-4 w-4" />{copy.marketReplay.emaAdd}</Button>
           {emaError ? <p className="text-xs text-red-600">{emaError}</p> : null}
         </div>
@@ -1702,16 +1994,25 @@ export function MarketReplayClient({ dataset }: { dataset: MarketDatasetSummary 
       </Dialog>
       <Dialog
         open={Boolean(styleDrawingId && styleDraft && !templateDialogOpen)}
-        title={copy.marketReplay.trendLineSettings}
-        description={copy.marketReplay.trendLineSettingsDescription}
-        className="max-w-md"
+        title={drawings.find((drawing) => drawing.id === styleDrawingId)?.type === DRAWING_TYPE_FIB_RETRACEMENT
+          ? copy.marketReplay.fibonacciSettings
+          : copy.marketReplay.trendLineSettings}
+        description={drawings.find((drawing) => drawing.id === styleDrawingId)?.type === DRAWING_TYPE_FIB_RETRACEMENT
+          ? copy.marketReplay.fibonacciSettingsDescription
+          : copy.marketReplay.trendLineSettingsDescription}
+        className={drawings.find((drawing) => drawing.id === styleDrawingId)?.type === DRAWING_TYPE_FIB_RETRACEMENT ? "max-w-2xl" : "max-w-md"}
         onClose={() => {
           setStyleDrawingId(null);
           setStyleDraft(null);
           setSelectedTemplateId("");
         }}
       >
-        {styleDraft ? (
+        {styleDraft && (() => {
+          const styleDrawing = drawings.find((drawing) => drawing.id === styleDrawingId);
+          if (!styleDrawing || !drawingStyleMatchesType(styleDrawing.type, styleDraft)) return null;
+          const isFibonacci = styleDrawing.type === DRAWING_TYPE_FIB_RETRACEMENT;
+          const templates = isFibonacci ? fibonacciTemplates : trendLineTemplates;
+          return (
           <div className="space-y-5">
             <div className="grid grid-cols-[7rem_1fr] items-center gap-3">
               <Label>{copy.marketReplay.drawingTemplate}</Label>
@@ -1720,10 +2021,12 @@ export function MarketReplayClient({ dataset }: { dataset: MarketDatasetSummary 
                   value={selectedTemplateId || "__none"}
                   onValueChange={(value) => {
                     if (value === "__none") return;
-                    const template = trendLineTemplates.find((item) => item.id === value);
+                    const template = templates.find((item) => item.id === value);
                     if (!template) return;
                     setSelectedTemplateId(value);
-                    setStyleDraft({ ...template.style });
+                    setStyleDraft(isFibonacci
+                      ? cloneFibonacciStyle(template.style as FibonacciRetracementStyle)
+                      : { ...template.style as TrendLineStyle });
                   }}
                 >
                   <SelectTrigger className="min-w-0 flex-1">
@@ -1731,9 +2034,9 @@ export function MarketReplayClient({ dataset }: { dataset: MarketDatasetSummary 
                   </SelectTrigger>
                   <SelectContent>
                     <SelectItem value="__none" disabled>
-                      {trendLineTemplates.length ? copy.marketReplay.chooseDrawingTemplate : copy.marketReplay.noDrawingTemplates}
+                      {templates.length ? copy.marketReplay.chooseDrawingTemplate : copy.marketReplay.noDrawingTemplates}
                     </SelectItem>
-                    {trendLineTemplates.map((template) => (
+                    {templates.map((template) => (
                       <SelectItem key={template.id} value={template.id}>{template.name}</SelectItem>
                     ))}
                   </SelectContent>
@@ -1744,27 +2047,27 @@ export function MarketReplayClient({ dataset }: { dataset: MarketDatasetSummary 
                   size="icon"
                   disabled={!selectedTemplateId}
                   aria-label={copy.marketReplay.deleteDrawingTemplate}
-                  onClick={deleteSelectedTrendLineTemplate}
+                  onClick={deleteSelectedDrawingTemplate}
                   className="shrink-0 text-slate-500 hover:text-red-600"
                 >
                   <Trash2 className="h-4 w-4" />
                 </Button>
               </div>
             </div>
-            <div className="grid grid-cols-[7rem_1fr] items-center gap-3">
+            {!isFibonacci && "color" in styleDraft ? <div className="grid grid-cols-[7rem_1fr] items-center gap-3">
               <Label htmlFor="trend-line-color">{copy.marketReplay.lineColor}</Label>
               <div className="flex items-center gap-2">
                 <Input
                   id="trend-line-color"
                   type="color"
                   value={styleDraft.color}
-                  onChange={(event) => setStyleDraft((current) => current ? { ...current, color: event.target.value.toUpperCase() } : current)}
+                  onChange={(event) => setStyleDraft((current) => current && "color" in current ? { ...current, color: event.target.value.toUpperCase() } : current)}
                   className="h-9 w-14 cursor-pointer p-1"
                 />
                 <span className="font-mono text-xs text-slate-500">{styleDraft.color.toUpperCase()}</span>
               </div>
-            </div>
-            <div className="grid grid-cols-[7rem_1fr] items-center gap-3">
+            </div> : null}
+            {!isFibonacci && "opacity" in styleDraft ? <div className="grid grid-cols-[7rem_1fr] items-center gap-3">
               <Label htmlFor="trend-line-opacity">{copy.marketReplay.lineOpacity}</Label>
               <div className="flex items-center gap-3">
                 <Input
@@ -1774,12 +2077,13 @@ export function MarketReplayClient({ dataset }: { dataset: MarketDatasetSummary 
                   max="100"
                   step="1"
                   value={styleDraft.opacity}
-                  onChange={(event) => setStyleDraft((current) => current ? { ...current, opacity: Number(event.target.value) } : current)}
+                  onChange={(event) => setStyleDraft((current) => current && "opacity" in current ? { ...current, opacity: Number(event.target.value) } : current)}
                   className="h-8 flex-1 border-0 px-0"
                 />
                 <span className="w-10 text-right text-xs tabular-nums text-slate-500">{styleDraft.opacity}%</span>
               </div>
-            </div>
+            </div> : null}
+            {isFibonacci ? <p className="text-sm font-medium text-slate-800">{copy.marketReplay.horizontalLineStyle}</p> : null}
             <div className="grid grid-cols-[7rem_1fr] items-center gap-3">
               <Label>{copy.marketReplay.lineWidth}</Label>
               <div className="flex gap-1">
@@ -1816,12 +2120,12 @@ export function MarketReplayClient({ dataset }: { dataset: MarketDatasetSummary 
                 ))}
               </div>
             </div>
-            <div className="space-y-2 rounded-md border bg-slate-50 p-3">
+            {!isFibonacci && "showStartPrice" in styleDraft ? <div className="space-y-2 rounded-md border bg-slate-50 p-3">
               <label className="flex items-center gap-2 text-sm text-slate-700">
                 <input
                   type="checkbox"
                   checked={styleDraft.showStartPrice}
-                  onChange={(event) => setStyleDraft((current) => current ? { ...current, showStartPrice: event.target.checked } : current)}
+                  onChange={(event) => setStyleDraft((current) => current && "showStartPrice" in current ? { ...current, showStartPrice: event.target.checked } : current)}
                   className="h-4 w-4 rounded border-slate-300"
                 />
                 {copy.marketReplay.showStartPrice}
@@ -1830,13 +2134,61 @@ export function MarketReplayClient({ dataset }: { dataset: MarketDatasetSummary 
                 <input
                   type="checkbox"
                   checked={styleDraft.showEndPrice}
-                  onChange={(event) => setStyleDraft((current) => current ? { ...current, showEndPrice: event.target.checked } : current)}
+                  onChange={(event) => setStyleDraft((current) => current && "showEndPrice" in current ? { ...current, showEndPrice: event.target.checked } : current)}
                   className="h-4 w-4 rounded border-slate-300"
                 />
                 {copy.marketReplay.showEndPrice}
               </label>
-            </div>
-            <p className="text-xs text-slate-500">{copy.marketReplay.nextTrendLineStyleHint}</p>
+            </div> : null}
+            {isFibonacci && "levels" in styleDraft ? (
+              <div className="space-y-2">
+                <p className="text-sm font-medium text-slate-800">{copy.marketReplay.fibonacciLevels}</p>
+                <div className="grid grid-cols-1 gap-2 rounded-md border bg-slate-50 p-3 sm:grid-cols-2">
+                  {styleDraft.levels.map((level, index) => (
+                    <div key={index} className="flex items-center gap-2">
+                      <input
+                        type="checkbox"
+                        checked={level.enabled}
+                        aria-label={copy.marketReplay.fibonacciLevelToggle(level.value)}
+                        onChange={(event) => setStyleDraft((current) => current && "levels" in current ? {
+                          ...current,
+                          levels: current.levels.map((item, itemIndex) => itemIndex === index ? { ...item, enabled: event.target.checked } : item),
+                        } : current)}
+                        className="h-4 w-4 shrink-0 rounded border-slate-300"
+                      />
+                      <Input
+                        type="number"
+                        min="-10"
+                        max="10"
+                        step="0.001"
+                        value={level.value}
+                        aria-label={copy.marketReplay.fibonacciLevelValue(index + 1)}
+                        onChange={(event) => {
+                          const value = Number(event.target.value);
+                          if (!Number.isFinite(value) || value < -10 || value > 10) return;
+                          setStyleDraft((current) => current && "levels" in current ? {
+                            ...current,
+                            levels: current.levels.map((item, itemIndex) => itemIndex === index ? { ...item, value } : item),
+                          } : current);
+                        }}
+                        className="h-9 min-w-0 flex-1 font-mono text-xs"
+                      />
+                      <Input
+                        type="color"
+                        value={level.color}
+                        aria-label={copy.marketReplay.fibonacciLevelColor(level.value)}
+                        onChange={(event) => setStyleDraft((current) => current && "levels" in current ? {
+                          ...current,
+                          levels: current.levels.map((item, itemIndex) => itemIndex === index ? { ...item, color: event.target.value.toUpperCase() } : item),
+                        } : current)}
+                        className="h-9 w-11 shrink-0 cursor-pointer p-1"
+                      />
+                    </div>
+                  ))}
+                </div>
+              </div>
+            ) : null}
+            <p className="text-xs text-slate-500">{isFibonacci ? copy.marketReplay.nextFibonacciStyleHint : copy.marketReplay.nextTrendLineStyleHint}</p>
             <div className="flex items-center justify-between gap-3 border-t pt-4">
               <Button type="button" variant="outline" onClick={() => {
                 setTemplateName("");
@@ -1851,9 +2203,17 @@ export function MarketReplayClient({ dataset }: { dataset: MarketDatasetSummary 
                 <Button type="button" onClick={() => {
                   if (!styleDrawingId) return;
                   const id = styleDrawingId;
-                  const style = styleDraft;
-                  setDefaultTrendLineStyle({ ...style });
-                  void updateTrendLine(id, { style });
+                  const drawing = drawings.find((item) => item.id === id);
+                  if (!drawing || !drawingStyleMatchesType(drawing.type, styleDraft)) return;
+                  const style = drawing.type === DRAWING_TYPE_FIB_RETRACEMENT
+                    ? cloneFibonacciStyle(styleDraft as FibonacciRetracementStyle)
+                    : { ...styleDraft as TrendLineStyle };
+                  if (drawing.type === DRAWING_TYPE_FIB_RETRACEMENT) {
+                    setDefaultFibonacciStyle(cloneFibonacciStyle(style as FibonacciRetracementStyle));
+                  } else {
+                    setDefaultTrendLineStyle({ ...style as TrendLineStyle });
+                  }
+                  void updateDrawing(id, { style });
                   setStyleDrawingId(null);
                   setStyleDraft(null);
                   setSelectedTemplateId("");
@@ -1861,7 +2221,7 @@ export function MarketReplayClient({ dataset }: { dataset: MarketDatasetSummary 
               </div>
             </div>
           </div>
-        ) : null}
+        ); })()}
       </Dialog>
       <Dialog
         open={templateDialogOpen}
@@ -1885,7 +2245,7 @@ export function MarketReplayClient({ dataset }: { dataset: MarketDatasetSummary 
               onKeyDown={(event) => {
                 if (event.key === "Enter" && templateName.trim()) {
                   event.preventDefault();
-                  saveTrendLineTemplate();
+                  saveDrawingTemplate();
                 }
               }}
             />
@@ -1895,7 +2255,7 @@ export function MarketReplayClient({ dataset }: { dataset: MarketDatasetSummary 
               setTemplateDialogOpen(false);
               setTemplateName("");
             }}>{copy.marketReplay.drawingCancel}</Button>
-            <Button type="button" disabled={!templateName.trim()} onClick={saveTrendLineTemplate}>
+            <Button type="button" disabled={!templateName.trim()} onClick={saveDrawingTemplate}>
               {copy.marketReplay.saveDrawingTemplate}
             </Button>
           </div>
