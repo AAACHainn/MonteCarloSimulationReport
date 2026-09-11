@@ -50,9 +50,11 @@ export function MarketDatasetDashboard({ datasets }: { datasets: MarketDatasetSu
   const [sessionMode, setSessionMode] = useState<"TWENTY_FOUR_SEVEN" | "DAILY_SESSION">("TWENTY_FOUR_SEVEN");
   const [timezone, setTimezone] = useState("Asia/Shanghai");
   const [importJobs, setImportJobs] = useState<ImportJob[]>([]);
-  const [tickDataset, setTickDataset] = useState<MarketDatasetSummary | null>(null);
-  const [tickValue, setTickValue] = useState("");
-  const [isSavingTick, setIsSavingTick] = useState(false);
+  const [settingsDataset, setSettingsDataset] = useState<MarketDatasetSummary | null>(null);
+  const [settingsTickValue, setSettingsTickValue] = useState("");
+  const [settingsSourceInterval, setSettingsSourceInterval] = useState("");
+  const [settingsError, setSettingsError] = useState<string | null>(null);
+  const [isSavingSettings, setIsSavingSettings] = useState(false);
 
   async function refreshImportJobs() {
     const response = await fetch("/api/market-dataset-imports");
@@ -162,22 +164,25 @@ export function MarketDatasetDashboard({ datasets }: { datasets: MarketDatasetSu
     startTransition(() => router.refresh());
   }
 
-  async function savePriceTickSize(event: React.FormEvent<HTMLFormElement>) {
+  async function saveMarketSettings(event: React.FormEvent<HTMLFormElement>) {
     event.preventDefault();
-    if (!tickDataset) return;
-    setIsSavingTick(true); setMessage(null);
-    const response = await fetch(`/api/market-datasets/${tickDataset.id}`, {
+    if (!settingsDataset) return;
+    setIsSavingSettings(true); setSettingsError(null); setMessage(null);
+    const response = await fetch(`/api/market-datasets/${settingsDataset.id}`, {
       method: "PATCH", headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ priceTickSize: Number(tickValue) }),
+      body: JSON.stringify({
+        sourceIntervalSeconds: Number(settingsSourceInterval),
+        priceTickSize: Number(settingsTickValue),
+      }),
     });
     const data = await response.json().catch(() => null);
-    setIsSavingTick(false);
+    setIsSavingSettings(false);
     if (!response.ok) {
-      setMessage(data?.error ?? copy.marketReplay.importError);
+      setSettingsError(data?.error ?? copy.marketReplay.saveMarketSettingsError);
       return;
     }
-    setTickDataset(null);
-    setMessage(copy.marketReplay.priceTickSizeSaved);
+    setSettingsDataset(null);
+    setMessage(copy.marketReplay.marketSettingsSaved);
     startTransition(() => router.refresh());
   }
 
@@ -301,8 +306,13 @@ export function MarketDatasetDashboard({ datasets }: { datasets: MarketDatasetSu
                     </div>
                   </div>
                   <div className="flex flex-wrap justify-end gap-2">
-                    <Button type="button" variant="outline" size="sm" onClick={() => { setTickDataset(dataset); setTickValue(String(dataset.priceTickSize)); }}>
-                      <PencilLine className="h-4 w-4" />{copy.marketReplay.editPriceTickSize}
+                    <Button type="button" variant="outline" size="sm" onClick={() => {
+                      setSettingsDataset(dataset);
+                      setSettingsSourceInterval(String(dataset.sourceIntervalSeconds ?? ""));
+                      setSettingsTickValue(String(dataset.priceTickSize));
+                      setSettingsError(null);
+                    }}>
+                      <PencilLine className="h-4 w-4" />{copy.marketReplay.editMarketSettings}
                     </Button>
                     <Button asChild size="sm">
                       <Link href={`/market-replay/${dataset.id}`}><Play className="h-4 w-4" />{copy.marketReplay.open}</Link>
@@ -318,21 +328,27 @@ export function MarketDatasetDashboard({ datasets }: { datasets: MarketDatasetSu
         </section>
       </div>
       <Dialog
-        open={Boolean(tickDataset)}
-        title={copy.marketReplay.editPriceTickSizeTitle}
-        description={copy.marketReplay.editPriceTickSizeDescription}
+        open={Boolean(settingsDataset)}
+        title={copy.marketReplay.editMarketSettingsTitle}
+        description={copy.marketReplay.editMarketSettingsDescription}
         className="max-w-md"
-        onClose={() => { if (!isSavingTick) setTickDataset(null); }}
+        onClose={() => { if (!isSavingSettings) setSettingsDataset(null); }}
       >
-        <form className="space-y-4" onSubmit={savePriceTickSize}>
+        <form className="space-y-4" onSubmit={saveMarketSettings}>
+          <div className="space-y-2">
+            <Label htmlFor="edit-source-interval">{copy.marketReplay.sourceInterval}</Label>
+            <Input id="edit-source-interval" name="sourceIntervalSeconds" type="number" min="1" max="86400" step="1" required value={settingsSourceInterval} onChange={(event) => setSettingsSourceInterval(event.target.value)} />
+            <p className="text-xs text-slate-500">{copy.marketReplay.editSourceIntervalHint}</p>
+          </div>
           <div className="space-y-2">
             <Label htmlFor="edit-price-tick-size">{copy.marketReplay.priceTickSize}</Label>
-            <Input id="edit-price-tick-size" name="priceTickSize" type="number" min="0" step="any" required value={tickValue} onChange={(event) => setTickValue(event.target.value)} />
+            <Input id="edit-price-tick-size" name="priceTickSize" type="number" min="0" step="any" required value={settingsTickValue} onChange={(event) => setSettingsTickValue(event.target.value)} />
             <p className="text-xs text-slate-500">{copy.marketReplay.priceTickSizeHint}</p>
           </div>
+          {settingsError ? <p className="rounded-md border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-700">{settingsError}</p> : null}
           <div className="flex justify-end gap-2">
-            <Button type="button" variant="outline" disabled={isSavingTick} onClick={() => setTickDataset(null)}>{copy.paperTrading.cancel}</Button>
-            <Button type="submit" disabled={isSavingTick}>{isSavingTick ? <Loader2 className="h-4 w-4 animate-spin" /> : null}{copy.marketReplay.savePriceTickSize}</Button>
+            <Button type="button" variant="outline" disabled={isSavingSettings} onClick={() => setSettingsDataset(null)}>{copy.paperTrading.cancel}</Button>
+            <Button type="submit" disabled={isSavingSettings}>{isSavingSettings ? <Loader2 className="h-4 w-4 animate-spin" /> : null}{copy.marketReplay.saveMarketSettings}</Button>
           </div>
         </form>
       </Dialog>
