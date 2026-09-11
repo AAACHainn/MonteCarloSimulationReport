@@ -48,6 +48,7 @@ export function MarketDatasetDashboard({ datasets }: { datasets: MarketDatasetSu
   const [deleteDataset, setDeleteDataset] = useState<MarketDatasetSummary | null>(null);
   const [isDeleting, setIsDeleting] = useState(false);
   const [sessionMode, setSessionMode] = useState<"TWENTY_FOUR_SEVEN" | "DAILY_SESSION">("TWENTY_FOUR_SEVEN");
+  const [timezone, setTimezone] = useState("Asia/Shanghai");
   const [importJobs, setImportJobs] = useState<ImportJob[]>([]);
   const [tickDataset, setTickDataset] = useState<MarketDatasetSummary | null>(null);
   const [tickValue, setTickValue] = useState("");
@@ -78,7 +79,7 @@ export function MarketDatasetDashboard({ datasets }: { datasets: MarketDatasetSu
     const sourceIntervalSeconds = Number(formData.get("sourceIntervalSeconds"));
     const metadata = {
       name: formData.get("name"), description: formData.get("description"), symbol: formData.get("symbol"),
-      timeframe: formatInterval(sourceIntervalSeconds), timezone: formData.get("timezone"),
+      timeframe: formatInterval(sourceIntervalSeconds), timezone,
       sourceIntervalSeconds, priceTickSize: Number(formData.get("priceTickSize")), sessionMode,
       sessionOpenMinute: sessionMode === "DAILY_SESSION" ? timeToMinute(formData.get("sessionOpen")) : null,
       sessionCloseMinute: sessionMode === "DAILY_SESSION" ? timeToMinute(formData.get("sessionClose")) : null,
@@ -215,7 +216,15 @@ export function MarketDatasetDashboard({ datasets }: { datasets: MarketDatasetSu
               </div>
               <div className="space-y-2">
                 <Label htmlFor="market-timezone">{copy.marketReplay.timezone}</Label>
-                <Input id="market-timezone" name="timezone" required maxLength={100} defaultValue="Asia/Shanghai" placeholder={copy.marketReplay.timezonePlaceholder} />
+                <Select value={timezone} onValueChange={setTimezone}>
+                  <SelectTrigger id="market-timezone"><SelectValue /></SelectTrigger>
+                  <SelectContent position="popper" className="max-h-72">
+                    {copy.marketReplay.timezoneOptions.map((option) => (
+                      <SelectItem key={option.value} value={option.value}>{option.label}</SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+                <p className="text-xs text-slate-500">{copy.marketReplay.timezoneHint}</p>
               </div>
               <div className="space-y-2">
                 <Label htmlFor="market-session-mode">{copy.marketReplay.sessionMode}</Label>
