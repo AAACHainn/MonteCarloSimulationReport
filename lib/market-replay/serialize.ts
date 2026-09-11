@@ -23,7 +23,6 @@ type DatasetRecord = {
   progress: null | {
     startSequence: number;
     currentSequence: number;
-    intervalMs: number;
     playbackRate: number;
     displayIntervalSeconds: number | null;
     displaySession: string;

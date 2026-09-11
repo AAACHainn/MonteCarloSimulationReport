@@ -49,7 +49,7 @@ try {
     }) });
   }
   await prisma.replayProgress.create({ data: {
-    datasetId: id, startSequence: 0, currentSequence: -1, intervalMs: 1000, playbackRate: 100, displayIntervalSeconds: 300,
+    datasetId: id, startSequence: 0, currentSequence: -1, playbackRate: 100, displayIntervalSeconds: 300,
   } });
   await prisma.paperTradingSession.create({ data: {
     datasetId: id, initialCapital: 100000, currency: "USD", peakEquity: 100000, lastProcessedSequence: -1,

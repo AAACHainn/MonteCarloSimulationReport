@@ -8,14 +8,12 @@ import {
 import { Link2, Loader2, LogOut, RotateCcw, ShieldAlert, X } from "lucide-react";
 import {
   CandlestickSeries, ColorType, createChart, createSeriesMarkers, CrosshairMode,
-  HistogramSeries, LineSeries, type IChartApi, type IPriceLine, type ISeriesApi,
+  HistogramSeries, type IChartApi, type IPriceLine, type ISeriesApi,
   type ISeriesMarkersPluginApi, type Time, TickMarkType, type UTCTimestamp,
 } from "lightweight-charts";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import { calculateEmaSeries, nextEma } from "@/lib/market-replay/ema";
-import { emaSeriesStyleOptions } from "@/lib/market-replay/ema-style";
 import type { AggregatedMarketBarData, EmaIndicatorConfig } from "@/lib/market-replay/types";
 import { copy } from "@/lib/i18n";
 import { defaultReplayLogicalRange, rangeAfterNewReplayBar } from "@/lib/market-replay/chart-range";
@@ -59,6 +57,7 @@ import {
   type PriceRReference,
 } from "@/lib/paper-trading/line-r-multiple";
 import type { PaperSessionSnapshot, PaperSide } from "@/lib/paper-trading/types";
+import { useReplayChartEma } from "./use-replay-chart-ema";
 
 type DraftOrder = {
   side: PaperSide;
@@ -244,12 +243,6 @@ export function ReplayChart({
   const markersRef = useRef<ISeriesMarkersPluginApi<Time> | null>(null);
   const trendLinePrimitiveRef = useRef<TrendLinePrimitive | null>(null);
   const fibonacciPrimitiveRef = useRef<FibonacciRetracementPrimitive | null>(null);
-  const emaSeriesRef = useRef(new Map<string, ISeriesApi<"Line">>());
-  const emaStateRef = useRef(new Map<string, {
-    length: number;
-    bars: Array<{ timestamp: string; close: number }>;
-    values: Array<number | null>;
-  }>());
   const lastDataRef = useRef<AggregatedMarketBarData[]>([]);
   const barsRef = useRef(bars);
   const candlestickStyleRef = useRef(candlestickStyle);
@@ -458,8 +451,6 @@ export function ReplayChart({
     if (!container) return;
     const priceLines = priceLinesRef.current;
     const lineTargets = lineTargetsRef.current;
-    const emaSeries = emaSeriesRef.current;
-    const emaStates = emaStateRef.current;
     const chart = createChart(container, {
       width: container.clientWidth, height: container.clientHeight,
       layout: { background: { type: ColorType.Solid, color: "#fff" }, textColor: "#475569", attributionLogo: true, panes: { separatorColor: "#e2e8f0", separatorHoverColor: "#cbd5e1" } },
@@ -507,7 +498,7 @@ export function ReplayChart({
       trendLinePrimitiveRef.current = null;
       fibonacciPrimitiveRef.current = null;
       chart.remove(); chartRef.current = null; candleRef.current = null; volumeRef.current = null;
-      markersRef.current = null; priceLines.clear(); lineTargets.clear(); emaSeries.clear(); emaStates.clear(); lastDataRef.current = [];
+      markersRef.current = null; priceLines.clear(); lineTargets.clear(); lastDataRef.current = [];
     };
   }, [priceTickSize, syncDrawingPrimitive, syncLineActionCoordinates, syncMeasurementCoordinates]);
 
@@ -589,72 +580,14 @@ export function ReplayChart({
     requestAnimationFrame(syncDrawingPrimitive);
   }, [bars, syncDrawingPrimitive, syncMeasurementCoordinates]);
 
-  useEffect(() => {
-    const chart = chartRef.current;
-    if (!chart) return;
-    const active = emaEnabled ? emaIndicators.filter((item) => item.visible) : [];
-    const activeIds = new Set(active.map((item) => item.id));
-    for (const [id, series] of emaSeriesRef.current) {
-      if (!activeIds.has(id)) {
-        chart.removeSeries(series);
-        emaSeriesRef.current.delete(id);
-        emaStateRef.current.delete(id);
-      }
-    }
-    const all = [...warmupBars, ...bars];
-    for (const indicator of active) {
-      let series = emaSeriesRef.current.get(indicator.id);
-      if (!series) {
-        series = chart.addSeries(LineSeries, {
-          ...emaSeriesStyleOptions(indicator),
-          title: copy.marketReplay.emaLine(indicator.length),
-          priceLineVisible: false,
-          crosshairMarkerVisible: false,
-        });
-        emaSeriesRef.current.set(indicator.id, series);
-      }
-      series.applyOptions({
-        ...emaSeriesStyleOptions(indicator),
-        title: copy.marketReplay.emaLine(indicator.length),
-      });
-      const previous = emaStateRef.current.get(indicator.id);
-      const samePrefix = previous?.length === indicator.length
-        && all.length >= previous.bars.length
-        && previous.bars.slice(0, -1).every((bar, index) => bar.timestamp === all[index]?.timestamp);
-      if (!previous || !samePrefix) {
-        const result = calculateEmaSeries(all, indicator.length, all.length - 1, 0);
-        const values: Array<number | null> = Array(all.length).fill(null);
-        for (const point of result.points) values[point.sequence] = point.value;
-        series.setData(result.points.filter((point) => point.sequence >= warmupBars.length)
-          .map((point) => ({ time: chartTime(all[point.sequence].timestamp), value: point.value })));
-        emaStateRef.current.set(indicator.id, {
-          length: indicator.length,
-          bars: all.map((bar) => ({ timestamp: bar.timestamp, close: bar.close })),
-          values,
-        });
-        continue;
-      }
-      const values = previous.values.slice(0, all.length);
-      while (values.length < all.length) values.push(null);
-      const start = Math.max(indicator.length - 1, previous.bars.length - 1);
-      for (let index = start; index < all.length; index += 1) {
-        if (index === indicator.length - 1) {
-          values[index] = all.slice(0, indicator.length).reduce((sum, bar) => sum + bar.close, 0) / indicator.length;
-        } else {
-          const prior = values[index - 1];
-          values[index] = prior === null ? null : nextEma(prior, all[index].close, indicator.length);
-        }
-        if (values[index] !== null && index >= warmupBars.length) {
-          series.update({ time: chartTime(all[index].timestamp), value: values[index]! });
-        }
-      }
-      emaStateRef.current.set(indicator.id, {
-        length: indicator.length,
-        bars: all.map((bar) => ({ timestamp: bar.timestamp, close: bar.close })),
-        values,
-      });
-    }
-  }, [bars, emaEnabled, emaIndicators, warmupBars]);
+  useReplayChartEma({
+    chartRef,
+    bars,
+    warmupBars,
+    enabled: emaEnabled,
+    indicators: emaIndicators,
+    chartKey: priceTickSize,
+  });
 
   const draftSizing = useMemo(() => {
     if (!draft || !paperSnapshot) return null;

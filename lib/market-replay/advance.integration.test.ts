@@ -29,6 +29,7 @@ import { applySpeculativeAdvance, paperStateFingerprint } from "@/lib/paper-trad
 import { buildPaperReplayDelta, createPaperDeltaAccumulator, recordPaperAdvance } from "./client-sync";
 import { resolveDisplaySession } from "./chart-sessions";
 import { getAggregationBucket } from "./aggregation";
+import { buildMarketBarBlocks } from "./bar-blocks";
 
 let databaseFile = "";
 const baseTime = Date.UTC(2026, 8, 1);
@@ -78,7 +79,7 @@ async function seed(
     }) });
   }
   await prisma.replayProgress.create({ data: {
-    datasetId: id, startSequence: start + 1, currentSequence: start, intervalMs: 1000,
+    datasetId: id, startSequence: start + 1, currentSequence: start,
     playbackRate: 20, displayIntervalSeconds: 300,
   } });
   if (paper) await prisma.paperTradingSession.create({ data: {
@@ -120,6 +121,19 @@ async function clientSyncBody(id: string, targetSequence: number, requestId: str
 }
 
 describe("replay advance with real SQLite", () => {
+  it("resumes legacy block construction from the persisted cursor", async () => {
+    const id = "block-resume";
+    await seed(id, 1, 5_000, -1, false);
+    await buildMarketBarBlocks(id, 5_000);
+    expect(await prisma.marketBarBlock.count({ where: { datasetId: id } })).toBe(2);
+    expect(await prisma.marketDataset.findUniqueOrThrow({ where: { id } })).toMatchObject({
+      barBlockBuildCursor: 4_999,
+    });
+
+    await buildMarketBarBlocks(id, 5_000);
+    expect(await prisma.marketBarBlock.count({ where: { datasetId: id } })).toBe(2);
+  });
+
   it("returns source bars as daily cache chunks and records empty weekly dates", async () => {
     await seed("chunk-second", 1, 120, -1, false);
     const daily = await chunksGET(new Request(
@@ -415,6 +429,60 @@ describe("replay advance with real SQLite", () => {
       expect(point.sequence).toBe(expected.sequence);
       expect(point.timestamp.toISOString()).toBe(expected.timestamp);
       for (const field of ["balance", "equity", "drawdown"] as const) expect(point[field]).toBeCloseTo(expected[field], 9);
+    });
+  });
+
+  it("persists closed-trade statistics incrementally", async () => {
+    const id = "incremental-trade-stats";
+    await seed(id, 1, 3);
+    const session = await prisma.paperTradingSession.findUniqueOrThrow({ where: { datasetId: id } });
+    await prisma.paperOrder.create({ data: {
+      id: "stats-entry", sessionId: session.id, side: "BUY", type: "MARKET", quantity: 2,
+      takeProfit: 105, createdSequence: -1, activeFromSequence: 0,
+    } });
+    await prisma.marketBar.update({
+      where: { datasetId_sequence: { datasetId: id, sequence: 1 } },
+      data: { high: 110 },
+    });
+
+    const response = await POST(request({
+      expectedCurrentSequence: -1, expectedVersion: 1, count: 2,
+    }), context(id));
+    expect(response.status).toBe(200);
+    const body = await response.json();
+    expect(body.snapshot.stats).toMatchObject({
+      tradeCount: 1, winRate: 1, profitFactor: null,
+      averageWin: 10, averageLoss: 0, maxConsecutiveWins: 1, maxConsecutiveLosses: 0,
+    });
+    expect(await prisma.paperTradingSession.findUniqueOrThrow({ where: { datasetId: id } })).toMatchObject({
+      tradeStatsVersion: 1, closedTradeCount: 1, winningTradeCount: 1, losingTradeCount: 0,
+      grossWinningPnl: 10, grossLosingPnl: 0, maxConsecutiveWins: 1,
+    });
+  });
+
+  it("backfills incremental statistics once for a legacy paper session", async () => {
+    const id = "legacy-trade-stats";
+    await seed(id, 1, 2);
+    const session = await prisma.paperTradingSession.findUniqueOrThrow({ where: { datasetId: id } });
+    await prisma.paperTrade.createMany({ data: [
+      { sessionId: session.id, side: "LONG", status: "CLOSED", openedSequence: 0,
+        openedAt: new Date(baseTime), closedSequence: 0, closedAt: new Date(baseTime), grossPnl: 12, fees: 2 },
+      { sessionId: session.id, side: "SHORT", status: "CLOSED", openedSequence: 1,
+        openedAt: new Date(baseTime + 1_000), closedSequence: 1, closedAt: new Date(baseTime + 1_000), grossPnl: -4, fees: 1 },
+    ] });
+    await prisma.paperTradingSession.update({
+      where: { id: session.id },
+      data: { tradeStatsVersion: 0 },
+    });
+
+    const snapshot = await getPaperSessionSnapshot(id);
+    expect(snapshot?.stats).toMatchObject({
+      tradeCount: 2, winRate: 0.5, profitFactor: 2,
+      averageWin: 10, averageLoss: -5, maxConsecutiveWins: 1, maxConsecutiveLosses: 1,
+    });
+    expect(await prisma.paperTradingSession.findUniqueOrThrow({ where: { datasetId: id } })).toMatchObject({
+      tradeStatsVersion: 1, closedTradeCount: 2, winningTradeCount: 1, losingTradeCount: 1,
+      grossWinningPnl: 10, grossLosingPnl: 5,
     });
   });
 

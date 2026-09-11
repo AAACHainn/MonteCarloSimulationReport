@@ -12,13 +12,48 @@ import type {
   PaperTradeData,
   PaperTradingStats,
 } from "./types";
+import { summarizeClosedTrades, type IncrementalTradeStats } from "./trade-stats";
 
-type SessionRecord = {
+export type SessionRecord = {
   id: string; datasetId: string; initialCapital: number; currency: string;
   commissionBps: number; slippageBps: number; lastProcessedSequence: number;
   netQuantity: number; averageEntryPrice: number | null; realizedPnl: number;
   totalFees: number; totalSlippage: number; peakEquity: number; maxDrawdown: number; version: number;
+  tradeStatsVersion: number; closedTradeCount: number; winningTradeCount: number; losingTradeCount: number;
+  grossWinningPnl: number; grossLosingPnl: number; currentWinStreak: number; currentLossStreak: number;
+  maxConsecutiveWins: number; maxConsecutiveLosses: number;
 };
+
+export function tradeStatsFromSession(session: SessionRecord): IncrementalTradeStats {
+  return {
+    closedTradeCount: session.closedTradeCount,
+    winningTradeCount: session.winningTradeCount,
+    losingTradeCount: session.losingTradeCount,
+    grossWinningPnl: session.grossWinningPnl,
+    grossLosingPnl: session.grossLosingPnl,
+    currentWinStreak: session.currentWinStreak,
+    currentLossStreak: session.currentLossStreak,
+    maxConsecutiveWins: session.maxConsecutiveWins,
+    maxConsecutiveLosses: session.maxConsecutiveLosses,
+  };
+}
+
+export async function ensurePaperTradeStats(
+  session: SessionRecord,
+  db: Prisma.TransactionClient = prisma,
+): Promise<SessionRecord> {
+  if (session.tradeStatsVersion >= 1) return session;
+  const closedTrades = await db.paperTrade.findMany({
+    where: { sessionId: session.id, status: "CLOSED" },
+    orderBy: [{ closedSequence: "asc" }, { id: "asc" }],
+    select: { grossPnl: true, fees: true },
+  });
+  const stats = summarizeClosedTrades(closedTrades.map((trade) => trade.grossPnl - trade.fees));
+  return await db.paperTradingSession.update({
+    where: { id: session.id },
+    data: { ...stats, tradeStatsVersion: 1 },
+  }) as SessionRecord;
+}
 
 export function serializePaperSession(session: SessionRecord): PaperSessionState {
   return {
@@ -67,25 +102,15 @@ export function serializePaperTrade(trade: {
   };
 }
 
-function streaks(values: number[]) {
-  let wins = 0; let losses = 0; let maxWins = 0; let maxLosses = 0;
-  for (const value of values) {
-    if (value > 0) { wins += 1; losses = 0; maxWins = Math.max(maxWins, wins); }
-    else if (value < 0) { losses += 1; wins = 0; maxLosses = Math.max(maxLosses, losses); }
-    else { wins = 0; losses = 0; }
-  }
-  return { maxWins, maxLosses };
-}
-
 export async function getPaperSessionSnapshot(datasetId: string, db: Prisma.TransactionClient = prisma): Promise<PaperSessionSnapshot | null> {
-  const session = await db.paperTradingSession.findUnique({ where: { datasetId } });
-  if (!session) return null;
-  const [activeOrders, recentOrders, recentFills, recentTrades, closedTrades, currentBar] = await Promise.all([
+  const storedSession = await db.paperTradingSession.findUnique({ where: { datasetId } });
+  if (!storedSession) return null;
+  const session = await ensurePaperTradeStats(storedSession as SessionRecord, db);
+  const [activeOrders, recentOrders, recentFills, recentTrades, currentBar] = await Promise.all([
     db.paperOrder.findMany({ where: { sessionId: session.id, status: "PENDING" }, orderBy: [{ createdSequence: "asc" }, { createdAt: "asc" }] }),
     db.paperOrder.findMany({ where: { sessionId: session.id, status: { not: "PENDING" } }, orderBy: { updatedAt: "desc" }, take: 30 }),
     db.paperFill.findMany({ where: { sessionId: session.id }, orderBy: [{ sequence: "desc" }, { createdAt: "desc" }], take: 50 }),
     db.paperTrade.findMany({ where: { sessionId: session.id }, orderBy: { openedSequence: "desc" }, take: 30 }),
-    db.paperTrade.findMany({ where: { sessionId: session.id, status: "CLOSED" }, orderBy: { closedSequence: "asc" } }),
     session.lastProcessedSequence >= 0
       ? db.marketBar.findUnique({ where: { datasetId_sequence: { datasetId, sequence: session.lastProcessedSequence } } })
       : Promise.resolve(null),
@@ -114,20 +139,17 @@ export async function getPaperSessionSnapshot(datasetId: string, db: Prisma.Tran
     ? (currentBar.close - session.averageEntryPrice) * session.netQuantity : 0;
   const balance = session.initialCapital + session.realizedPnl - session.totalFees;
   const equity = balance + unrealizedPnl;
-  const pnls = closedTrades.map((trade) => trade.grossPnl - trade.fees);
-  const wins = pnls.filter((value) => value > 0);
-  const losses = pnls.filter((value) => value < 0);
-  const grossWins = wins.reduce((sum, value) => sum + value, 0);
-  const grossLosses = Math.abs(losses.reduce((sum, value) => sum + value, 0));
-  const streak = streaks(pnls);
   const stats: PaperTradingStats = {
     balance, equity, unrealizedPnl, netPnl: equity - session.initialCapital,
-    tradeCount: closedTrades.length,
-    winRate: closedTrades.length ? wins.length / closedTrades.length : 0,
-    profitFactor: grossLosses > 0 ? grossWins / grossLosses : grossWins > 0 ? null : 0,
-    averageWin: wins.length ? grossWins / wins.length : 0,
-    averageLoss: losses.length ? -grossLosses / losses.length : 0,
-    maxConsecutiveWins: streak.maxWins, maxConsecutiveLosses: streak.maxLosses,
+    tradeCount: session.closedTradeCount,
+    winRate: session.closedTradeCount ? session.winningTradeCount / session.closedTradeCount : 0,
+    profitFactor: session.grossLosingPnl > 0
+      ? session.grossWinningPnl / session.grossLosingPnl
+      : session.grossWinningPnl > 0 ? null : 0,
+    averageWin: session.winningTradeCount ? session.grossWinningPnl / session.winningTradeCount : 0,
+    averageLoss: session.losingTradeCount ? -session.grossLosingPnl / session.losingTradeCount : 0,
+    maxConsecutiveWins: session.maxConsecutiveWins,
+    maxConsecutiveLosses: session.maxConsecutiveLosses,
     maxDrawdown: session.maxDrawdown, totalFees: session.totalFees, totalSlippage: session.totalSlippage,
   };
   return {

@@ -123,6 +123,7 @@ model MarketDataset {
   status                String  @default("READY")
   dataVersion           Int     @default(1)
   replayGeneration      Int     @default(0)
+  barBlockBuildCursor   Int     @default(-1)
   sourceIntervalSeconds Int?
   priceTickSize         Float   @default(0.01)
   sessionMode           String  @default("TWENTY_FOUR_SEVEN")
@@ -216,7 +217,6 @@ model ReplayProgress {
   dataset         MarketDataset @relation(fields: [datasetId], references: [id], onDelete: Cascade)
   startSequence   Int
   currentSequence Int
-  intervalMs      Int
   playbackRate    Int           @default(1)
   displayIntervalSeconds Int?
   displaySession         String        @default("ETH")
@@ -246,6 +246,16 @@ model PaperTradingSession {
   maxDrawdown           Float              @default(0)
   version               Int                @default(1)
   equitySampleStride    Int                @default(1)
+  tradeStatsVersion     Int                @default(1)
+  closedTradeCount      Int                @default(0)
+  winningTradeCount     Int                @default(0)
+  losingTradeCount      Int                @default(0)
+  grossWinningPnl       Float              @default(0)
+  grossLosingPnl        Float              @default(0)
+  currentWinStreak      Int                @default(0)
+  currentLossStreak     Int                @default(0)
+  maxConsecutiveWins    Int                @default(0)
+  maxConsecutiveLosses  Int                @default(0)
   orders                PaperOrder[]
   fills                 PaperFill[]
   trades                PaperTrade[]

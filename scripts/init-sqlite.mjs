@@ -75,6 +75,7 @@ const createStatements = [
     "status" TEXT NOT NULL DEFAULT 'READY',
     "dataVersion" INTEGER NOT NULL DEFAULT 1,
     "replayGeneration" INTEGER NOT NULL DEFAULT 0,
+    "barBlockBuildCursor" INTEGER NOT NULL DEFAULT -1,
     "sourceIntervalSeconds" INTEGER,
     "priceTickSize" REAL NOT NULL DEFAULT 0.01,
     "sessionMode" TEXT NOT NULL DEFAULT 'TWENTY_FOUR_SEVEN',
@@ -103,7 +104,6 @@ const createStatements = [
     "datasetId" TEXT NOT NULL PRIMARY KEY,
     "startSequence" INTEGER NOT NULL,
     "currentSequence" INTEGER NOT NULL,
-    "intervalMs" INTEGER NOT NULL,
     "playbackRate" INTEGER NOT NULL DEFAULT 1,
     "displayIntervalSeconds" INTEGER,
     "displaySession" TEXT NOT NULL DEFAULT 'ETH',
@@ -132,6 +132,16 @@ const createStatements = [
     "maxDrawdown" REAL NOT NULL DEFAULT 0,
     "version" INTEGER NOT NULL DEFAULT 1,
     "equitySampleStride" INTEGER NOT NULL DEFAULT 1,
+    "tradeStatsVersion" INTEGER NOT NULL DEFAULT 1,
+    "closedTradeCount" INTEGER NOT NULL DEFAULT 0,
+    "winningTradeCount" INTEGER NOT NULL DEFAULT 0,
+    "losingTradeCount" INTEGER NOT NULL DEFAULT 0,
+    "grossWinningPnl" REAL NOT NULL DEFAULT 0,
+    "grossLosingPnl" REAL NOT NULL DEFAULT 0,
+    "currentWinStreak" INTEGER NOT NULL DEFAULT 0,
+    "currentLossStreak" INTEGER NOT NULL DEFAULT 0,
+    "maxConsecutiveWins" INTEGER NOT NULL DEFAULT 0,
+    "maxConsecutiveLosses" INTEGER NOT NULL DEFAULT 0,
     "createdAt" DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
     "updatedAt" DATETIME NOT NULL,
     CONSTRAINT "PaperTradingSession_datasetId_fkey" FOREIGN KEY ("datasetId") REFERENCES "MarketDataset" ("id") ON DELETE CASCADE ON UPDATE CASCADE
@@ -267,6 +277,7 @@ const marketDatasetColumns = [
   ["status", "TEXT NOT NULL DEFAULT 'READY'"],
   ["dataVersion", "INTEGER NOT NULL DEFAULT 1"],
   ["replayGeneration", "INTEGER NOT NULL DEFAULT 0"],
+  ["barBlockBuildCursor", "INTEGER NOT NULL DEFAULT -1"],
   ["sourceIntervalSeconds", "INTEGER"],
   ["priceTickSize", "REAL NOT NULL DEFAULT 0.01"],
   ["sessionMode", "TEXT NOT NULL DEFAULT 'TWENTY_FOUR_SEVEN'"],
@@ -280,7 +291,19 @@ const replayProgressColumns = [
   ["generation", "INTEGER NOT NULL DEFAULT 1"], ["syncVersion", "INTEGER NOT NULL DEFAULT 0"],
   ["lastSyncRequestId", "TEXT"], ["lastSyncResponse", "TEXT"],
 ];
-const paperSessionColumns = [["equitySampleStride", "INTEGER NOT NULL DEFAULT 1"]];
+const paperSessionColumns = [
+  ["equitySampleStride", "INTEGER NOT NULL DEFAULT 1"],
+  ["tradeStatsVersion", "INTEGER NOT NULL DEFAULT 1"],
+  ["closedTradeCount", "INTEGER NOT NULL DEFAULT 0"],
+  ["winningTradeCount", "INTEGER NOT NULL DEFAULT 0"],
+  ["losingTradeCount", "INTEGER NOT NULL DEFAULT 0"],
+  ["grossWinningPnl", "REAL NOT NULL DEFAULT 0"],
+  ["grossLosingPnl", "REAL NOT NULL DEFAULT 0"],
+  ["currentWinStreak", "INTEGER NOT NULL DEFAULT 0"],
+  ["currentLossStreak", "INTEGER NOT NULL DEFAULT 0"],
+  ["maxConsecutiveWins", "INTEGER NOT NULL DEFAULT 0"],
+  ["maxConsecutiveLosses", "INTEGER NOT NULL DEFAULT 0"],
+];
 const paperOrderColumns = [["riskAmount", "REAL"]];
 const marketDatasetImportColumns = [["importedBars", "INTEGER NOT NULL DEFAULT 0"]];
 
@@ -335,7 +358,12 @@ try {
     const existing = await prisma.$queryRawUnsafe(`PRAGMA table_info("${table}")`);
     const names = new Set(existing.map((column) => column.name));
     for (const [name, type] of columns) {
-      if (!names.has(name)) await prisma.$executeRawUnsafe(`ALTER TABLE "${table}" ADD COLUMN "${name}" ${type}`);
+      if (!names.has(name)) {
+        await prisma.$executeRawUnsafe(`ALTER TABLE "${table}" ADD COLUMN "${name}" ${type}`);
+        if (table === "PaperTradingSession" && name === "tradeStatsVersion") {
+          await prisma.$executeRawUnsafe(`UPDATE "PaperTradingSession" SET "tradeStatsVersion" = 0`);
+        }
+      }
     }
   }
 

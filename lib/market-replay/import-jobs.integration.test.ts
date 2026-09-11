@@ -89,7 +89,7 @@ describe("market dataset streaming import", () => {
     const blocks = await prisma.marketBarBlock.findMany({ where: { datasetId: dataset.id } });
 
     expect(job).toMatchObject({ status: "COMPLETED", processedRows: 4, importedBars: 2 });
-    expect(dataset).toMatchObject({ symbol: "ES", barCount: 2 });
+    expect(dataset).toMatchObject({ symbol: "ES", barCount: 2, barBlockBuildCursor: 1 });
     expect(bars.map((bar) => ({ sequence: bar.sequence, close: bar.close, volume: bar.volume }))).toEqual([
       { sequence: 0, close: 4538.25, volume: null },
       { sequence: 1, close: 4538, volume: null },

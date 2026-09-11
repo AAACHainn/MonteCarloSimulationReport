@@ -5,12 +5,20 @@ import { serializeSourceBar } from "@/lib/market-replay/dataset";
 import { MAX_REPLAY_SYNC_SOURCE_BARS } from "@/lib/market-replay/types";
 import { createDeterministicEventIdFactory } from "@/lib/paper-trading/deterministic-id";
 import { advancePaperTrading } from "@/lib/paper-trading/engine";
-import { getPaperSessionSnapshot, serializePaperOrder, serializePaperSession } from "@/lib/paper-trading/serialize";
+import {
+  ensurePaperTradeStats,
+  getPaperSessionSnapshot,
+  serializePaperOrder,
+  serializePaperSession,
+  tradeStatsFromSession,
+  type SessionRecord,
+} from "@/lib/paper-trading/serialize";
 import type { PaperEquityPointData, PaperFillData, PaperOrderData } from "@/lib/paper-trading/types";
 import { derivePaperTradeTransitions } from "@/lib/paper-trading/reducers";
 import { paperStateFingerprint } from "@/lib/paper-trading/speculative";
 import type { PaperReplayDelta, ReplaySyncReceipt, ReplaySyncRequest } from "@/lib/market-replay/client-sync";
 import type { PaperSessionState } from "@/lib/paper-trading/types";
+import { recordClosedTrade, type IncrementalTradeStats } from "@/lib/paper-trading/trade-stats";
 
 export type ReplaySyncInput = {
   generation: number;
@@ -52,7 +60,9 @@ async function persistTrades(
   sessionId: string,
   orders: PaperOrderData[],
   fills: PaperFillData[],
+  initialStats: IncrementalTradeStats,
 ) {
+  let stats = initialStats;
   let activeTrade = fills.length
     ? await tx.paperTrade.findFirst({ where: { sessionId, status: "OPEN" } })
     : null;
@@ -73,24 +83,27 @@ async function persistTrades(
         data: { grossPnl: { increment: fill.realizedPnl }, fees: { increment: fill.fee } },
       });
     } else if ((transition.kind === "CLOSE" || transition.kind === "STOP_LOSS" || transition.kind === "TAKE_PROFIT") && activeTrade) {
-      await tx.paperTrade.update({
+      const closed = await tx.paperTrade.update({
         where: { id: activeTrade.id },
         data: { status: "CLOSED", grossPnl: { increment: fill.realizedPnl }, fees: { increment: fill.fee }, closedSequence: fill.sequence, closedAt: new Date(fill.timestamp) },
       });
+      stats = recordClosedTrade(stats, closed.grossPnl - closed.fees);
       activeTrade = null;
     } else if (transition.kind === "REVERSE") {
       const closingFee = transition.closingFee;
       if (activeTrade) {
-        await tx.paperTrade.update({
+        const closed = await tx.paperTrade.update({
           where: { id: activeTrade.id },
           data: { status: "CLOSED", grossPnl: { increment: fill.realizedPnl }, fees: { increment: closingFee }, closedSequence: fill.sequence, closedAt: new Date(fill.timestamp) },
         });
+        stats = recordClosedTrade(stats, closed.grossPnl - closed.fees);
       }
       activeTrade = await tx.paperTrade.create({
         data: { sessionId, side: fill.netQuantityAfter > 0 ? "LONG" : "SHORT", openedSequence: fill.sequence, openedAt: new Date(fill.timestamp), fees: fill.fee - closingFee, plannedRisk: transition.plannedRisk },
       });
     }
   }
+  return stats;
 }
 
 const ACCOUNTING_EPSILON = 1e-8;
@@ -254,7 +267,8 @@ export async function persistClientReplayBatch(
         || sessionRecord.lastProcessedSequence !== progress.currentSequence) {
         return { status: 409, error: copy.paperTrading.conflict } as const;
       }
-      const session = serializePaperSession(sessionRecord);
+      const statsSession = await ensurePaperTradeStats(sessionRecord as SessionRecord, tx);
+      const session = serializePaperSession(statsSession);
       const currentOrders = (await tx.paperOrder.findMany({ where: { sessionId: session.id, status: "PENDING" } }))
         .map(serializePaperOrder);
       if (!validateClientPaperDelta(datasetId, progress.generation, progress.currentSequence,
@@ -287,7 +301,13 @@ export async function persistClientReplayBatch(
           data: delta.fills.map((fill) => ({ ...fill, sessionId: session.id, timestamp: new Date(fill.timestamp) })),
         });
       }
-      await persistTrades(tx, session.id, delta.orderChanges, delta.fills);
+      const tradeStats = await persistTrades(
+        tx, session.id, delta.orderChanges, delta.fills, tradeStatsFromSession(statsSession),
+      );
+      await tx.paperTradingSession.update({
+        where: { id: session.id },
+        data: { ...tradeStats, tradeStatsVersion: 1 },
+      });
       if (delta.equityPoints.length) {
         await tx.paperEquityPoint.createMany({
           data: delta.equityPoints.map((point) => ({ ...point, sessionId: session.id, timestamp: new Date(point.timestamp) })),
@@ -356,7 +376,8 @@ export async function syncReplayToTarget(
       if (session.version !== input.expectedPaperVersion || session.lastProcessedSequence !== progress.currentSequence) {
         return { status: 409, error: copy.paperTrading.conflict } as const;
       }
-      let state = serializePaperSession(session);
+      const statsSession = await ensurePaperTradeStats(session as SessionRecord, tx);
+      let state = serializePaperSession(statsSession);
       let orders = (await tx.paperOrder.findMany({
         where: { sessionId: session.id, status: "PENDING" },
         orderBy: [{ createdSequence: "asc" }, { id: "asc" }],
@@ -406,7 +427,13 @@ export async function syncReplayToTarget(
           data: fills.map((fill) => ({ ...fill, sessionId: session.id, timestamp: new Date(fill.timestamp) })),
         });
       }
-      await persistTrades(tx, session.id, orders, fills);
+      const tradeStats = await persistTrades(
+        tx, session.id, orders, fills, tradeStatsFromSession(statsSession),
+      );
+      await tx.paperTradingSession.update({
+        where: { id: session.id },
+        data: { ...tradeStats, tradeStatsVersion: 1 },
+      });
       for (let index = 0; index < equityPoints.length; index += 1_000) {
         await tx.paperEquityPoint.createMany({
           data: equityPoints.slice(index, index + 1_000).map((point) => ({

@@ -17,9 +17,6 @@ export const MAX_EMA_INDICATORS = 5;
 export const EMA_LINE_WIDTHS = [1, 2, 3, 4] as const;
 export const EMA_LINE_STYLES = ["SOLID", "DASHED", "DOTTED"] as const;
 
-// Kept for one migration cycle so old saved progress can be read.
-export const REPLAY_INTERVALS = [10_000, 5_000, 3_000, 1_000, 500, 200, 100] as const;
-export type ReplayIntervalMs = (typeof REPLAY_INTERVALS)[number];
 export type PlaybackRate = number;
 export type SessionMode = "TWENTY_FOUR_SEVEN" | "DAILY_SESSION" | "OVERNIGHT_SESSION";
 export type DisplaySession = "ETH" | "RTH";
@@ -151,10 +148,6 @@ export type ReplayState = ReplayProgressData & {
 
 export function isPlaybackRate(value: number): value is PlaybackRate {
   return Number.isInteger(value) && value >= MIN_PLAYBACK_RATE && value <= MAX_PLAYBACK_RATE;
-}
-
-export function isReplayInterval(value: number): value is ReplayIntervalMs {
-  return REPLAY_INTERVALS.includes(value as ReplayIntervalMs);
 }
 
 export function parseSourceInterval(value: string) {

@@ -33,6 +33,23 @@ describe("manual replay step queue", () => {
     expect(calls).toEqual(["running", "new interval"]);
   });
 
+  it("lets active asynchronous work observe cancellation", async () => {
+    const queue = createReplayStepQueue();
+    let release!: () => void;
+    const blocked = new Promise<void>((resolve) => { release = resolve; });
+    const states: boolean[] = [];
+    const running = queue.enqueue(async (isCancelled) => {
+      states.push(isCancelled());
+      await blocked;
+      states.push(isCancelled());
+    });
+    await Promise.resolve();
+    queue.cancel();
+    release();
+    await running;
+    expect(states).toEqual([false, true]);
+  });
+
   it("drops queued clicks after a failure and accepts the next user attempt", async () => {
     const queue = createReplayStepQueue();
     let calls = 0;

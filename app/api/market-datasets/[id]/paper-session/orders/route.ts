@@ -1,4 +1,5 @@
 import { NextResponse } from "next/server";
+import { z } from "zod";
 import { prisma } from "@/lib/db";
 import { copy } from "@/lib/i18n";
 import { getPaperSessionSnapshot } from "@/lib/paper-trading/serialize";
@@ -73,16 +74,33 @@ export async function POST(request: Request, context: RouteContext) {
 
 export async function DELETE(request: Request, context: RouteContext) {
   const { id } = await context.params;
-  const body = await request.json().catch(() => ({})) as { expectedVersion?: number; scope?: "ALL" | "BRACKET" };
-  const session = await prisma.paperTradingSession.findUnique({ where: { datasetId: id } });
-  if (!session) return NextResponse.json({ error: copy.paperTrading.sessionNotFound }, { status: 404 });
-  if (session.version !== body.expectedVersion) return NextResponse.json({ error: copy.paperTrading.conflict }, { status: 409 });
-  await prisma.$transaction([
-    prisma.paperOrder.updateMany({
-      where: { sessionId: session.id, status: "PENDING", ...(body.scope === "BRACKET" ? { isProtective: true } : { isProtective: false }) },
+  const body = z.object({
+    expectedVersion: z.number().int().positive(),
+    scope: z.enum(["ALL", "BRACKET"]).default("ALL"),
+  }).safeParse(await request.json().catch(() => ({})));
+  if (!body.success) return NextResponse.json({ error: copy.paperTrading.conflict }, { status: 400 });
+  const result = await prisma.$transaction(async (tx) => {
+    const session = await tx.paperTradingSession.findUnique({ where: { datasetId: id } });
+    if (!session) return { status: 404, error: copy.paperTrading.sessionNotFound } as const;
+    if (session.version !== body.data.expectedVersion) {
+      return { status: 409, error: copy.paperTrading.conflict } as const;
+    }
+    const updated = await tx.paperOrder.updateMany({
+      where: {
+        sessionId: session.id,
+        status: "PENDING",
+        ...(body.data.scope === "BRACKET" ? { isProtective: true } : {}),
+      },
       data: { status: "CANCELLED", cancelReason: "USER_CANCELLED" },
-    }),
-    prisma.paperTradingSession.update({ where: { id: session.id }, data: { version: { increment: 1 } } }),
-  ]);
+    });
+    if (updated.count) {
+      await tx.paperTradingSession.update({
+        where: { id: session.id },
+        data: { version: { increment: 1 } },
+      });
+    }
+    return { status: 200, error: null } as const;
+  });
+  if (result.error) return NextResponse.json({ error: result.error }, { status: result.status });
   return NextResponse.json({ snapshot: await getPaperSessionSnapshot(id) });
 }

@@ -165,7 +165,10 @@ export async function processImportJob(jobId: string) {
     await prisma.$transaction([
       prisma.marketDataset.update({
         where: { id: dataset.id },
-        data: { status: "READY", barCount: importedBarCount, startTime: firstTime, endTime: lastTime, dataVersion: { increment: 1 } },
+        data: {
+          status: "READY", barCount: importedBarCount, startTime: firstTime, endTime: lastTime,
+          barBlockBuildCursor: importedBarCount - 1, dataVersion: { increment: 1 },
+        },
       }),
       prisma.marketDatasetImport.update({
         where: { id: jobId },

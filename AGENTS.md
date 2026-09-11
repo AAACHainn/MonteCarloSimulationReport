@@ -281,7 +281,7 @@ corepack pnpm run build
 - 浏览器不再获取完整源数据；旧的 `GET /api/market-datasets/[id]/bars` 已返回 `410`。
 - 图表窗口通过 `GET /api/market-datasets/[id]/bars/window` 获取，接口只返回当前源序号及以前的聚合窗口、EMA 预热区和最后一根源 K 线。
 - 回放起点通过 `POST /api/market-datasets/[id]/replay/start` 在服务端定位。
-- `ReplayProgress` 使用 `playbackRate`（整数 `1–100`）和 `displayIntervalSeconds`。旧 `intervalMs` 暂时保留一轮迁移兼容，不应再用于新回放逻辑。
+- `ReplayProgress` 使用 `playbackRate`（整数 `1–100`）和 `displayIntervalSeconds`；旧 `intervalMs` 兼容字段已完成迁移并移除。
 - 自动播放和“下一根”按显示周期整根推进。1× 的每根等待时间等于显示周期，倍率相应缩短等待；例如 5 分钟 / 100× 为每 3 秒一根。时间戳缺口、周末和休市不会额外等待。页面进入后台时自动暂停。
 - `POST /api/market-datasets/[id]/replay/advance` 未传显示周期时单次最多推进 100 根源 K 线；传显示周期时 `count` 表示显示 K 线根数，单次读取上限 86,400 根源 K 线。模拟交易引擎仍按顺序逐源处理，不能把一批源 K 线合并后撮合。
 - 显示周期推进返回 `aggregatedBars`（受影响桶的完整修订）和 `lastSourceBar`，前端替换/追加这些桶，不再每一步请求完整窗口。权益采样点批量写入，账户快照在推进事务内读取。

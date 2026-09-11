@@ -6,7 +6,7 @@ const mocks = vi.hoisted(() => {
     replayProgress: { findUnique: vi.fn() },
     marketDataset: { findUnique: vi.fn() },
     marketBar: { findUnique: vi.fn() },
-    paperOrder: { create: vi.fn(), findFirst: vi.fn(), update: vi.fn() },
+    paperOrder: { create: vi.fn(), findFirst: vi.fn(), update: vi.fn(), updateMany: vi.fn() },
   };
   return {
     tx,
@@ -18,7 +18,7 @@ const mocks = vi.hoisted(() => {
 vi.mock("@/lib/db", () => ({ prisma: { $transaction: mocks.transaction } }));
 vi.mock("@/lib/paper-trading/serialize", () => ({ getPaperSessionSnapshot: mocks.getSnapshot }));
 
-import { POST } from "./route";
+import { DELETE, POST } from "./route";
 import { PATCH } from "./[orderId]/route";
 
 const context = { params: Promise.resolve({ id: "dataset" }) };
@@ -43,6 +43,7 @@ describe("paper order API fixed-risk behavior", () => {
     mocks.tx.marketBar.findUnique.mockResolvedValue({ close: 100 });
     mocks.tx.paperOrder.create.mockResolvedValue({ id: "order" });
     mocks.tx.paperOrder.update.mockResolvedValue({ id: "order" });
+    mocks.tx.paperOrder.updateMany.mockResolvedValue({ count: 2 });
     mocks.tx.paperTradingSession.update.mockResolvedValue({ version: 2 });
     mocks.tx.paperOrder.findFirst.mockResolvedValue({
       id: "order", side: "BUY", type: "LIMIT", status: "PENDING", quantity: 20,
@@ -98,6 +99,22 @@ describe("paper order API fixed-risk behavior", () => {
         price: 102, stopLoss: 98, takeProfit: 110, riskAmount: 200, quantity: 50,
         activeFromSequence: 10,
       }),
+    });
+  });
+
+  it("cancels every pending order for ALL and only protective orders for BRACKET", async () => {
+    const all = await DELETE(request("DELETE", { expectedVersion: 1, scope: "ALL" }), context);
+    expect(all.status).toBe(200);
+    expect(mocks.tx.paperOrder.updateMany).toHaveBeenLastCalledWith({
+      where: { sessionId: "session", status: "PENDING" },
+      data: { status: "CANCELLED", cancelReason: "USER_CANCELLED" },
+    });
+
+    const bracket = await DELETE(request("DELETE", { expectedVersion: 1, scope: "BRACKET" }), context);
+    expect(bracket.status).toBe(200);
+    expect(mocks.tx.paperOrder.updateMany).toHaveBeenLastCalledWith({
+      where: { sessionId: "session", status: "PENDING", isProtective: true },
+      data: { status: "CANCELLED", cancelReason: "USER_CANCELLED" },
     });
   });
 

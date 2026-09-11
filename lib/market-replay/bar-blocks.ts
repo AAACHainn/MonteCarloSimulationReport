@@ -1,9 +1,18 @@
 import { prisma } from "@/lib/db";
 import { MARKET_BAR_BLOCK_SIZE } from "./types";
 
-export async function ensureMarketBarBlocks(datasetId: string, barCount: number) {
-  if (!barCount || await prisma.marketBarBlock.count({ where: { datasetId } })) return;
-  for (let start = 0; start < barCount; start += MARKET_BAR_BLOCK_SIZE) {
+const builds = new Map<string, Promise<void>>();
+
+export async function buildMarketBarBlocks(datasetId: string, barCount: number) {
+  if (!barCount) return;
+  const dataset = await prisma.marketDataset.findUnique({
+    where: { id: datasetId },
+    select: { barBlockBuildCursor: true },
+  });
+  if (!dataset || dataset.barBlockBuildCursor >= barCount - 1) return;
+  const firstMissing = dataset.barBlockBuildCursor + 1;
+  const initialStart = Math.floor(firstMissing / MARKET_BAR_BLOCK_SIZE) * MARKET_BAR_BLOCK_SIZE;
+  for (let start = initialStart; start < barCount; start += MARKET_BAR_BLOCK_SIZE) {
     const bars = await prisma.marketBar.findMany({
       where: { datasetId, sequence: { gte: start, lt: start + MARKET_BAR_BLOCK_SIZE } },
       orderBy: { sequence: "asc" },
@@ -21,5 +30,22 @@ export async function ensureMarketBarBlocks(datasetId: string, barCount: number)
       },
       update: {},
     });
+    await prisma.marketDataset.update({
+      where: { id: datasetId },
+      data: { barBlockBuildCursor: bars.at(-1)!.sequence },
+    });
   }
+}
+
+/** Start resumable legacy backfill without putting the full scan on the window request path. */
+export function scheduleMarketBarBlockBuild(datasetId: string, barCount: number) {
+  const active = builds.get(datasetId);
+  if (active) return active;
+  const operation = new Promise<void>((resolve) => setTimeout(resolve, 0))
+    .then(() => buildMarketBarBlocks(datasetId, barCount))
+    .finally(() => {
+      if (builds.get(datasetId) === operation) builds.delete(datasetId);
+    });
+  builds.set(datasetId, operation);
+  return operation;
 }

@@ -7,11 +7,7 @@ import * as Popover from "@radix-ui/react-popover";
 import { ReplayChart } from "@/components/market-replay/replay-chart";
 import { ReplayStartDialog } from "@/components/market-replay/replay-start-dialog";
 import { DEFAULT_REPLAY_MAX_VISIBLE_BARS } from "@/lib/market-replay/chart-range";
-import {
-  DEFAULT_CANDLESTICK_STYLE,
-  parseCandlestickStyle,
-  type CandlestickStyle,
-} from "@/lib/market-replay/candlestick-style";
+import type { CandlestickStyle } from "@/lib/market-replay/candlestick-style";
 import { PaperAccountStrip, PaperTradingDetails, PaperTradingPanel } from "@/components/market-replay/paper-trading-panel";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { Button } from "@/components/ui/button";
@@ -41,14 +37,10 @@ import {
   UTC_OFFSET_OPTIONS,
   formatUtcDateTime,
   formatUtcOffset,
-  isSupportedUtcOffsetMinutes,
-  utcOffsetMinutesForTimezone,
 } from "@/lib/market-replay/display-timezone";
 import {
   DEFAULT_EMA_LINE_STYLE,
   DEFAULT_EMA_LINE_WIDTH,
-  normalizeEmaLineStyle,
-  normalizeEmaLineWidth,
 } from "@/lib/market-replay/ema-style";
 import {
   EMA_LENGTH_MAX,
@@ -61,7 +53,6 @@ import {
   formatInterval,
   isValidDisplayInterval,
   type AggregatedMarketBarData,
-  type EmaIndicatorConfig,
   type DisplaySession,
   type MarketBarData,
   type MarketDatasetSummary,
@@ -83,13 +74,9 @@ import {
 import { useReplayState } from "@/lib/market-replay/use-replay-state";
 import { createReplayStepQueue } from "@/lib/market-replay/step-queue";
 import {
-  DEFAULT_FIBONACCI_RETRACEMENT_STYLE,
-  DEFAULT_TREND_LINE_STYLE,
   DRAWING_TYPE_FIB_RETRACEMENT,
   DRAWING_TYPE_TREND_LINE,
   drawingStyleMatchesType,
-  parseFibonacciRetracementPreferences,
-  parseTrendLinePreferences,
   type DrawingTool,
   type FibonacciRetracementStyle,
   type FibonacciRetracementTemplate,
@@ -99,6 +86,10 @@ import {
   type TrendLineStyle,
   type TrendLineTemplate,
 } from "@/lib/market-replay/chart-drawings";
+import {
+  EMA_COLORS,
+  useReplayPreferences,
+} from "@/components/market-replay/use-replay-preferences";
 
 type SaveStatus = "idle" | "saving" | "saved" | "error";
 type WindowPayload = {
@@ -115,17 +106,6 @@ type ServerAdvancePayload = {
   syncVersion: number;
 };
 
-const EMA_SETTINGS_STORAGE_KEY = "market-replay-ema-settings-v1";
-const DISPLAY_TIMEZONE_STORAGE_KEY = "market-replay-display-timezone-v1";
-const CANDLESTICK_STYLE_STORAGE_KEY = "market-replay-candlestick-style-v1";
-const TREND_LINE_PREFERENCES_STORAGE_KEY = "market-replay-trend-line-preferences-v1";
-const FIBONACCI_PREFERENCES_STORAGE_KEY = "market-replay-fibonacci-preferences-v1";
-const EMA_COLORS = ["#f59e0b", "#2563eb", "#7c3aed", "#0f766e", "#e11d48"];
-const DEFAULT_EMA_INDICATORS: EmaIndicatorConfig[] = [
-  { id: "ema-default-20", length: 20, color: EMA_COLORS[0], lineWidth: DEFAULT_EMA_LINE_WIDTH, lineStyle: DEFAULT_EMA_LINE_STYLE, visible: true },
-  { id: "ema-default-60", length: 60, color: EMA_COLORS[1], lineWidth: DEFAULT_EMA_LINE_WIDTH, lineStyle: DEFAULT_EMA_LINE_STYLE, visible: true },
-  { id: "ema-default-200", length: 200, color: EMA_COLORS[2], lineWidth: DEFAULT_EMA_LINE_WIDTH, lineStyle: DEFAULT_EMA_LINE_STYLE, visible: true },
-];
 const DISPLAY_INTERVAL_PRESETS = [1, 5, 10, 15, 30, 60, 120, 180, 300, 600, 900, 1_800, 2_700, 3_600, 7_200, 14_400, 21_600, 43_200, 86_400];
 const REPLAY_SYNC_BATCH_SIZE = 100;
 const REPLAY_SYNC_HARD_CAP = 200;
@@ -149,32 +129,6 @@ function replaySyncCapacity(state: ReplayState, sourceIntervalSeconds: number, s
 
 function isValidEmaLength(value: unknown): value is number {
   return Number.isInteger(value) && Number(value) >= EMA_LENGTH_MIN && Number(value) <= EMA_LENGTH_MAX;
-}
-
-function loadEmaSettings() {
-  try {
-    const parsed = JSON.parse(window.localStorage.getItem(EMA_SETTINGS_STORAGE_KEY) ?? "null") as {
-      enabled?: unknown;
-      indicators?: unknown;
-    } | null;
-    if (!parsed || typeof parsed.enabled !== "boolean" || !Array.isArray(parsed.indicators)) return null;
-    const indicators = parsed.indicators.slice(0, MAX_EMA_INDICATORS).flatMap((item, index) => {
-      if (!item || typeof item !== "object") return [];
-      const candidate = item as Partial<EmaIndicatorConfig>;
-      if (typeof candidate.id !== "string" || !isValidEmaLength(candidate.length)) return [];
-      return [{
-        id: candidate.id,
-        length: candidate.length,
-        color: typeof candidate.color === "string" ? candidate.color : EMA_COLORS[index],
-        lineWidth: normalizeEmaLineWidth(candidate.lineWidth),
-        lineStyle: normalizeEmaLineStyle(candidate.lineStyle),
-        visible: typeof candidate.visible === "boolean" ? candidate.visible : true,
-      }];
-    });
-    return { enabled: parsed.enabled, indicators };
-  } catch {
-    return null;
-  }
 }
 
 function dateTimeLocalValue(value: string, timezone: string) {
@@ -217,12 +171,7 @@ export function MarketReplayClient({ dataset }: { dataset: MarketDatasetSummary 
   const [saveStatus, setSaveStatus] = useState<SaveStatus>("idle");
   const [confirmAction, setConfirmAction] = useState<"reset" | "paper-clear" | null>(null);
   const [settingsDialog, setSettingsDialog] = useState<"candlesticks" | "indicators" | "paper" | null>(null);
-  const [candlestickStyle, setCandlestickStyle] = useState<CandlestickStyle>(DEFAULT_CANDLESTICK_STYLE);
   const [candlestickStyleDraft, setCandlestickStyleDraft] = useState<CandlestickStyle | null>(null);
-  const [candlestickStyleLoaded, setCandlestickStyleLoaded] = useState(false);
-  const [emaEnabled, setEmaEnabled] = useState(false);
-  const [emaIndicators, setEmaIndicators] = useState<EmaIndicatorConfig[]>(DEFAULT_EMA_INDICATORS);
-  const [emaSettingsLoaded, setEmaSettingsLoaded] = useState(false);
   const [emaError, setEmaError] = useState<string | null>(null);
   const [customInterval, setCustomInterval] = useState("");
   const [customIntervalUnit, setCustomIntervalUnit] = useState<"s" | "m" | "h">("m");
@@ -242,19 +191,29 @@ export function MarketReplayClient({ dataset }: { dataset: MarketDatasetSummary 
   const [drawingObjectsOpen, setDrawingObjectsOpen] = useState(false);
   const [styleDrawingId, setStyleDrawingId] = useState<string | null>(null);
   const [styleDraft, setStyleDraft] = useState<MarketDrawingStyle | null>(null);
-  const [defaultTrendLineStyle, setDefaultTrendLineStyle] = useState<TrendLineStyle>(DEFAULT_TREND_LINE_STYLE);
-  const [trendLineTemplates, setTrendLineTemplates] = useState<TrendLineTemplate[]>([]);
-  const [defaultFibonacciStyle, setDefaultFibonacciStyle] = useState<FibonacciRetracementStyle>(() => cloneFibonacciStyle(DEFAULT_FIBONACCI_RETRACEMENT_STYLE));
-  const [fibonacciTemplates, setFibonacciTemplates] = useState<FibonacciRetracementTemplate[]>([]);
-  const [drawingPreferencesLoaded, setDrawingPreferencesLoaded] = useState(false);
   const [selectedTemplateId, setSelectedTemplateId] = useState("");
   const [templateDialogOpen, setTemplateDialogOpen] = useState(false);
   const [templateName, setTemplateName] = useState("");
   const [pendingDrawingIds, setPendingDrawingIds] = useState<Set<string>>(() => new Set());
-  const [displayUtcOffsetMinutes, setDisplayUtcOffsetMinutes] = useState(() => (
-    utcOffsetMinutesForTimezone(dataset.startTime, dataset.timezone)
-  ));
-  const [displayTimezoneLoaded, setDisplayTimezoneLoaded] = useState(false);
+  const {
+    candlestickStyle,
+    setCandlestickStyle,
+    emaEnabled,
+    setEmaEnabled,
+    emaIndicators,
+    setEmaIndicators,
+    emaSettingsLoaded,
+    defaultTrendLineStyle,
+    setDefaultTrendLineStyle,
+    trendLineTemplates,
+    setTrendLineTemplates,
+    defaultFibonacciStyle,
+    setDefaultFibonacciStyle,
+    fibonacciTemplates,
+    setFibonacciTemplates,
+    displayUtcOffsetMinutes,
+    setDisplayUtcOffsetMinutes,
+  } = useReplayPreferences(dataset);
   const emaWarmupCount = emaEnabled
     ? Math.max(0, ...emaIndicators.filter((indicator) => indicator.visible).map((indicator) => indicator.length))
     : 0;
@@ -289,6 +248,7 @@ export function MarketReplayClient({ dataset }: { dataset: MarketDatasetSummary 
   const pendingPaperMutationsRef = useRef(0);
   const playbackAccumulatorRef = useRef(0);
   const playbackClockRef = useRef(0);
+  const playbackEpochRef = useRef(0);
   const bufferingRef = useRef(false);
   const bufferingTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const syncingRef = useRef(false);
@@ -335,98 +295,6 @@ export function MarketReplayClient({ dataset }: { dataset: MarketDatasetSummary 
 
   useEffect(() => { barsRef.current = bars; }, [bars]);
   useEffect(() => { currentSourceBarRef.current = currentSourceBar; }, [currentSourceBar]);
-
-  useEffect(() => {
-    const stored = loadEmaSettings();
-    if (stored) {
-      setEmaEnabled(stored.enabled);
-      setEmaIndicators(stored.indicators);
-    }
-    setEmaSettingsLoaded(true);
-  }, []);
-
-  useEffect(() => {
-    try {
-      setCandlestickStyle(parseCandlestickStyle(window.localStorage.getItem(CANDLESTICK_STYLE_STORAGE_KEY)));
-    } catch {
-      setCandlestickStyle(DEFAULT_CANDLESTICK_STYLE);
-    }
-    setCandlestickStyleLoaded(true);
-  }, []);
-
-  useEffect(() => {
-    if (!candlestickStyleLoaded) return;
-    try {
-      window.localStorage.setItem(CANDLESTICK_STYLE_STORAGE_KEY, JSON.stringify(candlestickStyle));
-    } catch {
-      // Browser storage can be unavailable; the style still applies to this page session.
-    }
-  }, [candlestickStyle, candlestickStyleLoaded]);
-
-  useEffect(() => {
-    const fallback = utcOffsetMinutesForTimezone(dataset.startTime, dataset.timezone);
-    try {
-      const storedValue = window.localStorage.getItem(`${DISPLAY_TIMEZONE_STORAGE_KEY}:${dataset.id}`);
-      const stored = storedValue === null ? Number.NaN : Number(storedValue);
-      setDisplayUtcOffsetMinutes(isSupportedUtcOffsetMinutes(stored) ? stored : fallback);
-    } catch {
-      setDisplayUtcOffsetMinutes(fallback);
-    }
-    setDisplayTimezoneLoaded(true);
-  }, [dataset.id, dataset.startTime, dataset.timezone]);
-
-  useEffect(() => {
-    if (!displayTimezoneLoaded) return;
-    try {
-      window.localStorage.setItem(`${DISPLAY_TIMEZONE_STORAGE_KEY}:${dataset.id}`, String(displayUtcOffsetMinutes));
-    } catch {
-      // Browser storage can be unavailable; the selected timezone still applies to this page session.
-    }
-  }, [dataset.id, displayTimezoneLoaded, displayUtcOffsetMinutes]);
-
-  useEffect(() => {
-    if (!emaSettingsLoaded) return;
-    try {
-      window.localStorage.setItem(EMA_SETTINGS_STORAGE_KEY, JSON.stringify({
-        enabled: emaEnabled,
-        indicators: emaIndicators,
-      }));
-    } catch {
-      // Browser storage can be unavailable; EMA controls still work for the current page session.
-    }
-  }, [emaEnabled, emaIndicators, emaSettingsLoaded]);
-
-  useEffect(() => {
-    let preferences = parseTrendLinePreferences(null);
-    let fibonacciPreferences = parseFibonacciRetracementPreferences(null);
-    try {
-      preferences = parseTrendLinePreferences(window.localStorage.getItem(TREND_LINE_PREFERENCES_STORAGE_KEY));
-      fibonacciPreferences = parseFibonacciRetracementPreferences(window.localStorage.getItem(FIBONACCI_PREFERENCES_STORAGE_KEY));
-    } catch {
-      // Browser storage can be unavailable; defaults still work for this page session.
-    }
-    setDefaultTrendLineStyle(preferences.defaultStyle);
-    setTrendLineTemplates(preferences.templates);
-    setDefaultFibonacciStyle(cloneFibonacciStyle(fibonacciPreferences.defaultStyle));
-    setFibonacciTemplates(fibonacciPreferences.templates);
-    setDrawingPreferencesLoaded(true);
-  }, []);
-
-  useEffect(() => {
-    if (!drawingPreferencesLoaded) return;
-    try {
-      window.localStorage.setItem(TREND_LINE_PREFERENCES_STORAGE_KEY, JSON.stringify({
-        defaultStyle: defaultTrendLineStyle,
-        templates: trendLineTemplates,
-      }));
-      window.localStorage.setItem(FIBONACCI_PREFERENCES_STORAGE_KEY, JSON.stringify({
-        defaultStyle: defaultFibonacciStyle,
-        templates: fibonacciTemplates,
-      }));
-    } catch {
-      // Drawing preferences still apply until this page closes.
-    }
-  }, [defaultFibonacciStyle, defaultTrendLineStyle, drawingPreferencesLoaded, fibonacciTemplates, trendLineTemplates]);
 
   const setDrawingPending = useCallback((id: string, pending: boolean) => {
     setPendingDrawingIds((current) => {
@@ -591,7 +459,7 @@ export function MarketReplayClient({ dataset }: { dataset: MarketDatasetSummary 
     setTemplateName("");
     setTemplateDialogOpen(false);
     setDrawingError(null);
-  }, [drawings, fibonacciTemplates, styleDraft, styleDrawingId, templateName, trendLineTemplates]);
+  }, [drawings, fibonacciTemplates, setFibonacciTemplates, setTrendLineTemplates, styleDraft, styleDrawingId, templateName, trendLineTemplates]);
 
   const deleteSelectedDrawingTemplate = useCallback(() => {
     if (!selectedTemplateId) return;
@@ -602,7 +470,7 @@ export function MarketReplayClient({ dataset }: { dataset: MarketDatasetSummary 
       setTrendLineTemplates((current) => current.filter((template) => template.id !== selectedTemplateId));
     }
     setSelectedTemplateId("");
-  }, [drawings, selectedTemplateId, styleDrawingId]);
+  }, [drawings, selectedTemplateId, setFibonacciTemplates, setTrendLineTemplates, styleDrawingId]);
 
   const displayedDrawings = useMemo(() => (
     styleDrawingId && styleDraft
@@ -881,7 +749,7 @@ export function MarketReplayClient({ dataset }: { dataset: MarketDatasetSummary 
     }
   }, [latestReplayRef, startSync]);
 
-  const fastForwardToNextVisibleBar = useCallback(async () => {
+  const fastForwardToNextVisibleBar = useCallback(async (shouldContinue: () => boolean = () => true) => {
     let current = latestReplayRef.current;
     if (!current || viewChangingRef.current || advancingRef.current || paperMutationActiveRef.current) return false;
     viewChangingRef.current = true;
@@ -923,8 +791,10 @@ export function MarketReplayClient({ dataset }: { dataset: MarketDatasetSummary 
         snapshot = data.snapshot;
         lastSourceBar = data.lastSourceBar;
         reachedVisibleBucket = data.reachedVisibleBucket;
-        if (reachedVisibleBucket) break;
+        if (reachedVisibleBucket || !shouldContinue()) break;
       }
+      const liveStatus = latestReplayRef.current?.status;
+      if (liveStatus) next = { ...next, status: liveStatus };
       commitConfirmedPaperSnapshot(snapshot);
       paperDeltaAccumulatorRef.current = createPaperDeltaAccumulator(next.currentSequence);
       currentSourceBarRef.current = lastSourceBar;
@@ -945,11 +815,14 @@ export function MarketReplayClient({ dataset }: { dataset: MarketDatasetSummary 
     }
   }, [beginBuffering, commitConfirmedPaperSnapshot, dataset.id, endBuffering, flushVisible, latestReplayRef, loadWindow, recoverReplay, setReplay]);
 
-  const processLocalBars = useCallback(async (requestedCount: number) => {
+  const processLocalBars = useCallback(async (
+    requestedCount: number,
+    shouldContinue: () => boolean = () => true,
+  ) => {
     const frameStartedAt = performance.now();
     let current = latestReplayRef.current;
     if (
-      !current || advancingRef.current || paperMutationActiveRef.current || viewChangingRef.current
+      !shouldContinue() || !current || advancingRef.current || paperMutationActiveRef.current || viewChangingRef.current
       || current.currentSequence >= current.barCount - 1 || !dataset.sourceIntervalSeconds
     ) return 0;
     const unconfirmedLimit = replaySyncCapacity(current, dataset.sourceIntervalSeconds, syncingRef.current, syncLatencyMsRef.current);
@@ -964,11 +837,12 @@ export function MarketReplayClient({ dataset }: { dataset: MarketDatasetSummary 
         beginBuffering();
         await paperSessionLoadRef.current;
         endBuffering();
+        if (!shouldContinue()) return 0;
       }
       if (recoveryRequiredRef.current) {
         await recoverReplay();
         current = latestReplayRef.current;
-        if (!current) return 0;
+        if (!shouldContinue() || !current) return 0;
       }
       const anchor = tradingDayForTimestamp(
         currentSourceBarRef.current?.timestamp ?? dataset.startTime,
@@ -983,6 +857,7 @@ export function MarketReplayClient({ dataset }: { dataset: MarketDatasetSummary 
           endBuffering();
         }
       }
+      if (!shouldContinue()) return 0;
       if (!sourceBars.length) {
         if (current.currentSequence >= current.barCount - 1) {
           setReplay((value) => value ? { ...value, status: "finished" } : value);
@@ -1049,6 +924,7 @@ export function MarketReplayClient({ dataset }: { dataset: MarketDatasetSummary 
       return 0;
     } finally {
       performance.measure("market-replay-source-frame", { start: frameStartedAt, end: performance.now() });
+      performance.clearMeasures("market-replay-source-frame");
       advancingRef.current = false;
       resolveAdvance();
     }
@@ -1058,11 +934,15 @@ export function MarketReplayClient({ dataset }: { dataset: MarketDatasetSummary 
   useEffect(() => {
     if (replayStatus !== "playing") return;
     let cancelled = false;
+    const epoch = ++playbackEpochRef.current;
+    const isCurrentPlayback = () => !cancelled
+      && playbackEpochRef.current === epoch
+      && latestReplayRef.current?.status === "playing";
     let frame = 0;
     playbackClockRef.current = performance.now();
     const tick = async (now: number) => {
       const current = latestReplayRef.current;
-      if (cancelled || !current || current.status !== "playing" || !dataset.sourceIntervalSeconds) return;
+      if (!isCurrentPlayback() || !current || !dataset.sourceIntervalSeconds) return;
       const maximum = Math.max(0, replaySyncCapacity(
         current, dataset.sourceIntervalSeconds, syncingRef.current, syncLatencyMsRef.current,
       ) - (current.currentSequence - current.confirmedSequence));
@@ -1080,6 +960,7 @@ export function MarketReplayClient({ dataset }: { dataset: MarketDatasetSummary 
           );
           nextSource = (await marketCache.getBarsAfter(current.currentSequence, 1, anchor))[0];
         }
+        if (!isCurrentPlayback()) return;
         const nextBucket = nextSource ? getAggregationBucket(
           new Date(nextSource.timestamp).getTime(),
           dataset.sourceIntervalSeconds,
@@ -1087,11 +968,11 @@ export function MarketReplayClient({ dataset }: { dataset: MarketDatasetSummary 
           displayMarketSession,
         ) : undefined;
         if (nextSource && !nextBucket) {
-          await fastForwardToNextVisibleBar();
+          await fastForwardToNextVisibleBar(isCurrentPlayback);
           playbackAccumulatorRef.current = 0;
           playbackClockRef.current = performance.now();
         } else {
-          const processed = await processLocalBars(advance.count);
+          const processed = await processLocalBars(advance.count, isCurrentPlayback);
           playbackAccumulatorRef.current += Math.max(0, advance.count - processed);
         }
       }
@@ -1101,15 +982,20 @@ export function MarketReplayClient({ dataset }: { dataset: MarketDatasetSummary 
       )) {
         void startSync(false, true);
       }
-      if (!cancelled) frame = requestAnimationFrame(tick);
+      if (isCurrentPlayback()) frame = requestAnimationFrame(tick);
     };
     frame = requestAnimationFrame(tick);
-    return () => { cancelled = true; cancelAnimationFrame(frame); };
+    return () => {
+      cancelled = true;
+      if (playbackEpochRef.current === epoch) playbackEpochRef.current += 1;
+      cancelAnimationFrame(frame);
+    };
   }, [dataset.sourceIntervalSeconds, dataset.startTime, displayMarketSession, fastForwardToNextVisibleBar, latestReplayRef, marketCache, marketSession, processLocalBars, replayStatus, startSync]);
 
   useEffect(() => {
     const pauseWhenHidden = () => {
       if (document.visibilityState !== "hidden") return;
+      playbackEpochRef.current += 1;
       manualStepsRef.current.cancel();
       setReplay((current) => current?.status === "playing" ? pauseReplay(current) : current);
       void advanceCompletionRef.current.then(() => flushVisible());
@@ -1182,6 +1068,7 @@ export function MarketReplayClient({ dataset }: { dataset: MarketDatasetSummary 
     const current = latestReplayRef.current;
     if (!current || viewChangingRef.current) return;
     manualStepsRef.current.cancel();
+    playbackEpochRef.current += 1;
     const next = current.status === "playing" ? pauseReplay(current) : playReplay(current);
     setReplay(next);
     if (next.status !== "playing") {
@@ -1198,17 +1085,20 @@ export function MarketReplayClient({ dataset }: { dataset: MarketDatasetSummary 
   const revealNextBar = useCallback(() => {
     const current = latestReplayRef.current;
     if (!current || current.status === "playing" || current.status === "finished") return;
-    void manualStepsRef.current.enqueue(async () => {
+    void manualStepsRef.current.enqueue(async (isCancelled) => {
       await advanceCompletionRef.current;
       await paperMutationChainRef.current;
+      if (isCancelled()) return;
       const latest = latestReplayRef.current;
       if (!latest || latest.status !== "paused" || viewChangingRef.current) return;
       if (!(await flushVisible())) return;
+      if (isCancelled()) return;
       const anchor = tradingDayForTimestamp(
         currentSourceBarRef.current?.timestamp ?? dataset.startTime,
         marketSession,
       );
       const first = (await marketCache.getBarsAfter(latest.currentSequence, 1, anchor))[0];
+      if (isCancelled()) return;
       if (!first || !dataset.sourceIntervalSeconds) return;
       const targetBucket = getAggregationBucket(
         new Date(first.timestamp).getTime(),
@@ -1217,7 +1107,7 @@ export function MarketReplayClient({ dataset }: { dataset: MarketDatasetSummary 
         displayMarketSession,
       );
       if (!targetBucket) {
-        await fastForwardToNextVisibleBar();
+        await fastForwardToNextVisibleBar(() => !isCancelled());
         return;
       }
       while (true) {
@@ -1228,6 +1118,7 @@ export function MarketReplayClient({ dataset }: { dataset: MarketDatasetSummary 
           marketSession,
         );
         const candidates = await marketCache.getBarsAfter(current.currentSequence, 100, currentAnchor);
+        if (isCancelled()) break;
         const inBucket = candidates.filter((bar) => {
           const bucket = getAggregationBucket(
             new Date(bar.timestamp).getTime(),
@@ -1238,7 +1129,7 @@ export function MarketReplayClient({ dataset }: { dataset: MarketDatasetSummary 
           return bucket?.start === targetBucket.start;
         });
         if (!inBucket.length) break;
-        const processed = await processLocalBars(inBucket.length);
+        const processed = await processLocalBars(inBucket.length, () => !isCancelled());
         if (!processed || !(await flushVisible())) break;
         if (processed < inBucket.length || inBucket.length < candidates.length) break;
       }

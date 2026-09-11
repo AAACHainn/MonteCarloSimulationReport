@@ -43,7 +43,7 @@ export async function POST(request: Request, context: RouteContext) {
       where: { datasetId: id },
       create: {
         datasetId: id, startSequence: first.sequence, currentSequence,
-        intervalMs: 1_000, playbackRate: parsed.data.playbackRate,
+        playbackRate: parsed.data.playbackRate,
         displayIntervalSeconds: parsed.data.displayIntervalSeconds,
         displaySession: parsed.data.displaySession,
         generation: versioned.replayGeneration, syncVersion: 0,

@@ -6,6 +6,7 @@ import {
   MARKET_CACHE_EVICT_TO_RATIO,
   type MarketBarChunksResponse,
   type MarketBarDayChunk,
+  type MarketBarData,
   type MarketDatasetSummary,
 } from "./types";
 
@@ -69,6 +70,8 @@ function isQuotaError(error: unknown) {
 
 export class MarketBarCache {
   private memory = new Map<string, StoredMarketChunk>();
+  private memoryBars: MarketBarData[] = [];
+  private memoryBarsDirty = true;
   private dateInflight = new Map<string, Promise<MarketBarChunksResponse>>();
   private nextRanges = new Map<string, string | null>();
   private database: Promise<IDBDatabase | null> | null = null;
@@ -109,9 +112,24 @@ export class MarketBarCache {
   private remember(record: StoredMarketChunk) {
     if (!this.memory.has(record.key) && this.memory.size >= MEMORY_CHUNK_LIMIT) {
       const oldest = this.memory.keys().next().value as string | undefined;
-      if (oldest) this.memory.delete(oldest);
+      if (oldest) {
+        this.memory.delete(oldest);
+        this.memoryBarsDirty = true;
+      }
     }
     this.memory.set(record.key, record);
+    this.memoryBarsDirty = true;
+  }
+
+  private orderedMemoryBars() {
+    if (!this.memoryBarsDirty) return this.memoryBars;
+    const barsBySequence = new Map<number, MarketBarData>();
+    for (const chunk of this.memory.values()) {
+      for (const bar of chunk.bars) barsBySequence.set(bar.sequence, bar);
+    }
+    this.memoryBars = [...barsBySequence.values()].sort((a, b) => a.sequence - b.sequence);
+    this.memoryBarsDirty = false;
+    return this.memoryBars;
   }
 
   private async read(tradingDay: string) {
@@ -132,11 +150,14 @@ export class MarketBarCache {
     }
   }
 
-  private async evict(database: IDBDatabase, incomingBytes = 0) {
+  private async evict(database: IDBDatabase, incomingBytes = 0, incomingKeys = new Set<string>()) {
     const read = database.transaction(STORE_NAME, "readonly");
     const readDone = transactionDone(read);
-    const records = await requestValue(read.objectStore(STORE_NAME).getAll()) as StoredMarketChunk[];
+    const storedRecords = await requestValue(read.objectStore(STORE_NAME).getAll()) as StoredMarketChunk[];
     await readDone;
+    const records = incomingKeys.size
+      ? storedRecords.filter((record) => !incomingKeys.has(record.key))
+      : storedRecords;
     const keys = selectFifoEvictions(
       incomingBytes ? [...records, { key: "__incoming__", serializedBytes: incomingBytes, writtenAt: Number.MAX_SAFE_INTEGER }] : records,
       this.budgetBytes,
@@ -147,13 +168,18 @@ export class MarketBarCache {
     await transactionDone(write);
   }
 
-  private async persist(record: StoredMarketChunk) {
+  private async persistMany(records: StoredMarketChunk[]) {
+    if (!records.length) return;
     const database = await this.open();
     if (!database) return;
+    const uniqueRecords = [...new Map(records.map((record) => [record.key, record])).values()];
+    const incomingBytes = uniqueRecords.reduce((sum, record) => sum + record.serializedBytes, 0);
+    const incomingKeys = new Set(uniqueRecords.map((record) => record.key));
     const attempt = async () => {
-      await this.evict(database, record.serializedBytes);
+      await this.evict(database, incomingBytes, incomingKeys);
       const transaction = database.transaction(STORE_NAME, "readwrite");
-      transaction.objectStore(STORE_NAME).put(record);
+      const store = transaction.objectStore(STORE_NAME);
+      for (const record of uniqueRecords) store.put(record);
       await transactionDone(transaction);
     };
     try {
@@ -161,7 +187,7 @@ export class MarketBarCache {
     } catch (error) {
       if (!isQuotaError(error)) return;
       try {
-        await this.evict(database, this.budgetBytes);
+        await this.evict(database, this.budgetBytes, incomingKeys);
         await attempt();
       } catch {
         this.persistentDisabled = true;
@@ -237,7 +263,7 @@ export class MarketBarCache {
       pending.add(request);
     }
     const responses = await Promise.all(pending);
-    const persistence: Promise<void>[] = [];
+    const persistence: StoredMarketChunk[] = [];
     for (const response of responses) {
       if (response.dataVersion !== this.dataset.dataVersion || response.datasetId !== this.dataset.id) {
         throw new Error("Market data cache version conflict.");
@@ -246,10 +272,10 @@ export class MarketBarCache {
       for (const chunk of response.chunks) {
         const record = this.toRecord(chunk, response.requestStartDate, response.nextStartDate);
         this.remember(record);
-        persistence.push(this.persist(record));
+        persistence.push(record);
       }
     }
-    await Promise.all(persistence);
+    await this.persistMany(persistence);
     const result = await Promise.all(expected.map((date) => this.read(date)));
     const nextStartDate = this.nextRanges.has(startDate)
       ? this.nextRanges.get(startDate)!
@@ -262,10 +288,24 @@ export class MarketBarCache {
   }
 
   readMemoryBarsAfter(sequence: number, count: number) {
-    return [...this.memory.values()].flatMap((chunk) => chunk.bars)
-      .filter((bar) => bar.sequence > sequence)
-      .sort((a, b) => a.sequence - b.sequence)
-      .slice(0, count);
+    if (count <= 0) return [];
+    const bars = this.orderedMemoryBars();
+    let low = 0;
+    let high = bars.length;
+    while (low < high) {
+      const middle = Math.floor((low + high) / 2);
+      if (bars[middle].sequence <= sequence) low = middle + 1;
+      else high = middle;
+    }
+    const result: MarketBarData[] = [];
+    let expectedSequence = sequence + 1;
+    for (let index = low; index < bars.length && result.length < count; index += 1) {
+      const bar = bars[index];
+      if (bar.sequence !== expectedSequence) break;
+      result.push(bar);
+      expectedSequence += 1;
+    }
+    return result;
   }
 
   async getBarsAfter(sequence: number, count: number, startDate: string) {

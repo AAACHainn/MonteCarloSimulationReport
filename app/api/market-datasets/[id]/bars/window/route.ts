@@ -12,7 +12,7 @@ import {
   type MarketBarData,
   type TradingSessionConfig,
 } from "@/lib/market-replay/types";
-import { ensureMarketBarBlocks } from "@/lib/market-replay/bar-blocks";
+import { scheduleMarketBarBlockBuild } from "@/lib/market-replay/bar-blocks";
 import { replayWindowSchema } from "@/lib/validations";
 
 type RouteContext = { params: Promise<{ id: string }> };
@@ -176,7 +176,7 @@ export async function GET(request: Request, context: RouteContext) {
   } else {
     const aggregateCount = wanted + 2;
     let sourceTake = Math.min(endSequence + 1, Math.max(1, Math.ceil(aggregateCount * multiplier)));
-    await ensureMarketBarBlocks(id, dataset.barCount);
+    void scheduleMarketBarBlockBuild(id, dataset.barCount).catch(() => undefined);
     aggregated = [];
     while (true) {
       const fromSequence = endSequence - sourceTake + 1;

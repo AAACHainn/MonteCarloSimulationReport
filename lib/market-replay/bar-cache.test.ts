@@ -133,4 +133,33 @@ describe("market bar cache metadata", () => {
     expect(requested).toContain("2026-09-01,2026-09-02,2026-09-03,2026-09-04,2026-09-05,2026-09-06,2026-09-07");
     expect(requested).toContain("2026-09-08");
   });
+
+  it("returns only the contiguous prefix when cached chunks have a sequence gap", async () => {
+    const fetcher = vi.fn(async (input: RequestInfo | URL) => {
+      const url = new URL(String(input), "http://localhost");
+      const startDate = url.searchParams.get("startDate")!;
+      const sequence = startDate === "2026-09-01" ? 0 : 2;
+      const dates = Array.from({ length: 7 }, (_value, index) => {
+        const day = Number(startDate.slice(-2)) + index;
+        return `2026-09-${String(day).padStart(2, "0")}`;
+      });
+      return new Response(JSON.stringify({
+        datasetId: "gapped", dataVersion: 1, symbol: "ES", sourceIntervalSeconds: 300,
+        requestStartDate: startDate, requestEndDate: dates.at(-1), coveredDates: dates,
+        chunks: dates.map((tradingDay, index) => ({
+          tradingDay, rangeStart: `${tradingDay}T00:00:00.000Z`, rangeEnd: `${tradingDay}T23:59:59.999Z`,
+          bars: index === 0 ? [{ sequence, timestamp: `${tradingDay}T00:00:00.000Z`, open: 1, high: 1, low: 1, close: 1, volume: null }] : [],
+        })),
+        nextStartDate: null,
+      }));
+    });
+    const cache = new MarketBarCache({
+      id: "gapped", dataVersion: 1, symbol: "ES", sourceIntervalSeconds: 300,
+    }, fetcher as typeof fetch);
+    await cache.loadRange("2026-09-01");
+    await cache.loadRange("2026-09-08");
+
+    expect(cache.readMemoryBarsAfter(-1, 10).map((bar) => bar.sequence)).toEqual([0]);
+    expect(cache.readMemoryBarsAfter(1, 10).map((bar) => bar.sequence)).toEqual([2]);
+  });
 });
