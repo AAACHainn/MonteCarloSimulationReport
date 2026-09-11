@@ -188,6 +188,14 @@ model MarketDatasetImport {
   expandedBytes      BigInt        @default(0)
   processedRows      Int           @default(0)
   importedBars       Int           @default(0)
+  stage              String        @default("WAITING_UPLOAD")
+  stageProcessedBytes BigInt       @default(0)
+  stageTotalBytes    BigInt        @default(0)
+  totalRows          Int           @default(0)
+  stageStartedAt     DateTime?
+  workerPid          Int?
+  workerRssBytes     BigInt        @default(0)
+  peakWorkerRssBytes BigInt        @default(0)
   totalErrors        Int           @default(0)
   errors             String        @default("[]")
   metadata           String

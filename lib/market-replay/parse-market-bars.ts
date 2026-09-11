@@ -1,9 +1,15 @@
 import { parse } from "csv-parse/sync";
 import { tzOffset } from "@date-fns/tz";
 import { copy } from "@/lib/i18n";
-import { MAX_MARKET_BARS } from "./types";
+import { MAX_MARKET_BARS, formatInterval } from "./types";
 import { getAggregationBucket } from "./aggregation";
-import { isCmeQuarterlyLeadSymbol, isCmeQuarterlyOutrightSymbol } from "./cme-contracts";
+import {
+  addCmeDailyVolume,
+  buildCmeVolumeLeadMap,
+  cmeVolumeDateKey,
+  normalizeCmeOutrightSymbol,
+  type CmeDailyVolumes,
+} from "./cme-contracts";
 import type { TradingSessionConfig } from "./types";
 
 export type ParsedMarketBar = {
@@ -25,10 +31,13 @@ export class MarketCsvValidationError extends Error {
 }
 
 export type CsvRow = Record<string, string | undefined>;
+export type CsvValues = string[];
+export type CsvColumnIndexes = Readonly<Record<string, number>>;
+export type CsvRecord = CsvRow | CsvValues;
 type LocalParts = { year: number; month: number; day: number; hour: number; minute: number; second: number; millisecond: number };
 
 const standardRequiredColumns = ["timestamp", "open", "high", "low", "close"] as const;
-const databentoCmeRequiredColumns = ["ts_event", "open", "high", "low", "close", "symbol"] as const;
+const databentoCmeRequiredColumns = ["ts_event", "rtype", "open", "high", "low", "close", "volume", "symbol"] as const;
 export type MarketCsvFormat = "STANDARD" | "DATABENTO_CME";
 
 function normalizeKey(value: string) {
@@ -46,12 +55,20 @@ export function inspectMarketCsvHeaders(headers: string[]) {
   };
 }
 
-function readValue(row: CsvRow, key: string) {
+export function createCsvColumnIndexes(headers: string[]) {
+  return Object.fromEntries(headers.map((header, index) => [normalizeKey(header), index])) as Record<string, number>;
+}
+
+export function readCsvValue(row: CsvRecord, key: string, columnIndexes?: CsvColumnIndexes) {
+  if (Array.isArray(row)) {
+    const index = columnIndexes?.[key];
+    return index === undefined ? undefined : row[index]?.trim();
+  }
   const found = Object.keys(row).find((candidate) => normalizeKey(candidate) === key);
   return found ? row[found]?.trim() : undefined;
 }
 
-function parseFiniteNumber(value: string | undefined) {
+export function parseFiniteNumber(value: string | undefined) {
   if (!value) return null;
   const number = Number(value.replaceAll(",", ""));
   return Number.isFinite(number) ? number : null;
@@ -130,7 +147,20 @@ export type MarketBarParseOptions = {
   sourceIntervalSeconds: number;
   session: TradingSessionConfig;
   cmeRootSymbol?: string;
+  cmeLeadByDate?: ReadonlyMap<string, string>;
 };
+
+const DATABENTO_RTYPE_INTERVALS = new Map([
+  [32, 1],
+  [33, 60],
+  [34, 3_600],
+  [35, 86_400],
+]);
+
+export function databentoSourceIntervalSeconds(row: CsvRecord, columnIndexes?: CsvColumnIndexes) {
+  const rtype = Number(readCsvValue(row, "rtype", columnIndexes));
+  return DATABENTO_RTYPE_INTERVALS.get(rtype) ?? null;
+}
 
 export function isMarketTimestampAligned(timestamp: Date, options: MarketBarParseOptions) {
   return getAggregationBucket(
@@ -139,13 +169,14 @@ export function isMarketTimestampAligned(timestamp: Date, options: MarketBarPars
 }
 
 export function parseMarketCsvRow({
-  row, rowNumber, sequence, timezone, options, previousTime = Number.NEGATIVE_INFINITY,
+  row, columnIndexes, rowNumber, sequence, timezone, options, previousTime = Number.NEGATIVE_INFINITY,
   previousChartSecond = Number.NEGATIVE_INFINITY, format = "STANDARD",
 }: {
-  row: CsvRow; rowNumber: number; sequence: number; timezone: string; options?: MarketBarParseOptions;
+  row: CsvRecord; columnIndexes?: CsvColumnIndexes; rowNumber: number; sequence: number; timezone: string; options?: MarketBarParseOptions;
   previousTime?: number; previousChartSecond?: number; format?: MarketCsvFormat;
 }) {
-  const symbol = readValue(row, "symbol");
+  const symbol = readCsvValue(row, "symbol", columnIndexes);
+  let cmeSymbol: string | null = null;
   if (format === "DATABENTO_CME") {
     if (!options?.cmeRootSymbol) {
       return {
@@ -156,7 +187,23 @@ export function parseMarketCsvRow({
         skipped: false,
       };
     }
-    if (!isCmeQuarterlyOutrightSymbol(symbol, options.cmeRootSymbol)) {
+    const declaredInterval = databentoSourceIntervalSeconds(row, columnIndexes);
+    if (declaredInterval === null || declaredInterval !== options.sourceIntervalSeconds) {
+      return {
+        issues: [{
+          row: rowNumber,
+          reason: declaredInterval === null
+            ? copy.marketReplay.validation.unsupportedDatabentoRtype
+            : copy.marketReplay.validation.sourceIntervalMismatch(formatInterval(declaredInterval)),
+        }],
+        time: previousTime,
+        chartSecond: previousChartSecond,
+        bar: null,
+        skipped: false,
+      };
+    }
+    cmeSymbol = normalizeCmeOutrightSymbol(symbol, options.cmeRootSymbol);
+    if (!cmeSymbol) {
       return {
         issues: [],
         time: previousTime,
@@ -167,7 +214,7 @@ export function parseMarketCsvRow({
     }
   }
 
-  const timestamp = parseMarketTimestamp(readValue(row, format === "DATABENTO_CME" ? "ts_event" : "timestamp"), timezone);
+  const timestamp = parseMarketTimestamp(readCsvValue(row, format === "DATABENTO_CME" ? "ts_event" : "timestamp", columnIndexes), timezone);
   if (format === "DATABENTO_CME" && !timestamp) {
     return {
       issues: [{ row: rowNumber, reason: copy.marketReplay.validation.invalidTimestamp }],
@@ -177,7 +224,8 @@ export function parseMarketCsvRow({
       skipped: false,
     };
   }
-  if (format === "DATABENTO_CME" && !isCmeQuarterlyLeadSymbol(symbol, options!.cmeRootSymbol!, timestamp!)) {
+  if (format === "DATABENTO_CME" && options!.cmeLeadByDate
+    && options!.cmeLeadByDate.get(cmeVolumeDateKey(timestamp!)) !== cmeSymbol) {
     return {
       issues: [],
       time: previousTime,
@@ -187,16 +235,16 @@ export function parseMarketCsvRow({
     };
   }
 
-  const open = parseFiniteNumber(readValue(row, "open"));
-  const high = parseFiniteNumber(readValue(row, "high"));
-  const low = parseFiniteNumber(readValue(row, "low"));
-  const close = parseFiniteNumber(readValue(row, "close"));
-  const volumeValue = readValue(row, "volume");
-  const volume = format === "DATABENTO_CME" ? null : volumeValue ? parseFiniteNumber(volumeValue) : null;
+  const open = parseFiniteNumber(readCsvValue(row, "open", columnIndexes));
+  const high = parseFiniteNumber(readCsvValue(row, "high", columnIndexes));
+  const low = parseFiniteNumber(readCsvValue(row, "low", columnIndexes));
+  const close = parseFiniteNumber(readCsvValue(row, "close", columnIndexes));
+  const volumeValue = readCsvValue(row, "volume", columnIndexes);
+  const volume = volumeValue ? parseFiniteNumber(volumeValue) : null;
   const reasons: string[] = [];
   if (!timestamp) reasons.push(copy.marketReplay.validation.invalidTimestamp);
   if ([open, high, low, close].some((value) => value === null)) reasons.push(copy.marketReplay.validation.invalidOhlc);
-  if (format === "STANDARD" && volumeValue && (volume === null || volume < 0)) reasons.push(copy.marketReplay.validation.invalidVolume);
+  if (volumeValue && (volume === null || volume < 0)) reasons.push(copy.marketReplay.validation.invalidVolume);
   if (open !== null && high !== null && low !== null && close !== null
     && (high < Math.max(open, close, low) || low > Math.min(open, close, high))) reasons.push(copy.marketReplay.validation.invalidPriceRelation);
   const chartSecond = timestamp ? Math.floor(timestamp.getTime() / 1_000) : Number.NaN;
@@ -238,6 +286,20 @@ export function parseMarketBarsCsv(csv: string, timezone: string, options?: Mark
     throw new MarketCsvValidationError([{ row: 1, reason: copy.marketReplay.validation.cmeRootRequired }]);
   }
 
+  let resolvedOptions = options;
+  if (format === "DATABENTO_CME") {
+    const dailyVolumes: CmeDailyVolumes = new Map();
+    for (const row of rows) {
+      const cmeSymbol = normalizeCmeOutrightSymbol(readCsvValue(row, "symbol"), options!.cmeRootSymbol!);
+      const timestamp = parseMarketTimestamp(readCsvValue(row, "ts_event"), timezone);
+      const volume = parseFiniteNumber(readCsvValue(row, "volume"));
+      if (cmeSymbol && timestamp && volume !== null && volume >= 0) {
+        addCmeDailyVolume(dailyVolumes, timestamp, cmeSymbol, volume);
+      }
+    }
+    resolvedOptions = { ...options!, cmeLeadByDate: buildCmeVolumeLeadMap(dailyVolumes) };
+  }
+
   const issues: MarketCsvIssue[] = [];
   const bars: ParsedMarketBar[] = [];
   let previousTime = Number.NEGATIVE_INFINITY;
@@ -246,7 +308,7 @@ export function parseMarketBarsCsv(csv: string, timezone: string, options?: Mark
   rows.forEach((row, index) => {
     const rowNumber = index + 2;
     const parsed = parseMarketCsvRow({
-      row, rowNumber, sequence: bars.length, timezone, options, previousTime, previousChartSecond, format,
+      row, rowNumber, sequence: bars.length, timezone, options: resolvedOptions, previousTime, previousChartSecond, format,
     });
     if (parsed.skipped) return;
     if (parsed.issues.length || !parsed.bar) {

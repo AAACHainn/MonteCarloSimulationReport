@@ -17,12 +17,25 @@ import { copy } from "@/lib/i18n";
 import type { MarketDatasetSummary } from "@/lib/market-replay/types";
 import { formatInterval } from "@/lib/market-replay/types";
 import { formatPriceForTick } from "@/lib/market-replay/price-ticks";
+import { MarketImportProgress, type ImportIssue, type ImportJob } from "./market-import-progress";
 
-type ImportIssue = { row: number; reason: string };
-type ImportJob = {
-  id: string; fileName: string; status: string; processedRows: number; importedBars: number;
-  errors: ImportIssue[]; totalErrors: number;
-};
+function uploadImportFile(jobId: string, file: File, onProgress: (percentage: number) => void) {
+  return new Promise<{ ok: boolean; data: { error?: string } | null }>((resolve) => {
+    const request = new XMLHttpRequest();
+    request.open("PUT", `/api/market-dataset-imports/${jobId}/file`);
+    request.setRequestHeader("Content-Type", "application/octet-stream");
+    request.responseType = "json";
+    request.upload.addEventListener("progress", (event) => {
+      if (event.lengthComputable) onProgress(Math.round(event.loaded / event.total * 1_000) / 10);
+    });
+    request.addEventListener("load", () => resolve({
+      ok: request.status >= 200 && request.status < 300,
+      data: request.response as { error?: string } | null,
+    }));
+    request.addEventListener("error", () => resolve({ ok: false, data: { error: copy.marketReplay.importError } }));
+    request.send(file);
+  });
+}
 
 function formatDatasetTime(value: string, timezone: string) {
   return new Intl.DateTimeFormat("zh-CN", {
@@ -40,6 +53,7 @@ function formatDatasetTime(value: string, timezone: string) {
 export function MarketDatasetDashboard({ datasets }: { datasets: MarketDatasetSummary[] }) {
   const router = useRouter();
   const fileRef = useRef<HTMLInputElement | null>(null);
+  const importFormRef = useRef<HTMLFormElement | null>(null);
   const [isPending, startTransition] = useTransition();
   const [isImporting, setIsImporting] = useState(false);
   const [message, setMessage] = useState<string | null>(null);
@@ -50,6 +64,8 @@ export function MarketDatasetDashboard({ datasets }: { datasets: MarketDatasetSu
   const [sessionMode, setSessionMode] = useState<"TWENTY_FOUR_SEVEN" | "DAILY_SESSION">("TWENTY_FOUR_SEVEN");
   const [timezone, setTimezone] = useState("Asia/Shanghai");
   const [importJobs, setImportJobs] = useState<ImportJob[]>([]);
+  const [activeJobId, setActiveJobId] = useState<string | null>(null);
+  const [uploadPercent, setUploadPercent] = useState<number | null>(null);
   const [settingsDataset, setSettingsDataset] = useState<MarketDatasetSummary | null>(null);
   const [settingsTickValue, setSettingsTickValue] = useState("");
   const [settingsSourceInterval, setSettingsSourceInterval] = useState("");
@@ -58,10 +74,61 @@ export function MarketDatasetDashboard({ datasets }: { datasets: MarketDatasetSu
 
   async function refreshImportJobs() {
     const response = await fetch("/api/market-dataset-imports");
-    if (response.ok) setImportJobs(await response.json());
+    if (!response.ok) return [] as ImportJob[];
+    const jobs = await response.json() as ImportJob[];
+    setImportJobs(jobs);
+    return jobs;
   }
 
-  useEffect(() => { void refreshImportJobs(); }, []);
+  useEffect(() => {
+    void refreshImportJobs().then((jobs) => {
+      const active = jobs.find((job) => ["QUEUED", "PROCESSING"].includes(job.status)
+        || (job.status === "CREATED" && job.stage === "UPLOADING"));
+      if (active) {
+        setActiveJobId(active.id);
+        setIsImporting(true);
+      }
+    });
+  }, []);
+
+  useEffect(() => {
+    if (!activeJobId) return;
+    let stopped = false;
+    let timer: number | undefined;
+    const poll = async () => {
+      const response = await fetch(`/api/market-dataset-imports/${activeJobId}`, { cache: "no-store" });
+      const job = await response.json().catch(() => null) as ImportJob | null;
+      if (stopped) return;
+      if (!response.ok || !job) {
+        timer = window.setTimeout(poll, 1_000);
+        return;
+      }
+      setImportJobs((current) => [job, ...current.filter((item) => item.id !== job.id)]);
+      if (job.stage !== "UPLOADING") setUploadPercent(null);
+      if (["COMPLETED", "FAILED", "INTERRUPTED"].includes(job.status)) {
+        setIsImporting(false);
+        setActiveJobId(null);
+        if (job.status === "COMPLETED") {
+          setMessage(copy.marketReplay.imported(job.importedBars, Math.max(0, job.totalRows - job.importedBars)));
+          importFormRef.current?.reset();
+          if (fileRef.current) fileRef.current.value = "";
+          startTransition(() => router.refresh());
+        } else {
+          setMessage(job.errors[0]?.reason ?? copy.marketReplay.importError);
+          setIssues(job.errors);
+          setTotalIssues(job.totalErrors);
+        }
+        void refreshImportJobs();
+        return;
+      }
+      timer = window.setTimeout(poll, 1_000);
+    };
+    void poll();
+    return () => {
+      stopped = true;
+      if (timer !== undefined) window.clearTimeout(timer);
+    };
+  }, [activeJobId, router]);
 
   function timeToMinute(value: FormDataEntryValue | null) {
     const match = /^(\d{2}):(\d{2})$/.exec(String(value ?? ""));
@@ -77,11 +144,12 @@ export function MarketDatasetDashboard({ datasets }: { datasets: MarketDatasetSu
     setTotalIssues(0);
     const formData = new FormData(form);
     const file = formData.get("file");
-    if (!(file instanceof File)) return;
-    const sourceIntervalSeconds = Number(formData.get("sourceIntervalSeconds"));
+    if (!(file instanceof File)) { setIsImporting(false); return; }
+    const sourceIntervalValue = String(formData.get("sourceIntervalSeconds") ?? "").trim();
+    const sourceIntervalSeconds = sourceIntervalValue ? Number(sourceIntervalValue) : null;
     const metadata = {
       name: formData.get("name"), description: formData.get("description"), symbol: formData.get("symbol"),
-      timeframe: formatInterval(sourceIntervalSeconds), timezone,
+      timeframe: sourceIntervalSeconds === null ? "auto" : formatInterval(sourceIntervalSeconds), timezone,
       sourceIntervalSeconds, priceTickSize: Number(formData.get("priceTickSize")), sessionMode,
       sessionOpenMinute: sessionMode === "DAILY_SESSION" ? timeToMinute(formData.get("sessionOpen")) : null,
       sessionCloseMinute: sessionMode === "DAILY_SESSION" ? timeToMinute(formData.get("sessionClose")) : null,
@@ -89,59 +157,39 @@ export function MarketDatasetDashboard({ datasets }: { datasets: MarketDatasetSu
       fileName: file.name,
     };
     const created = await fetch("/api/market-dataset-imports", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(metadata) });
-    let data = await created.json().catch(() => null);
+    const data = await created.json().catch(() => null);
     if (!created.ok) {
       setIsImporting(false); setMessage(data?.error ?? copy.marketReplay.importError); return;
     }
-    setMessage(copy.marketReplay.uploading);
-    const uploaded = await fetch(`/api/market-dataset-imports/${data.id}/file`, { method: "PUT", headers: { "Content-Type": "application/octet-stream" }, body: file });
+    setImportJobs((current) => [data as ImportJob, ...current.filter((job) => job.id !== data.id)]);
+    setActiveJobId(data.id);
+    setUploadPercent(0);
+    const uploaded = await uploadImportFile(data.id, file, setUploadPercent);
     if (!uploaded.ok) {
-      data = await uploaded.json().catch(() => null); setIsImporting(false); setMessage(data?.error ?? copy.marketReplay.importError); return;
-    }
-    setMessage(copy.marketReplay.processing(0));
-    let processingDone = false;
-    const processingRequest = fetch(`/api/market-dataset-imports/${data.id}/process`, { method: "POST" }).finally(() => { processingDone = true; });
-    while (!processingDone) {
-      await new Promise((resolve) => window.setTimeout(resolve, 750));
-      if (processingDone) break;
-      const progressResponse = await fetch(`/api/market-dataset-imports/${data.id}`);
-      const progress = await progressResponse.json().catch(() => null);
-      if (progressResponse.ok) setMessage(copy.marketReplay.processing(progress.processedRows ?? 0));
-    }
-    const response = await processingRequest;
-    const result = await response.json().catch(() => null);
-    const statusResponse = await fetch(`/api/market-dataset-imports/${data.id}`);
-    data = await statusResponse.json().catch(() => result);
-    setIsImporting(false);
-
-    if (!response.ok) {
-      setMessage(data?.error ?? copy.marketReplay.importError);
-      setIssues(data?.errors ?? []); setTotalIssues(data?.totalErrors ?? data?.errors?.length ?? 0);
+      setActiveJobId(null); setUploadPercent(null); setIsImporting(false);
+      setMessage(uploaded.data?.error ?? copy.marketReplay.importError);
       await refreshImportJobs();
       return;
     }
-
-    setMessage(copy.marketReplay.imported(data.importedBars, Math.max(0, data.processedRows - data.importedBars)));
-    form.reset();
-    if (fileRef.current) fileRef.current.value = "";
-    startTransition(() => router.refresh());
-    await refreshImportJobs();
+    setUploadPercent(100);
+    const response = await fetch(`/api/market-dataset-imports/${data.id}/process`, { method: "POST" });
+    const result = await response.json().catch(() => null);
+    if (!response.ok) {
+      setMessage(result?.error ?? copy.marketReplay.importError);
+      setIsImporting(false); setActiveJobId(null);
+      await refreshImportJobs();
+    }
   }
 
   async function retryImport(job: ImportJob) {
-    setIsImporting(true); setMessage(copy.marketReplay.processing(job.processedRows));
+    setIsImporting(true); setMessage(null); setIssues([]); setTotalIssues(0);
     const response = await fetch(`/api/market-dataset-imports/${job.id}/process`, { method: "POST" });
-    let data = await response.json().catch(() => null);
-    if (response.ok) {
-      const statusResponse = await fetch(`/api/market-dataset-imports/${job.id}`);
-      data = await statusResponse.json().catch(() => data);
+    const data = await response.json().catch(() => null);
+    if (!response.ok) {
+      setIsImporting(false); setMessage(data?.error ?? copy.marketReplay.importError);
+      return;
     }
-    setIsImporting(false);
-    if (!response.ok) setMessage(data?.error ?? copy.marketReplay.importError);
-    else {
-      setMessage(copy.marketReplay.imported(data.importedBars, Math.max(0, data.processedRows - data.importedBars)));
-      startTransition(() => router.refresh());
-    }
+    setActiveJobId(job.id);
     await refreshImportJobs();
   }
 
@@ -195,7 +243,7 @@ export function MarketDatasetDashboard({ datasets }: { datasets: MarketDatasetSu
             <CardDescription>{copy.marketReplay.importDescription}</CardDescription>
           </CardHeader>
           <CardContent>
-            <form onSubmit={importDataset} className="space-y-4">
+            <form ref={importFormRef} onSubmit={importDataset} className="space-y-4">
               <div className="space-y-2">
                 <Label htmlFor="market-name">{copy.marketReplay.datasetName}</Label>
                 <Input id="market-name" name="name" required maxLength={120} placeholder={copy.marketReplay.datasetNamePlaceholder} />
@@ -211,7 +259,7 @@ export function MarketDatasetDashboard({ datasets }: { datasets: MarketDatasetSu
               </div>
               <div className="space-y-2">
                 <Label htmlFor="market-source-interval">{copy.marketReplay.sourceInterval}</Label>
-                <Input id="market-source-interval" name="sourceIntervalSeconds" type="number" min="1" max="86400" required defaultValue="1" />
+                <Input id="market-source-interval" name="sourceIntervalSeconds" type="number" min="1" max="86400" step="1" placeholder={copy.marketReplay.sourceIntervalPlaceholder} />
                 <p className="text-xs text-slate-500">{copy.marketReplay.sourceIntervalHint}</p>
               </div>
               <div className="space-y-2">
@@ -262,14 +310,11 @@ export function MarketDatasetDashboard({ datasets }: { datasets: MarketDatasetSu
                   ) : null}
                 </Alert>
               ) : null}
-              {importJobs.length ? <div className="space-y-2 rounded-lg border bg-slate-50 p-3">{importJobs.map((job) => (
-                <div key={job.id} className="flex flex-wrap items-center gap-2 text-xs text-slate-700">
-                  <span className="min-w-0 flex-1 truncate">
-                    {job.fileName} · {job.status} · {copy.marketReplay.importJobCounts(job.processedRows, job.importedBars)}
-                  </span>
+              {importJobs.length ? <div className="space-y-2">{importJobs.map((job) => (
+                <MarketImportProgress key={job.id} job={job} uploadPercent={job.id === activeJobId ? uploadPercent : null}>
                   {["FAILED", "INTERRUPTED", "UPLOADED"].includes(job.status) ? <Button type="button" size="sm" variant="outline" disabled={isImporting} onClick={() => void retryImport(job)}>{copy.marketReplay.retryImport}</Button> : null}
-                  {job.status !== "PROCESSING" ? <Button type="button" size="sm" variant="ghost" onClick={() => void cancelImport(job.id)}>{copy.marketReplay.cancelImport}</Button> : null}
-                </div>
+                  {!["QUEUED", "PROCESSING"].includes(job.status) && !(job.status === "CREATED" && job.stage === "UPLOADING") ? <Button type="button" size="sm" variant="ghost" onClick={() => void cancelImport(job.id)}>{copy.marketReplay.cancelImport}</Button> : null}
+                </MarketImportProgress>
               ))}</div> : null}
               <Button type="submit" className="w-full" disabled={isImporting || isPending}>
                 {isImporting ? <Loader2 className="h-4 w-4 animate-spin" /> : <Upload className="h-4 w-4" />}

@@ -9,6 +9,7 @@
     "start": "next start",
     "lint": "eslint .",
     "test": "vitest run",
+    "benchmark:market-import-memory": "node --max-old-space-size=1024 --import tsx scripts/benchmark-market-import-memory.ts",
     "prisma:generate": "prisma generate",
     "prisma:migrate": "prisma migrate dev",
     "db:init-sqlite": "node scripts/init-sqlite.mjs"
@@ -33,6 +34,7 @@
     "react-dom": "^19.0.0",
     "recharts": "^2.15.3",
     "tailwind-merge": "^2.6.0",
+    "tsx": "^4.20.5",
     "zod": "^3.25.67"
   },
   "devDependencies": {

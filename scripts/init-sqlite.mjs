@@ -243,6 +243,14 @@ const createStatements = [
     "expandedBytes" BIGINT NOT NULL DEFAULT 0,
     "processedRows" INTEGER NOT NULL DEFAULT 0,
     "importedBars" INTEGER NOT NULL DEFAULT 0,
+    "stage" TEXT NOT NULL DEFAULT 'WAITING_UPLOAD',
+    "stageProcessedBytes" BIGINT NOT NULL DEFAULT 0,
+    "stageTotalBytes" BIGINT NOT NULL DEFAULT 0,
+    "totalRows" INTEGER NOT NULL DEFAULT 0,
+    "stageStartedAt" DATETIME,
+    "workerPid" INTEGER,
+    "workerRssBytes" BIGINT NOT NULL DEFAULT 0,
+    "peakWorkerRssBytes" BIGINT NOT NULL DEFAULT 0,
     "totalErrors" INTEGER NOT NULL DEFAULT 0,
     "errors" TEXT NOT NULL DEFAULT '[]',
     "metadata" TEXT NOT NULL,
@@ -305,7 +313,17 @@ const paperSessionColumns = [
   ["maxConsecutiveLosses", "INTEGER NOT NULL DEFAULT 0"],
 ];
 const paperOrderColumns = [["riskAmount", "REAL"]];
-const marketDatasetImportColumns = [["importedBars", "INTEGER NOT NULL DEFAULT 0"]];
+const marketDatasetImportColumns = [
+  ["importedBars", "INTEGER NOT NULL DEFAULT 0"],
+  ["stage", "TEXT NOT NULL DEFAULT 'WAITING_UPLOAD'"],
+  ["stageProcessedBytes", "BIGINT NOT NULL DEFAULT 0"],
+  ["stageTotalBytes", "BIGINT NOT NULL DEFAULT 0"],
+  ["totalRows", "INTEGER NOT NULL DEFAULT 0"],
+  ["stageStartedAt", "DATETIME"],
+  ["workerPid", "INTEGER"],
+  ["workerRssBytes", "BIGINT NOT NULL DEFAULT 0"],
+  ["peakWorkerRssBytes", "BIGINT NOT NULL DEFAULT 0"],
+];
 
 const indexStatements = [
   `CREATE INDEX IF NOT EXISTS "Trade_datasetId_idx" ON "Trade"("datasetId")`,

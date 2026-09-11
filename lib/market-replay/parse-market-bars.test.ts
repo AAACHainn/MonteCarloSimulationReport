@@ -14,11 +14,11 @@ describe("parseMarketBarsCsv", () => {
     expect(result[2].volume).toBeNull();
   });
 
-  it("parses Databento CME OHLCV rows and keeps only the customary quarterly lead contract", () => {
+  it("parses Databento CME OHLCV rows, preserves volume, and keeps the daily volume leader", () => {
     const result = parseMarketBarsCsv([
       "ts_event,rtype,publisher_id,instrument_id,open,high,low,close,volume,symbol,ignored",
-      "2021-09-07T00:00:00.000000000Z,33,1,1030,4539.25,4539.25,4538,4538.25,not-a-number,ESU1,x",
-      "2021-09-07T00:00:00.000000000Z,33,1,8858,4529.5,4529.5,4528.25,4528.5,-1,ESZ1,x",
+      "2021-09-07T00:00:00.000000000Z,33,1,1030,4539.25,4539.25,4538,4538.25,576,ESU1,x",
+      "2021-09-07T00:00:00.000000000Z,33,1,8858,4529.5,4529.5,4528.25,4528.5,20,ESZ1,x",
       "2021-09-07T00:01:00.000000000Z,33,1,1030,4538.25,4538.25,4537.5,4538,367,ESU1,x",
       "2021-09-07T00:01:00.000000000Z,33,1,8858,4528.25,4528.25,4528,4528,3,ESZ1,x",
       "2021-09-07T00:02:00.000000000Z,33,1,9999,bad,bad,bad,bad,1,NQU1,x",
@@ -32,22 +32,55 @@ describe("parseMarketBarsCsv", () => {
     expect(result).toHaveLength(2);
     expect(result.map((bar) => bar.sequence)).toEqual([0, 1]);
     expect(result.map((bar) => bar.close)).toEqual([4538.25, 4538]);
-    expect(result.every((bar) => bar.volume === null)).toBe(true);
+    expect(result.map((bar) => bar.volume)).toEqual([576, 367]);
   });
 
-  it("switches Databento CME rows at the Globex open for roll Monday", () => {
+  it("switches Databento CME rows using the previous available UTC day's volume", () => {
     const result = parseMarketBarsCsv([
-      "ts_event,open,high,low,close,symbol",
-      "2021-09-12T21:59:00.000000000Z,1,2,0,1,ESU1",
-      "2021-09-12T21:59:00.000000000Z,10,20,5,10,ESZ1",
-      "2021-09-12T22:00:00.000000000Z,2,3,1,2,ESU1",
-      "2021-09-12T22:00:00.000000000Z,20,30,15,20,ESZ1",
+      "ts_event,rtype,open,high,low,close,volume,symbol",
+      "2021-09-10T00:00:00.000000000Z,33,1,2,0,1,100,ESU1",
+      "2021-09-10T00:00:00.000000000Z,33,10,20,5,10,10,ESZ1",
+      "2021-09-12T22:00:00.000000000Z,33,2,3,1,2,5,ESU1",
+      "2021-09-12T22:00:00.000000000Z,33,20,30,15,20,200,ESZ1",
+      "2021-09-13T00:00:00.000000000Z,33,3,4,2,3,1,ESU1",
+      "2021-09-13T00:00:00.000000000Z,33,30,40,25,30,250,ESZ1",
     ].join("\n"), "UTC", {
       sourceIntervalSeconds: 60,
       cmeRootSymbol: "ES",
       session: { mode: "TWENTY_FOUR_SEVEN", timezone: "UTC", openMinute: null, closeMinute: null, weekdays: [1,2,3,4,5,6,7] },
     });
-    expect(result.map((bar) => bar.close)).toEqual([1, 20]);
+    expect(result.map((bar) => bar.close)).toEqual([1, 2, 30]);
+  });
+
+  it("supports Micro Gold delivery months and excludes calendar spreads", () => {
+    const result = parseMarketBarsCsv([
+      "ts_event,rtype,open,high,low,close,volume,symbol",
+      "2021-09-10T00:00:00.000000000Z,33,1780,1781,1779,1780,100,MGCV1",
+      "2021-09-10T00:00:00.000000000Z,33,1790,1791,1789,1790,20,MGCZ1",
+      "2021-09-10T00:00:00.000000000Z,33,-2,-2,-2,-2,50,MGCV1-MGCZ1",
+      "2021-09-12T22:00:00.000000000Z,33,1781,1782,1780,1781,10,MGCV1",
+      "2021-09-12T22:00:00.000000000Z,33,1791,1792,1790,1791,200,MGCZ1",
+    ].join("\n"), "UTC", {
+      sourceIntervalSeconds: 60,
+      cmeRootSymbol: "MGC",
+      session: { mode: "TWENTY_FOUR_SEVEN", timezone: "UTC", openMinute: null, closeMinute: null, weekdays: [1,2,3,4,5,6,7] },
+    });
+    expect(result.map((bar) => ({ close: bar.close, volume: bar.volume }))).toEqual([
+      { close: 1780, volume: 100 },
+      { close: 1781, volume: 10 },
+    ]);
+  });
+
+  it("rejects a Databento rtype that disagrees with the selected source interval", () => {
+    expect(() => parseMarketBarsCsv([
+      "ts_event,rtype,open,high,low,close,volume,symbol",
+      "2021-09-10T00:00:00Z,32,1,2,0,1,1,MGCZ1",
+      "2021-09-10T00:00:01Z,32,1,2,0,1,1,MGCZ1",
+    ].join("\n"), "UTC", {
+      sourceIntervalSeconds: 60,
+      cmeRootSymbol: "MGC",
+      session: { mode: "TWENTY_FOUR_SEVEN", timezone: "UTC", openMinute: null, closeMinute: null, weekdays: [1,2,3,4,5,6,7] },
+    })).toThrow("1s");
   });
 
   it("interprets offset-free ISO timestamps in the selected IANA timezone", () => {
@@ -113,16 +146,16 @@ describe("parseMarketBarsCsv", () => {
 
   it("requires symbol and a root code for Databento CME files", () => {
     const missingSymbol = [
-      "ts_event,open,high,low,close",
-      "2021-09-07T00:00:00Z,1,2,0,1",
-      "2021-09-07T00:01:00Z,1,2,0,1",
+      "ts_event,rtype,open,high,low,close,volume",
+      "2021-09-07T00:00:00Z,33,1,2,0,1,1",
+      "2021-09-07T00:01:00Z,33,1,2,0,1,1",
     ].join("\n");
     expect(() => parseMarketBarsCsv(missingSymbol, "UTC")).toThrow("symbol");
 
     const withSymbol = [
-      "ts_event,open,high,low,close,symbol",
-      "2021-09-07T00:00:00Z,1,2,0,1,ESU1",
-      "2021-09-07T00:01:00Z,1,2,0,1,ESU1",
+      "ts_event,rtype,open,high,low,close,volume,symbol",
+      "2021-09-07T00:00:00Z,33,1,2,0,1,1,ESU1",
+      "2021-09-07T00:01:00Z,33,1,2,0,1,1,ESU1",
     ].join("\n");
     expect(() => parseMarketBarsCsv(withSymbol, "UTC")).toThrow("根代码");
   });
