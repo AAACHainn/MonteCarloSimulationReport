@@ -16,6 +16,7 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import type { AggregatedMarketBarData, EmaIndicatorConfig } from "@/lib/market-replay/types";
 import { copy } from "@/lib/i18n";
+import { calculateAbrSeries } from "@/lib/market-replay/abr";
 import { defaultReplayLogicalRange, rangeAfterNewReplayBar } from "@/lib/market-replay/chart-range";
 import {
   candlestickSeriesStyleOptions,
@@ -71,6 +72,12 @@ type DraftOrder = {
 };
 
 type ContextMenuState = { x: number; y: number; price: number };
+type AbrTooltipState = {
+  left: number;
+  top: number;
+  bar: AggregatedMarketBarData;
+  value: number | null;
+};
 type OrderUpdate = {
   price?: number;
   quantity?: number;
@@ -176,6 +183,13 @@ function compactVolume(value: number) {
   }).format(value);
 }
 
+function formatAbrValue(value: number | null, priceTickSize: number) {
+  if (value === null || !Number.isFinite(value)) return "—";
+  return new Intl.NumberFormat("zh-CN", {
+    maximumFractionDigits: Math.min(12, Math.max(2, priceDecimalsForTick(priceTickSize) + 2)),
+  }).format(value);
+}
+
 function sizingErrorText(error: RiskSizingError) {
   const labels: Record<RiskSizingError, string> = {
     INVALID_PRICE: copy.paperTrading.invalidPrice,
@@ -197,7 +211,7 @@ export function ReplayChart({
   candlestickStyle,
   onMeasurementArmedChange, drawingTool, onDrawingToolChange, trendLineDraftStyle, fibonacciDraftStyle, drawings, selectedDrawingId,
   onSelectedDrawingIdChange, onCreateDrawing, onUpdateDrawing, onDeleteDrawing,
-  onOpenDrawingStyle, emaEnabled, emaIndicators, volumeVisible, paperSnapshot,
+  onOpenDrawingStyle, emaEnabled, emaIndicators, abrEnabled, abrLength, volumeVisible, paperSnapshot,
   paperBusy, paperError, onSubmitOrder, onOrderPriceChange,
   onCancelOrder, onClosePosition, onDraftActiveChange, onOpenPaperAccount,
 }: {
@@ -223,6 +237,8 @@ export function ReplayChart({
   onOpenDrawingStyle: (id: string) => void;
   emaEnabled: boolean;
   emaIndicators: EmaIndicatorConfig[];
+  abrEnabled: boolean;
+  abrLength: number;
   volumeVisible: boolean;
   paperSnapshot: PaperSessionSnapshot | null;
   paperBusy: boolean;
@@ -267,6 +283,7 @@ export function ReplayChart({
   const onOpenDrawingStyleRef = useRef(onOpenDrawingStyle);
   const displayIntervalSecondsRef = useRef(displayIntervalSeconds);
   const [contextMenu, setContextMenu] = useState<ContextMenuState | null>(null);
+  const [abrTooltip, setAbrTooltip] = useState<AbrTooltipState | null>(null);
   const [measurement, setMeasurement] = useState<MeasurementState | null>(null);
   const measurementRef = useRef<MeasurementState | null>(null);
   const drawingDraftRef = useRef<DrawingDraft | null>(null);
@@ -279,6 +296,19 @@ export function ReplayChart({
   const [draftError, setDraftError] = useState<string | null>(null);
   const [lineActions, setLineActions] = useState<LineAction[]>([]);
   const hasVolume = useMemo(() => [...warmupBars, ...bars].some((bar) => bar.volume !== null), [bars, warmupBars]);
+  const abrValues = useMemo(() => {
+    const values = Array<number | null>(bars.length).fill(null);
+    if (!abrEnabled || bars.length === 0) return values;
+    const allBars = [...warmupBars, ...bars];
+    const result = calculateAbrSeries(allBars, abrLength, allBars.length - 1, warmupBars.length);
+    for (const point of result.points) {
+      const visibleIndex = point.sequence - warmupBars.length;
+      if (visibleIndex >= 0 && visibleIndex < values.length) values[visibleIndex] = point.value;
+    }
+    return values;
+  }, [abrEnabled, abrLength, bars, warmupBars]);
+  const abrValuesRef = useRef(abrValues);
+  abrValuesRef.current = abrValues;
   const latest = bars.at(-1);
   const currentPrice = latest?.close ?? null;
   const currentPriceRef = useRef(currentPrice);
@@ -1184,6 +1214,121 @@ export function ReplayChart({
   }, [measurement, measurementArmed, setChartCursor]);
 
   useEffect(() => {
+    const container = containerRef.current;
+    const interaction = interactionRef.current;
+    const chart = chartRef.current;
+    const series = candleRef.current;
+    if (!container || !interaction || !chart || !series) {
+      setAbrTooltip(null);
+      return;
+    }
+
+    const LONG_PRESS_MS = 350;
+    const MOVE_TOLERANCE_PX = 6;
+    let timer: ReturnType<typeof setTimeout> | null = null;
+    let pointerId: number | null = null;
+    let tracking = false;
+    let start = { x: 0, y: 0 };
+    let latestPointer = { x: 0, y: 0 };
+
+    const clearTimer = () => {
+      if (timer) clearTimeout(timer);
+      timer = null;
+    };
+    const tooltipAt = (clientX: number, clientY: number): AbrTooltipState | null => {
+      const currentBars = barsRef.current;
+      const rect = container.getBoundingClientRect();
+      const x = clientX - rect.left;
+      const y = clientY - rect.top;
+      const paneWidth = chart.timeScale().width();
+      const paneHeight = chart.panes()[0]?.getHeight() ?? 0;
+      if (!currentBars.length || x < 0 || x > paneWidth || y < 0 || y > paneHeight) return null;
+      const logical = chart.timeScale().coordinateToLogical(x as never);
+      if (logical === null) return null;
+      const index = Math.round(Number(logical));
+      const bar = currentBars[index];
+      if (!bar) return null;
+      const tooltipWidth = 196;
+      const tooltipHeight = abrEnabled ? 138 : 112;
+      const preferredLeft = x + 14;
+      const left = preferredLeft + tooltipWidth <= paneWidth - 8
+        ? preferredLeft
+        : Math.max(8, x - tooltipWidth - 14);
+      const top = Math.max(8, Math.min(y + 12, Math.max(8, paneHeight - tooltipHeight - 8)));
+      return { left, top, bar, value: abrValuesRef.current[index] ?? null };
+    };
+    const showAt = (clientX: number, clientY: number) => {
+      setAbrTooltip(tooltipAt(clientX, clientY));
+    };
+    const nearOrderLine = (clientY: number) => {
+      const y = clientY - container.getBoundingClientRect().top;
+      return [...lineTargetsRef.current.values()].some((target) => {
+        const coordinate = series.priceToCoordinate(target.price);
+        return coordinate !== null && Math.abs(Number(coordinate) - y) <= 8;
+      });
+    };
+    const down = (event: PointerEvent) => {
+      if (event.pointerType !== "mouse" || event.button !== 0 || !interaction.contains(event.target as Node)) return;
+      if (drawingToolRef.current || drawingDraftRef.current || drawingPreviewRef.current
+        || measurementArmedRef.current || measurementRef.current) return;
+      const target = event.target as HTMLElement;
+      if (target.closest("button,input,[data-context-menu],[data-order-ticket],[data-line-action]") || nearOrderLine(event.clientY)) return;
+      pointerId = event.pointerId;
+      start = { x: event.clientX, y: event.clientY };
+      latestPointer = start;
+      clearTimer();
+      timer = setTimeout(() => {
+        timer = null;
+        if (pointerId === null) return;
+        tracking = true;
+        chart.applyOptions({ handleScroll: false });
+        setContextMenu(null);
+        showAt(latestPointer.x, latestPointer.y);
+      }, LONG_PRESS_MS);
+    };
+    const move = (event: PointerEvent) => {
+      if (pointerId !== event.pointerId) return;
+      latestPointer = { x: event.clientX, y: event.clientY };
+      if (!tracking) {
+        if (Math.hypot(event.clientX - start.x, event.clientY - start.y) > MOVE_TOLERANCE_PX) {
+          clearTimer();
+          pointerId = null;
+        }
+        return;
+      }
+      event.preventDefault();
+      event.stopImmediatePropagation();
+      showAt(event.clientX, event.clientY);
+    };
+    const finish = (event?: PointerEvent) => {
+      if (event && pointerId !== event.pointerId) return;
+      clearTimer();
+      pointerId = null;
+      if (!tracking) return;
+      tracking = false;
+      setAbrTooltip(null);
+      chart.applyOptions({ handleScroll: true });
+    };
+    const blur = () => finish();
+
+    interaction.addEventListener("pointerdown", down, true);
+    window.addEventListener("pointermove", move, true);
+    window.addEventListener("pointerup", finish, true);
+    window.addEventListener("pointercancel", finish, true);
+    window.addEventListener("blur", blur);
+    return () => {
+      interaction.removeEventListener("pointerdown", down, true);
+      window.removeEventListener("pointermove", move, true);
+      window.removeEventListener("pointerup", finish, true);
+      window.removeEventListener("pointercancel", finish, true);
+      window.removeEventListener("blur", blur);
+      clearTimer();
+      if (tracking) chart.applyOptions({ handleScroll: true });
+      setAbrTooltip(null);
+    };
+  }, [abrEnabled, priceTickSize]);
+
+  useEffect(() => {
     const container = containerRef.current; const interaction = interactionRef.current; const series = candleRef.current;
     if (!container || !interaction || !series) return;
     let dragging: { target: LineTarget; originalPrice: number; previewPrice: number } | null = null;
@@ -1383,6 +1528,31 @@ export function ReplayChart({
       }}
     >
       <div ref={containerRef} className="h-full min-h-[240px] w-full overflow-hidden bg-white" aria-label={copy.marketReplay.chartAriaLabel} />
+
+      {abrTooltip ? (
+        <div
+          data-testid="abr-bar-tooltip"
+          className="pointer-events-none absolute z-30 w-[196px] rounded-md border border-slate-200 bg-white/95 px-3 py-2.5 text-xs shadow-lg backdrop-blur"
+          style={{ left: abrTooltip.left, top: abrTooltip.top }}
+        >
+          <div className="grid grid-cols-[1fr_auto] gap-x-5 gap-y-1.5">
+            {abrEnabled ? (
+              <>
+                <span className="font-medium text-slate-600">{copy.marketReplay.abrName(abrLength)}</span>
+                <span className="font-mono font-semibold text-slate-950">{formatAbrValue(abrTooltip.value, priceTickSize)}</span>
+              </>
+            ) : null}
+            <span className="text-slate-600">{copy.marketReplay.abrOpen}</span>
+            <span className="font-mono font-semibold text-slate-950">{formatPriceForTick(abrTooltip.bar.open, priceTickSize)}</span>
+            <span className="text-slate-600">{copy.marketReplay.abrHigh}</span>
+            <span className="font-mono font-semibold text-slate-950">{formatPriceForTick(abrTooltip.bar.high, priceTickSize)}</span>
+            <span className="text-slate-600">{copy.marketReplay.abrLow}</span>
+            <span className="font-mono font-semibold text-slate-950">{formatPriceForTick(abrTooltip.bar.low, priceTickSize)}</span>
+            <span className="text-slate-600">{copy.marketReplay.abrClose}</span>
+            <span className="font-mono font-semibold text-slate-950">{formatPriceForTick(abrTooltip.bar.close, priceTickSize)}</span>
+          </div>
+        </div>
+      ) : null}
 
       {measurement ? (
         <div

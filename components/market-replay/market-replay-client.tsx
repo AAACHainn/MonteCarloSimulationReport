@@ -43,6 +43,8 @@ import {
   DEFAULT_EMA_LINE_WIDTH,
 } from "@/lib/market-replay/ema-style";
 import {
+  ABR_LENGTH_MAX,
+  ABR_LENGTH_MIN,
   EMA_LENGTH_MAX,
   EMA_LENGTH_MIN,
   EMA_LINE_STYLES,
@@ -173,6 +175,7 @@ export function MarketReplayClient({ dataset }: { dataset: MarketDatasetSummary 
   const [settingsDialog, setSettingsDialog] = useState<"candlesticks" | "indicators" | "paper" | null>(null);
   const [candlestickStyleDraft, setCandlestickStyleDraft] = useState<CandlestickStyle | null>(null);
   const [emaError, setEmaError] = useState<string | null>(null);
+  const [abrError, setAbrError] = useState<string | null>(null);
   const [customInterval, setCustomInterval] = useState("");
   const [customIntervalUnit, setCustomIntervalUnit] = useState<"s" | "m" | "h">("m");
   const [repairInterval, setRepairInterval] = useState("");
@@ -203,6 +206,11 @@ export function MarketReplayClient({ dataset }: { dataset: MarketDatasetSummary 
     emaIndicators,
     setEmaIndicators,
     emaSettingsLoaded,
+    abrEnabled,
+    setAbrEnabled,
+    abrLength,
+    setAbrLength,
+    abrSettingsLoaded,
     volumeVisible,
     setVolumeVisible,
     defaultTrendLineStyle,
@@ -219,9 +227,10 @@ export function MarketReplayClient({ dataset }: { dataset: MarketDatasetSummary 
   const emaWarmupCount = emaEnabled
     ? Math.max(0, ...emaIndicators.filter((indicator) => indicator.visible).map((indicator) => indicator.length))
     : 0;
-  const emaWarmupCountRef = useRef(emaWarmupCount);
-  emaWarmupCountRef.current = emaWarmupCount;
-  const previousEmaWarmupCountRef = useRef<number | null>(null);
+  const indicatorWarmupCount = Math.max(emaWarmupCount, abrEnabled ? abrLength : 0);
+  const indicatorWarmupCountRef = useRef(indicatorWarmupCount);
+  indicatorWarmupCountRef.current = indicatorWarmupCount;
+  const previousIndicatorWarmupCountRef = useRef<number | null>(null);
   const manualStepsRef = useRef(createReplayStepQueue());
   const marketSession = useMemo(() => datasetSession(dataset), [dataset]);
   const displayMarketSession = useMemo(() => (
@@ -536,7 +545,7 @@ export function MarketReplayClient({ dataset }: { dataset: MarketDatasetSummary 
   }, [dataset.dataVersion, dataset.id, dataset.sourceIntervalSeconds, dataset.startTime, marketCache, marketSession]);
 
   useEffect(() => {
-    if (!emaSettingsLoaded) return;
+    if (!emaSettingsLoaded || !abrSettingsLoaded) return;
     let cancelled = false;
     const initialize = async () => {
       if (!dataset.sourceIntervalSeconds) throw new Error(copy.marketReplay.invalidDisplayInterval);
@@ -558,28 +567,28 @@ export function MarketReplayClient({ dataset }: { dataset: MarketDatasetSummary 
         if (!cancelled) setReplay(next);
         paperDeltaAccumulatorRef.current = createPaperDeltaAccumulator(next.currentSequence);
         lastSyncStartedAtRef.current = performance.now();
-        await loadWindow(next.currentSequence, next.displayIntervalSeconds, next.displaySession, emaWarmupCountRef.current);
+        await loadWindow(next.currentSequence, next.displayIntervalSeconds, next.displaySession, indicatorWarmupCountRef.current);
       }
     };
     initialize().catch((error) => { if (!cancelled) setLoadError(error instanceof Error ? error.message : copy.marketReplay.loadError); })
       .finally(() => { if (!cancelled) setIsLoading(false); });
     return () => { cancelled = true; };
-  }, [commitConfirmedPaperSnapshot, dataset, emaSettingsLoaded, loadWindow, setReplay]);
+  }, [abrSettingsLoaded, commitConfirmedPaperSnapshot, dataset, emaSettingsLoaded, loadWindow, setReplay]);
 
   useEffect(() => {
-    if (!emaSettingsLoaded) return;
-    const previous = previousEmaWarmupCountRef.current;
-    previousEmaWarmupCountRef.current = emaWarmupCount;
-    if (previous === null || previous === emaWarmupCount) return;
+    if (!emaSettingsLoaded || !abrSettingsLoaded) return;
+    const previous = previousIndicatorWarmupCountRef.current;
+    previousIndicatorWarmupCountRef.current = indicatorWarmupCount;
+    if (previous === null || previous === indicatorWarmupCount) return;
     const current = latestReplayRef.current;
     if (!current) return;
     void loadWindow(
       current.currentSequence,
       current.displayIntervalSeconds,
       current.displaySession,
-      emaWarmupCount,
+      indicatorWarmupCount,
     ).catch((error) => setEmaError(error instanceof Error ? error.message : copy.marketReplay.loadError));
-  }, [emaSettingsLoaded, emaWarmupCount, latestReplayRef, loadWindow]);
+  }, [abrSettingsLoaded, emaSettingsLoaded, indicatorWarmupCount, latestReplayRef, loadWindow]);
 
   useEffect(() => { paperSnapshotRef.current = paperSnapshot; }, [paperSnapshot]);
 
@@ -643,7 +652,7 @@ export function MarketReplayClient({ dataset }: { dataset: MarketDatasetSummary 
         progress.displayIntervalSeconds ?? dataset.sourceIntervalSeconds!, progress.currentSequence,
         progress.generation, progress.syncVersion, progress.displaySession ?? "ETH");
       setReplay(next);
-      await loadWindow(next.currentSequence, next.displayIntervalSeconds, next.displaySession, emaWarmupCountRef.current);
+      await loadWindow(next.currentSequence, next.displayIntervalSeconds, next.displaySession, indicatorWarmupCountRef.current);
       setRecoveryNotice(visibleSequence > next.currentSequence ? copy.marketReplay.recoveredWithRollback(visibleSequence - next.currentSequence) : null);
     }
     recoveryRequiredRef.current = false;
@@ -802,7 +811,7 @@ export function MarketReplayClient({ dataset }: { dataset: MarketDatasetSummary 
       currentSourceBarRef.current = lastSourceBar;
       setReplay(next);
       setCurrentSourceBar(lastSourceBar);
-      await loadWindow(next.currentSequence, next.displayIntervalSeconds, next.displaySession, emaWarmupCountRef.current);
+      await loadWindow(next.currentSequence, next.displayIntervalSeconds, next.displaySession, indicatorWarmupCountRef.current);
       setRecoveryNotice(null);
       return reachedVisibleBucket;
     } catch (error) {
@@ -1053,7 +1062,7 @@ export function MarketReplayClient({ dataset }: { dataset: MarketDatasetSummary 
     resumeReplayAfterStartDialogRef.current = false;
     setStartError(null); setReplay(next);
     commitConfirmedPaperSnapshot(null);
-    await loadWindow(next.currentSequence, next.displayIntervalSeconds, next.displaySession, emaWarmupCountRef.current);
+    await loadWindow(next.currentSequence, next.displayIntervalSeconds, next.displaySession, indicatorWarmupCountRef.current);
     return true;
   }
 
@@ -1190,7 +1199,7 @@ export function MarketReplayClient({ dataset }: { dataset: MarketDatasetSummary 
       playbackClockRef.current = performance.now();
       const next = setDisplayInterval(current, value);
       setReplay(next); setEmaError(null); queueSave(next, true);
-      await loadWindow(next.currentSequence, value, next.displaySession, emaWarmupCountRef.current);
+      await loadWindow(next.currentSequence, value, next.displaySession, indicatorWarmupCountRef.current);
     } catch (error) {
       recoveryRequiredRef.current = true;
       setPaperError(error instanceof Error ? error.message : copy.marketReplay.loadError);
@@ -1213,7 +1222,7 @@ export function MarketReplayClient({ dataset }: { dataset: MarketDatasetSummary 
       setEmaError(null);
       queueSave(next, true);
       await saveChainRef.current;
-      await loadWindow(next.currentSequence, next.displayIntervalSeconds, value, emaWarmupCountRef.current);
+      await loadWindow(next.currentSequence, next.displayIntervalSeconds, value, indicatorWarmupCountRef.current);
     } catch (error) {
       recoveryRequiredRef.current = true;
       setPaperError(error instanceof Error ? error.message : copy.marketReplay.loadError);
@@ -1231,6 +1240,16 @@ export function MarketReplayClient({ dataset }: { dataset: MarketDatasetSummary 
       indicator.id === id ? { ...indicator, length: value } : indicator
     )));
     setEmaError(null);
+    return true;
+  }
+
+  function updateAbrLength(value: number) {
+    if (!Number.isInteger(value) || value < ABR_LENGTH_MIN || value > ABR_LENGTH_MAX) {
+      setAbrError(copy.marketReplay.abrLengthRange(ABR_LENGTH_MIN, ABR_LENGTH_MAX));
+      return false;
+    }
+    setAbrLength(value);
+    setAbrError(null);
     return true;
   }
 
@@ -1345,7 +1364,7 @@ export function MarketReplayClient({ dataset }: { dataset: MarketDatasetSummary 
       reset.syncVersion = data.syncVersion;
       reset.confirmedSequence = data.currentSequence;
       setReplay(reset);
-      await loadWindow(reset.currentSequence, reset.displayIntervalSeconds, reset.displaySession, emaWarmupCountRef.current);
+      await loadWindow(reset.currentSequence, reset.displayIntervalSeconds, reset.displaySession, indicatorWarmupCountRef.current);
       setSaveStatus("idle");
     }
     setConfirmAction(null);
@@ -1659,6 +1678,8 @@ export function MarketReplayClient({ dataset }: { dataset: MarketDatasetSummary 
             onOpenDrawingStyle={openDrawingStyle}
             emaEnabled={emaEnabled}
             emaIndicators={emaIndicators}
+            abrEnabled={abrEnabled}
+            abrLength={abrLength}
             volumeVisible={volumeVisible}
             paperSnapshot={paperSnapshot}
             paperBusy={paperBusy}
@@ -1837,6 +1858,31 @@ export function MarketReplayClient({ dataset }: { dataset: MarketDatasetSummary 
           <div className="flex items-center justify-between rounded-md border bg-slate-50 p-3">
             <div><p className="text-sm font-medium text-slate-950">{copy.marketReplay.volumeTitle}</p><p className="mt-0.5 text-xs text-slate-500">{copy.marketReplay.volumeDescription}</p></div>
             <div className="flex items-center gap-2"><span className="text-xs text-slate-500">{volumeVisible ? copy.marketReplay.volumeOn : copy.marketReplay.volumeOff}</span><button type="button" role="switch" aria-checked={volumeVisible} aria-label={copy.marketReplay.volumeToggle} onClick={() => setVolumeVisible((visible) => !visible)} className={`relative h-6 w-11 rounded-full transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-600 focus-visible:ring-offset-2 ${volumeVisible ? "bg-blue-600" : "bg-slate-300"}`}><span className={`absolute left-0 top-0.5 h-5 w-5 rounded-full bg-white shadow-sm transition-transform ${volumeVisible ? "translate-x-5" : "translate-x-0.5"}`} /></button></div>
+          </div>
+          <div className="space-y-3 rounded-md border bg-slate-50 p-3">
+            <div className="flex items-center justify-between gap-4">
+              <div><p className="text-sm font-medium text-slate-950">{copy.marketReplay.abrTitle}</p><p className="mt-0.5 text-xs text-slate-500">{copy.marketReplay.abrDescription}</p></div>
+              <div className="flex shrink-0 items-center gap-2"><span className="text-xs text-slate-500">{abrEnabled ? copy.marketReplay.emaOn : copy.marketReplay.emaOff}</span><button type="button" role="switch" aria-checked={abrEnabled} aria-label={copy.marketReplay.abrMaster} onClick={() => setAbrEnabled((enabled) => !enabled)} className={`relative h-6 w-11 rounded-full transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-600 focus-visible:ring-offset-2 ${abrEnabled ? "bg-blue-600" : "bg-slate-300"}`}><span className={`absolute left-0 top-0.5 h-5 w-5 rounded-full bg-white shadow-sm transition-transform ${abrEnabled ? "translate-x-5" : "translate-x-0.5"}`} /></button></div>
+            </div>
+            <div className="flex items-center gap-3 border-t pt-3">
+              <Label htmlFor="abr-length" className="text-xs text-slate-500">{copy.marketReplay.abrLength}</Label>
+              <Input
+                key={abrLength}
+                id="abr-length"
+                type="number"
+                min={ABR_LENGTH_MIN}
+                max={ABR_LENGTH_MAX}
+                step="1"
+                defaultValue={abrLength}
+                onBlur={(event) => {
+                  if (!updateAbrLength(Number(event.currentTarget.value))) event.currentTarget.value = String(abrLength);
+                }}
+                onKeyDown={(event) => { if (event.key === "Enter") event.currentTarget.blur(); }}
+                className="h-8 w-24 font-mono text-xs"
+              />
+              <span className="text-xs text-slate-500">{copy.marketReplay.abrName(abrLength)}</span>
+            </div>
+            {abrError ? <p className="text-xs text-red-600">{abrError}</p> : null}
           </div>
           <div className="flex items-center justify-between rounded-md border bg-slate-50 p-3">
             <div><p className="text-sm font-medium text-slate-950">{copy.marketReplay.emaTitle}</p><p className="mt-0.5 text-xs text-slate-500">{copy.marketReplay.emaDescription}</p></div>

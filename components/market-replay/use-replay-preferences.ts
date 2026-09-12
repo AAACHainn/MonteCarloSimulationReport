@@ -27,6 +27,8 @@ import {
   normalizeEmaLineWidth,
 } from "@/lib/market-replay/ema-style";
 import {
+  ABR_LENGTH_MAX,
+  ABR_LENGTH_MIN,
   EMA_LENGTH_MAX,
   EMA_LENGTH_MIN,
   MAX_EMA_INDICATORS,
@@ -34,6 +36,7 @@ import {
 } from "@/lib/market-replay/types";
 
 const EMA_SETTINGS_STORAGE_KEY = "market-replay-ema-settings-v1";
+const ABR_SETTINGS_STORAGE_KEY = "market-replay-abr-settings-v1";
 const VOLUME_VISIBILITY_STORAGE_KEY = "market-replay-volume-visibility-v1";
 const DISPLAY_TIMEZONE_STORAGE_KEY = "market-replay-display-timezone-v1";
 const CANDLESTICK_STYLE_STORAGE_KEY = "market-replay-candlestick-style-v1";
@@ -81,12 +84,29 @@ function loadEmaSettings() {
   }
 }
 
+function loadAbrSettings() {
+  try {
+    const parsed = JSON.parse(window.localStorage.getItem(ABR_SETTINGS_STORAGE_KEY) ?? "null") as {
+      enabled?: unknown;
+      length?: unknown;
+    } | null;
+    if (!parsed || typeof parsed.enabled !== "boolean" || !Number.isInteger(parsed.length)
+      || Number(parsed.length) < ABR_LENGTH_MIN || Number(parsed.length) > ABR_LENGTH_MAX) return null;
+    return { enabled: parsed.enabled, length: Number(parsed.length) };
+  } catch {
+    return null;
+  }
+}
+
 export function useReplayPreferences(dataset: { id: string; startTime: string; timezone: string }) {
   const [candlestickStyle, setCandlestickStyle] = useState<CandlestickStyle>(DEFAULT_CANDLESTICK_STYLE);
   const [candlestickStyleLoaded, setCandlestickStyleLoaded] = useState(false);
   const [emaEnabled, setEmaEnabled] = useState(false);
   const [emaIndicators, setEmaIndicators] = useState<EmaIndicatorConfig[]>(DEFAULT_EMA_INDICATORS);
   const [emaSettingsLoaded, setEmaSettingsLoaded] = useState(false);
+  const [abrEnabled, setAbrEnabled] = useState(false);
+  const [abrLength, setAbrLength] = useState(8);
+  const [abrSettingsLoaded, setAbrSettingsLoaded] = useState(false);
   const [volumeVisible, setVolumeVisible] = useState(true);
   const [volumeVisibilityLoaded, setVolumeVisibilityLoaded] = useState(false);
   const [defaultTrendLineStyle, setDefaultTrendLineStyle] = useState<TrendLineStyle>(DEFAULT_TREND_LINE_STYLE);
@@ -106,6 +126,15 @@ export function useReplayPreferences(dataset: { id: string; startTime: string; t
       setEmaIndicators(stored.indicators);
     }
     setEmaSettingsLoaded(true);
+  }, []);
+
+  useEffect(() => {
+    const stored = loadAbrSettings();
+    if (stored) {
+      setAbrEnabled(stored.enabled);
+      setAbrLength(stored.length);
+    }
+    setAbrSettingsLoaded(true);
   }, []);
 
   useEffect(() => {
@@ -167,6 +196,15 @@ export function useReplayPreferences(dataset: { id: string; startTime: string; t
   }, [emaEnabled, emaIndicators, emaSettingsLoaded]);
 
   useEffect(() => {
+    if (!abrSettingsLoaded) return;
+    try {
+      window.localStorage.setItem(ABR_SETTINGS_STORAGE_KEY, JSON.stringify({ enabled: abrEnabled, length: abrLength }));
+    } catch {
+      // Browser storage can be unavailable; ABR settings still apply to this page session.
+    }
+  }, [abrEnabled, abrLength, abrSettingsLoaded]);
+
+  useEffect(() => {
     if (!volumeVisibilityLoaded) return;
     try {
       window.localStorage.setItem(VOLUME_VISIBILITY_STORAGE_KEY, String(volumeVisible));
@@ -215,6 +253,11 @@ export function useReplayPreferences(dataset: { id: string; startTime: string; t
     emaIndicators,
     setEmaIndicators,
     emaSettingsLoaded,
+    abrEnabled,
+    setAbrEnabled,
+    abrLength,
+    setAbrLength,
+    abrSettingsLoaded,
     volumeVisible,
     setVolumeVisible,
     defaultTrendLineStyle,

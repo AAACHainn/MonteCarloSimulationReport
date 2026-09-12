@@ -13,6 +13,8 @@ export const MAX_PLAYBACK_RATE = 100;
 export const MAX_DISPLAY_INTERVAL_SECONDS = 86_400;
 export const EMA_LENGTH_MIN = 2;
 export const EMA_LENGTH_MAX = 1_000;
+export const ABR_LENGTH_MIN = 1;
+export const ABR_LENGTH_MAX = 1_000;
 export const MAX_EMA_INDICATORS = 5;
 export const EMA_LINE_WIDTHS = [1, 2, 3, 4] as const;
 export const EMA_LINE_STYLES = ["SOLID", "DASHED", "DOTTED"] as const;
@@ -44,6 +46,11 @@ export type EmaIndicatorConfig = {
   lineWidth: EmaLineWidth;
   lineStyle: EmaLineStyle;
   visible: boolean;
+};
+
+export type AbrIndicatorConfig = {
+  enabled: boolean;
+  length: number;
 };
 
 export type MarketBarData = {
