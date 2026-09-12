@@ -220,6 +220,8 @@ export function advancePaperTrading(input: PaperAdvanceInput): PaperAdvanceResul
         openedSequence: fill.sequence,
         openedAt: fill.timestamp,
         entryPrice: fill.price,
+        entryOrderType: order.type,
+        initialStopPrice: order.stopLoss,
         initialQuantity: openedQuantity,
         remainingQuantity: openedQuantity,
         initialRisk: order.stopLoss === null ? null : Math.abs(fill.price - order.stopLoss),

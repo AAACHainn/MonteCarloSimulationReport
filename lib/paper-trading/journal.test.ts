@@ -34,6 +34,17 @@ function ids() {
 }
 
 describe("paper replay journal", () => {
+  it.each(["MARKET", "LIMIT", "STOP"] as const)("keeps the %s entry order type on a new lot", (type) => {
+    const result = advancePaperTrading({
+      state,
+      orders: [order({ type, price: type === "MARKET" ? null : 100, takeProfit: null })],
+      bar: { sequence: 0, timestamp: "2026-09-01T00:00:00.000Z", open: 100, high: 101, low: 99, close: 100, volume: null },
+      makeId: ids(),
+      journalContext: context,
+    });
+    expect(result.lots).toMatchObject([{ entryOrderType: type }]);
+  });
+
   it("tracks only the adverse path after entry and closes on the same bar", () => {
     const result = advancePaperTrading({
       state,
@@ -45,7 +56,7 @@ describe("paper replay journal", () => {
     expect(result.journalEntries).toHaveLength(1);
     expect(result.journalEntries[0]).toMatchObject({
       direction: "LONG", entryPrice: 100, exitPrice: 104,
-      initialRisk: 5, actualRisk: 1, gainLoss: 4,
+      entryOrderType: "LIMIT", initialStopPrice: 95, initialRisk: 5, actualRisk: 1, gainLoss: 4,
       abrValue: 2, abrLength: 8, displayIntervalSeconds: 300,
     });
     expect(result.lots).toHaveLength(0);
@@ -55,6 +66,7 @@ describe("paper replay journal", () => {
     const lot = (id: string, sequence: number, quantity: number): PaperPositionLotData => ({
       ...context, id, entryFillId: `fill-${id}`, side: "LONG", openedSequence: sequence,
       openedAt: `2026-09-01T00:00:0${sequence}.000Z`, entryPrice: 100 + sequence,
+      entryOrderType: "LIMIT", initialStopPrice: 95,
       initialQuantity: quantity, remainingQuantity: quantity, initialRisk: 5, actualRisk: 2,
     });
     const result = closeLotsFifo([lot("first", 0, 2), lot("second", 1, 2)], 3, {
@@ -69,7 +81,7 @@ describe("paper replay journal", () => {
       id: "entry", no: 1, journalSessionId: "journal", lotId: "lot", direction: "LONG",
       quantity: 1, openedSequence: 0, openedAt: new Date("2026-09-01T00:00:00Z"),
       closedSequence: 1, closedAt: new Date("2026-09-01T00:01:00Z"), entryPrice: 100,
-      exitPrice: 101, abrValue: 2, abrLength: 8, displayIntervalSeconds: 300,
+      entryOrderType: null, exitPrice: 101, initialStopPrice: null, abrValue: 2, abrLength: 8, displayIntervalSeconds: 300,
       displaySession: "ETH", displayUtcOffsetMinutes: 480, priceTickSize: 0.25,
       initialRisk: 0, actualRisk: 0, gainLoss: 1,
       journalSession: { archivedAt: null },
@@ -86,7 +98,7 @@ describe("paper replay journal", () => {
       id: "entry", no: 1, journalSessionId: "journal", lotId: "lot", direction: "SHORT",
       quantity: 1, openedSequence: 0, openedAt: new Date("2026-09-01T00:00:00Z"),
       closedSequence: 1, closedAt: new Date("2026-09-01T00:01:00Z"), entryPrice: 100,
-      exitPrice: 100, abrValue: null, abrLength: 8, displayIntervalSeconds: 300,
+      entryOrderType: "STOP", exitPrice: 100, initialStopPrice: 101, abrValue: null, abrLength: 8, displayIntervalSeconds: 300,
       displaySession: "ETH", displayUtcOffsetMinutes: 0, priceTickSize: 0.25,
       initialRisk: 1, actualRisk: 0, gainLoss: 0, journalSession: { archivedAt: null },
     });

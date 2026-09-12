@@ -10,7 +10,7 @@ export default async function ReplayTradeHistoryPage({ params }: { params: Promi
   const { id } = await params;
   const dataset = await prisma.marketDataset.findUnique({ where: { id }, select: { id: true, name: true, symbol: true } });
   if (!dataset) notFound();
-  return <div className="space-y-6">
+  return <div className="relative left-1/2 w-[calc(100vw-2rem)] max-w-[1800px] -translate-x-1/2 space-y-6 sm:w-[calc(100vw-3rem)]">
     <Breadcrumbs items={[
       { label: copy.marketReplay.title, href: "/market-replay" },
       { label: dataset.name, href: `/market-replay/${id}` },

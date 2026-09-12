@@ -215,6 +215,8 @@ const paperPositionLotDataSchema = paperJournalContextSchema.extend({
   id: z.string().min(1).max(240), entryFillId: z.string().min(1).max(160),
   side: z.enum(["LONG", "SHORT"]), openedSequence: z.number().int().min(0),
   openedAt: z.string().datetime(), entryPrice: z.number().finite().positive(),
+  entryOrderType: z.enum(["MARKET", "LIMIT", "STOP"]).nullable(),
+  initialStopPrice: z.number().finite().positive().nullable(),
   initialQuantity: z.number().finite().positive(), remainingQuantity: z.number().finite().positive(),
   initialRisk: z.number().finite().min(0).nullable(), actualRisk: z.number().finite().min(0),
 });
@@ -224,7 +226,9 @@ const replayJournalEntryDraftSchema = paperJournalContextSchema.extend({
   direction: z.enum(["LONG", "SHORT"]), quantity: z.number().finite().positive(),
   openedSequence: z.number().int().min(0), openedAt: z.string().datetime(),
   closedSequence: z.number().int().min(0), closedAt: z.string().datetime(),
-  entryPrice: z.number().finite().positive(), exitPrice: z.number().finite().positive(),
+  entryPrice: z.number().finite().positive(), entryOrderType: z.enum(["MARKET", "LIMIT", "STOP"]).nullable(),
+  exitPrice: z.number().finite().positive(),
+  initialStopPrice: z.number().finite().positive().nullable(),
   initialRisk: z.number().finite().min(0), actualRisk: z.number().finite().min(0),
   gainLoss: z.number().finite(),
 });
@@ -252,6 +256,20 @@ export const replaySyncSchema = z.object({
 }).superRefine((value, context) => {
   if (value.targetSequence <= value.confirmedSequence || value.targetSequence - value.confirmedSequence > MAX_REPLAY_SYNC_SOURCE_BARS) {
     context.addIssue({ code: z.ZodIssueCode.custom, message: copy.marketReplay.validation.progressInvalid });
+  }
+});
+
+export const replayTradeAnnotationsQuerySchema = z.object({
+  fromSequence: z.coerce.number().int().min(0).optional(),
+  toSequence: z.coerce.number().int().min(0).optional(),
+  journalNo: z.coerce.number().int().positive().optional(),
+}).superRefine((value, context) => {
+  const rangeProvided = value.fromSequence !== undefined || value.toSequence !== undefined;
+  if (value.journalNo === undefined && (!rangeProvided || value.fromSequence === undefined || value.toSequence === undefined)) {
+    context.addIssue({ code: z.ZodIssueCode.custom, message: copy.marketReplay.validation.annotationQueryRequired });
+  }
+  if (value.fromSequence !== undefined && value.toSequence !== undefined && value.fromSequence > value.toSequence) {
+    context.addIssue({ code: z.ZodIssueCode.custom, message: copy.marketReplay.validation.annotationRangeInvalid });
   }
 });
 

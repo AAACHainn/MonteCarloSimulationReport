@@ -90,6 +90,8 @@ export type PaperPositionLotData = PaperJournalContext & {
   openedSequence: number;
   openedAt: string;
   entryPrice: number;
+  entryOrderType: PaperOrderType | null;
+  initialStopPrice: number | null;
   initialQuantity: number;
   remainingQuantity: number;
   initialRisk: number | null;
@@ -106,7 +108,9 @@ export type ReplayJournalEntryDraft = PaperJournalContext & {
   closedSequence: number;
   closedAt: string;
   entryPrice: number;
+  entryOrderType: PaperOrderType | null;
   exitPrice: number;
+  initialStopPrice: number | null;
   initialRisk: number;
   actualRisk: number;
   gainLoss: number;
@@ -122,6 +126,20 @@ export type ReplayJournalEntryData = ReplayJournalEntryDraft & {
   actualRiskRr: number;
   journalSessionId: string;
   archivedAt: string | null;
+};
+
+export type ReplayTradeAnnotationData = {
+  id: string;
+  no: number;
+  direction: "LONG" | "SHORT";
+  entryOrderType: PaperOrderType | null;
+  openedSequence: number;
+  closedSequence: number;
+  entryPrice: number;
+  initialStopPrice: number | null;
+  actualRisk: number;
+  exitPrice: number;
+  result: "W" | "L" | "BE";
 };
 
 export type PaperTradeData = {

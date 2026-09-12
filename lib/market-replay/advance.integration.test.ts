@@ -438,7 +438,7 @@ describe("replay advance with real SQLite", () => {
     const session = await prisma.paperTradingSession.findUniqueOrThrow({ where: { datasetId: id } });
     await prisma.paperOrder.create({ data: {
       id: "stats-entry", sessionId: session.id, side: "BUY", type: "MARKET", quantity: 2,
-      takeProfit: 105, createdSequence: -1, activeFromSequence: 0,
+      stopLoss: 90, takeProfit: 105, createdSequence: -1, activeFromSequence: 0,
     } });
     await prisma.marketBar.update({
       where: { datasetId_sequence: { datasetId: id, sequence: 1 } },
@@ -464,7 +464,7 @@ describe("replay advance with real SQLite", () => {
     });
     expect(journalEntry).toMatchObject({
       no: 1, direction: "LONG", quantity: 2,
-      entryPrice: 100, exitPrice: 105, initialRisk: 1, actualRisk: 1, gainLoss: 5,
+      entryPrice: 100, entryOrderType: "MARKET", exitPrice: 105, initialStopPrice: 90, initialRisk: 10, actualRisk: 1, gainLoss: 5,
     });
     expect(journalEntry.journalSession.archivedAt).toBeNull();
 

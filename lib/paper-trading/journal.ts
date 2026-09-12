@@ -3,9 +3,15 @@ import type {
   PaperPositionLotData,
   ReplayJournalEntryData,
   ReplayJournalEntryDraft,
+  ReplayTradeAnnotationData,
 } from "./types";
 
 const EPSILON = 1e-12;
+
+export function replayJournalResult(gainLoss: number, priceTickSize: number) {
+  return Math.abs(gainLoss) <= priceTickSize * 1e-9
+    ? "BE" as const : gainLoss > 0 ? "W" as const : "L" as const;
+}
 
 export const DEFAULT_PAPER_JOURNAL_CONTEXT: PaperJournalContext = {
   abrValue: null,
@@ -45,7 +51,9 @@ export function closeLotsFifo(
       closedSequence: exit.sequence,
       closedAt: exit.timestamp,
       entryPrice: lot.entryPrice,
+      entryOrderType: lot.entryOrderType,
       exitPrice: exit.price,
+      initialStopPrice: lot.initialStopPrice,
       initialRisk,
       actualRisk: lot.actualRisk,
       gainLoss,
@@ -65,7 +73,7 @@ export function closeLotsFifo(
 export function serializeReplayJournalEntry(entry: {
   id: string; no: number; journalSessionId: string; direction: string; quantity: number;
   openedSequence: number; openedAt: Date; closedSequence: number; closedAt: Date;
-  entryPrice: number; exitPrice: number; abrValue: number | null; abrLength: number;
+  entryPrice: number; entryOrderType: string | null; exitPrice: number; initialStopPrice: number | null; abrValue: number | null; abrLength: number;
   displayIntervalSeconds: number; displaySession: string; displayUtcOffsetMinutes: number;
   priceTickSize: number; initialRisk: number; actualRisk: number; gainLoss: number; lotId: string;
   journalSession: { archivedAt: Date | null };
@@ -73,14 +81,15 @@ export function serializeReplayJournalEntry(entry: {
   const abr = entry.abrValue !== null && entry.abrValue > 0 ? entry.abrValue : null;
   const effectiveActualRisk = entry.actualRisk > EPSILON ? entry.actualRisk : entry.priceTickSize;
   const effectiveInitialRisk = entry.initialRisk > EPSILON ? entry.initialRisk : entry.priceTickSize;
-  const result = Math.abs(entry.gainLoss) <= entry.priceTickSize * 1e-9
-    ? "BE" as const : entry.gainLoss > 0 ? "W" as const : "L" as const;
+  const result = replayJournalResult(entry.gainLoss, entry.priceTickSize);
   return {
     id: entry.id, no: entry.no, journalSessionId: entry.journalSessionId,
     lotId: entry.lotId, direction: entry.direction as "LONG" | "SHORT", quantity: entry.quantity,
     openedSequence: entry.openedSequence, openedAt: entry.openedAt.toISOString(),
     closedSequence: entry.closedSequence, closedAt: entry.closedAt.toISOString(),
-    entryPrice: entry.entryPrice, exitPrice: entry.exitPrice,
+    entryPrice: entry.entryPrice,
+    entryOrderType: entry.entryOrderType as ReplayJournalEntryData["entryOrderType"],
+    exitPrice: entry.exitPrice, initialStopPrice: entry.initialStopPrice,
     abrValue: entry.abrValue, abrLength: entry.abrLength,
     displayIntervalSeconds: entry.displayIntervalSeconds,
     displaySession: entry.displaySession as "ETH" | "RTH",
@@ -93,5 +102,34 @@ export function serializeReplayJournalEntry(entry: {
     initialRiskRr: entry.gainLoss / effectiveInitialRisk,
     actualRiskRr: entry.gainLoss / effectiveActualRisk,
     archivedAt: entry.journalSession.archivedAt?.toISOString() ?? null,
+  };
+}
+
+export function serializeReplayTradeAnnotation(entry: {
+  id: string;
+  no: number;
+  direction: string;
+  entryOrderType: string | null;
+  openedSequence: number;
+  closedSequence: number;
+  entryPrice: number;
+  initialStopPrice: number | null;
+  actualRisk: number;
+  exitPrice: number;
+  gainLoss: number;
+  priceTickSize: number;
+}): ReplayTradeAnnotationData {
+  return {
+    id: entry.id,
+    no: entry.no,
+    direction: entry.direction as ReplayTradeAnnotationData["direction"],
+    entryOrderType: entry.entryOrderType as ReplayTradeAnnotationData["entryOrderType"],
+    openedSequence: entry.openedSequence,
+    closedSequence: entry.closedSequence,
+    entryPrice: entry.entryPrice,
+    initialStopPrice: entry.initialStopPrice,
+    actualRisk: entry.actualRisk,
+    exitPrice: entry.exitPrice,
+    result: replayJournalResult(entry.gainLoss, entry.priceTickSize),
   };
 }

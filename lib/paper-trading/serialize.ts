@@ -105,13 +105,14 @@ export function serializePaperTrade(trade: {
 
 export function serializePaperPositionLot(lot: {
   id: string; entryFillId: string; side: string; openedSequence: number; openedAt: Date;
-  entryPrice: number; initialQuantity: number; remainingQuantity: number; initialRisk: number | null;
+  entryPrice: number; entryOrderType: string | null; initialStopPrice: number | null; initialQuantity: number; remainingQuantity: number; initialRisk: number | null;
   actualRisk: number; abrValue: number | null; abrLength: number; displayIntervalSeconds: number;
   displaySession: string; displayUtcOffsetMinutes: number; priceTickSize: number;
 }): PaperPositionLotData {
   return {
     ...lot,
     side: lot.side as "LONG" | "SHORT",
+    entryOrderType: lot.entryOrderType as PaperPositionLotData["entryOrderType"],
     displaySession: lot.displaySession as "ETH" | "RTH",
     openedAt: lot.openedAt.toISOString(),
   };

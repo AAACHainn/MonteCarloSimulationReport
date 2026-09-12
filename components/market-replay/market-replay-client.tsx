@@ -62,7 +62,13 @@ import {
   type MarketDatasetSummary,
   type ReplayState,
 } from "@/lib/market-replay/types";
-import type { PaperOrderType, PaperSessionSnapshot, PaperSide, ReplayJournalEntryData } from "@/lib/paper-trading/types";
+import type {
+  PaperOrderType,
+  PaperSessionSnapshot,
+  PaperSide,
+  ReplayJournalEntryData,
+  ReplayTradeAnnotationData,
+} from "@/lib/paper-trading/types";
 import { createDeterministicEventIdFactory } from "@/lib/paper-trading/deterministic-id";
 import { advancePaperTrading } from "@/lib/paper-trading/engine";
 import { applySpeculativeAdvance, paperCheckpointFingerprint } from "@/lib/paper-trading/speculative";
@@ -109,6 +115,10 @@ type ServerAdvancePayload = {
   snapshot: PaperSessionSnapshot | null;
   generation: number;
   syncVersion: number;
+};
+type TradeAnnotationsPayload = {
+  items: ReplayTradeAnnotationData[];
+  truncated: boolean;
 };
 
 const DISPLAY_INTERVAL_PRESETS = [1, 5, 10, 15, 30, 60, 120, 180, 300, 600, 900, 1_800, 2_700, 3_600, 7_200, 14_400, 21_600, 43_200, 86_400];
@@ -183,6 +193,8 @@ export function MarketReplayClient({ dataset, initialJournalFocus = null }: { da
   const [customIntervalUnit, setCustomIntervalUnit] = useState<"s" | "m" | "h">("m");
   const [repairInterval, setRepairInterval] = useState("");
   const [paperSnapshot, setPaperSnapshot] = useState<PaperSessionSnapshot | null>(null);
+  const [tradeAnnotations, setTradeAnnotations] = useState<ReplayTradeAnnotationData[]>([]);
+  const [tradeAnnotationsTruncated, setTradeAnnotationsTruncated] = useState(false);
   const [paperBusy, setPaperBusy] = useState(false);
   const [paperError, setPaperError] = useState<string | null>(null);
   const [journalReview, setJournalReview] = useState<{ sequence: number; no: number } | null>(null);
@@ -249,6 +261,8 @@ export function MarketReplayClient({ dataset, initialJournalFocus = null }: { da
   const viewChangingRef = useRef(false);
   const windowRequestRef = useRef(0);
   const windowAbortRef = useRef<AbortController | null>(null);
+  const annotationAbortRef = useRef<AbortController | null>(null);
+  const annotationRequestRef = useRef(0);
   const pendingSaveRef = useRef<ReplayState | null>(null);
   const saveTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const lastSaveAtRef = useRef(0);
@@ -298,6 +312,7 @@ export function MarketReplayClient({ dataset, initialJournalFocus = null }: { da
   useEffect(() => () => {
     if (bufferingTimerRef.current) clearTimeout(bufferingTimerRef.current);
     windowAbortRef.current?.abort();
+    annotationAbortRef.current?.abort();
   }, []);
 
   const commitPaperSnapshot = useCallback((snapshot: PaperSessionSnapshot | null) => {
@@ -497,6 +512,45 @@ export function MarketReplayClient({ dataset, initialJournalFocus = null }: { da
       : drawings
   ), [drawings, styleDraft, styleDrawingId]);
 
+  const loadTradeAnnotations = useCallback(async (
+    visibleBars: AggregatedMarketBarData[],
+    journalNo: number | null = null,
+  ) => {
+    const requestId = ++annotationRequestRef.current;
+    annotationAbortRef.current?.abort();
+    annotationAbortRef.current = null;
+    if (!visibleBars.length && journalNo === null) {
+      setTradeAnnotations([]);
+      setTradeAnnotationsTruncated(false);
+      return;
+    }
+    const params = new URLSearchParams();
+    if (journalNo !== null) {
+      params.set("journalNo", String(journalNo));
+    } else {
+      params.set("fromSequence", String(visibleBars[0].firstSequence));
+      params.set("toSequence", String(visibleBars.at(-1)!.lastSequence));
+    }
+    const controller = new AbortController();
+    annotationAbortRef.current = controller;
+    try {
+      const response = await fetch(`/api/market-datasets/${dataset.id}/paper-journal/annotations?${params}`, {
+        signal: controller.signal,
+      });
+      const data = await response.json() as TradeAnnotationsPayload & { error?: string };
+      if (!response.ok) throw new Error(data.error ?? copy.paperTrading.journalLoadFailed);
+      if (requestId !== annotationRequestRef.current) return;
+      setTradeAnnotations(data.items);
+      setTradeAnnotationsTruncated(data.truncated);
+    } catch {
+      if (controller.signal.aborted || requestId !== annotationRequestRef.current) return;
+      setTradeAnnotations([]);
+      setTradeAnnotationsTruncated(false);
+    } finally {
+      if (annotationAbortRef.current === controller) annotationAbortRef.current = null;
+    }
+  }, [dataset.id]);
+
   const loadWindow = useCallback(async (
     endSequence: number,
     displayIntervalSeconds: number,
@@ -505,6 +559,7 @@ export function MarketReplayClient({ dataset, initialJournalFocus = null }: { da
     completedDisplayBucketStart: string | null = null,
     focusSequence: number | null = null,
     reviewOnly = false,
+    focusJournalNo: number | null = null,
   ) => {
     const requestId = ++windowRequestRef.current;
     windowAbortRef.current?.abort();
@@ -547,6 +602,7 @@ export function MarketReplayClient({ dataset, initialJournalFocus = null }: { da
     warmupBarsRef.current = data.warmupBars;
     setBars(visible);
     setWarmupBars(data.warmupBars);
+    void loadTradeAnnotations(visible, focusJournalNo);
     if (!reviewOnly) {
       currentSourceBarRef.current = data.lastSourceBar;
       setCurrentSourceBar(data.lastSourceBar);
@@ -555,7 +611,7 @@ export function MarketReplayClient({ dataset, initialJournalFocus = null }: { da
       const anchor = tradingDayForTimestamp(data.lastSourceBar?.timestamp ?? dataset.startTime, marketSession);
       marketCache.prefetch(anchor);
     }
-  }, [dataset.dataVersion, dataset.id, dataset.sourceIntervalSeconds, dataset.startTime, marketCache, marketSession]);
+  }, [dataset.dataVersion, dataset.id, dataset.sourceIntervalSeconds, dataset.startTime, loadTradeAnnotations, marketCache, marketSession]);
 
   useEffect(() => {
     if (!emaSettingsLoaded || !abrSettingsLoaded) return;
@@ -749,6 +805,9 @@ export function MarketReplayClient({ dataset, initialJournalFocus = null }: { da
       syncLatencyMsRef.current = syncLatencyMsRef.current * 0.7 + measuredLatency * 0.3;
       if (!silent) setSaveStatus("saved");
       setPaperError(null);
+      if (frozenAccumulator.journalEntries.length > 0) {
+        void loadTradeAnnotations(barsRef.current);
+      }
       return true;
     })().catch(async (error) => {
       recoveryRequiredRef.current = true;
@@ -762,7 +821,7 @@ export function MarketReplayClient({ dataset, initialJournalFocus = null }: { da
     });
     syncCompletionRef.current = operation;
     return operation;
-  }, [dataset.dataVersion, dataset.id, latestReplayRef, recoverReplay, setReplay]);
+  }, [dataset.dataVersion, dataset.id, latestReplayRef, loadTradeAnnotations, recoverReplay, setReplay]);
 
   const flushVisible = useCallback(async (keepalive = false) => {
     while (true) {
@@ -1200,6 +1259,7 @@ export function MarketReplayClient({ dataset, initialJournalFocus = null }: { da
       null,
       focus.sequence,
       true,
+      focus.no,
     );
   }, [flushVisible, latestReplayRef, loadWindow, setReplay]);
 
@@ -1416,7 +1476,12 @@ export function MarketReplayClient({ dataset, initialJournalFocus = null }: { da
     if (confirmAction === "paper-clear") {
       const response = await fetch(`/api/market-datasets/${dataset.id}/paper-session`, { method: "DELETE" });
       if (!response.ok) setPaperError(copy.paperTrading.requestFailed);
-      else { commitConfirmedPaperSnapshot(null); setPaperError(null); }
+      else {
+        commitConfirmedPaperSnapshot(null);
+        setTradeAnnotations([]);
+        setTradeAnnotationsTruncated(false);
+        setPaperError(null);
+      }
     } else {
       if (saveTimerRef.current) clearTimeout(saveTimerRef.current);
       saveTimerRef.current = null;
@@ -1760,8 +1825,9 @@ export function MarketReplayClient({ dataset, initialJournalFocus = null }: { da
             abrLength={abrLength}
             volumeVisible={volumeVisible}
             paperSnapshot={journalReview ? null : paperSnapshot}
+            tradeAnnotations={tradeAnnotations}
+            tradeAnnotationsTruncated={tradeAnnotationsTruncated}
             focusSequence={journalReview?.sequence ?? null}
-            focusLabel={journalReview ? `No ${journalReview.no}` : null}
             paperBusy={paperBusy}
             paperError={paperError}
             onSubmitOrder={submitPaperOrder}

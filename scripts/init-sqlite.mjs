@@ -170,6 +170,8 @@ const createStatements = [
     "openedSequence" INTEGER NOT NULL,
     "openedAt" DATETIME NOT NULL,
     "entryPrice" REAL NOT NULL,
+    "entryOrderType" TEXT,
+    "initialStopPrice" REAL,
     "initialQuantity" REAL NOT NULL,
     "remainingQuantity" REAL NOT NULL,
     "initialRisk" REAL,
@@ -196,7 +198,9 @@ const createStatements = [
     "closedSequence" INTEGER NOT NULL,
     "closedAt" DATETIME NOT NULL,
     "entryPrice" REAL NOT NULL,
+    "entryOrderType" TEXT,
     "exitPrice" REAL NOT NULL,
+    "initialStopPrice" REAL,
     "abrValue" REAL,
     "abrLength" INTEGER NOT NULL,
     "displayIntervalSeconds" INTEGER NOT NULL,
@@ -378,6 +382,8 @@ const paperSessionColumns = [
   ["maxConsecutiveLosses", "INTEGER NOT NULL DEFAULT 0"],
 ];
 const paperOrderColumns = [["riskAmount", "REAL"]];
+const paperPositionLotColumns = [["initialStopPrice", "REAL"], ["entryOrderType", "TEXT"]];
+const replayJournalEntryColumns = [["initialStopPrice", "REAL"], ["entryOrderType", "TEXT"]];
 const marketDatasetImportColumns = [
   ["importedBars", "INTEGER NOT NULL DEFAULT 0"],
   ["stage", "TEXT NOT NULL DEFAULT 'WAITING_UPLOAD'"],
@@ -418,6 +424,7 @@ const indexStatements = [
   `CREATE UNIQUE INDEX IF NOT EXISTS "ReplayJournalEntry_journalSessionId_id_key" ON "ReplayJournalEntry"("journalSessionId", "id")`,
   `CREATE INDEX IF NOT EXISTS "ReplayJournalEntry_journalSessionId_no_idx" ON "ReplayJournalEntry"("journalSessionId", "no")`,
   `CREATE INDEX IF NOT EXISTS "ReplayJournalEntry_journalSessionId_openedSequence_idx" ON "ReplayJournalEntry"("journalSessionId", "openedSequence")`,
+  `CREATE INDEX IF NOT EXISTS "ReplayJournalEntry_journalSessionId_closedSequence_idx" ON "ReplayJournalEntry"("journalSessionId", "closedSequence")`,
   `CREATE INDEX IF NOT EXISTS "MarketBarBlock_datasetId_startTime_endTime_idx" ON "MarketBarBlock"("datasetId", "startTime", "endTime")`,
   `CREATE INDEX IF NOT EXISTS "MarketDatasetImport_status_createdAt_idx" ON "MarketDatasetImport"("status", "createdAt")`,
   `CREATE INDEX IF NOT EXISTS "MarketDrawing_datasetId_createdAt_idx" ON "MarketDrawing"("datasetId", "createdAt")`,
@@ -443,6 +450,8 @@ try {
     ["ReplayProgress", replayProgressColumns],
     ["PaperTradingSession", paperSessionColumns],
     ["PaperOrder", paperOrderColumns],
+    ["PaperPositionLot", paperPositionLotColumns],
+    ["ReplayJournalEntry", replayJournalEntryColumns],
     ["MarketDatasetImport", marketDatasetImportColumns],
   ]) {
     const existing = await prisma.$queryRawUnsafe(`PRAGMA table_info("${table}")`);
@@ -456,6 +465,29 @@ try {
       }
     }
   }
+
+  await prisma.$executeRawUnsafe(`
+    UPDATE "PaperPositionLot"
+    SET "entryOrderType" = (
+      SELECT "PaperOrder"."type"
+      FROM "PaperFill"
+      INNER JOIN "PaperOrder" ON "PaperOrder"."id" = "PaperFill"."orderId"
+      WHERE "PaperFill"."id" = "PaperPositionLot"."entryFillId"
+      LIMIT 1
+    )
+    WHERE "entryOrderType" IS NULL
+  `);
+  await prisma.$executeRawUnsafe(`
+    UPDATE "ReplayJournalEntry"
+    SET "entryOrderType" = (
+      SELECT "PaperOrder"."type"
+      FROM "PaperFill"
+      INNER JOIN "PaperOrder" ON "PaperOrder"."id" = "PaperFill"."orderId"
+      WHERE "ReplayJournalEntry"."lotId" = 'lot_' || "PaperFill"."id"
+      LIMIT 1
+    )
+    WHERE "entryOrderType" IS NULL
+  `);
 
   const replayProgressTable = await prisma.$queryRawUnsafe(`PRAGMA table_info("ReplayProgress")`);
   if (replayProgressTable.some((column) => column.name === "intervalMs")) {

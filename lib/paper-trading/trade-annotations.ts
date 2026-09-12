@@ -1,0 +1,1 @@
+export const REPLAY_TRADE_ANNOTATION_LIMIT = 100;

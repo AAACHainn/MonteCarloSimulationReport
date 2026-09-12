@@ -7,9 +7,9 @@ import {
 } from "react";
 import { Link2, Loader2, LogOut, RotateCcw, ShieldAlert, X } from "lucide-react";
 import {
-  CandlestickSeries, ColorType, createChart, createSeriesMarkers, CrosshairMode,
+  CandlestickSeries, ColorType, createChart, CrosshairMode,
   HistogramSeries, type IChartApi, type IPriceLine, type ISeriesApi,
-  type ISeriesMarkersPluginApi, type Time, TickMarkType, type UTCTimestamp,
+  type Time, TickMarkType, type UTCTimestamp,
 } from "lightweight-charts";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -44,6 +44,7 @@ import { TrendLinePrimitive } from "@/lib/market-replay/trend-line-primitive";
 import { FibonacciRetracementPrimitive } from "@/lib/market-replay/fibonacci-retracement-primitive";
 import { formatUtcDateTime, utcDateParts } from "@/lib/market-replay/display-timezone";
 import { formatPriceForTick, priceDecimalsForTick, snapPriceToTick } from "@/lib/market-replay/price-ticks";
+import { ReplayTradeAnnotationPrimitive } from "@/lib/market-replay/trade-annotation-primitive";
 import {
   calculateRiskSizing,
   orderTypeForEntry,
@@ -57,7 +58,7 @@ import {
   rMultipleAtPrice,
   type PriceRReference,
 } from "@/lib/paper-trading/line-r-multiple";
-import type { PaperSessionSnapshot, PaperSide } from "@/lib/paper-trading/types";
+import type { PaperSessionSnapshot, PaperSide, ReplayTradeAnnotationData } from "@/lib/paper-trading/types";
 import { useReplayChartEma } from "./use-replay-chart-ema";
 
 type DraftOrder = {
@@ -212,7 +213,7 @@ export function ReplayChart({
   onMeasurementArmedChange, drawingTool, onDrawingToolChange, trendLineDraftStyle, fibonacciDraftStyle, drawings, selectedDrawingId,
   onSelectedDrawingIdChange, onCreateDrawing, onUpdateDrawing, onDeleteDrawing,
   onOpenDrawingStyle, emaEnabled, emaIndicators, abrEnabled, abrLength, volumeVisible, paperSnapshot,
-  focusSequence = null, focusLabel = null,
+  tradeAnnotations, tradeAnnotationsTruncated, focusSequence = null,
   paperBusy, paperError, onSubmitOrder, onOrderPriceChange,
   onCancelOrder, onClosePosition, onDraftActiveChange, onOpenPaperAccount,
 }: {
@@ -242,8 +243,9 @@ export function ReplayChart({
   abrLength: number;
   volumeVisible: boolean;
   paperSnapshot: PaperSessionSnapshot | null;
+  tradeAnnotations: ReplayTradeAnnotationData[];
+  tradeAnnotationsTruncated: boolean;
   focusSequence?: number | null;
-  focusLabel?: string | null;
   paperBusy: boolean;
   paperError: string | null;
   onSubmitOrder: (order: { side: PaperSide; type: "LIMIT" | "STOP"; quantity: number; riskAmount: number; price: number; stopLoss: number; takeProfit: number }) => Promise<boolean>;
@@ -260,11 +262,13 @@ export function ReplayChart({
   const volumeRef = useRef<ISeriesApi<"Histogram"> | null>(null);
   const priceLinesRef = useRef(new Map<string, IPriceLine>());
   const lineTargetsRef = useRef(new Map<string, LineTarget>());
-  const markersRef = useRef<ISeriesMarkersPluginApi<Time> | null>(null);
+  const tradeAnnotationPrimitiveRef = useRef<ReplayTradeAnnotationPrimitive | null>(null);
   const trendLinePrimitiveRef = useRef<TrendLinePrimitive | null>(null);
   const fibonacciPrimitiveRef = useRef<FibonacciRetracementPrimitive | null>(null);
   const lastDataRef = useRef<AggregatedMarketBarData[]>([]);
   const barsRef = useRef(bars);
+  const tradeAnnotationsRef = useRef(tradeAnnotations);
+  tradeAnnotationsRef.current = tradeAnnotations;
   const candlestickStyleRef = useRef(candlestickStyle);
   candlestickStyleRef.current = candlestickStyle;
   const priceTickSizeRef = useRef(priceTickSize);
@@ -506,8 +510,11 @@ export function ReplayChart({
     });
     const trendLinePrimitive = new TrendLinePrimitive();
     const fibonacciPrimitive = new FibonacciRetracementPrimitive();
+    const tradeAnnotationPrimitive = new ReplayTradeAnnotationPrimitive();
     candles.attachPrimitive(trendLinePrimitive);
     candles.attachPrimitive(fibonacciPrimitive);
+    candles.attachPrimitive(tradeAnnotationPrimitive);
+    tradeAnnotationPrimitive.setData({ entries: tradeAnnotationsRef.current, bars: barsRef.current });
     const observer = new ResizeObserver(([entry]) => {
       if (entry?.contentRect.width && entry.contentRect.height) {
         chart.applyOptions({ width: entry.contentRect.width, height: entry.contentRect.height });
@@ -521,18 +528,20 @@ export function ReplayChart({
     chartRef.current = chart; candleRef.current = candles; volumeRef.current = null;
     trendLinePrimitiveRef.current = trendLinePrimitive;
     fibonacciPrimitiveRef.current = fibonacciPrimitive;
+    tradeAnnotationPrimitiveRef.current = tradeAnnotationPrimitive;
     syncDrawingPrimitive();
-    markersRef.current = createSeriesMarkers(candles, []);
     return () => {
       observer.disconnect();
       chart.timeScale().unsubscribeVisibleLogicalRangeChange(syncLineActionCoordinates);
       chart.timeScale().unsubscribeVisibleLogicalRangeChange(syncMeasurementCoordinates);
       candles.detachPrimitive(trendLinePrimitive);
       candles.detachPrimitive(fibonacciPrimitive);
+      candles.detachPrimitive(tradeAnnotationPrimitive);
       trendLinePrimitiveRef.current = null;
       fibonacciPrimitiveRef.current = null;
+      tradeAnnotationPrimitiveRef.current = null;
       chart.remove(); chartRef.current = null; candleRef.current = null; volumeRef.current = null;
-      markersRef.current = null; priceLines.clear(); lineTargets.clear(); lastDataRef.current = [];
+      priceLines.clear(); lineTargets.clear(); lastDataRef.current = [];
     };
   }, [priceTickSize, syncDrawingPrimitive, syncLineActionCoordinates, syncMeasurementCoordinates]);
 
@@ -632,6 +641,10 @@ export function ReplayChart({
     chart.timeScale().setVisibleLogicalRange({ from: Math.max(-2, index - 30), to: index + 30 });
   }, [bars, focusSequence]);
 
+  useEffect(() => {
+    tradeAnnotationPrimitiveRef.current?.setData({ entries: tradeAnnotations, bars });
+  }, [bars, tradeAnnotations]);
+
   useReplayChartEma({
     chartRef,
     bars,
@@ -700,18 +713,8 @@ export function ReplayChart({
       addLine({ key: "draft:sl", price: draft.stopLoss, kind: "draft", field: "stopLoss" }, draft.stopLoss, "#dc2626", formatRMultiple(rMultipleAtPrice(reference, draft.stopLoss)), true);
       addLine({ key: "draft:tp", price: draft.takeProfit, kind: "draft", field: "takeProfit" }, draft.takeProfit, "#16a34a", formatRMultiple(rMultipleAtPrice(reference, draft.takeProfit)), true);
     }
-    const fillMarkers = (paperSnapshot?.recentFills ?? []).flatMap((fill) => {
-      const aggregate = bars.find((bar) => fill.sequence >= bar.firstSequence && fill.sequence <= bar.lastSequence);
-      if (!aggregate) return [];
-      return [{ time: chartTime(aggregate.timestamp), position: fill.side === "BUY" ? "belowBar" as const : "aboveBar" as const, shape: fill.side === "BUY" ? "arrowUp" as const : "arrowDown" as const, color: fill.side === "BUY" ? "#16a34a" : "#dc2626", text: fill.reason }];
-    });
-    const focusBar = focusSequence === null ? null : bars.find((bar) => focusSequence >= bar.firstSequence && focusSequence <= bar.lastSequence);
-    markersRef.current?.setMarkers([
-      ...fillMarkers,
-      ...(focusBar ? [{ time: chartTime(focusBar.timestamp), position: "aboveBar" as const, shape: "arrowDown" as const, color: "#7c3aed", text: focusLabel ?? copy.paperTrading.journalTab }] : []),
-    ]);
     setLineActions((current) => sameLineActions(current, nextLineActions) ? current : nextLineActions);
-  }, [bars, draft, draftSizing, focusLabel, focusSequence, paperSnapshot]);
+  }, [draft, draftSizing, paperSnapshot]);
 
   const moveDraftLine = useCallback((current: DraftOrder, field: LineTarget["field"], price: number): DraftOrder => {
     price = snapPriceToTick(price, priceTickSize);
@@ -1544,6 +1547,12 @@ export function ReplayChart({
       }}
     >
       <div ref={containerRef} className="h-full min-h-[240px] w-full overflow-hidden bg-white" aria-label={copy.marketReplay.chartAriaLabel} />
+
+      {tradeAnnotationsTruncated ? (
+        <div className="pointer-events-none absolute right-3 top-3 z-20 rounded-md bg-amber-50/95 px-2 py-1 text-[11px] text-amber-800 shadow-sm backdrop-blur">
+          {copy.paperTrading.tradeAnnotationLimit(100)}
+        </div>
+      ) : null}
 
       {abrTooltip ? (
         <div

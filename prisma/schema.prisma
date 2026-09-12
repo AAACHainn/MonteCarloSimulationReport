@@ -307,6 +307,8 @@ model PaperPositionLot {
   openedSequence           Int
   openedAt                 DateTime
   entryPrice               Float
+  entryOrderType           String?
+  initialStopPrice         Float?
   initialQuantity          Float
   remainingQuantity        Float
   initialRisk              Float?
@@ -336,7 +338,9 @@ model ReplayJournalEntry {
   closedSequence           Int
   closedAt                 DateTime
   entryPrice               Float
+  entryOrderType           String?
   exitPrice                Float
+  initialStopPrice         Float?
   abrValue                 Float?
   abrLength                Int
   displayIntervalSeconds   Int
@@ -351,6 +355,7 @@ model ReplayJournalEntry {
   @@unique([journalSessionId, id])
   @@index([journalSessionId, no])
   @@index([journalSessionId, openedSequence])
+  @@index([journalSessionId, closedSequence])
 }
 
 model PaperOrder {
