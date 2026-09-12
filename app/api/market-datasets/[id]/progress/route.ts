@@ -6,6 +6,7 @@ import { datasetSourceInterval } from "@/lib/market-replay/dataset";
 import { resolveDisplaySession } from "@/lib/market-replay/chart-sessions";
 import { isValidDisplayInterval } from "@/lib/market-replay/types";
 import { getPaperSessionSnapshot } from "@/lib/paper-trading/serialize";
+import { archiveAndDeletePaperSession } from "@/lib/paper-trading/journal-storage";
 
 type RouteContext = { params: Promise<{ id: string }> };
 
@@ -58,9 +59,9 @@ export async function PUT(request: Request, context: RouteContext) {
 
 export async function DELETE(_request: Request, context: RouteContext) {
   const { id } = await context.params;
-  await prisma.$transaction([
-    prisma.paperTradingSession.deleteMany({ where: { datasetId: id } }),
-    prisma.replayProgress.deleteMany({ where: { datasetId: id } }),
-  ]);
+  await prisma.$transaction(async (tx) => {
+    await archiveAndDeletePaperSession(tx, id);
+    await tx.replayProgress.deleteMany({ where: { datasetId: id } });
+  });
   return NextResponse.json({ ok: true });
 }

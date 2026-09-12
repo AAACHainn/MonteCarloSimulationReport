@@ -7,8 +7,9 @@ import { serializeMarketDataset } from "@/lib/market-replay/serialize";
 
 export const dynamic = "force-dynamic";
 
-export default async function MarketReplayDetailPage({ params }: { params: Promise<{ id: string }> }) {
+export default async function MarketReplayDetailPage({ params, searchParams }: { params: Promise<{ id: string }>; searchParams: Promise<{ focusSequence?: string; journalNo?: string }> }) {
   const { id } = await params;
+  const query = await searchParams;
   const dataset = await prisma.marketDataset.findUnique({ where: { id }, include: { progress: true } });
   if (!dataset) notFound();
   const serialized = serializeMarketDataset(dataset);
@@ -21,7 +22,7 @@ export default async function MarketReplayDetailPage({ params }: { params: Promi
           <p className="truncate text-xs text-slate-500">{dataset.name} · {dataset.timezone} · {dataset.barCount.toLocaleString("zh-CN")} {copy.marketReplay.bars}</p>
         </div>
       </div>
-      <div className="min-h-0 flex-1"><MarketReplayClient dataset={serialized} /></div>
+      <div className="min-h-0 flex-1"><MarketReplayClient dataset={serialized} initialJournalFocus={Number.isInteger(Number(query.focusSequence)) && Number(query.focusSequence) >= 0 ? { sequence: Number(query.focusSequence), no: Math.max(1, Number(query.journalNo) || 1) } : null} /></div>
     </div>
   );
 }

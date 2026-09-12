@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import { prisma } from "@/lib/db";
 import { copy } from "@/lib/i18n";
 import { paperResetSchema } from "@/lib/validations";
+import { archiveAndDeletePaperSession } from "@/lib/paper-trading/journal-storage";
 
 type RouteContext = { params: Promise<{ id: string }> };
 
@@ -12,7 +13,7 @@ export async function POST(request: Request, context: RouteContext) {
   const progress = await prisma.replayProgress.findUnique({ where: { datasetId: id } });
   if (!progress) return NextResponse.json({ error: copy.marketReplay.validation.progressInvalid }, { status: 404 });
   const resetProgress = await prisma.$transaction(async (tx) => {
-    await tx.paperTradingSession.deleteMany({ where: { datasetId: id } });
+    await archiveAndDeletePaperSession(tx, id);
     const currentDataset = await tx.marketDataset.findUniqueOrThrow({
       where: { id },
       select: { replayGeneration: true },

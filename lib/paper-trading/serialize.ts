@@ -5,6 +5,7 @@ import type {
   PaperFillReason,
   PaperOrderData,
   PaperOrderStatus,
+  PaperPositionLotData,
   PaperOrderType,
   PaperSessionSnapshot,
   PaperSessionState,
@@ -102,15 +103,30 @@ export function serializePaperTrade(trade: {
   };
 }
 
+export function serializePaperPositionLot(lot: {
+  id: string; entryFillId: string; side: string; openedSequence: number; openedAt: Date;
+  entryPrice: number; initialQuantity: number; remainingQuantity: number; initialRisk: number | null;
+  actualRisk: number; abrValue: number | null; abrLength: number; displayIntervalSeconds: number;
+  displaySession: string; displayUtcOffsetMinutes: number; priceTickSize: number;
+}): PaperPositionLotData {
+  return {
+    ...lot,
+    side: lot.side as "LONG" | "SHORT",
+    displaySession: lot.displaySession as "ETH" | "RTH",
+    openedAt: lot.openedAt.toISOString(),
+  };
+}
+
 export async function getPaperSessionSnapshot(datasetId: string, db: Prisma.TransactionClient = prisma): Promise<PaperSessionSnapshot | null> {
   const storedSession = await db.paperTradingSession.findUnique({ where: { datasetId } });
   if (!storedSession) return null;
   const session = await ensurePaperTradeStats(storedSession as SessionRecord, db);
-  const [activeOrders, recentOrders, recentFills, recentTrades, currentBar] = await Promise.all([
+  const [activeOrders, recentOrders, recentFills, recentTrades, openLots, currentBar] = await Promise.all([
     db.paperOrder.findMany({ where: { sessionId: session.id, status: "PENDING" }, orderBy: [{ createdSequence: "asc" }, { createdAt: "asc" }] }),
     db.paperOrder.findMany({ where: { sessionId: session.id, status: { not: "PENDING" } }, orderBy: { updatedAt: "desc" }, take: 30 }),
     db.paperFill.findMany({ where: { sessionId: session.id }, orderBy: [{ sequence: "desc" }, { createdAt: "desc" }], take: 50 }),
     db.paperTrade.findMany({ where: { sessionId: session.id }, orderBy: { openedSequence: "desc" }, take: 30 }),
+    db.paperPositionLot.findMany({ where: { sessionId: session.id }, orderBy: [{ openedSequence: "asc" }, { createdAt: "asc" }] }),
     session.lastProcessedSequence >= 0
       ? db.marketBar.findUnique({ where: { datasetId_sequence: { datasetId, sequence: session.lastProcessedSequence } } })
       : Promise.resolve(null),
@@ -158,6 +174,7 @@ export async function getPaperSessionSnapshot(datasetId: string, db: Prisma.Tran
     recentOrders: snapshotRecentOrders.map(serializePaperOrder),
     recentFills: recentFills.map(serializePaperFill),
     recentTrades: recentTrades.map(serializePaperTrade),
+    openLots: openLots.map(serializePaperPositionLot),
     stats,
   };
 }

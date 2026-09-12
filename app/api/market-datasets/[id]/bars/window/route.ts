@@ -149,7 +149,13 @@ export async function GET(request: Request, context: RouteContext) {
   if (!sourceSeconds || !isValidDisplayInterval(sourceSeconds, parsed.data.displayIntervalSeconds)) {
     return NextResponse.json({ error: copy.marketReplay.invalidDisplayInterval }, { status: 400 });
   }
-  const endSequence = Math.min(parsed.data.endSequence, dataset.barCount - 1);
+  const maximumEndSequence = Math.min(parsed.data.endSequence, dataset.barCount - 1);
+  const focusSequence = parsed.data.focusSequence === undefined
+    ? null : Math.min(parsed.data.focusSequence, maximumEndSequence);
+  const sourceMultiplier = parsed.data.displayIntervalSeconds / sourceSeconds;
+  const endSequence = focusSequence === null
+    ? maximumEndSequence
+    : Math.min(maximumEndSequence, focusSequence + Math.ceil(parsed.data.visibleCount / 2) * sourceMultiplier);
   if (endSequence < 0) return NextResponse.json({ visibleBars: [], warmupBars: [], lastSourceBar: null });
 
   const session = resolveDisplaySession(dataset, parsed.data.displaySession);
@@ -223,5 +229,8 @@ export async function GET(request: Request, context: RouteContext) {
     warmupBars: window.slice(0, visibleFrom),
     visibleBars: window.slice(visibleFrom),
     lastSourceBar,
+    focusBarIndex: focusSequence === null ? null : window.slice(visibleFrom).findIndex((bar) => (
+      focusSequence >= bar.firstSequence && focusSequence <= bar.lastSequence
+    )),
   });
 }

@@ -3,6 +3,8 @@ import type {
   PaperEquityPointData,
   PaperFillData,
   PaperOrderData,
+  PaperPositionLotData,
+  ReplayJournalEntryDraft,
   PaperSessionSnapshot,
   PaperSessionState,
 } from "@/lib/paper-trading/types";
@@ -14,6 +16,8 @@ export type PaperReplayDelta = {
   orderChanges: PaperOrderData[];
   fills: PaperFillData[];
   equityPoints: PaperEquityPointData[];
+  openLots: PaperPositionLotData[];
+  journalEntries: ReplayJournalEntryDraft[];
   fingerprint: string;
 };
 
@@ -44,10 +48,11 @@ export type PaperDeltaAccumulator = {
   orderChanges: Map<string, PaperOrderData>;
   fills: PaperFillData[];
   equityPoints: PaperEquityPointData[];
+  journalEntries: ReplayJournalEntryDraft[];
 };
 
 export function createPaperDeltaAccumulator(sequence: number): PaperDeltaAccumulator {
-  return { fromSequence: sequence, toSequence: sequence, orderChanges: new Map(), fills: [], equityPoints: [] };
+  return { fromSequence: sequence, toSequence: sequence, orderChanges: new Map(), fills: [], equityPoints: [], journalEntries: [] };
 }
 
 export function recordPaperAdvance(
@@ -65,6 +70,7 @@ export function recordPaperAdvance(
   }
   accumulator.toSequence = result.state.lastProcessedSequence;
   accumulator.fills.push(...result.fills);
+  accumulator.journalEntries.push(...result.journalEntries);
   if (shouldSampleEquity) accumulator.equityPoints.push(result.equityPoint);
 }
 
@@ -78,7 +84,9 @@ export function buildPaperReplayDelta(
     orderChanges: [...accumulator.orderChanges.values()],
     fills: accumulator.fills,
     equityPoints: accumulator.equityPoints,
-    fingerprint: paperStateFingerprint(snapshot.session, snapshot.activeOrders),
+    openLots: snapshot.openLots ?? [],
+    journalEntries: accumulator.journalEntries,
+    fingerprint: paperStateFingerprint(snapshot.session, snapshot.activeOrders, snapshot.openLots ?? []),
   };
 }
 
@@ -94,5 +102,6 @@ export function mergePaperDeltaAccumulators(
     orderChanges,
     fills: [...earlier.fills, ...later.fills],
     equityPoints: [...earlier.equityPoints, ...later.equityPoints],
+    journalEntries: [...earlier.journalEntries, ...later.journalEntries],
   };
 }

@@ -123,6 +123,7 @@ model MarketDataset {
   status                String  @default("READY")
   dataVersion           Int     @default(1)
   replayGeneration      Int     @default(0)
+  nextReplayJournalNo   Int     @default(0)
   barBlockBuildCursor   Int     @default(-1)
   sourceIntervalSeconds Int?
   priceTickSize         Float   @default(0.01)
@@ -138,6 +139,7 @@ model MarketDataset {
   importJobs   MarketDatasetImport[]
   progress     ReplayProgress?
   paperSession PaperTradingSession?
+  replayJournalSessions ReplayJournalSession[]
   drawings     MarketDrawing[]
   createdAt    DateTime             @default(now())
   updatedAt    DateTime             @updatedAt
@@ -240,6 +242,8 @@ model PaperTradingSession {
   id                    String             @id @default(cuid())
   datasetId             String             @unique
   dataset               MarketDataset      @relation(fields: [datasetId], references: [id], onDelete: Cascade)
+  journalSessionId      String?             @unique
+  journalSession        ReplayJournalSession? @relation(fields: [journalSessionId], references: [id], onDelete: SetNull)
   initialCapital        Float
   currency              String
   commissionBps         Float              @default(0)
@@ -267,11 +271,86 @@ model PaperTradingSession {
   orders                PaperOrder[]
   fills                 PaperFill[]
   trades                PaperTrade[]
+  positionLots          PaperPositionLot[]
   equityPoints          PaperEquityPoint[]
   createdAt             DateTime           @default(now())
   updatedAt             DateTime           @updatedAt
 
   @@index([datasetId])
+}
+
+model ReplayJournalSession {
+  id             String               @id @default(cuid())
+  datasetId      String
+  dataset        MarketDataset        @relation(fields: [datasetId], references: [id], onDelete: Cascade)
+  replayGeneration Int
+  initialCapital Float
+  currency       String
+  commissionBps  Float
+  slippageBps    Float
+  archivedAt     DateTime?
+  paperSession   PaperTradingSession?
+  entries        ReplayJournalEntry[]
+  createdAt      DateTime             @default(now())
+  updatedAt      DateTime             @updatedAt
+
+  @@index([datasetId, createdAt])
+  @@index([datasetId, archivedAt])
+}
+
+model PaperPositionLot {
+  id                       String              @id
+  sessionId                String
+  session                  PaperTradingSession @relation(fields: [sessionId], references: [id], onDelete: Cascade)
+  entryFillId              String
+  side                     String
+  openedSequence           Int
+  openedAt                 DateTime
+  entryPrice               Float
+  initialQuantity          Float
+  remainingQuantity        Float
+  initialRisk              Float?
+  actualRisk               Float               @default(0)
+  abrValue                 Float?
+  abrLength                Int
+  displayIntervalSeconds   Int
+  displaySession           String
+  displayUtcOffsetMinutes  Int
+  priceTickSize            Float
+  createdAt                DateTime             @default(now())
+  updatedAt                DateTime             @updatedAt
+
+  @@index([sessionId, openedSequence])
+}
+
+model ReplayJournalEntry {
+  id                       String               @id
+  journalSessionId         String
+  journalSession           ReplayJournalSession @relation(fields: [journalSessionId], references: [id], onDelete: Cascade)
+  no                       Int
+  lotId                    String
+  direction                String
+  quantity                 Float
+  openedSequence           Int
+  openedAt                 DateTime
+  closedSequence           Int
+  closedAt                 DateTime
+  entryPrice               Float
+  exitPrice                Float
+  abrValue                 Float?
+  abrLength                Int
+  displayIntervalSeconds   Int
+  displaySession           String
+  displayUtcOffsetMinutes  Int
+  priceTickSize            Float
+  initialRisk              Float
+  actualRisk               Float
+  gainLoss                 Float
+  createdAt                DateTime             @default(now())
+
+  @@unique([journalSessionId, id])
+  @@index([journalSessionId, no])
+  @@index([journalSessionId, openedSequence])
 }
 
 model PaperOrder {

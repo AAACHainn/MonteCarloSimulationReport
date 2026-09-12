@@ -458,6 +458,21 @@ describe("replay advance with real SQLite", () => {
       tradeStatsVersion: 1, closedTradeCount: 1, winningTradeCount: 1, losingTradeCount: 0,
       grossWinningPnl: 10, grossLosingPnl: 0, maxConsecutiveWins: 1,
     });
+    const journalEntry = await prisma.replayJournalEntry.findFirstOrThrow({
+      where: { journalSession: { datasetId: id } },
+      include: { journalSession: true },
+    });
+    expect(journalEntry).toMatchObject({
+      no: 1, direction: "LONG", quantity: 2,
+      entryPrice: 100, exitPrice: 105, initialRisk: 1, actualRisk: 1, gainLoss: 5,
+    });
+    expect(journalEntry.journalSession.archivedAt).toBeNull();
+
+    const reset = await resetPOST(request({ action: "RESET" }), context(id));
+    expect(reset.status).toBe(200);
+    expect(await prisma.paperTradingSession.findUnique({ where: { datasetId: id } })).toBeNull();
+    expect(await prisma.replayJournalEntry.count({ where: { journalSession: { datasetId: id } } })).toBe(1);
+    expect((await prisma.replayJournalSession.findFirstOrThrow({ where: { datasetId: id } })).archivedAt).not.toBeNull();
   });
 
   it("backfills incremental statistics once for a legacy paper session", async () => {

@@ -74,6 +74,56 @@ export type PaperEquityPointData = {
   drawdown: number;
 };
 
+export type PaperJournalContext = {
+  abrValue: number | null;
+  abrLength: number;
+  displayIntervalSeconds: number;
+  displaySession: "ETH" | "RTH";
+  displayUtcOffsetMinutes: number;
+  priceTickSize: number;
+};
+
+export type PaperPositionLotData = PaperJournalContext & {
+  id: string;
+  entryFillId: string;
+  side: "LONG" | "SHORT";
+  openedSequence: number;
+  openedAt: string;
+  entryPrice: number;
+  initialQuantity: number;
+  remainingQuantity: number;
+  initialRisk: number | null;
+  actualRisk: number;
+};
+
+export type ReplayJournalEntryDraft = PaperJournalContext & {
+  id: string;
+  lotId: string;
+  direction: "LONG" | "SHORT";
+  quantity: number;
+  openedSequence: number;
+  openedAt: string;
+  closedSequence: number;
+  closedAt: string;
+  entryPrice: number;
+  exitPrice: number;
+  initialRisk: number;
+  actualRisk: number;
+  gainLoss: number;
+};
+
+export type ReplayJournalEntryData = ReplayJournalEntryDraft & {
+  no: number;
+  result: "W" | "L" | "BE";
+  initialRiskAbr: number | null;
+  actualRiskAbr: number | null;
+  abrRr: number | null;
+  initialRiskRr: number;
+  actualRiskRr: number;
+  journalSessionId: string;
+  archivedAt: string | null;
+};
+
 export type PaperTradeData = {
   id: string;
   side: "LONG" | "SHORT";
@@ -110,6 +160,7 @@ export type PaperSessionSnapshot = {
   recentOrders: PaperOrderData[];
   recentFills: PaperFillData[];
   recentTrades: PaperTradeData[];
+  openLots?: PaperPositionLotData[];
   stats: PaperTradingStats;
 };
 
@@ -118,6 +169,8 @@ export type PaperAdvanceResult = {
   orders: PaperOrderData[];
   fills: PaperFillData[];
   equityPoint: PaperEquityPointData;
+  lots: PaperPositionLotData[];
+  journalEntries: ReplayJournalEntryDraft[];
 };
 
 export type PaperAdvanceInput = {
@@ -125,4 +178,6 @@ export type PaperAdvanceInput = {
   orders: PaperOrderData[];
   bar: MarketBarData;
   makeId: () => string;
+  lots?: PaperPositionLotData[];
+  journalContext?: PaperJournalContext | null;
 };

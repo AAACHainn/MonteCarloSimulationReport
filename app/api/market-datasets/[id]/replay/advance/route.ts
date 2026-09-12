@@ -84,6 +84,14 @@ export async function POST(request: Request, context: RouteContext) {
     syncVersion: progress.syncVersion,
     expectedPaperVersion: parsed.data.expectedVersion ?? null,
     targetSequence,
+    journalContext: parsed.data.displayIntervalSeconds === undefined ? null : {
+      abrValue: parsed.data.abrValue ?? null,
+      abrLength: parsed.data.abrLength,
+      displayIntervalSeconds: parsed.data.displayIntervalSeconds,
+      displaySession: parsed.data.displaySession,
+      displayUtcOffsetMinutes: parsed.data.displayUtcOffsetMinutes,
+      priceTickSize: dataset.priceTickSize,
+    },
   }, MAX_DISPLAY_ADVANCE_SOURCE_BARS);
   if (outcome.status !== 200) return NextResponse.json({ error: outcome.error }, { status: outcome.status });
 

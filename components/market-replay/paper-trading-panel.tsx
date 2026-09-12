@@ -9,10 +9,11 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Line, LineChart, ResponsiveContainer, Tooltip, XAxis, YAxis } from "recharts";
+import { PaperJournalTable } from "@/components/market-replay/paper-journal-table";
 import { copy } from "@/lib/i18n";
 import { snapPriceToTick } from "@/lib/market-replay/price-ticks";
 import type { MarketBarData } from "@/lib/market-replay/types";
-import type { PaperOrderData, PaperOrderType, PaperSessionSnapshot, PaperSide } from "@/lib/paper-trading/types";
+import type { PaperOrderData, PaperOrderType, PaperSessionSnapshot, PaperSide, ReplayJournalEntryData } from "@/lib/paper-trading/types";
 
 type OrderInput = {
   side: PaperSide;
@@ -157,8 +158,8 @@ function ActiveOrders({ priceTickSize, orders, busy, onCancel, onUpdate }: { pri
   return <div className="space-y-2 border-t pt-3">{orders.map((order) => <div key={order.id} className="rounded-md border bg-slate-50 p-2 text-xs"><div className="flex items-center justify-between gap-2"><div><span className={order.side === "BUY" ? "font-medium text-emerald-700" : "font-medium text-red-700"}>{order.side === "BUY" ? copy.paperTrading.buy : copy.paperTrading.sell}</span> · {order.isProtective ? copy.paperTrading.protective : orderTypeLabel(order.type)} · {number(order.quantity, 8)} {order.price == null ? "" : `@ ${number(order.price, 8)}`}</div><button type="button" onClick={() => setOpenId(openId === order.id ? null : order.id)} aria-label={copy.paperTrading.edit}>{openId === order.id ? <ChevronUp className="h-4 w-4" /> : <ChevronDown className="h-4 w-4" />}</button></div>{openId === order.id ? <form className="mt-2 grid grid-cols-[1fr_1fr_auto_auto] gap-1" onSubmit={(event) => { event.preventDefault(); const data = new FormData(event.currentTarget); void onUpdate(order.id, { ...(order.isProtective ? {} : { quantity: Number(data.get("quantity")) }), ...(order.price == null ? {} : { price: snapPriceToTick(Number(data.get("price")), priceTickSize) }) }); setOpenId(null); }}>{order.isProtective ? <span /> : <Input name="quantity" type="number" step="any" defaultValue={order.quantity} className="h-8" />}{order.price == null ? <span /> : <Input name="price" type="number" step={priceTickSize} defaultValue={order.price} className="h-8" />}<Button type="submit" size="sm" disabled={busy}>{copy.paperTrading.save}</Button><Button type="button" variant="ghost" size="sm" disabled={busy} onClick={() => void onCancel(order.id)}>{copy.paperTrading.cancel}</Button></form> : null}</div>)}</div>;
 }
 
-export function PaperTradingDetails({ snapshot }: { snapshot: PaperSessionSnapshot | null }) {
-  const [tab, setTab] = useState<"orders" | "fills" | "stats">("orders");
+export function PaperTradingDetails({ snapshot, onFocusJournalEntry }: { snapshot: PaperSessionSnapshot | null; onFocusJournalEntry?: (entry: ReplayJournalEntryData) => void }) {
+  const [tab, setTab] = useState<"orders" | "fills" | "journal" | "stats">("orders");
   const [open, setOpen] = useState(false);
   const [position, setPosition] = useState<{ x: number; y: number } | null>(null);
   const [size, setSize] = useState<PanelSize | null>(null);
@@ -310,13 +311,14 @@ export function PaperTradingDetails({ snapshot }: { snapshot: PaperSessionSnapsh
               <span className="mr-1 text-sm font-semibold text-slate-800">{copy.paperTrading.records}</span>
               <Button size="sm" variant={tab === "orders" ? "default" : "ghost"} onClick={() => setTab("orders")}>{copy.paperTrading.ordersTab}</Button>
               <Button size="sm" variant={tab === "fills" ? "default" : "ghost"} onClick={() => setTab("fills")}>{copy.paperTrading.fillsTab}</Button>
+              <Button size="sm" variant={tab === "journal" ? "default" : "ghost"} onClick={() => setTab("journal")}>{copy.paperTrading.journalTab}</Button>
               <Button size="sm" variant={tab === "stats" ? "default" : "ghost"} onClick={() => setTab("stats")}>{copy.paperTrading.statsTab}</Button>
               <Button type="button" variant="ghost" size="icon" className="ml-auto h-8 w-8" onClick={() => setOpen(false)} aria-label={copy.paperTrading.closeRecords}>
                 <X className="h-4 w-4" />
               </Button>
             </div>
             <div className="min-h-0 flex-1 overflow-auto p-3">
-              {tab === "orders" ? <OrderHistory snapshot={snapshot} /> : tab === "fills" ? <FillHistory snapshot={snapshot} /> : <Stats snapshot={snapshot} />}
+              {tab === "orders" ? <OrderHistory snapshot={snapshot} /> : tab === "fills" ? <FillHistory snapshot={snapshot} /> : tab === "journal" ? <PaperJournalTable datasetId={snapshot.session.datasetId} scope="current" onFocus={(entry) => { setOpen(false); onFocusJournalEntry?.(entry); }} /> : <Stats snapshot={snapshot} />}
             </div>
           </CardContent></Card>
           {RESIZE_HANDLES.map(({ direction, className }) => (

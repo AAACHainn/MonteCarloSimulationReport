@@ -7,6 +7,8 @@ import {
   normalizeTagName,
 } from "./trade-journal/tags";
 import {
+  ABR_LENGTH_MAX,
+  ABR_LENGTH_MIN,
   MAX_DISPLAY_INTERVAL_SECONDS,
   MAX_REPLAY_ADVANCE_COUNT,
   MAX_REPLAY_SYNC_SOURCE_BARS,
@@ -101,6 +103,7 @@ export const replayWindowSchema = z.object({
   endSequence: z.coerce.number().int().min(-1),
   visibleCount: z.coerce.number().int().min(20).max(2_000).default(200),
   warmupCount: z.coerce.number().int().min(0).max(1_000).default(0),
+  focusSequence: z.coerce.number().int().min(0).optional(),
 });
 
 export const paperSessionSchema = z.object({
@@ -143,6 +146,9 @@ export const paperAdvanceSchema = z.object({
   count: z.coerce.number().int().min(1).max(MAX_REPLAY_ADVANCE_COUNT).default(1),
   displayIntervalSeconds: z.coerce.number().int().min(1).max(MAX_DISPLAY_INTERVAL_SECONDS).optional(),
   displaySession: displaySessionSchema.default("ETH"),
+  abrValue: z.coerce.number().finite().positive().optional().nullable(),
+  abrLength: z.coerce.number().int().min(ABR_LENGTH_MIN).max(ABR_LENGTH_MAX).default(8),
+  displayUtcOffsetMinutes: z.coerce.number().int().min(-840).max(840).default(0),
 });
 
 export const replayChunksSchema = z.object({
@@ -196,12 +202,41 @@ const paperEquityPointDataSchema = z.object({
   balance: z.number().finite(), equity: z.number().finite(), drawdown: z.number().finite().min(0),
 });
 
+const paperJournalContextSchema = z.object({
+  abrValue: z.number().finite().positive().nullable(),
+  abrLength: z.number().int().min(ABR_LENGTH_MIN).max(ABR_LENGTH_MAX),
+  displayIntervalSeconds: z.number().int().min(1).max(MAX_DISPLAY_INTERVAL_SECONDS),
+  displaySession: displaySessionSchema,
+  displayUtcOffsetMinutes: z.number().int().min(-840).max(840),
+  priceTickSize: z.number().finite().positive(),
+});
+
+const paperPositionLotDataSchema = paperJournalContextSchema.extend({
+  id: z.string().min(1).max(240), entryFillId: z.string().min(1).max(160),
+  side: z.enum(["LONG", "SHORT"]), openedSequence: z.number().int().min(0),
+  openedAt: z.string().datetime(), entryPrice: z.number().finite().positive(),
+  initialQuantity: z.number().finite().positive(), remainingQuantity: z.number().finite().positive(),
+  initialRisk: z.number().finite().min(0).nullable(), actualRisk: z.number().finite().min(0),
+});
+
+const replayJournalEntryDraftSchema = paperJournalContextSchema.extend({
+  id: z.string().min(1).max(500), lotId: z.string().min(1).max(240),
+  direction: z.enum(["LONG", "SHORT"]), quantity: z.number().finite().positive(),
+  openedSequence: z.number().int().min(0), openedAt: z.string().datetime(),
+  closedSequence: z.number().int().min(0), closedAt: z.string().datetime(),
+  entryPrice: z.number().finite().positive(), exitPrice: z.number().finite().positive(),
+  initialRisk: z.number().finite().min(0), actualRisk: z.number().finite().min(0),
+  gainLoss: z.number().finite(),
+});
+
 const paperReplayDeltaSchema = z.object({
   state: paperSessionStateSchema,
   activeOrders: z.array(paperOrderDataSchema).max(10_000),
   orderChanges: z.array(paperOrderDataSchema).max(10_000),
   fills: z.array(paperFillDataSchema).max(10_000),
   equityPoints: z.array(paperEquityPointDataSchema).max(MAX_REPLAY_SYNC_SOURCE_BARS),
+  openLots: z.array(paperPositionLotDataSchema).max(10_000),
+  journalEntries: z.array(replayJournalEntryDraftSchema).max(10_000),
   fingerprint: z.string().min(1).max(100_000),
 });
 

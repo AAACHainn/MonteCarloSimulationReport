@@ -212,6 +212,7 @@ export function ReplayChart({
   onMeasurementArmedChange, drawingTool, onDrawingToolChange, trendLineDraftStyle, fibonacciDraftStyle, drawings, selectedDrawingId,
   onSelectedDrawingIdChange, onCreateDrawing, onUpdateDrawing, onDeleteDrawing,
   onOpenDrawingStyle, emaEnabled, emaIndicators, abrEnabled, abrLength, volumeVisible, paperSnapshot,
+  focusSequence = null, focusLabel = null,
   paperBusy, paperError, onSubmitOrder, onOrderPriceChange,
   onCancelOrder, onClosePosition, onDraftActiveChange, onOpenPaperAccount,
 }: {
@@ -241,6 +242,8 @@ export function ReplayChart({
   abrLength: number;
   volumeVisible: boolean;
   paperSnapshot: PaperSessionSnapshot | null;
+  focusSequence?: number | null;
+  focusLabel?: string | null;
   paperBusy: boolean;
   paperError: string | null;
   onSubmitOrder: (order: { side: PaperSide; type: "LIMIT" | "STOP"; quantity: number; riskAmount: number; price: number; stopLoss: number; takeProfit: number }) => Promise<boolean>;
@@ -621,6 +624,14 @@ export function ReplayChart({
     requestAnimationFrame(syncDrawingPrimitive);
   }, [bars, syncDrawingPrimitive, syncMeasurementCoordinates]);
 
+  useEffect(() => {
+    if (focusSequence === null) return;
+    const index = bars.findIndex((bar) => focusSequence >= bar.firstSequence && focusSequence <= bar.lastSequence);
+    const chart = chartRef.current;
+    if (index < 0 || !chart) return;
+    chart.timeScale().setVisibleLogicalRange({ from: Math.max(-2, index - 30), to: index + 30 });
+  }, [bars, focusSequence]);
+
   useReplayChartEma({
     chartRef,
     bars,
@@ -689,13 +700,18 @@ export function ReplayChart({
       addLine({ key: "draft:sl", price: draft.stopLoss, kind: "draft", field: "stopLoss" }, draft.stopLoss, "#dc2626", formatRMultiple(rMultipleAtPrice(reference, draft.stopLoss)), true);
       addLine({ key: "draft:tp", price: draft.takeProfit, kind: "draft", field: "takeProfit" }, draft.takeProfit, "#16a34a", formatRMultiple(rMultipleAtPrice(reference, draft.takeProfit)), true);
     }
-    markersRef.current?.setMarkers((paperSnapshot?.recentFills ?? []).flatMap((fill) => {
+    const fillMarkers = (paperSnapshot?.recentFills ?? []).flatMap((fill) => {
       const aggregate = bars.find((bar) => fill.sequence >= bar.firstSequence && fill.sequence <= bar.lastSequence);
       if (!aggregate) return [];
       return [{ time: chartTime(aggregate.timestamp), position: fill.side === "BUY" ? "belowBar" as const : "aboveBar" as const, shape: fill.side === "BUY" ? "arrowUp" as const : "arrowDown" as const, color: fill.side === "BUY" ? "#16a34a" : "#dc2626", text: fill.reason }];
-    }));
+    });
+    const focusBar = focusSequence === null ? null : bars.find((bar) => focusSequence >= bar.firstSequence && focusSequence <= bar.lastSequence);
+    markersRef.current?.setMarkers([
+      ...fillMarkers,
+      ...(focusBar ? [{ time: chartTime(focusBar.timestamp), position: "aboveBar" as const, shape: "arrowDown" as const, color: "#7c3aed", text: focusLabel ?? copy.paperTrading.journalTab }] : []),
+    ]);
     setLineActions((current) => sameLineActions(current, nextLineActions) ? current : nextLineActions);
-  }, [bars, draft, draftSizing, paperSnapshot]);
+  }, [bars, draft, draftSizing, focusLabel, focusSequence, paperSnapshot]);
 
   const moveDraftLine = useCallback((current: DraftOrder, field: LineTarget["field"], price: number): DraftOrder => {
     price = snapPriceToTick(price, priceTickSize);

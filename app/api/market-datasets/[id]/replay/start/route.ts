@@ -5,6 +5,7 @@ import { datasetSourceInterval } from "@/lib/market-replay/dataset";
 import { resolveDisplaySession } from "@/lib/market-replay/chart-sessions";
 import { isValidDisplayInterval } from "@/lib/market-replay/types";
 import { replayStartSchema } from "@/lib/validations";
+import { archiveAndDeletePaperSession } from "@/lib/paper-trading/journal-storage";
 
 type RouteContext = { params: Promise<{ id: string }> };
 
@@ -38,7 +39,7 @@ async function startReplay(request: Request, context: RouteContext) {
       data: { replayGeneration: nextGeneration },
       select: { replayGeneration: true },
     });
-    await tx.paperTradingSession.deleteMany({ where: { datasetId: id } });
+    await archiveAndDeletePaperSession(tx, id);
     return tx.replayProgress.upsert({
       where: { datasetId: id },
       create: {

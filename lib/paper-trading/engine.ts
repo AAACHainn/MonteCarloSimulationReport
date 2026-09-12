@@ -7,6 +7,7 @@ import type {
   PaperSessionState,
   PaperSide,
 } from "./types";
+import { closeLotsFifo, DEFAULT_PAPER_JOURNAL_CONTEXT, updateLotAdverseRisk } from "./journal";
 
 const EPSILON = 1e-12;
 
@@ -110,6 +111,10 @@ export function advancePaperTrading(input: PaperAdvanceInput): PaperAdvanceResul
   const state = { ...input.state };
   const orders = input.orders.map((order) => ({ ...order }));
   const fills: PaperFillData[] = [];
+  let lots = (input.lots ?? []).map((lot) => ({ ...lot }));
+  let journalTrackingBlocked = sign(state.netQuantity) !== 0 && lots.length === 0;
+  const journalEntries = [] as PaperAdvanceResult["journalEntries"];
+  const journalContext = input.journalContext ?? DEFAULT_PAPER_JOURNAL_CONTEXT;
   const { bar, makeId } = input;
   if (bar.sequence !== state.lastProcessedSequence + 1) throw new Error("Paper trading can only advance one bar at a time.");
 
@@ -189,12 +194,39 @@ export function advancePaperTrading(input: PaperAdvanceInput): PaperAdvanceResul
       createBracket(orders, order, state, bar.sequence, makeId);
     }
 
-    fills.push({
+    const fill: PaperFillData = {
       id: makeId(), orderId: order.id, sequence: bar.sequence, timestamp: bar.timestamp,
       side: order.side, price, quantity, fee, slippageCost, realizedPnl,
       closedQuantity, openedQuantity, netQuantityAfter: nextQuantity,
       averagePriceAfter: nextAverage, reason: fillReason(oldQuantity, nextQuantity, order),
-    });
+    };
+    fills.push(fill);
+
+    if (closedQuantity > EPSILON && lots.length > 0) {
+      const closed = closeLotsFifo(lots, closedQuantity, {
+        fillId: fill.id, sequence: fill.sequence, timestamp: fill.timestamp, price: fill.price,
+      });
+      lots = closed.lots;
+      journalEntries.push(...closed.entries);
+    }
+    if (journalTrackingBlocked && closedQuantity >= Math.abs(oldQuantity) - EPSILON) {
+      journalTrackingBlocked = false;
+    }
+    if (openedQuantity > EPSILON && !journalTrackingBlocked) {
+      lots.push({
+        id: `lot_${fill.id}`,
+        entryFillId: fill.id,
+        side: nextQuantity > 0 ? "LONG" : "SHORT",
+        openedSequence: fill.sequence,
+        openedAt: fill.timestamp,
+        entryPrice: fill.price,
+        initialQuantity: openedQuantity,
+        remainingQuantity: openedQuantity,
+        initialRisk: order.stopLoss === null ? null : Math.abs(fill.price - order.stopLoss),
+        actualRisk: 0,
+        ...journalContext,
+      });
+    }
   }
 
   function processAtPrice(price: number, includeMarket: boolean) {
@@ -209,6 +241,7 @@ export function advancePaperTrading(input: PaperAdvanceInput): PaperAdvanceResul
     }
   }
 
+  updateLotAdverseRisk(lots, bar.open);
   processAtPrice(bar.open, true);
   const path = bar.close > bar.open
     ? [bar.open, bar.low, bar.high, bar.close]
@@ -226,8 +259,12 @@ export function advancePaperTrading(input: PaperAdvanceInput): PaperAdvanceResul
         return distance || compareOrders(a.order, b.order);
       });
       const candidate = candidates[0];
-      if (!candidate) break;
+      if (!candidate) {
+        updateLotAdverseRisk(lots, end);
+        break;
+      }
       cursor = candidate.trigger;
+      updateLotAdverseRisk(lots, cursor);
       execute(candidate.order, candidate.trigger);
       processAtPrice(cursor, false);
     }
@@ -246,6 +283,8 @@ export function advancePaperTrading(input: PaperAdvanceInput): PaperAdvanceResul
     state,
     orders,
     fills,
+    lots,
+    journalEntries,
     equityPoint: { sequence: bar.sequence, timestamp: bar.timestamp, balance, equity, drawdown },
   };
 }

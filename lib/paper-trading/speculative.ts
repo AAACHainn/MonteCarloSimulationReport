@@ -24,11 +24,12 @@ export function applySpeculativeAdvance(snapshot: PaperSessionSnapshot, result: 
     recentOrders,
     recentFills,
     recentTrades: reduceRecentPaperTrades(snapshot.recentTrades, transitions),
+    openLots: result.lots,
     stats: applyLiveAccountStats(snapshot.stats, sessionSnapshot, balance, equity),
   };
 }
 
-export function paperStateFingerprint(session: PaperSessionState, activeOrders: PaperOrderData[]) {
+export function paperStateFingerprint(session: PaperSessionState, activeOrders: PaperOrderData[], openLots: NonNullable<PaperSessionSnapshot["openLots"]> = []) {
   const state = {
     lastProcessedSequence: session.lastProcessedSequence,
     netQuantity: session.netQuantity,
@@ -49,10 +50,15 @@ export function paperStateFingerprint(session: PaperSessionState, activeOrders: 
       filledPrice: order.filledPrice,
       cancelReason: order.cancelReason,
     })),
+    lots: [...openLots].sort((a, b) => a.id.localeCompare(b.id)).map((lot) => ({
+      id: lot.id,
+      remainingQuantity: lot.remainingQuantity,
+      actualRisk: lot.actualRisk,
+    })),
   };
   return JSON.stringify(state);
 }
 
 export function paperCheckpointFingerprint(snapshot: PaperSessionSnapshot | null) {
-  return snapshot ? paperStateFingerprint(snapshot.session, snapshot.activeOrders) : "no-paper-session";
+  return snapshot ? paperStateFingerprint(snapshot.session, snapshot.activeOrders, snapshot.openLots ?? []) : "no-paper-session";
 }

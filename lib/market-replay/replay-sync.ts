@@ -9,16 +9,18 @@ import {
   ensurePaperTradeStats,
   getPaperSessionSnapshot,
   serializePaperOrder,
+  serializePaperPositionLot,
   serializePaperSession,
   tradeStatsFromSession,
   type SessionRecord,
 } from "@/lib/paper-trading/serialize";
-import type { PaperEquityPointData, PaperFillData, PaperOrderData } from "@/lib/paper-trading/types";
+import type { PaperEquityPointData, PaperFillData, PaperJournalContext, PaperOrderData, ReplayJournalEntryDraft } from "@/lib/paper-trading/types";
 import { derivePaperTradeTransitions } from "@/lib/paper-trading/reducers";
 import { paperStateFingerprint } from "@/lib/paper-trading/speculative";
 import type { PaperReplayDelta, ReplaySyncReceipt, ReplaySyncRequest } from "@/lib/market-replay/client-sync";
 import type { PaperSessionState } from "@/lib/paper-trading/types";
 import { recordClosedTrade, type IncrementalTradeStats } from "@/lib/paper-trading/trade-stats";
+import { ensureReplayJournalSession, persistPaperJournalState } from "@/lib/paper-trading/journal-storage";
 
 export type ReplaySyncInput = {
   generation: number;
@@ -27,6 +29,7 @@ export type ReplaySyncInput = {
   syncVersion: number;
   expectedPaperVersion: number | null;
   targetSequence: number;
+  journalContext?: PaperJournalContext | null;
 };
 
 export type ReplaySyncSuccess = {
@@ -200,7 +203,7 @@ function validateClientPaperDelta(
     || (Math.abs(state.netQuantity) <= 1e-12) !== (state.averageEntryPrice === null)
     || state.totalFees < session.totalFees || state.totalSlippage < session.totalSlippage
     || state.peakEquity < session.peakEquity || state.maxDrawdown < session.maxDrawdown
-    || paperStateFingerprint(state, delta.activeOrders) !== delta.fingerprint
+    || paperStateFingerprint(state, delta.activeOrders, delta.openLots) !== delta.fingerprint
   ) return false;
   const currentOrderIds = new Set(currentOrders.map((order) => order.id));
   const changedIds = new Set<string>();
@@ -233,6 +236,17 @@ function validateClientPaperDelta(
   for (const point of delta.equityPoints) {
     if (equitySequences.has(point.sequence) || point.sequence <= confirmedSequence || point.sequence > targetSequence) return false;
     equitySequences.add(point.sequence);
+  }
+  const lotIds = new Set<string>();
+  for (const lot of delta.openLots) {
+    if (lotIds.has(lot.id) || lot.openedSequence > targetSequence || lot.remainingQuantity > lot.initialQuantity) return false;
+    lotIds.add(lot.id);
+  }
+  const journalIds = new Set<string>();
+  for (const entry of delta.journalEntries) {
+    if (journalIds.has(entry.id) || entry.closedSequence <= confirmedSequence || entry.closedSequence > targetSequence
+      || entry.openedSequence > entry.closedSequence) return false;
+    journalIds.add(entry.id);
   }
   return validateFillAccounting(session, delta);
 }
@@ -308,6 +322,10 @@ export async function persistClientReplayBatch(
         where: { id: session.id },
         data: { ...tradeStats, tradeStatsVersion: 1 },
       });
+      const journalSessionId = await ensureReplayJournalSession(tx, sessionRecord, progress.generation);
+      await persistPaperJournalState(
+        tx, datasetId, session.id, journalSessionId, delta.openLots, delta.journalEntries,
+      );
       if (delta.equityPoints.length) {
         await tx.paperEquityPoint.createMany({
           data: delta.equityPoints.map((point) => ({ ...point, sessionId: session.id, timestamp: new Date(point.timestamp) })),
@@ -382,6 +400,10 @@ export async function syncReplayToTarget(
         where: { sessionId: session.id, status: "PENDING" },
         orderBy: [{ createdSequence: "asc" }, { id: "asc" }],
       })).map(serializePaperOrder);
+      let lots = (await tx.paperPositionLot.findMany({
+        where: { sessionId: session.id }, orderBy: [{ openedSequence: "asc" }, { createdAt: "asc" }],
+      })).map(serializePaperPositionLot);
+      const journalEntries: ReplayJournalEntryDraft[] = [];
       const originalOrders = new Map(orders.map((order) => [order.id, JSON.stringify(order)]));
       const equityPoints: PaperEquityPointData[] = [];
       for (const dbBar of dbBars) {
@@ -391,9 +413,13 @@ export async function syncReplayToTarget(
           orders,
           bar,
           makeId: createDeterministicEventIdFactory(session.id, progress.generation, bar.sequence),
+          lots,
+          journalContext: input.journalContext,
         });
         state = result.state;
         orders = result.orders;
+        lots = result.lots;
+        journalEntries.push(...result.journalEntries);
         fills.push(...result.fills);
         const shouldSample = result.fills.length > 0
           || dbBar.sequence === dataset.barCount - 1
@@ -409,6 +435,8 @@ export async function syncReplayToTarget(
           peakEquity: state.peakEquity, maxDrawdown: state.maxDrawdown, version: state.version,
         },
       });
+      const journalSessionId = await ensureReplayJournalSession(tx, session, progress.generation);
+      await persistPaperJournalState(tx, datasetId, session.id, journalSessionId, lots, journalEntries);
       for (const order of orders) {
         if (originalOrders.get(order.id) === JSON.stringify(order)) continue;
         await tx.paperOrder.upsert({

@@ -3,6 +3,7 @@ import { prisma } from "@/lib/db";
 import { copy } from "@/lib/i18n";
 import { getPaperSessionSnapshot } from "@/lib/paper-trading/serialize";
 import { paperSessionSchema } from "@/lib/validations";
+import { archiveAndDeletePaperSession } from "@/lib/paper-trading/journal-storage";
 
 type RouteContext = { params: Promise<{ id: string }> };
 
@@ -21,13 +22,17 @@ export async function POST(request: Request, context: RouteContext) {
   try {
     created = await prisma.$transaction(async (tx) => {
       const [progress, dataset] = await Promise.all([
-        tx.replayProgress.findUnique({ where: { datasetId: id }, select: { currentSequence: true } }),
+        tx.replayProgress.findUnique({ where: { datasetId: id }, select: { currentSequence: true, generation: true } }),
         tx.marketDataset.findUnique({ where: { id }, select: { barCount: true } }),
       ]);
       if (!progress || !dataset) return false;
+      const journal = await tx.replayJournalSession.create({
+        data: { datasetId: id, replayGeneration: progress.generation, ...parsed.data },
+      });
       await tx.paperTradingSession.create({
         data: {
           datasetId: id,
+          journalSessionId: journal.id,
           ...parsed.data,
           lastProcessedSequence: progress.currentSequence,
           peakEquity: parsed.data.initialCapital,
@@ -45,6 +50,6 @@ export async function POST(request: Request, context: RouteContext) {
 
 export async function DELETE(_request: Request, context: RouteContext) {
   const { id } = await context.params;
-  await prisma.paperTradingSession.deleteMany({ where: { datasetId: id } });
+  await prisma.$transaction((tx) => archiveAndDeletePaperSession(tx, id));
   return NextResponse.json({ ok: true });
 }
