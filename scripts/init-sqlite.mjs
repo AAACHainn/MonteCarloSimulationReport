@@ -385,6 +385,11 @@ try {
     }
   }
 
+  const replayProgressTable = await prisma.$queryRawUnsafe(`PRAGMA table_info("ReplayProgress")`);
+  if (replayProgressTable.some((column) => column.name === "intervalMs")) {
+    await prisma.$executeRawUnsafe(`ALTER TABLE "ReplayProgress" DROP COLUMN "intervalMs"`);
+  }
+
   for (const statement of indexStatements) {
     await prisma.$executeRawUnsafe(statement);
   }

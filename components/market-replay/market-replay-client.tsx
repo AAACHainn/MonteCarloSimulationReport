@@ -203,6 +203,8 @@ export function MarketReplayClient({ dataset }: { dataset: MarketDatasetSummary 
     emaIndicators,
     setEmaIndicators,
     emaSettingsLoaded,
+    volumeVisible,
+    setVolumeVisible,
     defaultTrendLineStyle,
     setDefaultTrendLineStyle,
     trendLineTemplates,
@@ -1038,9 +1040,9 @@ export function MarketReplayClient({ dataset }: { dataset: MarketDatasetSummary 
       method: "POST", headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ timestamp: new Date(timestamp).toISOString(), playbackRate: 1, displayIntervalSeconds: dataset.sourceIntervalSeconds, displaySession: "ETH" }),
     });
-    const data = await response.json();
-    if (!response.ok) {
-      setStartError(data?.error ?? copy.marketReplay.invalidStart);
+    const data = await response.json().catch(() => null);
+    if (!response.ok || !data) {
+      setStartError(data?.error ?? copy.marketReplay.startError);
       return false;
     }
     const next = createReplayState(dataset.barCount, data.startSequence, data.playbackRate, data.displayIntervalSeconds, data.currentSequence, data.generation, data.syncVersion, data.displaySession ?? "ETH");
@@ -1657,6 +1659,7 @@ export function MarketReplayClient({ dataset }: { dataset: MarketDatasetSummary 
             onOpenDrawingStyle={openDrawingStyle}
             emaEnabled={emaEnabled}
             emaIndicators={emaIndicators}
+            volumeVisible={volumeVisible}
             paperSnapshot={paperSnapshot}
             paperBusy={paperBusy}
             paperError={paperError}
@@ -1831,6 +1834,10 @@ export function MarketReplayClient({ dataset }: { dataset: MarketDatasetSummary 
 
       <Dialog open={settingsDialog === "indicators"} title={copy.marketReplay.indicatorSettings} description={copy.marketReplay.indicatorSettingsDescription} onClose={() => setSettingsDialog(null)}>
         <div className="space-y-4">
+          <div className="flex items-center justify-between rounded-md border bg-slate-50 p-3">
+            <div><p className="text-sm font-medium text-slate-950">{copy.marketReplay.volumeTitle}</p><p className="mt-0.5 text-xs text-slate-500">{copy.marketReplay.volumeDescription}</p></div>
+            <div className="flex items-center gap-2"><span className="text-xs text-slate-500">{volumeVisible ? copy.marketReplay.volumeOn : copy.marketReplay.volumeOff}</span><button type="button" role="switch" aria-checked={volumeVisible} aria-label={copy.marketReplay.volumeToggle} onClick={() => setVolumeVisible((visible) => !visible)} className={`relative h-6 w-11 rounded-full transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-600 focus-visible:ring-offset-2 ${volumeVisible ? "bg-blue-600" : "bg-slate-300"}`}><span className={`absolute left-0 top-0.5 h-5 w-5 rounded-full bg-white shadow-sm transition-transform ${volumeVisible ? "translate-x-5" : "translate-x-0.5"}`} /></button></div>
+          </div>
           <div className="flex items-center justify-between rounded-md border bg-slate-50 p-3">
             <div><p className="text-sm font-medium text-slate-950">{copy.marketReplay.emaTitle}</p><p className="mt-0.5 text-xs text-slate-500">{copy.marketReplay.emaDescription}</p></div>
             <div className="flex items-center gap-2"><span className="text-xs text-slate-500">{emaEnabled ? copy.marketReplay.emaOn : copy.marketReplay.emaOff}</span><button type="button" role="switch" aria-checked={emaEnabled} aria-label={copy.marketReplay.emaMaster} onClick={() => setEmaEnabled((enabled) => !enabled)} className={`relative h-6 w-11 rounded-full transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-600 focus-visible:ring-offset-2 ${emaEnabled ? "bg-blue-600" : "bg-slate-300"}`}><span className={`absolute left-0 top-0.5 h-5 w-5 rounded-full bg-white shadow-sm transition-transform ${emaEnabled ? "translate-x-5" : "translate-x-0.5"}`} /></button></div>

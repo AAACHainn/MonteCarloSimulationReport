@@ -34,6 +34,7 @@ import {
 } from "@/lib/market-replay/types";
 
 const EMA_SETTINGS_STORAGE_KEY = "market-replay-ema-settings-v1";
+const VOLUME_VISIBILITY_STORAGE_KEY = "market-replay-volume-visibility-v1";
 const DISPLAY_TIMEZONE_STORAGE_KEY = "market-replay-display-timezone-v1";
 const CANDLESTICK_STYLE_STORAGE_KEY = "market-replay-candlestick-style-v1";
 const TREND_LINE_PREFERENCES_STORAGE_KEY = "market-replay-trend-line-preferences-v1";
@@ -86,6 +87,8 @@ export function useReplayPreferences(dataset: { id: string; startTime: string; t
   const [emaEnabled, setEmaEnabled] = useState(false);
   const [emaIndicators, setEmaIndicators] = useState<EmaIndicatorConfig[]>(DEFAULT_EMA_INDICATORS);
   const [emaSettingsLoaded, setEmaSettingsLoaded] = useState(false);
+  const [volumeVisible, setVolumeVisible] = useState(true);
+  const [volumeVisibilityLoaded, setVolumeVisibilityLoaded] = useState(false);
   const [defaultTrendLineStyle, setDefaultTrendLineStyle] = useState<TrendLineStyle>(DEFAULT_TREND_LINE_STYLE);
   const [trendLineTemplates, setTrendLineTemplates] = useState<TrendLineTemplate[]>([]);
   const [defaultFibonacciStyle, setDefaultFibonacciStyle] = useState<FibonacciRetracementStyle>(() => cloneFibonacciStyle(DEFAULT_FIBONACCI_RETRACEMENT_STYLE));
@@ -103,6 +106,16 @@ export function useReplayPreferences(dataset: { id: string; startTime: string; t
       setEmaIndicators(stored.indicators);
     }
     setEmaSettingsLoaded(true);
+  }, []);
+
+  useEffect(() => {
+    try {
+      const stored = window.localStorage.getItem(VOLUME_VISIBILITY_STORAGE_KEY);
+      setVolumeVisible(stored === null ? true : stored === "true");
+    } catch {
+      setVolumeVisible(true);
+    }
+    setVolumeVisibilityLoaded(true);
   }, []);
 
   useEffect(() => {
@@ -154,6 +167,15 @@ export function useReplayPreferences(dataset: { id: string; startTime: string; t
   }, [emaEnabled, emaIndicators, emaSettingsLoaded]);
 
   useEffect(() => {
+    if (!volumeVisibilityLoaded) return;
+    try {
+      window.localStorage.setItem(VOLUME_VISIBILITY_STORAGE_KEY, String(volumeVisible));
+    } catch {
+      // Browser storage can be unavailable; the visibility still applies to this page session.
+    }
+  }, [volumeVisibilityLoaded, volumeVisible]);
+
+  useEffect(() => {
     let preferences = parseTrendLinePreferences(null);
     let fibonacciPreferences = parseFibonacciRetracementPreferences(null);
     try {
@@ -193,6 +215,8 @@ export function useReplayPreferences(dataset: { id: string; startTime: string; t
     emaIndicators,
     setEmaIndicators,
     emaSettingsLoaded,
+    volumeVisible,
+    setVolumeVisible,
     defaultTrendLineStyle,
     setDefaultTrendLineStyle,
     trendLineTemplates,

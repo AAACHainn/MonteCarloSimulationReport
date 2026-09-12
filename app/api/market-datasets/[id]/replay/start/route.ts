@@ -8,7 +8,7 @@ import { replayStartSchema } from "@/lib/validations";
 
 type RouteContext = { params: Promise<{ id: string }> };
 
-export async function POST(request: Request, context: RouteContext) {
+async function startReplay(request: Request, context: RouteContext) {
   const { id } = await context.params;
   const parsed = replayStartSchema.safeParse(await request.json());
   if (!parsed.success) return NextResponse.json({ error: parsed.error.issues[0]?.message }, { status: 400 });
@@ -63,4 +63,13 @@ export async function POST(request: Request, context: RouteContext) {
     displaySession: progress.displaySession,
     generation: progress.generation, syncVersion: progress.syncVersion,
   });
+}
+
+export async function POST(request: Request, context: RouteContext) {
+  try {
+    return await startReplay(request, context);
+  } catch (error) {
+    console.error("Failed to start market replay.", error);
+    return NextResponse.json({ error: copy.marketReplay.startError }, { status: 500 });
+  }
 }

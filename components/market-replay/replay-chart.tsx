@@ -197,7 +197,7 @@ export function ReplayChart({
   candlestickStyle,
   onMeasurementArmedChange, drawingTool, onDrawingToolChange, trendLineDraftStyle, fibonacciDraftStyle, drawings, selectedDrawingId,
   onSelectedDrawingIdChange, onCreateDrawing, onUpdateDrawing, onDeleteDrawing,
-  onOpenDrawingStyle, emaEnabled, emaIndicators, paperSnapshot,
+  onOpenDrawingStyle, emaEnabled, emaIndicators, volumeVisible, paperSnapshot,
   paperBusy, paperError, onSubmitOrder, onOrderPriceChange,
   onCancelOrder, onClosePosition, onDraftActiveChange, onOpenPaperAccount,
 }: {
@@ -223,6 +223,7 @@ export function ReplayChart({
   onOpenDrawingStyle: (id: string) => void;
   emaEnabled: boolean;
   emaIndicators: EmaIndicatorConfig[];
+  volumeVisible: boolean;
   paperSnapshot: PaperSessionSnapshot | null;
   paperBusy: boolean;
   paperError: string | null;
@@ -443,7 +444,7 @@ export function ReplayChart({
     return () => window.removeEventListener("keydown", close);
   }, []);
 
-  // Keep the chart instance stable. Window data, display interval, volume availability,
+  // Keep the chart instance stable. Window data, display interval, volume visibility,
   // and drawing preferences must update the existing instance so pointer handlers never
   // retain a removed chart or series.
   useEffect(() => {
@@ -504,7 +505,17 @@ export function ReplayChart({
 
   useEffect(() => {
     const chart = chartRef.current;
-    if (!chart || !hasVolume || volumeRef.current) return;
+    if (!chart) return;
+    if (!volumeVisible || !hasVolume) {
+      const volumes = volumeRef.current;
+      if (volumes) {
+        volumeRef.current = null;
+        chart.removeSeries(volumes);
+        chart.panes()[0]?.setStretchFactor(1);
+      }
+      return;
+    }
+    if (volumeRef.current) return;
     const pane = chart.addPane();
     chart.panes()[0]?.setStretchFactor(4);
     pane.setStretchFactor(1);
@@ -515,7 +526,7 @@ export function ReplayChart({
     });
     volumeRef.current = volumes;
     volumes.setData(barsRef.current.filter((bar) => bar.volume !== null).map(volume));
-  }, [hasVolume, priceTickSize]);
+  }, [hasVolume, volumeVisible]);
 
   useEffect(() => {
     candleRef.current?.applyOptions(candlestickSeriesStyleOptions(candlestickStyle));
