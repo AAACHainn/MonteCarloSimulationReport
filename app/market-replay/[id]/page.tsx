@@ -12,6 +12,13 @@ export default async function MarketReplayDetailPage({ params, searchParams }: {
   const query = await searchParams;
   const dataset = await prisma.marketDataset.findUnique({ where: { id }, include: { progress: true } });
   if (!dataset) notFound();
+  const requestedJournalNo = Number(query.journalNo);
+  const journalEntry = Number.isInteger(requestedJournalNo) && requestedJournalNo > 0
+    ? await prisma.replayJournalEntry.findFirst({
+      where: { no: requestedJournalNo, journalSession: { datasetId: id } },
+      select: { no: true, accountNo: true, openedSequence: true },
+    })
+    : null;
   const serialized = serializeMarketDataset(dataset);
   return (
     <div className="relative left-1/2 flex h-[calc(100dvh-4.3125rem)] w-[calc(100vw-2rem)] max-w-none -translate-x-1/2 flex-col gap-2 overflow-hidden sm:w-[calc(100vw-3rem)]">
@@ -22,7 +29,7 @@ export default async function MarketReplayDetailPage({ params, searchParams }: {
           <p className="truncate text-xs text-slate-500">{dataset.name} · {dataset.timezone} · {dataset.barCount.toLocaleString("zh-CN")} {copy.marketReplay.bars}</p>
         </div>
       </div>
-      <div className="min-h-0 flex-1"><MarketReplayClient dataset={serialized} initialJournalFocus={Number.isInteger(Number(query.focusSequence)) && Number(query.focusSequence) >= 0 ? { sequence: Number(query.focusSequence), no: Math.max(1, Number(query.journalNo) || 1) } : null} /></div>
+      <div className="min-h-0 flex-1"><MarketReplayClient dataset={serialized} initialJournalFocus={journalEntry ? { sequence: journalEntry.openedSequence, no: journalEntry.accountNo, globalNo: journalEntry.no } : null} /></div>
     </div>
   );
 }

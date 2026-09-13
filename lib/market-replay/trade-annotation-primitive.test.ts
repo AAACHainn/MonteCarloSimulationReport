@@ -6,6 +6,7 @@ import {
   replayTradeAnnotationColor,
   replayTradeOrderTypeAbbreviation,
   REPLAY_TRADE_ANNOTATION_COLORS,
+  REPLAY_TRADE_ANNOTATION_LINE_LENGTH,
 } from "./trade-annotation-primitive";
 
 function entry(values: Partial<ReplayTradeAnnotationData> = {}): ReplayTradeAnnotationData {
@@ -26,6 +27,10 @@ function entry(values: Partial<ReplayTradeAnnotationData> = {}): ReplayTradeAnno
 }
 
 describe("replay trade price annotations", () => {
+  it("draws a twenty-pixel price segment", () => {
+    expect(REPLAY_TRADE_ANNOTATION_LINE_LENGTH).toBe(20);
+  });
+
   it("cycles a deterministic five-color palette by journal number", () => {
     expect(Array.from({ length: 6 }, (_, index) => replayTradeAnnotationColor(index + 1))).toEqual([
       ...REPLAY_TRADE_ANNOTATION_COLORS,

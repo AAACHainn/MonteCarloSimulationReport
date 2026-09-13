@@ -288,6 +288,7 @@ model ReplayJournalSession {
   currency       String
   commissionBps  Float
   slippageBps    Float
+  nextEntryNo    Int                  @default(0)
   archivedAt     DateTime?
   paperSession   PaperTradingSession?
   entries        ReplayJournalEntry[]
@@ -330,6 +331,7 @@ model ReplayJournalEntry {
   journalSessionId         String
   journalSession           ReplayJournalSession @relation(fields: [journalSessionId], references: [id], onDelete: Cascade)
   no                       Int
+  accountNo                Int                  @default(0)
   lotId                    String
   direction                String
   quantity                 Float
@@ -353,6 +355,7 @@ model ReplayJournalEntry {
   createdAt                DateTime             @default(now())
 
   @@unique([journalSessionId, id])
+  @@unique([journalSessionId, accountNo])
   @@index([journalSessionId, no])
   @@index([journalSessionId, openedSequence])
   @@index([journalSessionId, closedSequence])

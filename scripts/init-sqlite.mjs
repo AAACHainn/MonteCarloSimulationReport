@@ -157,6 +157,7 @@ const createStatements = [
     "currency" TEXT NOT NULL,
     "commissionBps" REAL NOT NULL,
     "slippageBps" REAL NOT NULL,
+    "nextEntryNo" INTEGER NOT NULL DEFAULT 0,
     "archivedAt" DATETIME,
     "createdAt" DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
     "updatedAt" DATETIME NOT NULL,
@@ -190,6 +191,7 @@ const createStatements = [
     "id" TEXT NOT NULL PRIMARY KEY,
     "journalSessionId" TEXT NOT NULL,
     "no" INTEGER NOT NULL,
+    "accountNo" INTEGER NOT NULL DEFAULT 0,
     "lotId" TEXT NOT NULL,
     "direction" TEXT NOT NULL,
     "quantity" REAL NOT NULL,
@@ -383,7 +385,8 @@ const paperSessionColumns = [
 ];
 const paperOrderColumns = [["riskAmount", "REAL"]];
 const paperPositionLotColumns = [["initialStopPrice", "REAL"], ["entryOrderType", "TEXT"]];
-const replayJournalEntryColumns = [["initialStopPrice", "REAL"], ["entryOrderType", "TEXT"]];
+const replayJournalSessionColumns = [["nextEntryNo", "INTEGER NOT NULL DEFAULT 0"]];
+const replayJournalEntryColumns = [["initialStopPrice", "REAL"], ["entryOrderType", "TEXT"], ["accountNo", "INTEGER NOT NULL DEFAULT 0"]];
 const marketDatasetImportColumns = [
   ["importedBars", "INTEGER NOT NULL DEFAULT 0"],
   ["stage", "TEXT NOT NULL DEFAULT 'WAITING_UPLOAD'"],
@@ -422,6 +425,7 @@ const indexStatements = [
   `CREATE INDEX IF NOT EXISTS "ReplayJournalSession_datasetId_archivedAt_idx" ON "ReplayJournalSession"("datasetId", "archivedAt")`,
   `CREATE INDEX IF NOT EXISTS "PaperPositionLot_sessionId_openedSequence_idx" ON "PaperPositionLot"("sessionId", "openedSequence")`,
   `CREATE UNIQUE INDEX IF NOT EXISTS "ReplayJournalEntry_journalSessionId_id_key" ON "ReplayJournalEntry"("journalSessionId", "id")`,
+  `CREATE UNIQUE INDEX IF NOT EXISTS "ReplayJournalEntry_journalSessionId_accountNo_key" ON "ReplayJournalEntry"("journalSessionId", "accountNo")`,
   `CREATE INDEX IF NOT EXISTS "ReplayJournalEntry_journalSessionId_no_idx" ON "ReplayJournalEntry"("journalSessionId", "no")`,
   `CREATE INDEX IF NOT EXISTS "ReplayJournalEntry_journalSessionId_openedSequence_idx" ON "ReplayJournalEntry"("journalSessionId", "openedSequence")`,
   `CREATE INDEX IF NOT EXISTS "ReplayJournalEntry_journalSessionId_closedSequence_idx" ON "ReplayJournalEntry"("journalSessionId", "closedSequence")`,
@@ -451,6 +455,7 @@ try {
     ["PaperTradingSession", paperSessionColumns],
     ["PaperOrder", paperOrderColumns],
     ["PaperPositionLot", paperPositionLotColumns],
+    ["ReplayJournalSession", replayJournalSessionColumns],
     ["ReplayJournalEntry", replayJournalEntryColumns],
     ["MarketDatasetImport", marketDatasetImportColumns],
   ]) {
@@ -487,6 +492,34 @@ try {
       LIMIT 1
     )
     WHERE "entryOrderType" IS NULL
+  `);
+  await prisma.$executeRawUnsafe(`
+    WITH "ranked" AS (
+      SELECT
+        "id",
+        ROW_NUMBER() OVER (PARTITION BY "journalSessionId" ORDER BY "no", "id") AS "accountNo"
+      FROM "ReplayJournalEntry"
+    )
+    UPDATE "ReplayJournalEntry"
+    SET "accountNo" = (
+      SELECT "ranked"."accountNo"
+      FROM "ranked"
+      WHERE "ranked"."id" = "ReplayJournalEntry"."id"
+    )
+    WHERE "accountNo" = 0
+  `);
+  await prisma.$executeRawUnsafe(`
+    UPDATE "ReplayJournalSession"
+    SET "nextEntryNo" = (
+      SELECT COALESCE(MAX("accountNo"), 0)
+      FROM "ReplayJournalEntry"
+      WHERE "ReplayJournalEntry"."journalSessionId" = "ReplayJournalSession"."id"
+    )
+    WHERE "nextEntryNo" < (
+      SELECT COALESCE(MAX("accountNo"), 0)
+      FROM "ReplayJournalEntry"
+      WHERE "ReplayJournalEntry"."journalSessionId" = "ReplayJournalSession"."id"
+    )
   `);
 
   const replayProgressTable = await prisma.$queryRawUnsafe(`PRAGMA table_info("ReplayProgress")`);

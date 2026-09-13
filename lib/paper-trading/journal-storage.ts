@@ -68,12 +68,19 @@ export async function persistPaperJournalState(
     data: { nextReplayJournalNo: { increment: entries.length } },
     select: { nextReplayJournalNo: true },
   });
+  const journal = await tx.replayJournalSession.update({
+    where: { id: journalSessionId },
+    data: { nextEntryNo: { increment: entries.length } },
+    select: { nextEntryNo: true },
+  });
   const firstNo = dataset.nextReplayJournalNo - entries.length + 1;
+  const firstAccountNo = journal.nextEntryNo - entries.length + 1;
   await tx.replayJournalEntry.createMany({
     data: entries.map((entry, index) => ({
       ...entry,
       journalSessionId,
       no: firstNo + index,
+      accountNo: firstAccountNo + index,
       openedAt: new Date(entry.openedAt),
       closedAt: new Date(entry.closedAt),
     })),

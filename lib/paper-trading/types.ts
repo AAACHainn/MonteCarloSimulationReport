@@ -118,6 +118,7 @@ export type ReplayJournalEntryDraft = PaperJournalContext & {
 
 export type ReplayJournalEntryData = ReplayJournalEntryDraft & {
   no: number;
+  globalNo: number;
   result: "W" | "L" | "BE";
   initialRiskAbr: number | null;
   actualRiskAbr: number | null;

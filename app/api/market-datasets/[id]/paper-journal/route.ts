@@ -27,7 +27,8 @@ export async function GET(request: Request, context: RouteContext) {
     take: take + 1,
   });
   const hasMore = records.length > take;
-  const items = records.slice(0, take).map(serializeReplayJournalEntry);
+  const pageRecords = records.slice(0, take);
+  const items = pageRecords.map(serializeReplayJournalEntry);
   const sessions = scope === "history" ? await prisma.replayJournalSession.findMany({
     where: { datasetId: id, entries: { some: {} } },
     orderBy: { createdAt: "desc" },
@@ -45,6 +46,6 @@ export async function GET(request: Request, context: RouteContext) {
       entryCount: session._count.entries,
       _count: undefined,
     })),
-    nextCursor: hasMore ? items.at(-1)?.no ?? null : null,
+    nextCursor: hasMore ? pageRecords.at(-1)?.no ?? null : null,
   });
 }

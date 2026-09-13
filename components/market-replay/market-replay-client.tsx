@@ -170,7 +170,9 @@ function formatDatasetTime(value: string, timezone: string) {
   }).format(new Date(value));
 }
 
-export function MarketReplayClient({ dataset, initialJournalFocus = null }: { dataset: MarketDatasetSummary; initialJournalFocus?: { sequence: number; no: number } | null }) {
+type JournalFocus = { sequence: number; no: number; globalNo: number };
+
+export function MarketReplayClient({ dataset, initialJournalFocus = null }: { dataset: MarketDatasetSummary; initialJournalFocus?: JournalFocus | null }) {
   const [bars, setBars] = useState<AggregatedMarketBarData[]>([]);
   const [warmupBars, setWarmupBars] = useState<AggregatedMarketBarData[]>([]);
   const [currentSourceBar, setCurrentSourceBar] = useState<MarketBarData | null>(null);
@@ -197,7 +199,7 @@ export function MarketReplayClient({ dataset, initialJournalFocus = null }: { da
   const [tradeAnnotationsTruncated, setTradeAnnotationsTruncated] = useState(false);
   const [paperBusy, setPaperBusy] = useState(false);
   const [paperError, setPaperError] = useState<string | null>(null);
-  const [journalReview, setJournalReview] = useState<{ sequence: number; no: number } | null>(null);
+  const [journalReview, setJournalReview] = useState<JournalFocus | null>(null);
   const [buffering, setBuffering] = useState(false);
   const [recoveryNotice, setRecoveryNotice] = useState<string | null>(null);
   const [draftActive, setDraftActive] = useState(false);
@@ -1237,7 +1239,7 @@ export function MarketReplayClient({ dataset, initialJournalFocus = null }: { da
     });
   }, [dataset.sourceIntervalSeconds, dataset.startTime, displayMarketSession, fastForwardToNextVisibleBar, flushVisible, journalReview, latestReplayRef, marketCache, marketSession, processLocalBars]);
 
-  const enterJournalReview = useCallback(async (focus: { sequence: number; no: number }) => {
+  const enterJournalReview = useCallback(async (focus: JournalFocus) => {
     const current = latestReplayRef.current;
     if (!current) return;
     if (focus.sequence > current.currentSequence) {
@@ -1259,7 +1261,7 @@ export function MarketReplayClient({ dataset, initialJournalFocus = null }: { da
       null,
       focus.sequence,
       true,
-      focus.no,
+      focus.globalNo,
     );
   }, [flushVisible, latestReplayRef, loadWindow, setReplay]);
 
@@ -1911,7 +1913,7 @@ export function MarketReplayClient({ dataset, initialJournalFocus = null }: { da
           <Button type="button" size="sm" variant="outline" className="h-9" onClick={revealNextBar} disabled={replay.status === "finished" || replay.status === "playing" || Boolean(journalReview)}>
             <ChevronRight className="h-4 w-4" />{copy.marketReplay.nextBar}<kbd className="ml-1 hidden rounded border bg-white px-1.5 py-0.5 font-mono text-[10px] text-slate-500 lg:inline">{copy.marketReplay.nextBarShortcut}</kbd>
           </Button>
-          <PaperTradingDetails snapshot={paperSnapshot} onFocusJournalEntry={(entry: ReplayJournalEntryData) => void enterJournalReview({ sequence: entry.openedSequence, no: entry.no })} />
+          <PaperTradingDetails snapshot={paperSnapshot} onFocusJournalEntry={(entry: ReplayJournalEntryData) => void enterJournalReview({ sequence: entry.openedSequence, no: entry.no, globalNo: entry.globalNo })} />
           <div className="mx-1 h-6 w-px bg-slate-200" />
           <Label htmlFor="replay-speed" className="whitespace-nowrap text-xs text-slate-500">{copy.marketReplay.speed}</Label>
           <Input id="replay-speed" type="range" min={MIN_PLAYBACK_RATE} max={MAX_PLAYBACK_RATE} value={replay.playbackRate} onChange={(event) => changeSpeed(Number(event.target.value))} className="h-8 w-24 border-0 bg-transparent px-0 lg:w-32" />

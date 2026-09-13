@@ -10,6 +10,7 @@ type RouteContext = { params: Promise<{ id: string }> };
 const ANNOTATION_SELECT = {
   id: true,
   no: true,
+  accountNo: true,
   direction: true,
   entryOrderType: true,
   openedSequence: true,

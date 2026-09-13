@@ -17,6 +17,7 @@ import { prisma } from "@/lib/db";
 import { POST } from "@/app/api/market-datasets/[id]/replay/advance/route";
 import { POST as syncPOST } from "@/app/api/market-datasets/[id]/replay/sync/route";
 import { POST as resetPOST } from "@/app/api/market-datasets/[id]/replay/reset/route";
+import { POST as paperSessionPOST } from "@/app/api/market-datasets/[id]/paper-session/route";
 import { GET as progressGET, PUT as progressPUT } from "@/app/api/market-datasets/[id]/progress/route";
 import { advancePaperTrading } from "@/lib/paper-trading/engine";
 import { getPaperSessionSnapshot, serializePaperSession, serializePaperOrder } from "@/lib/paper-trading/serialize";
@@ -463,7 +464,7 @@ describe("replay advance with real SQLite", () => {
       include: { journalSession: true },
     });
     expect(journalEntry).toMatchObject({
-      no: 1, direction: "LONG", quantity: 2,
+      no: 1, accountNo: 1, direction: "LONG", quantity: 2,
       entryPrice: 100, entryOrderType: "MARKET", exitPrice: 105, initialStopPrice: 90, initialRisk: 10, actualRisk: 1, gainLoss: 5,
     });
     expect(journalEntry.journalSession.archivedAt).toBeNull();
@@ -473,6 +474,26 @@ describe("replay advance with real SQLite", () => {
     expect(await prisma.paperTradingSession.findUnique({ where: { datasetId: id } })).toBeNull();
     expect(await prisma.replayJournalEntry.count({ where: { journalSession: { datasetId: id } } })).toBe(1);
     expect((await prisma.replayJournalSession.findFirstOrThrow({ where: { datasetId: id } })).archivedAt).not.toBeNull();
+
+    const createAccount = await paperSessionPOST(request({
+      initialCapital: 100000, currency: "USD", commissionBps: 0, slippageBps: 0,
+    }), context(id));
+    expect(createAccount.status).toBe(201);
+    const newSession = await prisma.paperTradingSession.findUniqueOrThrow({ where: { datasetId: id } });
+    await prisma.paperOrder.create({ data: {
+      id: "stats-entry-new-account", sessionId: newSession.id, side: "BUY", type: "MARKET", quantity: 1,
+      stopLoss: 90, takeProfit: 105, createdSequence: -1, activeFromSequence: 0,
+    } });
+    const secondAdvance = await POST(request({
+      expectedCurrentSequence: -1, expectedVersion: 1, count: 2,
+    }), context(id));
+    expect(secondAdvance.status).toBe(200);
+    expect(await prisma.replayJournalEntry.findFirstOrThrow({
+      where: { journalSessionId: newSession.journalSessionId! },
+    })).toMatchObject({ no: 2, accountNo: 1 });
+    expect(await prisma.replayJournalSession.findUniqueOrThrow({
+      where: { id: newSession.journalSessionId! },
+    })).toMatchObject({ nextEntryNo: 1 });
   });
 
   it("backfills incremental statistics once for a legacy paper session", async () => {

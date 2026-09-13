@@ -78,7 +78,7 @@ describe("paper replay journal", () => {
 
   it("uses actual risk for missing iRisk and tick only for zero-risk RR denominators", () => {
     const base = {
-      id: "entry", no: 1, journalSessionId: "journal", lotId: "lot", direction: "LONG",
+      id: "entry", no: 3, accountNo: 1, journalSessionId: "journal", lotId: "lot", direction: "LONG",
       quantity: 1, openedSequence: 0, openedAt: new Date("2026-09-01T00:00:00Z"),
       closedSequence: 1, closedAt: new Date("2026-09-01T00:01:00Z"), entryPrice: 100,
       entryOrderType: null, exitPrice: 101, initialStopPrice: null, abrValue: 2, abrLength: 8, displayIntervalSeconds: 300,
@@ -88,6 +88,7 @@ describe("paper replay journal", () => {
     } as const;
     const serialized = serializeReplayJournalEntry(base);
     expect(serialized).toMatchObject({
+      no: 1, globalNo: 3,
       result: "W", initialRiskAbr: 0, actualRiskAbr: 0,
       initialRiskRr: 4, actualRiskRr: 4, abrRr: 0.5,
     });
@@ -95,7 +96,7 @@ describe("paper replay journal", () => {
 
   it("returns dashes through null ratios when ABR is unavailable", () => {
     const serialized = serializeReplayJournalEntry({
-      id: "entry", no: 1, journalSessionId: "journal", lotId: "lot", direction: "SHORT",
+      id: "entry", no: 3, accountNo: 1, journalSessionId: "journal", lotId: "lot", direction: "SHORT",
       quantity: 1, openedSequence: 0, openedAt: new Date("2026-09-01T00:00:00Z"),
       closedSequence: 1, closedAt: new Date("2026-09-01T00:01:00Z"), entryPrice: 100,
       entryOrderType: "STOP", exitPrice: 100, initialStopPrice: 101, abrValue: null, abrLength: 8, displayIntervalSeconds: 300,

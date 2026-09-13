@@ -23,10 +23,11 @@ import { GET } from "./route";
 
 const context = { params: Promise.resolve({ id: "dataset-1" }) };
 
-function record(no: number) {
+function record(no: number, accountNo = no) {
   return {
     id: `entry-${no}`,
     no,
+    accountNo,
     direction: no % 2 ? "LONG" : "SHORT",
     entryOrderType: no % 3 ? "LIMIT" : null,
     openedSequence: no,
@@ -93,7 +94,7 @@ describe("replay trade annotation API", () => {
   });
 
   it("loads one archived journal entry by dataset-wide number", async () => {
-    mocks.journalFindFirst.mockResolvedValue(record(42));
+    mocks.journalFindFirst.mockResolvedValue(record(42, 1));
     const response = await GET(new Request(
       "http://localhost/api/annotations?journalNo=42",
     ), context);
@@ -102,7 +103,7 @@ describe("replay trade annotation API", () => {
       where: { no: 42, journalSession: { datasetId: "dataset-1" } },
     }));
     expect(await response.json()).toMatchObject({
-      items: [{ no: 42, entryOrderType: null, result: "L" }],
+      items: [{ no: 1, entryOrderType: null, result: "L" }],
       truncated: false,
     });
   });

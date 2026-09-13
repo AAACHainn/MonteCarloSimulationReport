@@ -20,7 +20,7 @@ export const REPLAY_TRADE_ANNOTATION_COLORS = [
   "#7c3aed",
 ] as const;
 
-export const REPLAY_TRADE_ANNOTATION_LINE_LENGTH = 12;
+export const REPLAY_TRADE_ANNOTATION_LINE_LENGTH = 20;
 const LABEL_GAP = 4;
 const LABEL_HEIGHT = 12;
 const LABEL_LANE_GAP = 2;

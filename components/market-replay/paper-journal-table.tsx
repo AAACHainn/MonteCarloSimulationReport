@@ -121,7 +121,7 @@ export function PaperJournalTable({
             {scope === "history" ? <th className="border-b px-3 py-2 font-semibold">{copy.paperTrading.action}</th> : null}
           </tr></thead>
           <tbody>{group.entries.map((entry) => <tr key={entry.id} className="border-b last:border-b-0 hover:bg-slate-50">
-            <td className="border-r px-3 py-2"><button type="button" className="cursor-pointer font-medium text-blue-700 underline-offset-2 hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-600" onClick={() => onFocus ? onFocus(entry) : window.location.assign(`/market-replay/${datasetId}?focusSequence=${entry.openedSequence}&journalNo=${entry.no}`)}>{entry.no}</button></td>
+            <td className="border-r px-3 py-2"><button type="button" className="cursor-pointer font-medium text-blue-700 underline-offset-2 hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-600" onClick={() => onFocus ? onFocus(entry) : window.location.assign(`/market-replay/${datasetId}?focusSequence=${entry.openedSequence}&journalNo=${entry.globalNo}`)}>{entry.no}</button></td>
             <td className="border-r px-3 py-2">{date(entry)}</td>
             <td className="border-r px-3 py-2">{entry.direction === "LONG" ? copy.paperTrading.long : copy.paperTrading.short}</td>
             <td className="border-r px-3 py-2" title={`${formatInterval(entry.displayIntervalSeconds)} · ABR(${entry.abrLength})`}>{number(entry.abrValue)}</td>

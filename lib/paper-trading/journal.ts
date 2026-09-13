@@ -71,7 +71,7 @@ export function closeLotsFifo(
 }
 
 export function serializeReplayJournalEntry(entry: {
-  id: string; no: number; journalSessionId: string; direction: string; quantity: number;
+  id: string; no: number; accountNo: number; journalSessionId: string; direction: string; quantity: number;
   openedSequence: number; openedAt: Date; closedSequence: number; closedAt: Date;
   entryPrice: number; entryOrderType: string | null; exitPrice: number; initialStopPrice: number | null; abrValue: number | null; abrLength: number;
   displayIntervalSeconds: number; displaySession: string; displayUtcOffsetMinutes: number;
@@ -83,7 +83,7 @@ export function serializeReplayJournalEntry(entry: {
   const effectiveInitialRisk = entry.initialRisk > EPSILON ? entry.initialRisk : entry.priceTickSize;
   const result = replayJournalResult(entry.gainLoss, entry.priceTickSize);
   return {
-    id: entry.id, no: entry.no, journalSessionId: entry.journalSessionId,
+    id: entry.id, no: entry.accountNo, globalNo: entry.no, journalSessionId: entry.journalSessionId,
     lotId: entry.lotId, direction: entry.direction as "LONG" | "SHORT", quantity: entry.quantity,
     openedSequence: entry.openedSequence, openedAt: entry.openedAt.toISOString(),
     closedSequence: entry.closedSequence, closedAt: entry.closedAt.toISOString(),
@@ -107,7 +107,7 @@ export function serializeReplayJournalEntry(entry: {
 
 export function serializeReplayTradeAnnotation(entry: {
   id: string;
-  no: number;
+  accountNo: number;
   direction: string;
   entryOrderType: string | null;
   openedSequence: number;
@@ -121,7 +121,7 @@ export function serializeReplayTradeAnnotation(entry: {
 }): ReplayTradeAnnotationData {
   return {
     id: entry.id,
-    no: entry.no,
+    no: entry.accountNo,
     direction: entry.direction as ReplayTradeAnnotationData["direction"],
     entryOrderType: entry.entryOrderType as ReplayTradeAnnotationData["entryOrderType"],
     openedSequence: entry.openedSequence,
