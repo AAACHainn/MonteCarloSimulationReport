@@ -31,3 +31,15 @@ export function rangeAfterNewReplayBar(
     ? { from: visibleRange.from + addedBarCount, to: visibleRange.to + addedBarCount }
     : visibleRange;
 }
+
+export function rangeAfterWindowReplacement(
+  visibleRange: ReplayLogicalRange,
+  previousLastLogicalIndex: number,
+  nextLastLogicalIndex: number,
+): ReplayLogicalRange {
+  const shift = nextLastLogicalIndex - previousLastLogicalIndex;
+  return {
+    from: visibleRange.from + shift,
+    to: visibleRange.to + shift,
+  };
+}

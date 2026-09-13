@@ -92,7 +92,8 @@ export function buildBarCountLabels({
     const number = Math.floor(elapsed / intervalMs) + 1;
     const isBar18 = displayIntervalSeconds === FIVE_MINUTES_SECONDS && number === 18;
     const isHourClose = end > bounds.start && end <= bounds.end && (end - bounds.start) % HOUR_MS === 0;
-    if ((number - 1) % config.interval !== 0 && number !== 1 && !isBar18 && !isHourClose) continue;
+    const displayStep = config.interval + 1;
+    if (number % displayStep !== 0 && number !== 1 && !isBar18 && !isHourClose) continue;
 
     const kind: BarCountLabelKind = isBar18 ? "BAR_18" : isHourClose ? "HOUR_CLOSE" : "REGULAR";
     labels.push({

@@ -23,7 +23,11 @@ import type {
 } from "@/lib/market-replay/types";
 import { copy } from "@/lib/i18n";
 import { calculateAbrSeries } from "@/lib/market-replay/abr";
-import { defaultReplayLogicalRange, rangeAfterNewReplayBar } from "@/lib/market-replay/chart-range";
+import {
+  defaultReplayLogicalRange,
+  rangeAfterNewReplayBar,
+  rangeAfterWindowReplacement,
+} from "@/lib/market-replay/chart-range";
 import {
   candlestickSeriesStyleOptions,
   type CandlestickStyle,
@@ -512,6 +516,7 @@ export function ReplayChart({
         secondsVisible: true,
         rightOffset: 4,
         shiftVisibleRangeOnNewBar: false,
+        lockVisibleTimeRangeOnResize: true,
         tickMarkFormatter: (time: Time, tickMarkType: TickMarkType) => formatChartTick(time, tickMarkType, displayUtcOffsetRef.current),
       },
       rightPriceScale: { borderColor: "#e2e8f0" },
@@ -619,13 +624,16 @@ export function ReplayChart({
     if (!chart || !series) return;
     const previous = lastDataRef.current;
     const next = bars;
+    const volumeSeries = volumeRef.current;
+    const candleWasAutoScaled = series.priceScale().options().autoScale;
+    const volumeWasAutoScaled = volumeSeries?.priceScale().options().autoScale ?? true;
     const samePrefix = previous.length > 0 && next.length >= previous.length
       && previous.slice(0, -1).every((bar, index) => bar.timestamp === next[index]?.timestamp);
     if (samePrefix) {
       const range = chart.timeScale().getVisibleLogicalRange();
       const previousLastIndex = previous.length - 1;
       for (const bar of next.slice(Math.max(0, previous.length - 1))) {
-        series.update(candle(bar)); if (bar.volume !== null) volumeRef.current?.update(volume(bar));
+        series.update(candle(bar)); if (bar.volume !== null) volumeSeries?.update(volume(bar));
       }
       if (range && next.length > previous.length) {
         chart.timeScale().setVisibleLogicalRange(rangeAfterNewReplayBar(range, previousLastIndex, next.length - previous.length));
@@ -635,15 +643,26 @@ export function ReplayChart({
       const previousLastIndex = previous.length - 1;
       const previousLastInNext = next.findIndex((bar) => bar.timestamp === previous.at(-1)?.timestamp);
       series.setData(next.map(candle));
-      volumeRef.current?.setData(next.filter((bar) => bar.volume !== null).map(volume));
+      volumeSeries?.setData(next.filter((bar) => bar.volume !== null).map(volume));
       if (range && previousLastInNext >= 0) {
         // A rolling server window renumbers logical indices. Preserve zoom and historical panning.
         const advanced = rangeAfterNewReplayBar(range, previousLastIndex, next.length - 1 - previousLastInNext);
         const removed = previousLastIndex - previousLastInNext;
         chart.timeScale().setVisibleLogicalRange({ from: advanced.from - removed, to: advanced.to - removed });
       } else if (next.length > 0) {
-        chart.timeScale().setVisibleLogicalRange(defaultReplayLogicalRange(chart.timeScale().width(), next.length));
+        chart.timeScale().setVisibleLogicalRange(
+          previous.length > 0 && range
+            ? rangeAfterWindowReplacement(range, previousLastIndex, next.length - 1)
+            : defaultReplayLogicalRange(chart.timeScale().width(), next.length),
+        );
       }
+    }
+    // Keep a user-selected manual price scale through every incremental update or window swap.
+    if (!candleWasAutoScaled && series.priceScale().options().autoScale) {
+      series.priceScale().applyOptions({ autoScale: false });
+    }
+    if (volumeSeries && !volumeWasAutoScaled && volumeSeries.priceScale().options().autoScale) {
+      volumeSeries.priceScale().applyOptions({ autoScale: false });
     }
     lastDataRef.current = next.map((bar) => ({ ...bar }));
     requestAnimationFrame(syncMeasurementCoordinates);
@@ -1396,7 +1415,8 @@ export function ReplayChart({
     };
     const move = (event: PointerEvent) => {
       const y = event.clientY - container.getBoundingClientRect().top;
-      if (!dragging) {
+      const activeDrag = dragging;
+      if (!activeDrag) {
         if (event.shiftKey || measurementArmedRef.current) {
           setChartCursor("crosshair");
           return;
@@ -1407,18 +1427,18 @@ export function ReplayChart({
       }
       const price = snapPriceToTick(Number(series.coordinateToPrice((event.clientY - container.getBoundingClientRect().top) as never)), priceTickSize);
       if (!Number.isFinite(price) || price <= 0) return;
-      if (dragging.target.kind === "draft") {
+      const target = activeDrag.target;
+      if (target.kind === "draft") {
+        const field = target.field;
         setDraft((current) => {
           if (!current) return current;
-          const next = moveDraftLine(current, dragging!.target.field, price);
-          dragging!.previewPrice = next[dragging!.target.field as keyof DraftOrder] as number;
-          return next;
+          return moveDraftLine(current, field, price);
         });
       } else {
-        dragging.previewPrice = price;
-        const rLabel = dragging.target.rReference ? formatRMultiple(rMultipleAtPrice(dragging.target.rReference, price)) : null;
-        priceLinesRef.current.get(dragging.target.key)?.applyOptions({ price, ...(rLabel ? { title: rLabel } : {}) });
-        setLineActions((current) => current.map((action) => action.key === dragging!.target.key ? { ...action, price, y, ...(rLabel ? { label: rLabel } : {}) } : action));
+        activeDrag.previewPrice = price;
+        const rLabel = target.rReference ? formatRMultiple(rMultipleAtPrice(target.rReference, price)) : null;
+        priceLinesRef.current.get(target.key)?.applyOptions({ price, ...(rLabel ? { title: rLabel } : {}) });
+        setLineActions((current) => current.map((action) => action.key === target.key ? { ...action, price, y, ...(rLabel ? { label: rLabel } : {}) } : action));
       }
     };
     const finish = () => {
@@ -1436,10 +1456,12 @@ export function ReplayChart({
     };
     const leave = () => { if (!dragging) setChartCursor(measurementArmedRef.current ? "crosshair" : ""); };
     interaction.addEventListener("pointerdown", down); interaction.addEventListener("pointermove", move);
-    interaction.addEventListener("pointerup", finish); interaction.addEventListener("pointerleave", leave); window.addEventListener("keydown", key);
+    interaction.addEventListener("pointerup", finish); interaction.addEventListener("pointercancel", finish);
+    interaction.addEventListener("pointerleave", leave); window.addEventListener("keydown", key);
     return () => {
       interaction.removeEventListener("pointerdown", down); interaction.removeEventListener("pointermove", move);
-      interaction.removeEventListener("pointerup", finish); interaction.removeEventListener("pointerleave", leave); window.removeEventListener("keydown", key);
+      interaction.removeEventListener("pointerup", finish); interaction.removeEventListener("pointercancel", finish);
+      interaction.removeEventListener("pointerleave", leave); window.removeEventListener("keydown", key);
       setChartCursor("");
     };
   }, [moveDraftLine, priceTickSize, setChartCursor, syncLineActionCoordinates]);

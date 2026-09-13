@@ -1,5 +1,9 @@
 import { describe, expect, it } from "vitest";
-import { defaultReplayLogicalRange, rangeAfterNewReplayBar } from "./chart-range";
+import {
+  defaultReplayLogicalRange,
+  rangeAfterNewReplayBar,
+  rangeAfterWindowReplacement,
+} from "./chart-range";
 
 describe("rangeAfterNewReplayBar", () => {
   it("keeps the viewport fixed when the latest bar is around the middle", () => {
@@ -63,5 +67,28 @@ describe("defaultReplayLogicalRange", () => {
   it("preserves historical panning when a batch arrives", () => {
     const range = { from: 10, to: 200 };
     expect(rangeAfterNewReplayBar(range, 299, 10)).toEqual(range);
+  });
+});
+
+describe("rangeAfterWindowReplacement", () => {
+  it("preserves zoom and the latest bar position when a large window is replaced", () => {
+    const range = { from: 1_100, to: 1_300 };
+    const next = rangeAfterWindowReplacement(range, 1_299, 299);
+    expect(next).toEqual({ from: 100, to: 300 });
+    expect(next.to - next.from).toBe(range.to - range.from);
+    expect(299 - next.from).toBe(1_299 - range.from);
+  });
+
+  it("preserves a manually panned range even when the old anchor is off screen", () => {
+    const range = { from: 40, to: 90 };
+    const next = rangeAfterWindowReplacement(range, 299, 99);
+    expect(next).toEqual({ from: -160, to: -110 });
+    expect(next.to - next.from).toBe(50);
+  });
+
+  it("preserves a fractional zoom span", () => {
+    const range = { from: 12.25, to: 47.75 };
+    const next = rangeAfterWindowReplacement(range, 59, 79);
+    expect(next).toEqual({ from: 32.25, to: 67.75 });
   });
 });

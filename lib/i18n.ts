@@ -254,7 +254,7 @@ export const dictionaries = {
       volumeOn: "已显示",
       volumeOff: "已隐藏",
       barCountTitle: "Bar Count 指标",
-      barCountDescription: "仅在 RTH 且显示周期不超过 1H 时，按交易日从 1 开始在 K 线下方显示编号。",
+      barCountDescription: "仅在 RTH 且显示周期不超过 1H 时显示。间隔 N 表示每 N+1 根标注一次，第 1 根始终标注。",
       barCountMaster: "显示 Bar Count",
       barCountInterval: "显示间隔",
       barCountRegularColor: "普通编号颜色",

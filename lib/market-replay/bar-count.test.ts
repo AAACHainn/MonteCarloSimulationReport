@@ -36,38 +36,49 @@ function sessionBars(day: string, displaySeconds: number, count: number, missing
 }
 
 describe("RTH bar count", () => {
-  it("numbers all 81 five-minute ES RTH slots and marks bar 18", () => {
+  it("numbers the 81 five-minute ES RTH slots and marks bar 18", () => {
+    const bars = sessionBars("2021-09-07", 300, 81);
     const labels = buildBarCountLabels({
-      bars: sessionBars("2021-09-07", 300, 81), displaySession: "RTH",
+      bars, displaySession: "RTH",
       displayIntervalSeconds: 300, session: rth, config,
     });
-    expect(labels).toHaveLength(81);
+    expect(bars).toHaveLength(81);
+    expect(labels).toHaveLength(41);
     expect(labels[0]).toMatchObject({ number: 1, kind: "REGULAR" });
-    expect(labels[17]).toMatchObject({ number: 18, kind: "BAR_18", color: config.bar18Color });
-    expect(sessionBars("2021-09-07", 300, 81)[17].timestamp).toBe("2021-09-07T14:55:00.000Z");
-    expect(labels[11]).toMatchObject({ number: 12, kind: "HOUR_CLOSE", color: config.hourCloseColor });
+    expect(labels.find((label) => label.number === 18)).toMatchObject({ kind: "BAR_18", color: config.bar18Color });
+    expect(bars[17].timestamp).toBe("2021-09-07T14:55:00.000Z");
+    expect(labels.find((label) => label.number === 12)).toMatchObject({ kind: "HOUR_CLOSE", color: config.hourCloseColor });
   });
 
   it("treats bar 18 as special only on the five-minute timeframe", () => {
     const labels = buildBarCountLabels({
       bars: sessionBars("2021-09-07", 60, 18), displaySession: "RTH",
-      displayIntervalSeconds: 60, session: rth, config,
+      displayIntervalSeconds: 60, session: rth, config: { ...config, interval: 17 },
     });
-    expect(labels[17]).toMatchObject({ number: 18, kind: "REGULAR", color: config.regularColor });
+    expect(labels.at(-1)).toMatchObject({ number: 18, kind: "REGULAR", color: config.regularColor });
   });
 
-  it("applies interval from bar one while forcing bar 18 and hourly closes", () => {
+  it("treats interval one as every second bar while forcing bar one, bar 18, and hourly closes", () => {
     const labels = buildBarCountLabels({
       bars: sessionBars("2021-09-07", 300, 24), displaySession: "RTH",
+      displayIntervalSeconds: 300, session: rth, config: { ...config, interval: 1 },
+    });
+    expect(labels.map((label) => label.number)).toEqual([1, 2, 4, 6, 8, 10, 12, 14, 16, 18, 20, 22, 24]);
+  });
+
+  it("treats interval two as every third bar", () => {
+    const labels = buildBarCountLabels({
+      bars: sessionBars("2021-09-07", 300, 18), displaySession: "RTH",
       displayIntervalSeconds: 300, session: rth, config: { ...config, interval: 2 },
     });
-    expect(labels.map((label) => label.number)).toEqual([1, 3, 5, 7, 9, 11, 12, 13, 15, 17, 18, 19, 21, 23, 24]);
+    expect(labels.map((label) => label.number)).toEqual([1, 3, 6, 9, 12, 15, 18]);
   });
 
   it("derives numbers from session time when the window starts midday or has gaps", () => {
     const bars = sessionBars("2021-09-07", 300, 20, [2, 3, 4, 5]).slice(10);
     const labels = buildBarCountLabels({
-      bars, displaySession: "RTH", displayIntervalSeconds: 300, session: rth, config,
+      bars, displaySession: "RTH", displayIntervalSeconds: 300, session: rth,
+      config: { ...config, interval: 14 },
     });
     expect(labels[0].number).toBe(15);
     expect(labels.map((label) => label.number)).not.toContain(2);
@@ -98,7 +109,8 @@ describe("RTH bar count", () => {
     const bars = sessionBars("2021-09-07", 3_600, 7);
     bars[6].bucketEnd = "2021-09-07T20:15:00.000Z";
     const labels = buildBarCountLabels({
-      bars, displaySession: "RTH", displayIntervalSeconds: 3_600, session: rth, config,
+      bars, displaySession: "RTH", displayIntervalSeconds: 3_600, session: rth,
+      config: { ...config, interval: 6 },
     });
     expect(labels.slice(0, 6).every((label) => label.kind === "HOUR_CLOSE")).toBe(true);
     expect(labels[6]).toMatchObject({ number: 7, kind: "REGULAR" });
