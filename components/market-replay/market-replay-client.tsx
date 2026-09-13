@@ -31,6 +31,7 @@ import {
 } from "@/lib/market-replay/engine";
 import { getAggregationBucket, mergeSourceBar } from "@/lib/market-replay/aggregation";
 import { calculateAbrSeries } from "@/lib/market-replay/abr";
+import { isValidBarCountInterval } from "@/lib/market-replay/bar-count";
 import { MarketBarCache, ReplayWindowMemoryCache } from "@/lib/market-replay/bar-cache";
 import { tradingDayForTimestamp } from "@/lib/market-replay/chunks";
 import { datasetSession } from "@/lib/market-replay/dataset";
@@ -47,6 +48,8 @@ import {
 import {
   ABR_LENGTH_MAX,
   ABR_LENGTH_MIN,
+  BAR_COUNT_INTERVAL_MAX,
+  BAR_COUNT_INTERVAL_MIN,
   EMA_LENGTH_MAX,
   EMA_LENGTH_MIN,
   EMA_LINE_STYLES,
@@ -191,6 +194,7 @@ export function MarketReplayClient({ dataset, initialJournalFocus = null }: { da
   const [candlestickStyleDraft, setCandlestickStyleDraft] = useState<CandlestickStyle | null>(null);
   const [emaError, setEmaError] = useState<string | null>(null);
   const [abrError, setAbrError] = useState<string | null>(null);
+  const [barCountError, setBarCountError] = useState<string | null>(null);
   const [customInterval, setCustomInterval] = useState("");
   const [customIntervalUnit, setCustomIntervalUnit] = useState<"s" | "m" | "h">("m");
   const [repairInterval, setRepairInterval] = useState("");
@@ -231,6 +235,8 @@ export function MarketReplayClient({ dataset, initialJournalFocus = null }: { da
     abrSettingsLoaded,
     volumeVisible,
     setVolumeVisible,
+    barCountConfig,
+    setBarCountConfig,
     defaultTrendLineStyle,
     setDefaultTrendLineStyle,
     trendLineTemplates,
@@ -1392,6 +1398,16 @@ export function MarketReplayClient({ dataset, initialJournalFocus = null }: { da
     return true;
   }
 
+  function updateBarCountInterval(value: number) {
+    if (!isValidBarCountInterval(value)) {
+      setBarCountError(copy.marketReplay.barCountIntervalRange(BAR_COUNT_INTERVAL_MIN, BAR_COUNT_INTERVAL_MAX));
+      return false;
+    }
+    setBarCountConfig((current) => ({ ...current, interval: value }));
+    setBarCountError(null);
+    return true;
+  }
+
   function addEma() {
     if (emaIndicators.length >= MAX_EMA_INDICATORS) {
       setEmaError(copy.marketReplay.emaLimit(MAX_EMA_INDICATORS));
@@ -1826,6 +1842,9 @@ export function MarketReplayClient({ dataset, initialJournalFocus = null }: { da
             abrEnabled={abrEnabled}
             abrLength={abrLength}
             volumeVisible={volumeVisible}
+            displaySession={replay.displaySession}
+            barCountSession={displayMarketSession}
+            barCountConfig={barCountConfig}
             paperSnapshot={journalReview ? null : paperSnapshot}
             tradeAnnotations={tradeAnnotations}
             tradeAnnotationsTruncated={tradeAnnotationsTruncated}
@@ -2007,6 +2026,49 @@ export function MarketReplayClient({ dataset, initialJournalFocus = null }: { da
           <div className="flex items-center justify-between rounded-md border bg-slate-50 p-3">
             <div><p className="text-sm font-medium text-slate-950">{copy.marketReplay.volumeTitle}</p><p className="mt-0.5 text-xs text-slate-500">{copy.marketReplay.volumeDescription}</p></div>
             <div className="flex items-center gap-2"><span className="text-xs text-slate-500">{volumeVisible ? copy.marketReplay.volumeOn : copy.marketReplay.volumeOff}</span><button type="button" role="switch" aria-checked={volumeVisible} aria-label={copy.marketReplay.volumeToggle} onClick={() => setVolumeVisible((visible) => !visible)} className={`relative h-6 w-11 rounded-full transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-600 focus-visible:ring-offset-2 ${volumeVisible ? "bg-blue-600" : "bg-slate-300"}`}><span className={`absolute left-0 top-0.5 h-5 w-5 rounded-full bg-white shadow-sm transition-transform ${volumeVisible ? "translate-x-5" : "translate-x-0.5"}`} /></button></div>
+          </div>
+          <div className="space-y-3 rounded-md border bg-slate-50 p-3">
+            <div className="flex items-center justify-between gap-4">
+              <div><p className="text-sm font-medium text-slate-950">{copy.marketReplay.barCountTitle}</p><p className="mt-0.5 text-xs text-slate-500">{copy.marketReplay.barCountDescription}</p></div>
+              <div className="flex shrink-0 items-center gap-2"><span className="text-xs text-slate-500">{barCountConfig.enabled ? copy.marketReplay.emaOn : copy.marketReplay.emaOff}</span><button type="button" role="switch" aria-checked={barCountConfig.enabled} aria-label={copy.marketReplay.barCountMaster} onClick={() => setBarCountConfig((current) => ({ ...current, enabled: !current.enabled }))} className={`relative h-6 w-11 rounded-full transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-600 focus-visible:ring-offset-2 ${barCountConfig.enabled ? "bg-blue-600" : "bg-slate-300"}`}><span className={`absolute left-0 top-0.5 h-5 w-5 rounded-full bg-white shadow-sm transition-transform ${barCountConfig.enabled ? "translate-x-5" : "translate-x-0.5"}`} /></button></div>
+            </div>
+            <div className="grid gap-3 border-t pt-3 sm:grid-cols-[7rem_1fr] sm:items-center">
+              <Label htmlFor="bar-count-interval" className="text-xs text-slate-500">{copy.marketReplay.barCountInterval}</Label>
+              <Input
+                key={barCountConfig.interval}
+                id="bar-count-interval"
+                type="number"
+                min={BAR_COUNT_INTERVAL_MIN}
+                max={BAR_COUNT_INTERVAL_MAX}
+                step="1"
+                defaultValue={barCountConfig.interval}
+                onBlur={(event) => {
+                  if (!updateBarCountInterval(Number(event.currentTarget.value))) event.currentTarget.value = String(barCountConfig.interval);
+                }}
+                onKeyDown={(event) => { if (event.key === "Enter") event.currentTarget.blur(); }}
+                className="h-8 w-24 font-mono text-xs"
+              />
+              {([
+                ["regularColor", copy.marketReplay.barCountRegularColor],
+                ["bar18Color", copy.marketReplay.barCountBar18Color],
+                ["hourCloseColor", copy.marketReplay.barCountHourCloseColor],
+              ] as const).map(([key, label]) => (
+                <div key={key} className="contents">
+                  <Label htmlFor={`bar-count-${key}`} className="text-xs text-slate-500">{label}</Label>
+                  <div className="flex items-center gap-2">
+                    <Input
+                      id={`bar-count-${key}`}
+                      type="color"
+                      value={barCountConfig[key]}
+                      onChange={(event) => setBarCountConfig((current) => ({ ...current, [key]: event.target.value.toUpperCase() }))}
+                      className="h-9 w-14 cursor-pointer p-1"
+                    />
+                    <span className="font-mono text-xs text-slate-500">{barCountConfig[key].toUpperCase()}</span>
+                  </div>
+                </div>
+              ))}
+            </div>
+            {barCountError ? <p className="text-xs text-red-600">{barCountError}</p> : null}
           </div>
           <div className="space-y-3 rounded-md border bg-slate-50 p-3">
             <div className="flex items-center justify-between gap-4">

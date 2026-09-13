@@ -27,6 +27,10 @@ import {
   normalizeEmaLineWidth,
 } from "@/lib/market-replay/ema-style";
 import {
+  DEFAULT_BAR_COUNT_CONFIG,
+  parseBarCountPreferences,
+} from "@/lib/market-replay/bar-count";
+import {
   ABR_LENGTH_MAX,
   ABR_LENGTH_MIN,
   EMA_LENGTH_MAX,
@@ -38,6 +42,7 @@ import {
 const EMA_SETTINGS_STORAGE_KEY = "market-replay-ema-settings-v1";
 const ABR_SETTINGS_STORAGE_KEY = "market-replay-abr-settings-v1";
 const VOLUME_VISIBILITY_STORAGE_KEY = "market-replay-volume-visibility-v1";
+const BAR_COUNT_SETTINGS_STORAGE_KEY = "market-replay-bar-count-settings-v1";
 const DISPLAY_TIMEZONE_STORAGE_KEY = "market-replay-display-timezone-v1";
 const CANDLESTICK_STYLE_STORAGE_KEY = "market-replay-candlestick-style-v1";
 const TREND_LINE_PREFERENCES_STORAGE_KEY = "market-replay-trend-line-preferences-v1";
@@ -109,6 +114,8 @@ export function useReplayPreferences(dataset: { id: string; startTime: string; t
   const [abrSettingsLoaded, setAbrSettingsLoaded] = useState(false);
   const [volumeVisible, setVolumeVisible] = useState(true);
   const [volumeVisibilityLoaded, setVolumeVisibilityLoaded] = useState(false);
+  const [barCountConfig, setBarCountConfig] = useState(() => ({ ...DEFAULT_BAR_COUNT_CONFIG }));
+  const [barCountSettingsLoaded, setBarCountSettingsLoaded] = useState(false);
   const [defaultTrendLineStyle, setDefaultTrendLineStyle] = useState<TrendLineStyle>(DEFAULT_TREND_LINE_STYLE);
   const [trendLineTemplates, setTrendLineTemplates] = useState<TrendLineTemplate[]>([]);
   const [defaultFibonacciStyle, setDefaultFibonacciStyle] = useState<FibonacciRetracementStyle>(() => cloneFibonacciStyle(DEFAULT_FIBONACCI_RETRACEMENT_STYLE));
@@ -145,6 +152,15 @@ export function useReplayPreferences(dataset: { id: string; startTime: string; t
       setVolumeVisible(true);
     }
     setVolumeVisibilityLoaded(true);
+  }, []);
+
+  useEffect(() => {
+    try {
+      setBarCountConfig(parseBarCountPreferences(window.localStorage.getItem(BAR_COUNT_SETTINGS_STORAGE_KEY)));
+    } catch {
+      setBarCountConfig({ ...DEFAULT_BAR_COUNT_CONFIG });
+    }
+    setBarCountSettingsLoaded(true);
   }, []);
 
   useEffect(() => {
@@ -214,6 +230,15 @@ export function useReplayPreferences(dataset: { id: string; startTime: string; t
   }, [volumeVisibilityLoaded, volumeVisible]);
 
   useEffect(() => {
+    if (!barCountSettingsLoaded) return;
+    try {
+      window.localStorage.setItem(BAR_COUNT_SETTINGS_STORAGE_KEY, JSON.stringify(barCountConfig));
+    } catch {
+      // Browser storage can be unavailable; Bar Count settings still apply to this page session.
+    }
+  }, [barCountConfig, barCountSettingsLoaded]);
+
+  useEffect(() => {
     let preferences = parseTrendLinePreferences(null);
     let fibonacciPreferences = parseFibonacciRetracementPreferences(null);
     try {
@@ -260,6 +285,8 @@ export function useReplayPreferences(dataset: { id: string; startTime: string; t
     abrSettingsLoaded,
     volumeVisible,
     setVolumeVisible,
+    barCountConfig,
+    setBarCountConfig,
     defaultTrendLineStyle,
     setDefaultTrendLineStyle,
     trendLineTemplates,

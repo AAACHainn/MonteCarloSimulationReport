@@ -15,6 +15,8 @@ export const EMA_LENGTH_MIN = 2;
 export const EMA_LENGTH_MAX = 1_000;
 export const ABR_LENGTH_MIN = 1;
 export const ABR_LENGTH_MAX = 1_000;
+export const BAR_COUNT_INTERVAL_MIN = 1;
+export const BAR_COUNT_INTERVAL_MAX = 100;
 export const MAX_EMA_INDICATORS = 5;
 export const EMA_LINE_WIDTHS = [1, 2, 3, 4] as const;
 export const EMA_LINE_STYLES = ["SOLID", "DASHED", "DOTTED"] as const;
@@ -51,6 +53,14 @@ export type EmaIndicatorConfig = {
 export type AbrIndicatorConfig = {
   enabled: boolean;
   length: number;
+};
+
+export type BarCountIndicatorConfig = {
+  enabled: boolean;
+  interval: number;
+  regularColor: string;
+  bar18Color: string;
+  hourCloseColor: string;
 };
 
 export type MarketBarData = {

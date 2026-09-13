@@ -53,7 +53,7 @@ export function PaperJournalTable({
   const [nextCursor, setNextCursor] = useState<number | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
-  const [deleteTarget, setDeleteTarget] = useState<{ kind: "entry" | "session"; id: string } | null>(null);
+  const [deleteTarget, setDeleteTarget] = useState<string | null>(null);
   const [deleting, setDeleting] = useState(false);
 
   const load = useCallback(async (cursor = 0, append = false) => {
@@ -86,9 +86,8 @@ export function PaperJournalTable({
   async function confirmDelete() {
     if (!deleteTarget) return;
     setDeleting(true);
-    const segment = deleteTarget.kind === "entry" ? `entries/${deleteTarget.id}` : `sessions/${deleteTarget.id}`;
     try {
-      const response = await fetch(`/api/market-datasets/${datasetId}/paper-journal/${segment}`, { method: "DELETE" });
+      const response = await fetch(`/api/market-datasets/${datasetId}/paper-journal/sessions/${deleteTarget}`, { method: "DELETE" });
       const data = await response.json().catch(() => null);
       if (!response.ok) throw new Error(data?.error ?? copy.paperTrading.journalDeleteFailed);
       setDeleteTarget(null);
@@ -112,13 +111,12 @@ export function PaperJournalTable({
         <span>{new Date(group.session.createdAt).toLocaleString("zh-CN")}</span>
         <span>{group.session.entryCount} {copy.paperTrading.journalRows}</span>
         <span>{group.session.archivedAt ? copy.paperTrading.journalArchived : copy.paperTrading.journalCurrent}</span>
-        {group.session.archivedAt ? <Button type="button" variant="ghost" size="sm" className="ml-auto h-7 text-red-600" onClick={() => setDeleteTarget({ kind: "session", id: group.session!.id })}><Trash2 className="h-3.5 w-3.5" />{copy.paperTrading.deleteJournalSession}</Button> : null}
+        {group.session.archivedAt ? <Button type="button" variant="ghost" size="sm" className="ml-auto h-7 text-red-600" onClick={() => setDeleteTarget(group.session!.id)}><Trash2 className="h-3.5 w-3.5" />{copy.paperTrading.deleteJournalSession}</Button> : null}
       </div> : null}
       <div className="overflow-x-auto rounded-md border">
         <table className="w-full min-w-[1320px] border-collapse text-right text-sm tabular-nums">
           <thead className="bg-blue-50 text-xs text-slate-700"><tr>
             {["No", "Date", "Direction", "ABR", "iRisk", "iRisk / ABR", "aRisk", "aRisk / ABR", "Gain / Loss", "Result", "ABR RR", "iRisk RR", "aRisk RR"].map((label) => <th key={label} className="border-b border-r px-3 py-2 font-semibold last:border-r-0">{label}</th>)}
-            {scope === "history" ? <th className="border-b px-3 py-2 font-semibold">{copy.paperTrading.action}</th> : null}
           </tr></thead>
           <tbody>{group.entries.map((entry) => <tr key={entry.id} className="border-b last:border-b-0 hover:bg-slate-50">
             <td className="border-r px-3 py-2"><button type="button" className="cursor-pointer font-medium text-blue-700 underline-offset-2 hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-600" onClick={() => onFocus ? onFocus(entry) : window.location.assign(`/market-replay/${datasetId}?focusSequence=${entry.openedSequence}&journalNo=${entry.globalNo}`)}>{entry.no}</button></td>
@@ -134,12 +132,11 @@ export function PaperJournalTable({
             <td className="border-r px-3 py-2">{ratio(entry.abrRr)}</td>
             <td className="border-r px-3 py-2">{ratio(entry.initialRiskRr)}</td>
             <td className="px-3 py-2">{ratio(entry.actualRiskRr)}</td>
-            {scope === "history" ? <td className="px-3 py-2"><Button type="button" variant="ghost" size="icon" className="h-7 w-7 text-red-600" aria-label={copy.paperTrading.deleteJournalEntry} disabled={!entry.archivedAt} onClick={() => setDeleteTarget({ kind: "entry", id: entry.id })}><Trash2 className="h-3.5 w-3.5" /></Button></td> : null}
           </tr>)}</tbody>
         </table>
       </div>
     </section>)}
     {nextCursor !== null ? <div className="text-center"><Button type="button" variant="outline" disabled={loading} onClick={() => void load(nextCursor, true)}>{loading ? <Loader2 className="h-4 w-4 animate-spin" /> : null}{copy.paperTrading.loadMoreJournal}</Button></div> : null}
-    <ConfirmDialog open={deleteTarget !== null} title={deleteTarget?.kind === "session" ? copy.paperTrading.deleteJournalSessionTitle : copy.paperTrading.deleteJournalEntryTitle} description={deleteTarget?.kind === "session" ? copy.paperTrading.deleteJournalSessionConfirm : copy.paperTrading.deleteJournalEntryConfirm} isLoading={deleting} onCancel={() => setDeleteTarget(null)} onConfirm={() => void confirmDelete()} />
+    <ConfirmDialog open={deleteTarget !== null} title={copy.paperTrading.deleteJournalSessionTitle} description={copy.paperTrading.deleteJournalSessionConfirm} isLoading={deleting} onCancel={() => setDeleteTarget(null)} onConfirm={() => void confirmDelete()} />
   </div>;
 }

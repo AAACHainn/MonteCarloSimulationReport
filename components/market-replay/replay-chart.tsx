@@ -14,7 +14,13 @@ import {
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import type { AggregatedMarketBarData, EmaIndicatorConfig } from "@/lib/market-replay/types";
+import type {
+  AggregatedMarketBarData,
+  BarCountIndicatorConfig,
+  DisplaySession,
+  EmaIndicatorConfig,
+  TradingSessionConfig,
+} from "@/lib/market-replay/types";
 import { copy } from "@/lib/i18n";
 import { calculateAbrSeries } from "@/lib/market-replay/abr";
 import { defaultReplayLogicalRange, rangeAfterNewReplayBar } from "@/lib/market-replay/chart-range";
@@ -45,6 +51,7 @@ import { FibonacciRetracementPrimitive } from "@/lib/market-replay/fibonacci-ret
 import { formatUtcDateTime, utcDateParts } from "@/lib/market-replay/display-timezone";
 import { formatPriceForTick, priceDecimalsForTick, snapPriceToTick } from "@/lib/market-replay/price-ticks";
 import { ReplayTradeAnnotationPrimitive } from "@/lib/market-replay/trade-annotation-primitive";
+import { BarCountPrimitive } from "@/lib/market-replay/bar-count-primitive";
 import {
   calculateRiskSizing,
   orderTypeForEntry,
@@ -212,7 +219,8 @@ export function ReplayChart({
   candlestickStyle,
   onMeasurementArmedChange, drawingTool, onDrawingToolChange, trendLineDraftStyle, fibonacciDraftStyle, drawings, selectedDrawingId,
   onSelectedDrawingIdChange, onCreateDrawing, onUpdateDrawing, onDeleteDrawing,
-  onOpenDrawingStyle, emaEnabled, emaIndicators, abrEnabled, abrLength, volumeVisible, paperSnapshot,
+  onOpenDrawingStyle, emaEnabled, emaIndicators, abrEnabled, abrLength, volumeVisible,
+  displaySession, barCountSession, barCountConfig, paperSnapshot,
   tradeAnnotations, tradeAnnotationsTruncated, focusSequence = null,
   paperBusy, paperError, onSubmitOrder, onOrderPriceChange,
   onCancelOrder, onClosePosition, onDraftActiveChange, onOpenPaperAccount,
@@ -242,6 +250,9 @@ export function ReplayChart({
   abrEnabled: boolean;
   abrLength: number;
   volumeVisible: boolean;
+  displaySession: DisplaySession;
+  barCountSession: TradingSessionConfig;
+  barCountConfig: BarCountIndicatorConfig;
   paperSnapshot: PaperSessionSnapshot | null;
   tradeAnnotations: ReplayTradeAnnotationData[];
   tradeAnnotationsTruncated: boolean;
@@ -263,6 +274,7 @@ export function ReplayChart({
   const priceLinesRef = useRef(new Map<string, IPriceLine>());
   const lineTargetsRef = useRef(new Map<string, LineTarget>());
   const tradeAnnotationPrimitiveRef = useRef<ReplayTradeAnnotationPrimitive | null>(null);
+  const barCountPrimitiveRef = useRef<BarCountPrimitive | null>(null);
   const trendLinePrimitiveRef = useRef<TrendLinePrimitive | null>(null);
   const fibonacciPrimitiveRef = useRef<FibonacciRetracementPrimitive | null>(null);
   const lastDataRef = useRef<AggregatedMarketBarData[]>([]);
@@ -511,9 +523,11 @@ export function ReplayChart({
     const trendLinePrimitive = new TrendLinePrimitive();
     const fibonacciPrimitive = new FibonacciRetracementPrimitive();
     const tradeAnnotationPrimitive = new ReplayTradeAnnotationPrimitive();
+    const barCountPrimitive = new BarCountPrimitive();
     candles.attachPrimitive(trendLinePrimitive);
     candles.attachPrimitive(fibonacciPrimitive);
     candles.attachPrimitive(tradeAnnotationPrimitive);
+    candles.attachPrimitive(barCountPrimitive);
     tradeAnnotationPrimitive.setData({ entries: tradeAnnotationsRef.current, bars: barsRef.current });
     const observer = new ResizeObserver(([entry]) => {
       if (entry?.contentRect.width && entry.contentRect.height) {
@@ -529,6 +543,7 @@ export function ReplayChart({
     trendLinePrimitiveRef.current = trendLinePrimitive;
     fibonacciPrimitiveRef.current = fibonacciPrimitive;
     tradeAnnotationPrimitiveRef.current = tradeAnnotationPrimitive;
+    barCountPrimitiveRef.current = barCountPrimitive;
     syncDrawingPrimitive();
     return () => {
       observer.disconnect();
@@ -537,9 +552,11 @@ export function ReplayChart({
       candles.detachPrimitive(trendLinePrimitive);
       candles.detachPrimitive(fibonacciPrimitive);
       candles.detachPrimitive(tradeAnnotationPrimitive);
+      candles.detachPrimitive(barCountPrimitive);
       trendLinePrimitiveRef.current = null;
       fibonacciPrimitiveRef.current = null;
       tradeAnnotationPrimitiveRef.current = null;
+      barCountPrimitiveRef.current = null;
       chart.remove(); chartRef.current = null; candleRef.current = null; volumeRef.current = null;
       priceLines.clear(); lineTargets.clear(); lastDataRef.current = [];
     };
@@ -644,6 +661,16 @@ export function ReplayChart({
   useEffect(() => {
     tradeAnnotationPrimitiveRef.current?.setData({ entries: tradeAnnotations, bars });
   }, [bars, tradeAnnotations]);
+
+  useEffect(() => {
+    barCountPrimitiveRef.current?.setData({
+      bars,
+      displaySession,
+      displayIntervalSeconds,
+      session: barCountSession,
+      config: barCountConfig,
+    });
+  }, [barCountConfig, barCountSession, bars, displayIntervalSeconds, displaySession]);
 
   useReplayChartEma({
     chartRef,
