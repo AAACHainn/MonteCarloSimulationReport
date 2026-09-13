@@ -41,7 +41,7 @@ export function TradeTagManager({ tags }: { tags: ManagedTradeTag[] }) {
     setIsSaving(false);
 
     if (!response.ok) {
-      setError(getTagApiError(data, copy.tradeJournals.tags.managerSaveError));
+      setError(getTagApiError(data, copy.masterData.tags.saveError));
       return;
     }
 
@@ -67,7 +67,7 @@ export function TradeTagManager({ tags }: { tags: ManagedTradeTag[] }) {
     setIsSaving(false);
 
     if (!response.ok) {
-      setError(getTagApiError(data, copy.tradeJournals.tags.managerSaveError));
+      setError(getTagApiError(data, copy.masterData.tags.saveError));
       return;
     }
 
@@ -85,7 +85,7 @@ export function TradeTagManager({ tags }: { tags: ManagedTradeTag[] }) {
     setIsDeleting(false);
 
     if (!response.ok) {
-      setError(getTagApiError(data, copy.tradeJournals.tags.managerDeleteError));
+      setError(getTagApiError(data, copy.masterData.tags.deleteError));
       setDeleteTag(null);
       return;
     }
@@ -99,25 +99,25 @@ export function TradeTagManager({ tags }: { tags: ManagedTradeTag[] }) {
       <CardHeader>
         <CardTitle className="flex items-center gap-2">
           <Tags className="h-5 w-5 text-blue-700" />
-          {copy.tradeJournals.tags.managerTitle}
+          {copy.masterData.tags.title}
         </CardTitle>
-        <CardDescription>{copy.tradeJournals.tags.managerDescription}</CardDescription>
+        <CardDescription>{copy.masterData.tags.description}</CardDescription>
       </CardHeader>
       <CardContent className="space-y-4">
         <form onSubmit={createTag} className="flex flex-col gap-2 sm:flex-row sm:items-end">
           <div className="flex-1 space-y-2">
-            <Label htmlFor="new-trade-tag">{copy.tradeJournals.tags.name}</Label>
+            <Label htmlFor="new-trade-tag">{copy.masterData.tags.name}</Label>
             <Input
               id="new-trade-tag"
               name="name"
               required
               maxLength={MAX_TAG_NAME_LENGTH}
-              placeholder={copy.tradeJournals.tags.managerPlaceholder}
+              placeholder={copy.masterData.tags.placeholder}
             />
           </div>
           <Button type="submit" disabled={isSaving}>
             <Plus className="h-4 w-4" />
-            {copy.tradeJournals.tags.create}
+            {copy.masterData.tags.create}
           </Button>
         </form>
 
@@ -125,7 +125,7 @@ export function TradeTagManager({ tags }: { tags: ManagedTradeTag[] }) {
 
         {tags.length === 0 ? (
           <p className="rounded-md border border-dashed p-5 text-center text-sm text-slate-500">
-            {copy.tradeJournals.tags.managerEmpty}
+            {copy.masterData.tags.empty}
           </p>
         ) : (
           <div className="grid gap-2 md:grid-cols-2 xl:grid-cols-3">
@@ -138,7 +138,7 @@ export function TradeTagManager({ tags }: { tags: ManagedTradeTag[] }) {
                       maxLength={MAX_TAG_NAME_LENGTH}
                       onChange={(event) => setEditName(event.target.value)}
                       className="h-8 min-w-0 flex-1"
-                      aria-label={copy.tradeJournals.tags.editName}
+                      aria-label={copy.masterData.tags.editName}
                     />
                     <Button
                       type="button"
@@ -146,7 +146,7 @@ export function TradeTagManager({ tags }: { tags: ManagedTradeTag[] }) {
                       className="h-8 w-8 px-0"
                       onClick={() => void saveTag(tag.id)}
                       disabled={isSaving}
-                      aria-label={copy.tradeJournals.tags.save}
+                      aria-label={copy.masterData.tags.save}
                     >
                       <Check className="h-4 w-4" />
                     </Button>
@@ -170,7 +170,7 @@ export function TradeTagManager({ tags }: { tags: ManagedTradeTag[] }) {
                     <div className="min-w-0 flex-1">
                       <div className="truncate text-sm font-medium text-slate-950" title={tag.name}>{tag.name}</div>
                       <div className="mt-1 text-xs text-slate-500">
-                        {copy.tradeJournals.tags.usageCount.replace("{count}", String(tag._count.trades))}
+                        {copy.masterData.tags.usageCount.replace("{count}", String(tag._count.trades))}
                       </div>
                     </div>
                     <Button
@@ -180,7 +180,7 @@ export function TradeTagManager({ tags }: { tags: ManagedTradeTag[] }) {
                       className="h-8 w-8 px-0"
                       onClick={() => beginEdit(tag)}
                       disabled={editingId !== null}
-                      aria-label={copy.tradeJournals.tags.edit}
+                      aria-label={copy.masterData.tags.edit}
                     >
                       <Pencil className="h-4 w-4" />
                     </Button>
@@ -191,8 +191,8 @@ export function TradeTagManager({ tags }: { tags: ManagedTradeTag[] }) {
                       className="h-8 w-8 px-0"
                       onClick={() => setDeleteTag(tag)}
                       disabled={editingId !== null || tag._count.trades > 0}
-                      aria-label={copy.tradeJournals.tags.delete}
-                      title={tag._count.trades > 0 ? copy.tradeJournals.tags.deleteInUse : copy.tradeJournals.tags.delete}
+                      aria-label={copy.masterData.tags.delete}
+                      title={tag._count.trades > 0 ? copy.masterData.tags.deleteInUse : copy.masterData.tags.delete}
                     >
                       <Trash2 className="h-4 w-4 text-red-600" />
                     </Button>
@@ -206,9 +206,9 @@ export function TradeTagManager({ tags }: { tags: ManagedTradeTag[] }) {
 
       <ConfirmDialog
         open={Boolean(deleteTag)}
-        title={copy.tradeJournals.tags.deleteTitle}
-        description={deleteTag ? copy.tradeJournals.tags.deleteConfirm.replace("{name}", deleteTag.name) : ""}
-        confirmLabel={copy.tradeJournals.tags.delete}
+        title={copy.masterData.tags.deleteTitle}
+        description={deleteTag ? copy.masterData.tags.deleteConfirm.replace("{name}", deleteTag.name) : ""}
+        confirmLabel={copy.masterData.tags.delete}
         isLoading={isDeleting}
         onCancel={() => setDeleteTag(null)}
         onConfirm={confirmDelete}

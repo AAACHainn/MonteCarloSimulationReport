@@ -6,15 +6,14 @@ import { copy } from "@/lib/i18n";
 export const dynamic = "force-dynamic";
 
 export default async function TradeJournalsPage() {
-  const [journals, options, tags] = await Promise.all([
+  const [journals, instrumentOptions] = await Promise.all([
     prisma.tradeJournal.findMany({
       orderBy: { createdAt: "desc" },
       include: { dataset: { include: { _count: { select: { trades: true, simulationRuns: true } } } } },
     }),
-    prisma.tradeOption.findMany({ orderBy: [{ type: "asc" }, { active: "desc" }, { name: "asc" }] }),
-    prisma.tradeTag.findMany({
-      orderBy: { name: "asc" },
-      include: { _count: { select: { trades: true } } },
+    prisma.tradeOption.findMany({
+      where: { type: "INSTRUMENT" },
+      orderBy: [{ active: "desc" }, { name: "asc" }],
     }),
   ]);
 
@@ -33,13 +32,12 @@ export default async function TradeJournalsPage() {
           description: journal.description,
           dataset: journal.dataset,
         }))}
-        options={options.map((option) => ({
+        instrumentOptions={instrumentOptions.map((option) => ({
           id: option.id,
           type: option.type,
           name: option.name,
           active: option.active,
         }))}
-        tags={tags}
       />
     </div>
   );

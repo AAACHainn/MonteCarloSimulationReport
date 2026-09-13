@@ -1,5 +1,5 @@
 import Link from "next/link";
-import { ArrowRight, BarChart3, ChartCandlestick, Database, History, NotebookTabs } from "lucide-react";
+import { ArrowRight, BarChart3, ChartCandlestick, Database, History, NotebookTabs, Tags } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { copy } from "@/lib/i18n";
@@ -16,6 +16,12 @@ const actions = [
     icon: NotebookTabs,
     title: copy.home.manageTradeJournals,
     body: copy.home.manageTradeJournalsBody,
+  },
+  {
+    href: "/master-data",
+    icon: Tags,
+    title: copy.home.manageMasterData,
+    body: copy.home.manageMasterDataBody,
   },
   {
     href: "/datasets",

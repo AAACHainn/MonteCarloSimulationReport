@@ -8,6 +8,7 @@ const navItems = [
   { href: "/market-replay", label: copy.nav.marketReplay },
   { href: "/datasets", label: copy.nav.datasets },
   { href: "/trade-journals", label: copy.nav.tradeJournals },
+  { href: "/master-data", label: copy.nav.masterData },
   { href: "/simulations/new", label: copy.nav.newSimulation },
   { href: "/simulations/history", label: copy.nav.history },
 ];

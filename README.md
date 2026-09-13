@@ -194,6 +194,7 @@ corepack pnpm run build
 
 - `/`：首页
 - `/trade-journals`：交易日志
+- `/master-data`：基础数据（交易策略与全局标签）
 - `/datasets`：交易数据集
 - `/simulations/new`：新建模拟
 - `/simulations/history`：模拟历史

@@ -14,16 +14,17 @@ import {
   NotebookTabs,
   Pencil,
   Plus,
-  Trash2,
   UploadCloud,
   X,
 } from "lucide-react";
+import {
+  TradeOptionManager,
+  type ManagedTradeOption,
+} from "@/components/master-data/trade-option-manager";
 import { DeleteJournalButton } from "@/components/trade-journals/delete-journal-button";
-import { TradeTagManager, type ManagedTradeTag } from "@/components/trade-journals/trade-tag-manager";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
-import { ConfirmDialog } from "@/components/ui/confirm-dialog";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
@@ -34,13 +35,6 @@ type Journal = {
   name: string;
   description: string | null;
   dataset: { _count: { trades: number; simulationRuns: number } };
-};
-
-type TradeOption = {
-  id: string;
-  type: "INSTRUMENT" | "STRATEGY";
-  name: string;
-  active: boolean;
 };
 
 type ImportStatus = "idle" | "uploading" | "processing" | "success" | "error";
@@ -60,12 +54,10 @@ function formatFileSize(size: number) {
 
 export function JournalDashboard({
   journals,
-  options,
-  tags,
+  instrumentOptions,
 }: {
   journals: Journal[];
-  options: TradeOption[];
-  tags: ManagedTradeTag[];
+  instrumentOptions: ManagedTradeOption[];
 }) {
   const router = useRouter();
   const importInputRef = useRef<HTMLInputElement | null>(null);
@@ -204,7 +196,7 @@ export function JournalDashboard({
           </CardContent>
         </Card>
 
-        <OptionManager options={options} />
+        <TradeOptionManager type="INSTRUMENT" options={instrumentOptions} />
 
         <Card>
           <CardHeader>
@@ -323,8 +315,6 @@ export function JournalDashboard({
         </Card>
       </div>
 
-      <TradeTagManager tags={tags} />
-
       <section className="space-y-4">
         <div>
           <h2 className="text-2xl font-semibold tracking-tight">{copy.tradeJournals.title}</h2>
@@ -341,7 +331,6 @@ export function JournalDashboard({
     </div>
   );
 }
-
 function JournalCard({ journal }: { journal: Journal }) {
   const router = useRouter();
   const [isEditing, setIsEditing] = useState(false);
@@ -466,239 +455,5 @@ function JournalCard({ journal }: { journal: Journal }) {
         )}
       </CardContent>
     </Card>
-  );
-}
-
-function OptionManager({ options }: { options: TradeOption[] }) {
-  const router = useRouter();
-  const [type, setType] = useState<TradeOption["type"]>("INSTRUMENT");
-  const [error, setError] = useState<string | null>(null);
-  const [editingOptionId, setEditingOptionId] = useState<string | null>(null);
-  const [editName, setEditName] = useState("");
-  const [deleteOption, setDeleteOption] = useState<TradeOption | null>(null);
-  const [isSavingOption, setIsSavingOption] = useState(false);
-  const [isDeletingOption, setIsDeletingOption] = useState(false);
-
-  async function addOption(event: React.FormEvent<HTMLFormElement>) {
-    event.preventDefault();
-    const form = event.currentTarget;
-    const formData = new FormData(form);
-    setError(null);
-    const response = await fetch("/api/trade-options", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ type, name: formData.get("name") }),
-    });
-    if (!response.ok) {
-      const data = await response.json().catch(() => null);
-      setError(data?.error ?? copy.tradeJournals.optionSaveError);
-      return;
-    }
-    form.reset();
-    router.refresh();
-  }
-
-  function beginEditOption(option: TradeOption) {
-    setEditingOptionId(option.id);
-    setEditName(option.name);
-    setError(null);
-  }
-
-  function cancelEditOption() {
-    setEditingOptionId(null);
-    setEditName("");
-    setError(null);
-  }
-
-  async function saveOption(option: TradeOption) {
-    const name = editName.trim();
-    if (!name) {
-      setError(copy.api.optionNameRequired);
-      return;
-    }
-
-    setIsSavingOption(true);
-    setError(null);
-    const response = await fetch(`/api/trade-options/${option.id}`, {
-      method: "PATCH",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ name }),
-    });
-    const data = await response.json().catch(() => null);
-    setIsSavingOption(false);
-
-    if (!response.ok) {
-      setError(data?.error ?? copy.tradeJournals.optionSaveError);
-      return;
-    }
-
-    cancelEditOption();
-    router.refresh();
-  }
-
-  async function toggleOptionActive(option: TradeOption) {
-    setError(null);
-    const response = await fetch(`/api/trade-options/${option.id}`, {
-      method: "PATCH",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ active: !option.active }),
-    });
-    const data = await response.json().catch(() => null);
-
-    if (!response.ok) {
-      setError(data?.error ?? copy.tradeJournals.optionSaveError);
-      return;
-    }
-
-    router.refresh();
-  }
-
-  async function confirmDeleteOption() {
-    if (!deleteOption) return;
-
-    setIsDeletingOption(true);
-    setError(null);
-    const response = await fetch(`/api/trade-options/${deleteOption.id}`, { method: "DELETE" });
-    const data = await response.json().catch(() => null);
-    setIsDeletingOption(false);
-
-    if (!response.ok) {
-      setError(data?.error ?? copy.tradeJournals.optionDeleteError);
-      return;
-    }
-
-    if (editingOptionId === deleteOption.id) {
-      cancelEditOption();
-    }
-    setDeleteOption(null);
-    router.refresh();
-  }
-
-  const visibleOptions = options.filter((option) => option.type === type);
-
-  return (
-    <>
-      <Card>
-        <CardHeader>
-          <CardTitle>{copy.tradeJournals.optionsTitle}</CardTitle>
-          <CardDescription>{copy.tradeJournals.optionsDescription}</CardDescription>
-        </CardHeader>
-        <CardContent className="space-y-4">
-          <div className="flex gap-2">
-            {(["INSTRUMENT", "STRATEGY"] as const).map((value) => (
-              <Button
-                key={value}
-                type="button"
-                size="sm"
-                variant={type === value ? "default" : "outline"}
-                onClick={() => setType(value)}
-              >
-                {value === "INSTRUMENT" ? copy.tradeJournals.instrument : copy.tradeJournals.strategy}
-              </Button>
-            ))}
-          </div>
-          <form onSubmit={addOption} className="flex gap-2">
-            <Input name="name" required maxLength={80} placeholder={copy.tradeJournals.optionPlaceholder} />
-            <Button type="submit" size="sm">{copy.tradeJournals.addOption}</Button>
-          </form>
-          {error ? <p className="text-sm text-red-600">{error}</p> : null}
-          <div className="max-h-44 space-y-2 overflow-auto pr-1">
-            {visibleOptions.length === 0 ? (
-              <p className="text-sm text-slate-500">{copy.tradeJournals.noOptions}</p>
-            ) : (
-              visibleOptions.map((option) => {
-                const isEditing = editingOptionId === option.id;
-
-                return (
-                  <div key={option.id} className="flex min-h-12 items-center gap-2 rounded-md border px-3 py-2 text-sm">
-                    {isEditing ? (
-                      <>
-                        <Input
-                          value={editName}
-                          onChange={(event) => setEditName(event.target.value)}
-                          maxLength={80}
-                          className="h-8 min-w-0 flex-1"
-                          autoFocus
-                        />
-                        <Button
-                          type="button"
-                          variant="ghost"
-                          size="icon"
-                          className="h-8 w-8 shrink-0 text-blue-700 hover:bg-blue-50 hover:text-blue-800"
-                          onClick={() => saveOption(option)}
-                          disabled={isSavingOption}
-                          aria-label={copy.tradeJournals.saveOption}
-                          title={copy.tradeJournals.saveOption}
-                        >
-                          <Check className="h-4 w-4" />
-                        </Button>
-                        <Button
-                          type="button"
-                          variant="ghost"
-                          size="icon"
-                          className="h-8 w-8 shrink-0"
-                          onClick={cancelEditOption}
-                          disabled={isSavingOption}
-                          aria-label={copy.common.cancel}
-                          title={copy.common.cancel}
-                        >
-                          <X className="h-4 w-4" />
-                        </Button>
-                      </>
-                    ) : (
-                      <>
-                        <span className={`min-w-0 flex-1 truncate ${option.active ? "text-slate-900" : "text-slate-400"}`}>
-                          {option.name}
-                        </span>
-                        <Button
-                          type="button"
-                          variant="ghost"
-                          size="icon"
-                          className="h-8 w-8 shrink-0"
-                          onClick={() => beginEditOption(option)}
-                          aria-label={copy.tradeJournals.editOption}
-                          title={copy.tradeJournals.editOption}
-                        >
-                          <Pencil className="h-4 w-4" />
-                        </Button>
-                        <Button
-                          type="button"
-                          variant="ghost"
-                          size="sm"
-                          className="h-8 shrink-0 px-2"
-                          onClick={() => toggleOptionActive(option)}
-                        >
-                          {option.active ? copy.tradeJournals.deactivate : copy.tradeJournals.reactivate}
-                        </Button>
-                        <Button
-                          type="button"
-                          variant="ghost"
-                          size="icon"
-                          className="h-8 w-8 shrink-0 text-red-600 hover:bg-red-50 hover:text-red-700"
-                          onClick={() => setDeleteOption(option)}
-                          aria-label={copy.tradeJournals.deleteOption}
-                          title={copy.tradeJournals.deleteOption}
-                        >
-                          <Trash2 className="h-4 w-4" />
-                        </Button>
-                      </>
-                    )}
-                  </div>
-                );
-              })
-            )}
-          </div>
-        </CardContent>
-      </Card>
-      <ConfirmDialog
-        open={Boolean(deleteOption)}
-        title={copy.tradeJournals.deleteOptionTitle}
-        description={copy.tradeJournals.deleteOptionConfirm}
-        confirmLabel={copy.tradeJournals.deleteOption}
-        isLoading={isDeletingOption}
-        onCancel={() => setDeleteOption(null)}
-        onConfirm={confirmDeleteOption}
-      />
-    </>
   );
 }
