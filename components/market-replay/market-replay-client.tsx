@@ -5,7 +5,7 @@ import Link from "next/link";
 import { startTransition, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { BookOpen, ChevronRight, ListTree, Loader2, Palette, Pause, Play, Plus, RotateCcw, Ruler, Settings2, Trash2, TrendingUp, WalletCards, X } from "lucide-react";
 import * as Popover from "@radix-ui/react-popover";
-import { ReplayChart } from "@/components/market-replay/replay-chart";
+import { ReplayChart, type ReplayVisibleSequenceRange } from "@/components/market-replay/replay-chart";
 import { ReplayStartDialog } from "@/components/market-replay/replay-start-dialog";
 import { DEFAULT_REPLAY_MAX_VISIBLE_BARS } from "@/lib/market-replay/chart-range";
 import type { CandlestickStyle } from "@/lib/market-replay/candlestick-style";
@@ -29,10 +29,10 @@ import {
   setDisplaySession,
   setPlaybackRate,
 } from "@/lib/market-replay/engine";
-import { getAggregationBucket, mergeSourceBar } from "@/lib/market-replay/aggregation";
-import { calculateAbrSeries } from "@/lib/market-replay/abr";
+import { aggregateMarketBars, getAggregationBucket, mergeSourceBarInto } from "@/lib/market-replay/aggregation";
+import { calculateLatestAbr } from "@/lib/market-replay/abr";
 import { isValidBarCountInterval } from "@/lib/market-replay/bar-count";
-import { MarketBarCache, ReplayWindowMemoryCache } from "@/lib/market-replay/bar-cache";
+import { DisplayBarCache, MarketBarCache, ReplayWindowMemoryCache } from "@/lib/market-replay/bar-cache";
 import { tradingDayForTimestamp } from "@/lib/market-replay/chunks";
 import { datasetSession } from "@/lib/market-replay/dataset";
 import { resolveDisplaySession } from "@/lib/market-replay/chart-sessions";
@@ -57,6 +57,9 @@ import {
   MAX_EMA_INDICATORS,
   MAX_PLAYBACK_RATE,
   MIN_PLAYBACK_RATE,
+  REPLAY_HISTORY_BAR_LIMIT,
+  REPLAY_HISTORY_COMPACT_TO,
+  REPLAY_HISTORY_PREFETCH_THRESHOLD,
   formatInterval,
   isValidDisplayInterval,
   type AggregatedMarketBarData,
@@ -65,6 +68,7 @@ import {
   type MarketDatasetSummary,
   type ReplayState,
 } from "@/lib/market-replay/types";
+import { mergeReplayHistory, nextHistoryEndSequence, replayHistoryPageSize } from "@/lib/market-replay/history";
 import type {
   PaperOrderType,
   PaperSessionSnapshot,
@@ -110,6 +114,8 @@ type WindowPayload = {
   warmupBars: AggregatedMarketBarData[];
   lastSourceBar: MarketBarData | null;
   focusBarIndex?: number | null;
+  nextEndSequence?: number | null;
+  hasEarlierBars?: boolean;
 };
 type ServerAdvancePayload = {
   currentSequence: number;
@@ -174,6 +180,15 @@ function formatDatasetTime(value: string, timezone: string) {
 }
 
 type JournalFocus = { sequence: number; no: number; globalNo: number };
+
+function scheduleIdleTask(task: () => void) {
+  if (typeof window !== "undefined" && "requestIdleCallback" in window) {
+    const id = window.requestIdleCallback(task, { timeout: 1_000 });
+    return () => window.cancelIdleCallback(id);
+  }
+  const id = setTimeout(task, 0);
+  return () => clearTimeout(id);
+}
 
 export function MarketReplayClient({ dataset, initialJournalFocus = null }: { dataset: MarketDatasetSummary; initialJournalFocus?: JournalFocus | null }) {
   const [bars, setBars] = useState<AggregatedMarketBarData[]>([]);
@@ -261,6 +276,29 @@ export function MarketReplayClient({ dataset, initialJournalFocus = null }: { da
     resolveDisplaySession(dataset, replay?.displaySession ?? "ETH") ?? marketSession
   ), [dataset, marketSession, replay?.displaySession]);
   const marketCache = useMemo(() => new MarketBarCache(dataset), [dataset]);
+  const displayCacheFingerprint = useMemo(() => JSON.stringify({
+    timezone: dataset.timezone,
+    sessionMode: dataset.sessionMode,
+    sessionOpenMinute: dataset.sessionOpenMinute,
+    sessionCloseMinute: dataset.sessionCloseMinute,
+    tradingWeekdays: dataset.tradingWeekdays,
+  }), [dataset.sessionCloseMinute, dataset.sessionMode, dataset.sessionOpenMinute, dataset.timezone, dataset.tradingWeekdays]);
+  const displayCachesRef = useRef(new Map<string, DisplayBarCache>());
+  const getDisplayCache = useCallback((displayIntervalSeconds: number, displaySession: DisplaySession) => {
+    const key = `${displayIntervalSeconds}:${displaySession}:${displayCacheFingerprint}`;
+    let cache = displayCachesRef.current.get(key);
+    if (!cache) {
+      cache = new DisplayBarCache({
+        datasetId: dataset.id,
+        dataVersion: dataset.dataVersion,
+        displayIntervalSeconds,
+        displaySession,
+        sessionFingerprint: displayCacheFingerprint,
+      });
+      displayCachesRef.current.set(key, cache);
+    }
+    return cache;
+  }, [dataset.dataVersion, dataset.id, displayCacheFingerprint]);
   const windowCache = useRef(new ReplayWindowMemoryCache<WindowPayload>());
   const barsRef = useRef<AggregatedMarketBarData[]>([]);
   const warmupBarsRef = useRef<AggregatedMarketBarData[]>([]);
@@ -271,6 +309,12 @@ export function MarketReplayClient({ dataset, initialJournalFocus = null }: { da
   const windowAbortRef = useRef<AbortController | null>(null);
   const annotationAbortRef = useRef<AbortController | null>(null);
   const annotationRequestRef = useRef(0);
+  const annotationTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const historyAbortRef = useRef<AbortController | null>(null);
+  const historyLoadingRef = useRef(false);
+  const historyHasEarlierRef = useRef(true);
+  const historyCacheCheckedRef = useRef(false);
+  const historyEpochRef = useRef(0);
   const pendingSaveRef = useRef<ReplayState | null>(null);
   const saveTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const lastSaveAtRef = useRef(0);
@@ -321,6 +365,8 @@ export function MarketReplayClient({ dataset, initialJournalFocus = null }: { da
     if (bufferingTimerRef.current) clearTimeout(bufferingTimerRef.current);
     windowAbortRef.current?.abort();
     annotationAbortRef.current?.abort();
+    historyAbortRef.current?.abort();
+    if (annotationTimerRef.current) clearTimeout(annotationTimerRef.current);
   }, []);
 
   const commitPaperSnapshot = useCallback((snapshot: PaperSessionSnapshot | null) => {
@@ -569,6 +615,11 @@ export function MarketReplayClient({ dataset, initialJournalFocus = null }: { da
     reviewOnly = false,
     focusJournalNo: number | null = null,
   ) => {
+    historyEpochRef.current += 1;
+    historyAbortRef.current?.abort();
+    historyAbortRef.current = null;
+    historyLoadingRef.current = false;
+    historyCacheCheckedRef.current = false;
     const requestId = ++windowRequestRef.current;
     windowAbortRef.current?.abort();
     windowAbortRef.current = null;
@@ -612,14 +663,165 @@ export function MarketReplayClient({ dataset, initialJournalFocus = null }: { da
     setWarmupBars(data.warmupBars);
     void loadTradeAnnotations(visible, focusJournalNo);
     if (!reviewOnly) {
+      historyHasEarlierRef.current = data.hasEarlierBars ?? nextHistoryEndSequence(visible) !== null;
       currentSourceBarRef.current = data.lastSourceBar;
       setCurrentSourceBar(data.lastSourceBar);
+      void getDisplayCache(displayIntervalSeconds, displaySession).persist([...data.warmupBars, ...visible]);
     }
     if (dataset.sourceIntervalSeconds) {
       const anchor = tradingDayForTimestamp(data.lastSourceBar?.timestamp ?? dataset.startTime, marketSession);
       marketCache.prefetch(anchor);
     }
-  }, [dataset.dataVersion, dataset.id, dataset.sourceIntervalSeconds, dataset.startTime, loadTradeAnnotations, marketCache, marketSession]);
+  }, [dataset.dataVersion, dataset.id, dataset.sourceIntervalSeconds, dataset.startTime, getDisplayCache, loadTradeAnnotations, marketCache, marketSession]);
+
+  const hydrateCachedHistory = useCallback(async (
+    currentSequence: number,
+    displayIntervalSeconds: number,
+    displaySession: DisplaySession,
+    requirePaused = true,
+  ) => {
+    if (historyLoadingRef.current || !dataset.sourceIntervalSeconds || journalReview) return false;
+    const epoch = historyEpochRef.current;
+    const stillCurrent = () => {
+      const current = latestReplayRef.current;
+      return epoch === historyEpochRef.current
+        && current?.currentSequence === currentSequence
+        && current.displayIntervalSeconds === displayIntervalSeconds
+        && current.displaySession === displaySession
+        && (!requirePaused || current.status !== "playing");
+    };
+    if (!stillCurrent()) return false;
+    historyLoadingRef.current = true;
+    try {
+      const warmupCount = Math.min(EMA_LENGTH_MAX, indicatorWarmupCountRef.current);
+      const cache = getDisplayCache(displayIntervalSeconds, displaySession);
+      const cached = await cache.readBefore(currentSequence, REPLAY_HISTORY_BAR_LIMIT + warmupCount);
+      if (!stillCurrent()) return false;
+      let merged = mergeReplayHistory(
+        [cached, warmupBarsRef.current, barsRef.current],
+        warmupCount,
+      );
+      if (merged.bars.length < REPLAY_HISTORY_BAR_LIMIT) {
+        const cursor = nextHistoryEndSequence(merged.bars);
+        if (cursor !== null) {
+          const oldestTimestamp = merged.bars[0]?.timestamp ?? dataset.startTime;
+          const startDate = tradingDayForTimestamp(oldestTimestamp, marketSession);
+          const sourceBars = await marketCache.readCachedBarsBefore(cursor, startDate);
+          if (sourceBars.length && stillCurrent()) {
+            const session = resolveDisplaySession(dataset, displaySession) ?? marketSession;
+            const aggregated = aggregateMarketBars({
+              bars: sourceBars,
+              sourceSeconds: dataset.sourceIntervalSeconds,
+              displaySeconds: displayIntervalSeconds,
+              session,
+              currentSequence: cursor,
+              finalSequence: dataset.barCount - 1,
+            }).map((bar, index, all) => index === all.length - 1 && bar.status === "FORMING"
+              ? { ...bar, status: bar.sourceCount === bar.expectedCount ? "COMPLETE" as const : "INCOMPLETE" as const }
+              : bar);
+            merged = mergeReplayHistory(
+              [aggregated, merged.warmupBars, merged.bars],
+              warmupCount,
+            );
+            void cache.persist(aggregated);
+          }
+        }
+      }
+      if (!stillCurrent()) return false;
+      const added = merged.bars.length > barsRef.current.length;
+      if (added) {
+        barsRef.current = merged.bars;
+        warmupBarsRef.current = merged.warmupBars;
+        startTransition(() => {
+          setBars(merged.bars);
+          setWarmupBars(merged.warmupBars);
+        });
+      }
+      historyHasEarlierRef.current = nextHistoryEndSequence(merged.bars) !== null;
+      return added;
+    } finally {
+      historyCacheCheckedRef.current = true;
+      historyLoadingRef.current = false;
+    }
+  }, [dataset, getDisplayCache, journalReview, latestReplayRef, marketCache, marketSession]);
+
+  const loadEarlierHistory = useCallback(async () => {
+    const current = latestReplayRef.current;
+    if (!current || journalReview || historyLoadingRef.current || !historyHasEarlierRef.current
+      || barsRef.current.length >= REPLAY_HISTORY_BAR_LIMIT || !dataset.sourceIntervalSeconds) return;
+    const addedFromCache = await hydrateCachedHistory(
+      current.currentSequence, current.displayIntervalSeconds, current.displaySession, false,
+    );
+    if (addedFromCache) return;
+    const endSequence = nextHistoryEndSequence(barsRef.current);
+    if (endSequence === null) {
+      historyHasEarlierRef.current = false;
+      return;
+    }
+    historyLoadingRef.current = true;
+    const epoch = historyEpochRef.current;
+    const controller = new AbortController();
+    historyAbortRef.current?.abort();
+    historyAbortRef.current = controller;
+    beginBuffering();
+    try {
+      const visibleCount = Math.min(
+        REPLAY_HISTORY_BAR_LIMIT - barsRef.current.length,
+        replayHistoryPageSize(dataset.sourceIntervalSeconds, current.displayIntervalSeconds),
+      );
+      const params = new URLSearchParams({
+        displayIntervalSeconds: String(current.displayIntervalSeconds),
+        displaySession: current.displaySession,
+        endSequence: String(endSequence),
+        visibleCount: String(visibleCount),
+        warmupCount: String(Math.min(EMA_LENGTH_MAX, indicatorWarmupCountRef.current)),
+      });
+      const response = await fetch(`/api/market-datasets/${dataset.id}/bars/window?${params}`, { signal: controller.signal });
+      const body = await response.json() as WindowPayload & { error?: string };
+      if (!response.ok) throw new Error(body.error ?? copy.marketReplay.loadError);
+      const live = latestReplayRef.current;
+      if (controller.signal.aborted || epoch !== historyEpochRef.current || !live
+        || live.displayIntervalSeconds !== current.displayIntervalSeconds || live.displaySession !== current.displaySession) return;
+      const merged = mergeReplayHistory(
+        [body.warmupBars, body.visibleBars, warmupBarsRef.current, barsRef.current],
+        Math.min(EMA_LENGTH_MAX, indicatorWarmupCountRef.current),
+      );
+      barsRef.current = merged.bars;
+      warmupBarsRef.current = merged.warmupBars;
+      setBars(merged.bars);
+      setWarmupBars(merged.warmupBars);
+      historyHasEarlierRef.current = body.hasEarlierBars ?? nextHistoryEndSequence(body.visibleBars) !== null;
+      void getDisplayCache(current.displayIntervalSeconds, current.displaySession).persist([...body.warmupBars, ...body.visibleBars]);
+    } catch (error) {
+      if (!controller.signal.aborted) setPaperError(error instanceof Error ? error.message : copy.marketReplay.loadError);
+    } finally {
+      if (historyAbortRef.current === controller) historyAbortRef.current = null;
+      historyLoadingRef.current = false;
+      endBuffering();
+    }
+  }, [beginBuffering, dataset.id, dataset.sourceIntervalSeconds, endBuffering, getDisplayCache, hydrateCachedHistory, journalReview, latestReplayRef]);
+
+  useEffect(() => {
+    const current = replay;
+    if (!current || current.status === "playing" || journalReview || !bars.length) return;
+    const cancel = scheduleIdleTask(() => {
+      void hydrateCachedHistory(current.currentSequence, current.displayIntervalSeconds, current.displaySession);
+    });
+    return cancel;
+  }, [bars.length, hydrateCachedHistory, journalReview, replay]);
+
+  const handleVisibleSequenceRange = useCallback((range: ReplayVisibleSequenceRange) => {
+    if (annotationTimerRef.current) clearTimeout(annotationTimerRef.current);
+    annotationTimerRef.current = setTimeout(() => {
+      const visible = barsRef.current.filter((bar) => (
+        bar.lastSequence >= range.fromSequence && bar.firstSequence <= range.toSequence
+      ));
+      void loadTradeAnnotations(visible);
+    }, 120);
+    if (historyCacheCheckedRef.current && range.barsBefore <= REPLAY_HISTORY_PREFETCH_THRESHOLD) {
+      void loadEarlierHistory();
+    }
+  }, [loadEarlierHistory, loadTradeAnnotations]);
 
   useEffect(() => {
     if (!emaSettingsLoaded || !abrSettingsLoaded) return;
@@ -813,8 +1015,10 @@ export function MarketReplayClient({ dataset, initialJournalFocus = null }: { da
       syncLatencyMsRef.current = syncLatencyMsRef.current * 0.7 + measuredLatency * 0.3;
       if (!silent) setSaveStatus("saved");
       setPaperError(null);
+      const confirmedBars = barsRef.current.filter((bar) => bar.lastSequence <= data.currentSequence).slice(-200);
+      void getDisplayCache(current.displayIntervalSeconds, current.displaySession).persist(confirmedBars);
       if (frozenAccumulator.journalEntries.length > 0) {
-        void loadTradeAnnotations(barsRef.current);
+        void loadTradeAnnotations(barsRef.current.slice(-DEFAULT_REPLAY_MAX_VISIBLE_BARS));
       }
       return true;
     })().catch(async (error) => {
@@ -829,7 +1033,7 @@ export function MarketReplayClient({ dataset, initialJournalFocus = null }: { da
     });
     syncCompletionRef.current = operation;
     return operation;
-  }, [dataset.dataVersion, dataset.id, latestReplayRef, loadTradeAnnotations, recoverReplay, setReplay]);
+  }, [dataset.dataVersion, dataset.id, getDisplayCache, latestReplayRef, loadTradeAnnotations, recoverReplay, setReplay]);
 
   const flushVisible = useCallback(async (keepalive = false) => {
     while (true) {
@@ -856,8 +1060,7 @@ export function MarketReplayClient({ dataset, initialJournalFocus = null }: { da
       let lastSourceBar = currentSourceBarRef.current;
       let reachedVisibleBucket = false;
       for (let attempt = 0; attempt < 64 && next.currentSequence < next.barCount - 1; attempt += 1) {
-        const abrInput = [...warmupBarsRef.current, ...barsRef.current];
-        const abrValue = abrInput.length ? calculateAbrSeries(abrInput, abrLength, abrInput.length - 1).lastValue : null;
+        const abrValue = calculateLatestAbr(warmupBarsRef.current, barsRef.current, abrLength);
         const response = await fetch(`/api/market-datasets/${dataset.id}/replay/advance`, {
           method: "POST",
           headers: { "Content-Type": "application/json" },
@@ -964,14 +1167,18 @@ export function MarketReplayClient({ dataset, initialJournalFocus = null }: { da
         throw new Error(copy.marketReplay.cacheGap);
       }
       sourceBars = sourceBars.slice(0, count);
-      let aggregates = barsRef.current;
+      let aggregates = barsRef.current.length >= REPLAY_HISTORY_BAR_LIMIT
+        ? barsRef.current.slice(-REPLAY_HISTORY_COMPACT_TO)
+        : barsRef.current.slice();
+      let nextWarmup = warmupBarsRef.current;
+      if (aggregates.length !== barsRef.current.length) {
+        const dropped = barsRef.current.slice(0, barsRef.current.length - aggregates.length);
+        nextWarmup = [...warmupBarsRef.current, ...dropped].slice(-indicatorWarmupCountRef.current);
+      }
       let snapshot = paperSnapshotRef.current;
       for (const source of sourceBars) {
-        const abrInput = [...warmupBarsRef.current, ...aggregates];
-        const abrValue = abrInput.length
-          ? calculateAbrSeries(abrInput, abrLength, abrInput.length - 1).lastValue
-          : null;
-        aggregates = mergeSourceBar(aggregates, source, {
+        const abrValue = calculateLatestAbr(nextWarmup, aggregates, abrLength);
+        mergeSourceBarInto(aggregates, source, {
           sourceSeconds: dataset.sourceIntervalSeconds,
           displaySeconds: current.displayIntervalSeconds,
           session: displayMarketSession,
@@ -1007,14 +1214,20 @@ export function MarketReplayClient({ dataset, initialJournalFocus = null }: { da
         }
         paperDeltaAccumulatorRef.current.toSequence = source.sequence;
       }
-      aggregates = aggregates.slice(-(DEFAULT_REPLAY_MAX_VISIBLE_BARS + EMA_LENGTH_MAX));
+      if (aggregates.length > REPLAY_HISTORY_BAR_LIMIT) {
+        const dropped = aggregates.slice(0, aggregates.length - REPLAY_HISTORY_COMPACT_TO);
+        nextWarmup = [...nextWarmup, ...dropped].slice(-indicatorWarmupCountRef.current);
+        aggregates = aggregates.slice(-REPLAY_HISTORY_COMPACT_TO);
+      }
       barsRef.current = aggregates;
+      warmupBarsRef.current = nextWarmup;
       const lastSourceBar = sourceBars.at(-1)!;
       currentSourceBarRef.current = lastSourceBar;
       paperSnapshotRef.current = snapshot;
       const currentSequence = lastSourceBar.sequence;
       startTransition(() => {
         setBars(aggregates);
+        setWarmupBars(nextWarmup);
         setCurrentSourceBar(lastSourceBar);
         if (snapshot) setPaperSnapshot(snapshot);
         setReplay((value) => value ? {
@@ -1857,6 +2070,7 @@ export function MarketReplayClient({ dataset, initialJournalFocus = null }: { da
             onClosePosition={closePaperPosition}
             onDraftActiveChange={setDraftActive}
             onOpenPaperAccount={() => setSettingsDialog("paper")}
+            onVisibleSequenceRangeChange={handleVisibleSequenceRange}
           />
           {journalReview ? <div className="absolute left-1/2 top-3 z-50 flex -translate-x-1/2 items-center gap-3 rounded-md border border-violet-200 bg-white/95 px-3 py-2 text-sm text-violet-800 shadow-lg backdrop-blur"><span className="font-medium">{copy.paperTrading.journalReviewing(journalReview.no)}</span><Button type="button" variant="outline" size="sm" className="h-7" onClick={() => void returnToLiveWindow()}>{copy.paperTrading.returnToLive}</Button></div> : null}
           {drawingError ? (

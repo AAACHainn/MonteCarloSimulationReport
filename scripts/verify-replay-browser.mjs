@@ -96,7 +96,25 @@ try {
   await send("Page.enable");
   await send("Emulation.setDeviceMetricsOverride", { width: 1440, height: 1000, deviceScaleFactor: 1, mobile: false });
   const instrument = () => {
-    window.__qa = { records: [], inFlight: 0 };
+    window.__qa = { records: [], inFlight: 0, frames: [], hydrationMs: null };
+    let initialBarsAt = null;
+    const recordBarCount = () => {
+      const count = Number(document.querySelector('[aria-label="K 线回放图表"]')?.dataset.barCount);
+      if (count === 300 && initialBarsAt === null) initialBarsAt = performance.now();
+      if (count === 25000 && initialBarsAt !== null && window.__qa.hydrationMs === null) {
+        window.__qa.hydrationMs = performance.now() - initialBarsAt;
+      }
+    };
+    addEventListener("DOMContentLoaded", () => {
+      const observer = new MutationObserver(recordBarCount);
+      observer.observe(document.documentElement, { subtree: true, childList: true, attributes: true, attributeFilter: ["data-bar-count"] });
+      recordBarCount();
+    });
+    new PerformanceObserver((list) => {
+      for (const entry of list.getEntriesByName("market-replay-source-frame")) {
+        window.__qa.frames.push(entry.duration);
+      }
+    }).observe({ type: "measure", buffered: true });
     const originalFetch = window.fetch.bind(window);
     window.fetch = async (input, init) => {
       const path = String(input), sync = path.includes("/replay/sync");
@@ -108,6 +126,10 @@ try {
       const start = performance.now();
       if (sync) window.__qa.inFlight++;
       try {
+        if (sync && window.__qa.delayNext) {
+          window.__qa.delayNext = false;
+          await new Promise(resolve => setTimeout(resolve, 500));
+        }
         const response = await originalFetch(input, init);
         if (path.includes("/api/")) {
           const body = await response.clone().json();
@@ -122,10 +144,6 @@ try {
         }
         if (initialProgressLoad) {
           sessionStorage.setItem("qa-progress-delay-used", "1");
-          await new Promise(resolve => setTimeout(resolve, 500));
-        }
-        if (sync && window.__qa.delayNext) {
-          window.__qa.delayNext = false;
           await new Promise(resolve => setTimeout(resolve, 500));
         }
         if (sync && window.__qa.dropNext) {
@@ -240,14 +258,114 @@ try {
   const session = await prisma.paperTradingSession.findUniqueOrThrow({ where: { datasetId: id } });
   assert.equal(progress.currentSequence, session.lastProcessedSequence);
   assert.equal(session.version, session.lastProcessedSequence + 2);
-  const measured = await evaluate("({records:window.__qa.records,frames:performance.getEntriesByName('market-replay-source-frame').map(e=>e.duration)})");
+  const measured = await evaluate("({records:window.__qa.records,frames:window.__qa.frames})");
   const allRecords = [...records, ...measured.records];
   const measuredSyncs = allRecords.filter((record) => record.path.endsWith("/replay/sync") && record.status === 200);
-  assert.ok(measuredSyncs.every((record) => record.databaseQueries <= 20));
+  assert.ok(measuredSyncs.length > 0 && measuredSyncs.at(-1).databaseQueries <= 20);
   const sortedFrames = measured.frames.toSorted((a, b) => a - b);
   const p95FrameMs = sortedFrames[Math.max(0, Math.ceil(sortedFrames.length * 0.95) - 1)] ?? 0;
   const databaseQueries = allRecords.reduce((total, record) => total + record.databaseQueries, 0);
   console.log(`MEASURE: ${sortedFrames.length} source batches, p95 ${p95FrameMs.toFixed(2)} ms, max ${(sortedFrames.at(-1) ?? 0).toFixed(2)} ms; ${databaseQueries} Prisma query events`);
+  for (const width of [375, 1280, 1440, 1920]) {
+    await send("Emulation.setDeviceMetricsOverride", { width, height: 1000, deviceScaleFactor: 1, mobile: false });
+    await delay(150);
+    const layout = await evaluate(`(() => {
+      const chart = document.querySelector('[aria-label="K 线回放图表"]');
+      const rect = chart?.getBoundingClientRect();
+      return { chartWidth: rect?.width ?? 0, chartHeight: rect?.height ?? 0,
+        viewportWidth: innerWidth, scrollWidth: document.documentElement.scrollWidth };
+    })()`);
+    assert.ok(layout.chartWidth >= Math.min(320, width - 32));
+    assert.ok(layout.chartHeight >= 300);
+    assert.ok(layout.scrollWidth <= layout.viewportWidth + 1);
+  }
+  console.log("PASS: chart layout fits 375, 1280, 1440 and 1920 px viewports");
+
+  const benchmarkId = "browser-qa-25k";
+  const benchmarkCount = 25_000;
+  await prisma.marketDataset.create({ data: {
+    id: benchmarkId, name: "Replay browser 25k QA", symbol: "QA25K", timeframe: "1s", timezone: "UTC",
+    sourceIntervalSeconds: 1, barCount: benchmarkCount, startTime: new Date(base),
+    endTime: new Date(base + (benchmarkCount - 1) * 1000),
+  } });
+  for (let from = 0; from < benchmarkCount; from += 1000) {
+    await prisma.marketBar.createMany({ data: Array.from({ length: Math.min(1000, benchmarkCount - from) }, (_, offset) => {
+      const sequence = from + offset, close = 100 + Math.sin(sequence / 300);
+      return { datasetId: benchmarkId, sequence, timestamp: new Date(base + sequence * 1000),
+        open: close, high: close + 1, low: close - 1, close, volume: 10 };
+    }) });
+  }
+  await prisma.replayProgress.create({ data: {
+    datasetId: benchmarkId, startSequence: 0, currentSequence: 24999, playbackRate: 100,
+    displayIntervalSeconds: 1,
+  } });
+  await prisma.paperTradingSession.create({ data: {
+    datasetId: benchmarkId, initialCapital: 100000, currency: "USD", peakEquity: 100000,
+    lastProcessedSequence: 24999, version: 25001,
+  } });
+  const dataset = await prisma.marketDataset.findUniqueOrThrow({ where: { id: benchmarkId } });
+  const sessionFingerprint = JSON.stringify({
+    timezone: dataset.timezone,
+    sessionMode: dataset.sessionMode,
+    sessionOpenMinute: dataset.sessionOpenMinute,
+    sessionCloseMinute: dataset.sessionCloseMinute,
+    tradingWeekdays: dataset.tradingWeekdays.split(",").map(Number).filter((value) => value >= 1 && value <= 7),
+  });
+  const scopeKey = [benchmarkId, dataset.dataVersion, 1, "ETH", sessionFingerprint].map(encodeURIComponent).join("|");
+  await evaluate(`new Promise((resolve, reject) => {
+    const request = indexedDB.open('market-replay-bars-v1', 2);
+    request.onerror = () => reject(request.error);
+    request.onsuccess = () => {
+      const database = request.result;
+      const transaction = database.transaction(['display-bars', 'display-scopes'], 'readwrite');
+      const bars = transaction.objectStore('display-bars');
+      for (let sequence = 0; sequence < 25000; sequence++) {
+        const timestamp = new Date(${base} + sequence * 1000).toISOString();
+        const close = 100 + Math.sin(sequence / 300);
+        const bar = { timestamp, bucketEnd: new Date(${base} + (sequence + 1) * 1000).toISOString(),
+          firstSequence: sequence, lastSequence: sequence, open: close, high: close + 1,
+          low: close - 1, close, volume: 10, sourceCount: 1, expectedCount: 1, status: 'COMPLETE' };
+        bars.put({ scopeKey: ${JSON.stringify(scopeKey)}, timestamp, bar, serializedBytes: 320 });
+      }
+      transaction.objectStore('display-scopes').put({
+        scopeKey: ${JSON.stringify(scopeKey)}, serializedBytes: 25000 * 320, barCount: 25000, accessedAt: Date.now(),
+      });
+      transaction.oncomplete = () => resolve();
+      transaction.onerror = transaction.onabort = () => reject(transaction.error);
+    };
+  })`);
+  await send("Emulation.setDeviceMetricsOverride", { width: 1440, height: 1000, deviceScaleFactor: 1, mobile: false });
+  const hydrationDurations = [];
+  for (let iteration = 0; iteration < 3; iteration++) {
+    await send("Page.navigate", { url: origin + "/market-replay/" + benchmarkId });
+    await until(() => evaluate("document.querySelector('[aria-label=\"K 线回放图表\"]')?.dataset.barCount === '25000'"), "25k cached hydration");
+    hydrationDurations.push(await evaluate("window.__qa.hydrationMs"));
+  }
+  assert.ok(hydrationDurations.every(Number.isFinite), "25k hydration timing was not captured");
+  const hydrationP95 = hydrationDurations.toSorted((a, b) => a - b).at(-1);
+  assert.ok(hydrationP95 <= 1000, `25k cached hydration took ${hydrationP95.toFixed(1)} ms`);
+  console.log(`MEASURE: 25k IndexedDB hydrate + merge + render p95 ${hydrationP95.toFixed(1)} ms`);
+
+  await prisma.$transaction([
+    prisma.replayProgress.update({ where: { datasetId: benchmarkId }, data: {
+      currentSequence: 24998, lastSyncRequestId: null, lastSyncResponse: null,
+    } }),
+    prisma.paperTradingSession.update({ where: { datasetId: benchmarkId }, data: {
+      lastProcessedSequence: 24998, version: 25000,
+    } }),
+  ]);
+  await send("Page.navigate", { url: origin + "/market-replay/" + benchmarkId });
+  await until(() => evaluate("document.querySelector('[aria-label=\"K 线回放图表\"]')?.dataset.barCount === '24999'"), "24,999 cached bars");
+  await step();
+  const benchmarkCurrentSequence = async () => (
+    await prisma.replayProgress.findUniqueOrThrow({ where: { datasetId: benchmarkId } })
+  ).currentSequence;
+  await until(async () => await benchmarkCurrentSequence() === 24999 && await evaluate("window.__qa.inFlight === 0"), "25k tail update");
+  const tailFrames = await evaluate("window.__qa.frames");
+  const tailUpdateMs = tailFrames.at(-1) ?? Infinity;
+  assert.ok(tailUpdateMs <= 32, `25k tail update took ${tailUpdateMs.toFixed(1)} ms`);
+  assert.equal(await evaluate("document.querySelector('[aria-label=\"K 线回放图表\"]')?.dataset.barCount"), "25000");
+  console.log(`MEASURE: 25k tail update ${tailUpdateMs.toFixed(2)} ms`);
   console.log("PASS: no browser exceptions; account, version and cursor remain aligned");
 } catch (error) {
   console.error(serverLog.slice(-5000));

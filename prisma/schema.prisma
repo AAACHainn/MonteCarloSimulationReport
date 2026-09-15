@@ -136,6 +136,7 @@ model MarketDataset {
   endTime      DateTime
   bars         MarketBar[]
   barBlocks    MarketBarBlock[]
+  barBlockBuildStates MarketBarBlockBuildState[]
   importJobs   MarketDatasetImport[]
   progress     ReplayProgress?
   paperSession PaperTradingSession?
@@ -163,6 +164,7 @@ model MarketDrawing {
 model MarketBarBlock {
   datasetId    String
   dataset      MarketDataset @relation(fields: [datasetId], references: [id], onDelete: Cascade)
+  blockSize     Int           @default(4096)
   startSequence Int
   endSequence   Int
   startTime     DateTime
@@ -175,8 +177,18 @@ model MarketBarBlock {
   volumeCount    Int
   barCount       Int
 
-  @@id([datasetId, startSequence])
-  @@index([datasetId, startTime, endTime])
+  @@id([datasetId, blockSize, startSequence])
+  @@index([datasetId, blockSize, startTime, endTime])
+}
+
+model MarketBarBlockBuildState {
+  datasetId  String
+  dataset    MarketDataset @relation(fields: [datasetId], references: [id], onDelete: Cascade)
+  blockSize  Int
+  cursor     Int           @default(-1)
+  updatedAt  DateTime      @updatedAt
+
+  @@id([datasetId, blockSize])
 }
 
 model MarketDatasetImport {

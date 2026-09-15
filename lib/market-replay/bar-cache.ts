@@ -4,6 +4,10 @@ import { addCalendarDays, chunkRequestDates } from "./chunks";
 import {
   MARKET_CACHE_BUDGET_BYTES,
   MARKET_CACHE_EVICT_TO_RATIO,
+  MARKET_DISPLAY_CACHE_BUDGET_BYTES,
+  REPLAY_HISTORY_BAR_LIMIT,
+  type AggregatedMarketBarData,
+  type DisplaySession,
   type MarketBarChunksResponse,
   type MarketBarDayChunk,
   type MarketBarData,
@@ -12,8 +16,11 @@ import {
 
 const DATABASE_NAME = "market-replay-bars-v1";
 const STORE_NAME = "daily-chunks";
-const DATABASE_VERSION = 1;
+const DISPLAY_STORE_NAME = "display-bars";
+const DISPLAY_SCOPE_STORE_NAME = "display-scopes";
+const DATABASE_VERSION = 2;
 const MEMORY_CHUNK_LIMIT = 14;
+const DISPLAY_CACHE_EVICT_TO_RATIO = 0.8;
 
 export type StoredMarketChunk = MarketBarDayChunk & {
   key: string;
@@ -26,6 +33,33 @@ export type StoredMarketChunk = MarketBarDayChunk & {
   requestStartDate?: string;
   nextStartDate?: string | null;
 };
+
+export type DisplayBarCacheScope = {
+  datasetId: string;
+  dataVersion: number;
+  displayIntervalSeconds: number;
+  displaySession: DisplaySession;
+  sessionFingerprint: string;
+};
+
+type StoredDisplayBar = {
+  scopeKey: string;
+  timestamp: string;
+  bar: AggregatedMarketBarData;
+  serializedBytes: number;
+};
+
+type StoredDisplayScope = {
+  scopeKey: string;
+  serializedBytes: number;
+  barCount: number;
+  accessedAt: number;
+};
+
+export function displayBarScopeKey(scope: DisplayBarCacheScope) {
+  return [scope.datasetId, scope.dataVersion, scope.displayIntervalSeconds, scope.displaySession, scope.sessionFingerprint]
+    .map(encodeURIComponent).join("|");
+}
 
 export function marketChunkKey(input: Pick<StoredMarketChunk, "datasetId" | "dataVersion" | "symbol" | "sourceIntervalSeconds" | "tradingDay">) {
   return [input.datasetId, input.dataVersion, input.symbol, input.sourceIntervalSeconds, input.tradingDay].map(encodeURIComponent).join("|");
@@ -101,6 +135,12 @@ export class MarketBarCache {
       const request = indexedDB.open(DATABASE_NAME, DATABASE_VERSION);
       request.onupgradeneeded = () => {
         if (!request.result.objectStoreNames.contains(STORE_NAME)) request.result.createObjectStore(STORE_NAME, { keyPath: "key" });
+        if (!request.result.objectStoreNames.contains(DISPLAY_STORE_NAME)) {
+          request.result.createObjectStore(DISPLAY_STORE_NAME, { keyPath: ["scopeKey", "timestamp"] });
+        }
+        if (!request.result.objectStoreNames.contains(DISPLAY_SCOPE_STORE_NAME)) {
+          request.result.createObjectStore(DISPLAY_SCOPE_STORE_NAME, { keyPath: "scopeKey" });
+        }
       };
       request.onsuccess = () => resolve(request.result);
       request.onerror = () => { this.persistentDisabled = true; resolve(null); };
@@ -322,6 +362,36 @@ export class MarketBarCache {
     return this.readMemoryBarsAfter(sequence, count);
   }
 
+  /** Read a contiguous cached suffix before a sequence without fetching missing days. */
+  async readCachedBarsBefore(sequence: number, startDate: string, options: { maxBars?: number; maxBytes?: number } = {}) {
+    const maxBars = Math.max(0, options.maxBars ?? 250_000);
+    const maxBytes = Math.max(0, options.maxBytes ?? 16 * 1024 * 1024);
+    if (!maxBars || !maxBytes || sequence < 0) return [];
+    const descending: MarketBarData[] = [];
+    let bytes = 0;
+    let tradingDay = startDate;
+    for (let day = 0; day < 3_660 && descending.length < maxBars && bytes < maxBytes; day += 1) {
+      const chunk = await this.read(tradingDay);
+      if (!chunk) break;
+      bytes += chunk.serializedBytes;
+      for (let index = chunk.bars.length - 1; index >= 0; index -= 1) {
+        const bar = chunk.bars[index];
+        if (bar.sequence > sequence) continue;
+        descending.push(bar);
+        if (descending.length >= maxBars) break;
+      }
+      tradingDay = addCalendarDays(tradingDay, -1);
+    }
+    descending.sort((a, b) => a.sequence - b.sequence);
+    if (!descending.length) return descending;
+    const contiguous: MarketBarData[] = [descending.at(-1)!];
+    for (let index = descending.length - 2; index >= 0; index -= 1) {
+      if (descending[index].sequence !== contiguous[0].sequence - 1) break;
+      contiguous.unshift(descending[index]);
+    }
+    return contiguous;
+  }
+
   prefetch(startDate: string) {
     void this.loadRange(startDate).then((loaded) => {
       if (loaded.nextStartDate) void this.loadRange(loaded.nextStartDate).catch(() => undefined);
@@ -329,15 +399,176 @@ export class MarketBarCache {
   }
 }
 
+/** Persistent cache of already aggregated display candles. Failures are intentionally non-fatal. */
+export class DisplayBarCache {
+  private database: Promise<IDBDatabase | null> | null = null;
+  private disabled = false;
+  readonly scopeKey: string;
+
+  constructor(private scope: DisplayBarCacheScope, private budgetBytes = MARKET_DISPLAY_CACHE_BUDGET_BYTES) {
+    this.scopeKey = displayBarScopeKey(scope);
+  }
+
+  private open() {
+    if (this.database) return this.database;
+    this.database = new Promise((resolve) => {
+      if (this.disabled || typeof indexedDB === "undefined") return resolve(null);
+      const request = indexedDB.open(DATABASE_NAME, DATABASE_VERSION);
+      request.onupgradeneeded = () => {
+        if (!request.result.objectStoreNames.contains(STORE_NAME)) request.result.createObjectStore(STORE_NAME, { keyPath: "key" });
+        if (!request.result.objectStoreNames.contains(DISPLAY_STORE_NAME)) {
+          request.result.createObjectStore(DISPLAY_STORE_NAME, { keyPath: ["scopeKey", "timestamp"] });
+        }
+        if (!request.result.objectStoreNames.contains(DISPLAY_SCOPE_STORE_NAME)) {
+          request.result.createObjectStore(DISPLAY_SCOPE_STORE_NAME, { keyPath: "scopeKey" });
+        }
+      };
+      request.onsuccess = () => resolve(request.result);
+      request.onerror = () => { this.disabled = true; resolve(null); };
+      request.onblocked = () => { this.disabled = true; resolve(null); };
+    });
+    return this.database;
+  }
+
+  async readBefore(currentSequence: number, count = REPLAY_HISTORY_BAR_LIMIT) {
+    const database = await this.open();
+    if (!database || count <= 0) return [] as AggregatedMarketBarData[];
+    try {
+      const transaction = database.transaction(DISPLAY_STORE_NAME, "readonly");
+      const done = transactionDone(transaction);
+      const store = transaction.objectStore(DISPLAY_STORE_NAME);
+      const range = IDBKeyRange.bound([this.scopeKey, ""], [this.scopeKey, "\uffff"]);
+      const records = await requestValue(store.getAll(range)) as StoredDisplayBar[];
+      await done;
+      void this.touch().catch(() => undefined);
+      return records
+        .filter((record) => record.bar.lastSequence <= currentSequence)
+        .slice(-count)
+        .map((record) => record.bar);
+    } catch {
+      return [];
+    }
+  }
+
+  private async touch() {
+    const database = await this.open();
+    if (!database) return;
+    const read = database.transaction(DISPLAY_SCOPE_STORE_NAME, "readonly");
+    const done = transactionDone(read);
+    const current = await requestValue(read.objectStore(DISPLAY_SCOPE_STORE_NAME).get(this.scopeKey)) as StoredDisplayScope | undefined;
+    await done;
+    if (!current) return;
+    const write = database.transaction(DISPLAY_SCOPE_STORE_NAME, "readwrite");
+    write.objectStore(DISPLAY_SCOPE_STORE_NAME).put({ ...current, accessedAt: Date.now() });
+    await transactionDone(write);
+  }
+
+  private async trimScope(database: IDBDatabase, excess: number) {
+    if (excess <= 0) return;
+    const transaction = database.transaction(DISPLAY_STORE_NAME, "readwrite");
+    const done = transactionDone(transaction);
+    const store = transaction.objectStore(DISPLAY_STORE_NAME);
+    const range = IDBKeyRange.bound([this.scopeKey, ""], [this.scopeKey, "\uffff"]);
+    await new Promise<void>((resolve, reject) => {
+      let remaining = excess;
+      const request = store.openCursor(range, "next");
+      request.onerror = () => reject(request.error);
+      request.onsuccess = () => {
+        const cursor = request.result;
+        if (!cursor || remaining <= 0) return resolve();
+        cursor.delete();
+        remaining -= 1;
+        cursor.continue();
+      };
+    });
+    await done;
+  }
+
+  private async evictScopes(database: IDBDatabase) {
+    const read = database.transaction(DISPLAY_SCOPE_STORE_NAME, "readonly");
+    const done = transactionDone(read);
+    const scopes = await requestValue(read.objectStore(DISPLAY_SCOPE_STORE_NAME).getAll()) as StoredDisplayScope[];
+    await done;
+    let total = scopes.reduce((sum, item) => sum + item.serializedBytes, 0);
+    if (total <= this.budgetBytes) return;
+    const target = this.budgetBytes * DISPLAY_CACHE_EVICT_TO_RATIO;
+    for (const item of [...scopes].sort((a, b) => a.accessedAt - b.accessedAt)) {
+      if (total <= target) break;
+      const transaction = database.transaction([DISPLAY_STORE_NAME, DISPLAY_SCOPE_STORE_NAME], "readwrite");
+      transaction.objectStore(DISPLAY_STORE_NAME).delete(IDBKeyRange.bound([item.scopeKey, ""], [item.scopeKey, "\uffff"]));
+      transaction.objectStore(DISPLAY_SCOPE_STORE_NAME).delete(item.scopeKey);
+      await transactionDone(transaction);
+      total -= item.serializedBytes;
+    }
+  }
+
+  async persist(bars: AggregatedMarketBarData[]) {
+    const database = await this.open();
+    if (!database || !bars.length) return;
+    const unique = [...new Map(bars.map((bar) => [bar.timestamp, bar])).values()];
+    try {
+      const read = database.transaction([DISPLAY_STORE_NAME, DISPLAY_SCOPE_STORE_NAME], "readonly");
+      const readDone = transactionDone(read);
+      const displayStore = read.objectStore(DISPLAY_STORE_NAME);
+      const existingRequests = unique.map((bar) => requestValue(displayStore.get([this.scopeKey, bar.timestamp])) as Promise<StoredDisplayBar | undefined>);
+      const scopeRequest = requestValue(read.objectStore(DISPLAY_SCOPE_STORE_NAME).get(this.scopeKey)) as Promise<StoredDisplayScope | undefined>;
+      const [existing, currentScope] = await Promise.all([Promise.all(existingRequests), scopeRequest]);
+      await readDone;
+      const records = unique.map((bar) => {
+        const core = { scopeKey: this.scopeKey, timestamp: bar.timestamp, bar };
+        return { ...core, serializedBytes: serializedSize(core) } satisfies StoredDisplayBar;
+      });
+      const replacedBytes = existing.reduce((sum, item) => sum + (item?.serializedBytes ?? 0), 0);
+      const newCount = existing.filter((item) => !item).length;
+      const nextScope: StoredDisplayScope = {
+        scopeKey: this.scopeKey,
+        serializedBytes: Math.max(0, (currentScope?.serializedBytes ?? 0) - replacedBytes + records.reduce((sum, item) => sum + item.serializedBytes, 0)),
+        barCount: (currentScope?.barCount ?? 0) + newCount,
+        accessedAt: Date.now(),
+      };
+      const write = database.transaction([DISPLAY_STORE_NAME, DISPLAY_SCOPE_STORE_NAME], "readwrite");
+      for (const record of records) write.objectStore(DISPLAY_STORE_NAME).put(record);
+      write.objectStore(DISPLAY_SCOPE_STORE_NAME).put(nextScope);
+      await transactionDone(write);
+      const excess = Math.max(0, nextScope.barCount - REPLAY_HISTORY_BAR_LIMIT);
+      if (excess) {
+        await this.trimScope(database, excess);
+        const metadata = database.transaction(DISPLAY_SCOPE_STORE_NAME, "readwrite");
+        metadata.objectStore(DISPLAY_SCOPE_STORE_NAME).put({ ...nextScope, barCount: REPLAY_HISTORY_BAR_LIMIT });
+        await transactionDone(metadata);
+      }
+      await this.evictScopes(database);
+    } catch (error) {
+      if (isQuotaError(error)) this.disabled = true;
+    }
+  }
+}
+
 export class ReplayWindowMemoryCache<T> {
   private values = new Map<string, T>();
-  constructor(private limit = 24) {}
-  get(key: string) { return this.values.get(key); }
-  set(key: string, value: T) {
-    if (!this.values.has(key) && this.values.size >= this.limit) {
-      const oldest = this.values.keys().next().value as string | undefined;
-      if (oldest) this.values.delete(oldest);
-    }
+  private sizes = new Map<string, number>();
+  private totalBytes = 0;
+  constructor(private budgetBytes = 32 * 1024 * 1024) {}
+  get(key: string) {
+    const value = this.values.get(key);
+    if (value === undefined) return undefined;
+    this.values.delete(key);
     this.values.set(key, value);
+    return value;
+  }
+  set(key: string, value: T) {
+    const size = serializedSize(value);
+    const previousSize = this.sizes.get(key) ?? 0;
+    this.totalBytes = this.totalBytes - previousSize + size;
+    this.values.delete(key);
+    this.values.set(key, value);
+    this.sizes.set(key, size);
+    while (this.totalBytes > this.budgetBytes && this.values.size > 1) {
+      const oldest = this.values.keys().next().value as string | undefined;
+      if (!oldest) break;
+      this.values.delete(oldest);
+      this.totalBytes -= this.sizes.get(oldest) ?? 0;
+      this.sizes.delete(oldest);
+    }
   }
 }

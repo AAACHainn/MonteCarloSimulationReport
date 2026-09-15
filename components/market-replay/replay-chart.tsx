@@ -22,7 +22,6 @@ import type {
   TradingSessionConfig,
 } from "@/lib/market-replay/types";
 import { copy } from "@/lib/i18n";
-import { calculateAbrSeries } from "@/lib/market-replay/abr";
 import {
   defaultReplayLogicalRange,
   rangeAfterNewReplayBar,
@@ -138,6 +137,12 @@ type DrawingSegmentCoordinate = {
   end: { x: number; y: number };
 };
 
+export type ReplayVisibleSequenceRange = {
+  fromSequence: number;
+  toSequence: number;
+  barsBefore: number;
+};
+
 function sameLineActions(current: LineAction[], next: LineAction[]) {
   return current.length === next.length && current.every((action, index) => {
     const candidate = next[index];
@@ -178,6 +183,23 @@ function volume(bar: AggregatedMarketBarData) {
     time: chartTime(bar.timestamp), value: bar.volume ?? 0,
     color: bar.status === "INCOMPLETE" ? "rgba(245,158,11,.5)" : bar.close >= bar.open ? "rgba(22,163,74,.45)" : "rgba(220,38,38,.45)",
   };
+}
+
+function abrValueAt(
+  warmupBars: AggregatedMarketBarData[],
+  bars: AggregatedMarketBarData[],
+  visibleIndex: number,
+  length: number,
+) {
+  const end = warmupBars.length + visibleIndex;
+  if (end < length - 1) return null;
+  let sum = 0;
+  for (let offset = 0; offset < length; offset += 1) {
+    const index = end - offset;
+    const bar = index < warmupBars.length ? warmupBars[index] : bars[index - warmupBars.length];
+    sum += Math.abs(bar.high - bar.low);
+  }
+  return sum / length;
 }
 
 function number(value: number, digits = 8) {
@@ -227,7 +249,7 @@ export function ReplayChart({
   displaySession, barCountSession, barCountConfig, paperSnapshot,
   tradeAnnotations, tradeAnnotationsTruncated, focusSequence = null,
   paperBusy, paperError, onSubmitOrder, onOrderPriceChange,
-  onCancelOrder, onClosePosition, onDraftActiveChange, onOpenPaperAccount,
+  onCancelOrder, onClosePosition, onDraftActiveChange, onOpenPaperAccount, onVisibleSequenceRangeChange,
 }: {
   datasetId: string;
   priceTickSize: number;
@@ -269,6 +291,7 @@ export function ReplayChart({
   onClosePosition: () => Promise<boolean>;
   onDraftActiveChange: (active: boolean) => void;
   onOpenPaperAccount: () => void;
+  onVisibleSequenceRangeChange?: (range: ReplayVisibleSequenceRange) => void;
 }) {
   const containerRef = useRef<HTMLDivElement | null>(null);
   const interactionRef = useRef<HTMLDivElement | null>(null);
@@ -283,6 +306,9 @@ export function ReplayChart({
   const fibonacciPrimitiveRef = useRef<FibonacciRetracementPrimitive | null>(null);
   const lastDataRef = useRef<AggregatedMarketBarData[]>([]);
   const barsRef = useRef(bars);
+  barsRef.current = bars;
+  const onVisibleSequenceRangeChangeRef = useRef(onVisibleSequenceRangeChange);
+  onVisibleSequenceRangeChangeRef.current = onVisibleSequenceRangeChange;
   const tradeAnnotationsRef = useRef(tradeAnnotations);
   tradeAnnotationsRef.current = tradeAnnotations;
   const candlestickStyleRef = useRef(candlestickStyle);
@@ -319,19 +345,10 @@ export function ReplayChart({
   const [draftError, setDraftError] = useState<string | null>(null);
   const [lineActions, setLineActions] = useState<LineAction[]>([]);
   const hasVolume = useMemo(() => [...warmupBars, ...bars].some((bar) => bar.volume !== null), [bars, warmupBars]);
-  const abrValues = useMemo(() => {
-    const values = Array<number | null>(bars.length).fill(null);
-    if (!abrEnabled || bars.length === 0) return values;
-    const allBars = [...warmupBars, ...bars];
-    const result = calculateAbrSeries(allBars, abrLength, allBars.length - 1, warmupBars.length);
-    for (const point of result.points) {
-      const visibleIndex = point.sequence - warmupBars.length;
-      if (visibleIndex >= 0 && visibleIndex < values.length) values[visibleIndex] = point.value;
-    }
-    return values;
-  }, [abrEnabled, abrLength, bars, warmupBars]);
-  const abrValuesRef = useRef(abrValues);
-  abrValuesRef.current = abrValues;
+  const warmupBarsRef = useRef(warmupBars);
+  warmupBarsRef.current = warmupBars;
+  const abrLengthRef = useRef(abrLength);
+  abrLengthRef.current = abrLength;
   const latest = bars.at(-1);
   const currentPrice = latest?.close ?? null;
   const currentPriceRef = useRef(currentPrice);
@@ -342,7 +359,6 @@ export function ReplayChart({
   const hasPendingClose = paperSnapshot?.activeOrders.some((order) => order.reduceOnly && !order.isProtective) ?? false;
 
   useEffect(() => { currentPriceRef.current = currentPrice; }, [currentPrice]);
-  useEffect(() => { barsRef.current = bars; }, [bars]);
   useEffect(() => { measurementArmedRef.current = measurementArmed; }, [measurementArmed]);
   useEffect(() => { onMeasurementArmedChangeRef.current = onMeasurementArmedChange; }, [onMeasurementArmedChange]);
   useEffect(() => { measurementRef.current = measurement; }, [measurement]);
@@ -464,6 +480,20 @@ export function ReplayChart({
     setMeasurement(next);
   }, [setChartCursor]);
 
+  const syncVisibleSequenceRange = useCallback(() => {
+    const chart = chartRef.current;
+    const currentBars = barsRef.current;
+    const range = chart?.timeScale().getVisibleLogicalRange();
+    if (!range || !currentBars.length) return;
+    const fromIndex = Math.max(0, Math.min(currentBars.length - 1, Math.floor(range.from)));
+    const toIndex = Math.max(fromIndex, Math.min(currentBars.length - 1, Math.ceil(range.to)));
+    onVisibleSequenceRangeChangeRef.current?.({
+      fromSequence: currentBars[fromIndex].firstSequence,
+      toSequence: currentBars[toIndex].lastSequence,
+      barsBefore: fromIndex,
+    });
+  }, []);
+
   useEffect(() => {
     if (!paperSessionId || paperInitialCapital === null) {
       setDefaultRiskAmount(null);
@@ -517,6 +547,7 @@ export function ReplayChart({
         rightOffset: 4,
         shiftVisibleRangeOnNewBar: false,
         lockVisibleTimeRangeOnResize: true,
+        enableConflation: true,
         tickMarkFormatter: (time: Time, tickMarkType: TickMarkType) => formatChartTick(time, tickMarkType, displayUtcOffsetRef.current),
       },
       rightPriceScale: { borderColor: "#e2e8f0" },
@@ -544,6 +575,7 @@ export function ReplayChart({
     observer.observe(container);
     chart.timeScale().subscribeVisibleLogicalRangeChange(syncLineActionCoordinates);
     chart.timeScale().subscribeVisibleLogicalRangeChange(syncMeasurementCoordinates);
+    chart.timeScale().subscribeVisibleLogicalRangeChange(syncVisibleSequenceRange);
     chartRef.current = chart; candleRef.current = candles; volumeRef.current = null;
     trendLinePrimitiveRef.current = trendLinePrimitive;
     fibonacciPrimitiveRef.current = fibonacciPrimitive;
@@ -554,6 +586,7 @@ export function ReplayChart({
       observer.disconnect();
       chart.timeScale().unsubscribeVisibleLogicalRangeChange(syncLineActionCoordinates);
       chart.timeScale().unsubscribeVisibleLogicalRangeChange(syncMeasurementCoordinates);
+      chart.timeScale().unsubscribeVisibleLogicalRangeChange(syncVisibleSequenceRange);
       candles.detachPrimitive(trendLinePrimitive);
       candles.detachPrimitive(fibonacciPrimitive);
       candles.detachPrimitive(tradeAnnotationPrimitive);
@@ -565,7 +598,7 @@ export function ReplayChart({
       chart.remove(); chartRef.current = null; candleRef.current = null; volumeRef.current = null;
       priceLines.clear(); lineTargets.clear(); lastDataRef.current = [];
     };
-  }, [priceTickSize, syncDrawingPrimitive, syncLineActionCoordinates, syncMeasurementCoordinates]);
+  }, [priceTickSize, syncDrawingPrimitive, syncLineActionCoordinates, syncMeasurementCoordinates, syncVisibleSequenceRange]);
 
   useEffect(() => {
     const chart = chartRef.current;
@@ -628,7 +661,8 @@ export function ReplayChart({
     const candleWasAutoScaled = series.priceScale().options().autoScale;
     const volumeWasAutoScaled = volumeSeries?.priceScale().options().autoScale ?? true;
     const samePrefix = previous.length > 0 && next.length >= previous.length
-      && previous.slice(0, -1).every((bar, index) => bar.timestamp === next[index]?.timestamp);
+      && previous[0].timestamp === next[0]?.timestamp
+      && previous.at(-1)?.timestamp === next[previous.length - 1]?.timestamp;
     if (samePrefix) {
       const range = chart.timeScale().getVisibleLogicalRange();
       const previousLastIndex = previous.length - 1;
@@ -664,10 +698,11 @@ export function ReplayChart({
     if (volumeSeries && !volumeWasAutoScaled && volumeSeries.priceScale().options().autoScale) {
       volumeSeries.priceScale().applyOptions({ autoScale: false });
     }
-    lastDataRef.current = next.map((bar) => ({ ...bar }));
+    lastDataRef.current = next;
+    requestAnimationFrame(syncVisibleSequenceRange);
     requestAnimationFrame(syncMeasurementCoordinates);
     requestAnimationFrame(syncDrawingPrimitive);
-  }, [bars, syncDrawingPrimitive, syncMeasurementCoordinates]);
+  }, [bars, syncDrawingPrimitive, syncMeasurementCoordinates, syncVisibleSequenceRange]);
 
   useEffect(() => {
     if (focusSequence === null) return;
@@ -1320,7 +1355,12 @@ export function ReplayChart({
         ? preferredLeft
         : Math.max(8, x - tooltipWidth - 14);
       const top = Math.max(8, Math.min(y + 12, Math.max(8, paneHeight - tooltipHeight - 8)));
-      return { left, top, bar, value: abrValuesRef.current[index] ?? null };
+      return {
+        left,
+        top,
+        bar,
+        value: abrEnabled ? abrValueAt(warmupBarsRef.current, barsRef.current, index, abrLengthRef.current) : null,
+      };
     };
     const showAt = (clientX: number, clientY: number) => {
       setAbrTooltip(tooltipAt(clientX, clientY));
@@ -1595,7 +1635,12 @@ export function ReplayChart({
         if (!(event.target as HTMLElement).closest("[data-context-menu]")) setContextMenu(null);
       }}
     >
-      <div ref={containerRef} className="h-full min-h-[240px] w-full overflow-hidden bg-white" aria-label={copy.marketReplay.chartAriaLabel} />
+      <div
+        ref={containerRef}
+        className="h-full min-h-[240px] w-full overflow-hidden bg-white"
+        aria-label={copy.marketReplay.chartAriaLabel}
+        data-bar-count={bars.length}
+      />
 
       {tradeAnnotationsTruncated ? (
         <div className="pointer-events-none absolute right-3 top-3 z-20 rounded-md bg-amber-50/95 px-2 py-1 text-[11px] text-amber-800 shadow-sm backdrop-blur">

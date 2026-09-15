@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { calculateAbrSeries } from "./abr";
+import { calculateAbrSeries, calculateLatestAbr } from "./abr";
 
 const bars = [
   { high: 12, low: 10 },
@@ -9,6 +9,15 @@ const bars = [
 ];
 
 describe("ABR", () => {
+  it("calculates the latest value across warmup and visible arrays", () => {
+    expect(calculateLatestAbr(
+      [{ high: 3, low: 1 }],
+      [{ high: 8, low: 4 }, { high: 9, low: 3 }],
+      3,
+    )).toBe(4);
+    expect(calculateLatestAbr([], [{ high: 2, low: 1 }], 2)).toBeNull();
+  });
+
   it("averages the ranges of the latest N bars including the current bar", () => {
     expect(calculateAbrSeries(bars, 3, 3)).toEqual({
       points: [

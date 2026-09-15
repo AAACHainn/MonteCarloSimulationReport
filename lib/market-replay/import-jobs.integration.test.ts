@@ -102,8 +102,10 @@ describe("market dataset streaming import", () => {
       { sequence: 0, close: 4538.25, volume: 576 },
       { sequence: 1, close: 4538, volume: 367 },
     ]);
-    expect(blocks).toHaveLength(1);
-    expect(blocks[0]).toMatchObject({ startSequence: 0, endSequence: 1, barCount: 2, volume: 943, volumeCount: 2 });
+    expect(blocks).toHaveLength(3);
+    expect(blocks).toEqual(expect.arrayContaining([64, 512, 4_096].map((blockSize) => expect.objectContaining({
+      blockSize, startSequence: 0, endSequence: 1, barCount: 2, volume: 943, volumeCount: 2,
+    }))));
   });
 
   it("infers an ordinary CSV's source interval from its timestamp cadence", async () => {

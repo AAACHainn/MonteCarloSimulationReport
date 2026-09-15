@@ -182,26 +182,41 @@ export function mergeSourceBar(
     finalSequence: number;
   },
 ) {
+  const next = existing.slice();
+  mergeSourceBarInto(next, source, options);
+  return next;
+}
+
+/** Mutates an array owned by the caller; avoids copying a long history for every source bar in one replay batch. */
+export function mergeSourceBarInto(
+  existing: AggregatedMarketBarData[],
+  source: MarketBarData,
+  options: {
+    sourceSeconds: number;
+    displaySeconds: number;
+    session: TradingSessionConfig;
+    finalSequence: number;
+  },
+) {
   const bucket = getAggregationBucket(
     new Date(source.timestamp).getTime(), options.sourceSeconds, options.displaySeconds, options.session,
   );
-  if (!bucket) return existing;
-  const next = existing.slice();
-  const previousLast = next.at(-1);
+  if (!bucket) return false;
+  const previousLast = existing.at(-1);
   const last = previousLast ? { ...previousLast } : undefined;
-  if (last) next[next.length - 1] = last;
+  if (last) existing[existing.length - 1] = last;
   if (!last || new Date(last.timestamp).getTime() !== bucket.start) {
     if (last && last.status === "FORMING") {
       last.status = last.sourceCount === last.expectedCount ? "COMPLETE" : "INCOMPLETE";
     }
-    next.push({
+    existing.push({
       timestamp: new Date(bucket.start).toISOString(), bucketEnd: new Date(bucket.end).toISOString(),
       firstSequence: source.sequence, lastSequence: source.sequence,
       open: source.open, high: source.high, low: source.low, close: source.close,
       volume: source.volume, sourceCount: 1, expectedCount: bucket.expectedCount,
       status: bucket.expectedCount === 1 ? "COMPLETE" : source.sequence >= options.finalSequence ? "INCOMPLETE" : "FORMING",
     });
-    return next;
+    return true;
   }
   last.lastSequence = source.sequence;
   last.high = Math.max(last.high, source.high);
@@ -211,7 +226,7 @@ export function mergeSourceBar(
   if (source.volume !== null) last.volume = (last.volume ?? 0) + source.volume;
   if (last.sourceCount === last.expectedCount) last.status = "COMPLETE";
   else if (source.sequence >= options.finalSequence) last.status = "INCOMPLETE";
-  return next;
+  return true;
 }
 
 /** Replace server bucket revisions; replayed responses never add volume twice. */

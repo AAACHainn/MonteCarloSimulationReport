@@ -7,12 +7,12 @@ import { addCalendarDays, tradingDayBounds, tradingDayForTimestamp } from "@/lib
 import { datasetSourceInterval, serializeSourceBar } from "@/lib/market-replay/dataset";
 import {
   isValidDisplayInterval,
-  MARKET_BAR_BLOCK_SIZE,
   type AggregatedMarketBarData,
   type MarketBarData,
   type TradingSessionConfig,
 } from "@/lib/market-replay/types";
 import { scheduleMarketBarBlockBuild } from "@/lib/market-replay/bar-blocks";
+import { marketBarBlockSizeForMultiplier } from "@/lib/market-replay/history";
 import { replayWindowSchema } from "@/lib/validations";
 
 type RouteContext = { params: Promise<{ id: string }> };
@@ -156,11 +156,14 @@ export async function GET(request: Request, context: RouteContext) {
   const endSequence = focusSequence === null
     ? maximumEndSequence
     : Math.min(maximumEndSequence, focusSequence + Math.ceil(parsed.data.visibleCount / 2) * sourceMultiplier);
-  if (endSequence < 0) return NextResponse.json({ visibleBars: [], warmupBars: [], lastSourceBar: null });
+  if (endSequence < 0) return NextResponse.json({
+    visibleBars: [], warmupBars: [], lastSourceBar: null, nextEndSequence: null, hasEarlierBars: false,
+  });
 
   const session = resolveDisplaySession(dataset, parsed.data.displaySession);
   if (!session) return NextResponse.json({ error: copy.marketReplay.unsupportedDisplaySession }, { status: 400 });
   const multiplier = parsed.data.displayIntervalSeconds / sourceSeconds;
+  const blockSize = marketBarBlockSizeForMultiplier(multiplier);
   const wanted = parsed.data.visibleCount + parsed.data.warmupCount;
   const lastSourceBar = serializeSourceBar(await prisma.marketBar.findUniqueOrThrow({
     where: { datasetId_sequence: { datasetId: id, sequence: endSequence } },
@@ -168,7 +171,7 @@ export async function GET(request: Request, context: RouteContext) {
   }));
   let aggregated: AggregatedMarketBarData[];
 
-  if (multiplier < MARKET_BAR_BLOCK_SIZE) {
+  if (blockSize === null) {
     aggregated = session.mode === "TWENTY_FOUR_SEVEN"
       ? await readSequentialRawWindow({
           datasetId: id, endSequence, wanted, sourceSeconds,
@@ -182,12 +185,12 @@ export async function GET(request: Request, context: RouteContext) {
   } else {
     const aggregateCount = wanted + 2;
     let sourceTake = Math.min(endSequence + 1, Math.max(1, Math.ceil(aggregateCount * multiplier)));
-    void scheduleMarketBarBlockBuild(id, dataset.barCount).catch(() => undefined);
+    void scheduleMarketBarBlockBuild(id, dataset.barCount, [blockSize]).catch(() => undefined);
     aggregated = [];
     while (true) {
       const fromSequence = endSequence - sourceTake + 1;
       const blocks = await prisma.marketBarBlock.findMany({
-        where: { datasetId: id, startSequence: { gte: fromSequence }, endSequence: { lte: endSequence } },
+        where: { datasetId: id, blockSize, startSequence: { gte: fromSequence }, endSequence: { lte: endSequence } },
         orderBy: { startSequence: "asc" },
       });
       const acceptedBlocks = blocks.filter((block) => {
@@ -225,10 +228,15 @@ export async function GET(request: Request, context: RouteContext) {
   }
   const window = aggregated.slice(-wanted);
   const visibleFrom = Math.max(0, window.length - parsed.data.visibleCount);
+  const visibleBars = window.slice(visibleFrom);
+  const firstVisibleSequence = visibleBars[0]?.firstSequence ?? 0;
+  const nextEndSequence = firstVisibleSequence > 0 ? firstVisibleSequence - 1 : null;
   return NextResponse.json({
     warmupBars: window.slice(0, visibleFrom),
-    visibleBars: window.slice(visibleFrom),
+    visibleBars,
     lastSourceBar,
+    nextEndSequence,
+    hasEarlierBars: nextEndSequence !== null,
     focusBarIndex: focusSequence === null ? null : window.slice(visibleFrom).findIndex((bar) => (
       focusSequence >= bar.firstSequence && focusSequence <= bar.lastSequence
     )),

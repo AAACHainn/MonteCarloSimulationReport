@@ -42,3 +42,22 @@ export function calculateAbrSeries(
 
   return { points, lastValue: rollingSum / length };
 }
+
+/** Latest ABR without allocating or scanning the complete replay history. */
+export function calculateLatestAbr(
+  warmupBars: Pick<MarketBarData, "high" | "low">[],
+  bars: Pick<MarketBarData, "high" | "low">[],
+  length: number,
+) {
+  assertLength(length);
+  if (warmupBars.length + bars.length < length) return null;
+  let sum = 0;
+  for (let offset = 0; offset < length; offset += 1) {
+    const combinedIndex = warmupBars.length + bars.length - 1 - offset;
+    const bar = combinedIndex < warmupBars.length
+      ? warmupBars[combinedIndex]
+      : bars[combinedIndex - warmupBars.length];
+    sum += Math.abs(bar.high - bar.low);
+  }
+  return sum / length;
+}

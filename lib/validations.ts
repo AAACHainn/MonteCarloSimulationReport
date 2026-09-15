@@ -101,7 +101,7 @@ export const replayWindowSchema = z.object({
   displayIntervalSeconds: z.coerce.number().int().min(1).max(MAX_DISPLAY_INTERVAL_SECONDS),
   displaySession: displaySessionSchema.default("ETH"),
   endSequence: z.coerce.number().int().min(-1),
-  visibleCount: z.coerce.number().int().min(20).max(2_000).default(200),
+  visibleCount: z.coerce.number().int().min(1).max(2_000).default(200),
   warmupCount: z.coerce.number().int().min(0).max(1_000).default(0),
   focusSequence: z.coerce.number().int().min(0).optional(),
 });

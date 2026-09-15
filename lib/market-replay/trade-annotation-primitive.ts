@@ -57,6 +57,19 @@ const EMPTY_PROJECTED_SNAPSHOT: ProjectedSnapshot = {
   paneHeight: 0,
 };
 
+function barIndexForSequence(bars: AggregatedMarketBarData[], sequence: number) {
+  let low = 0;
+  let high = bars.length - 1;
+  while (low <= high) {
+    const middle = Math.floor((low + high) / 2);
+    const bar = bars[middle];
+    if (sequence < bar.firstSequence) high = middle - 1;
+    else if (sequence > bar.lastSequence) low = middle + 1;
+    else return middle;
+  }
+  return -1;
+}
+
 export function replayTradeAnnotationColor(no: number) {
   const index = ((Math.max(1, no) - 1) % REPLAY_TRADE_ANNOTATION_COLORS.length);
   return REPLAY_TRADE_ANNOTATION_COLORS[index];
@@ -257,9 +270,7 @@ export class ReplayTradeAnnotationPrimitive implements ISeriesPrimitive<Time> {
     const paneHeight = chart.panes()[0]?.getHeight() ?? 0;
     const visibleRange = chart.timeScale().getVisibleLogicalRange();
     const annotations = this.snapshot.entries.flatMap(buildReplayTradePriceAnnotations).flatMap((annotation) => {
-      const index = this.snapshot.bars.findIndex((bar) => (
-        annotation.sequence >= bar.firstSequence && annotation.sequence <= bar.lastSequence
-      ));
+      const index = barIndexForSequence(this.snapshot.bars, annotation.sequence);
       if (index < 0 || (visibleRange && (index < visibleRange.from - 1 || index > visibleRange.to + 1))) return [];
       const x = chart.timeScale().logicalToCoordinate(index as never);
       const y = series.priceToCoordinate(annotation.price);

@@ -20,7 +20,7 @@ import {
   type MarketCsvIssue,
   type ParsedMarketBar,
 } from "./parse-market-bars";
-import { MARKET_BAR_BLOCK_SIZE, MAX_MARKET_BARS, MAX_MARKET_EXPANDED_BYTES, formatInterval } from "./types";
+import { MARKET_BAR_BLOCK_SIZES, MAX_MARKET_BARS, MAX_MARKET_EXPANDED_BYTES, formatInterval } from "./types";
 import { marketDatasetImportSchema, marketDatasetSchema } from "@/lib/validations";
 import {
   addCmeDailyVolume,
@@ -308,8 +308,10 @@ export async function processImportJob(jobId: string) {
     let firstTime: Date | null = null;
     let lastTime: Date | null = null;
     let chunk: Array<ParsedMarketBar & { datasetId: string }> = [];
-    let blocks: BlockAccumulator[] = [];
-    let block: BlockAccumulator | null = null;
+    let blocks: Array<BlockAccumulator & { blockSize: number }> = [];
+    const blockAccumulators = new Map<number, BlockAccumulator | null>(
+      MARKET_BAR_BLOCK_SIZES.map((blockSize) => [blockSize, null]),
+    );
     let lastProgressAt = 0;
 
     const persistProgress = async (force = false) => {
@@ -368,13 +370,22 @@ export async function processImportJob(jobId: string) {
         importedBarCount += 1;
         firstTime ??= parsed.bar.timestamp; lastTime = parsed.bar.timestamp;
         chunk.push({ ...parsed.bar, datasetId: dataset.id });
-        block = addToBlock(block, parsed.bar);
-        if (block.barCount === MARKET_BAR_BLOCK_SIZE) { blocks.push(block); block = null; }
+        for (const blockSize of MARKET_BAR_BLOCK_SIZES) {
+          const nextBlock = addToBlock(blockAccumulators.get(blockSize) ?? null, parsed.bar);
+          if (nextBlock.barCount === blockSize) {
+            blocks.push({ ...nextBlock, blockSize });
+            blockAccumulators.set(blockSize, null);
+          } else {
+            blockAccumulators.set(blockSize, nextBlock);
+          }
+        }
       }
       if (rowCount % INSERT_CHUNK_SIZE === 0) await flush();
       if (totalIssues > 1_000) break;
     }
-    if (block) blocks.push(block);
+    for (const [blockSize, pendingBlock] of blockAccumulators) {
+      if (pendingBlock) blocks.push({ ...pendingBlock, blockSize });
+    }
     await flush(true);
     if (importedBarCount < 2) {
       totalIssues += 1;
@@ -409,6 +420,11 @@ export async function processImportJob(jobId: string) {
           stageProcessedBytes: job.compressedBytes, stageTotalBytes: job.compressedBytes,
           workerPid: null, ...memorySnapshot(memory),
         },
+      }),
+      prisma.marketBarBlockBuildState.createMany({
+        data: MARKET_BAR_BLOCK_SIZES.map((blockSize) => ({
+          datasetId: dataset.id, blockSize, cursor: importedBarCount - 1,
+        })),
       }),
     ]);
     await rm(job.storedPath, { force: true });

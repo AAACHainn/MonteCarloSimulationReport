@@ -1,6 +1,9 @@
 export type ReplayLogicalRange = { from: number; to: number };
 
-export const DEFAULT_REPLAY_MAX_VISIBLE_BARS = 300;
+import { REPLAY_INITIAL_VISIBLE_BARS } from "./types";
+
+/** Maximum number of candles in the default viewport, not the loaded history limit. */
+export const DEFAULT_REPLAY_MAX_VISIBLE_BARS = REPLAY_INITIAL_VISIBLE_BARS;
 const DEFAULT_REPLAY_LATEST_BAR_POSITION = 0.618;
 
 export function defaultReplayLogicalRange(chartWidth: number, barCount: number): ReplayLogicalRange {

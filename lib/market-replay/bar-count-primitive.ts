@@ -67,7 +67,6 @@ export class BarCountPrimitive implements ISeriesPrimitive<Time> {
   private series: SeriesAttachedParameter<Time>["series"] | null = null;
   private requestUpdate: (() => void) | null = null;
   private snapshot: PrimitiveSnapshot | null = null;
-  private labels: BarCountLabel[] = [];
   private projected: ProjectedLabel[] = [];
   private readonly views = [new BarCountPaneView(() => this.projected)];
 
@@ -82,7 +81,6 @@ export class BarCountPrimitive implements ISeriesPrimitive<Time> {
     this.chart = null;
     this.series = null;
     this.requestUpdate = null;
-    this.labels = [];
     this.projected = [];
   }
 
@@ -90,7 +88,6 @@ export class BarCountPrimitive implements ISeriesPrimitive<Time> {
 
   setData(snapshot: PrimitiveSnapshot) {
     this.snapshot = snapshot;
-    this.labels = buildBarCountLabels(snapshot);
     this.requestUpdate?.();
   }
 
@@ -106,8 +103,11 @@ export class BarCountPrimitive implements ISeriesPrimitive<Time> {
     const visibleRange = chart.timeScale().getVisibleLogicalRange();
     const paneWidth = chart.timeScale().width();
     const paneHeight = chart.panes()[0]?.getHeight() ?? 0;
-    this.projected = this.labels.flatMap((label) => {
-      if (visibleRange && (label.index < visibleRange.from - 1 || label.index > visibleRange.to + 1)) return [];
+    const fromIndex = visibleRange ? Math.max(0, Math.floor(visibleRange.from) - 1) : 0;
+    const toIndex = visibleRange ? Math.min(snapshot.bars.length - 1, Math.ceil(visibleRange.to) + 1) : snapshot.bars.length - 1;
+    const labels: BarCountLabel[] = buildBarCountLabels({ ...snapshot, bars: snapshot.bars.slice(fromIndex, toIndex + 1) })
+      .map((label) => ({ ...label, index: label.index + fromIndex }));
+    this.projected = labels.flatMap((label) => {
       const bar = snapshot.bars[label.index];
       const x = chart.timeScale().logicalToCoordinate(label.index as never);
       const lowY = series.priceToCoordinate(bar.low);

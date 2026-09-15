@@ -9,7 +9,9 @@ import type { AggregatedMarketBarData, EmaIndicatorConfig } from "@/lib/market-r
 
 type EmaRenderState = {
   length: number;
-  bars: Array<{ timestamp: string; close: number }>;
+  firstTimestamp: string | null;
+  lastTimestamp: string | null;
+  barCount: number;
   values: Array<number | null>;
 };
 
@@ -71,8 +73,9 @@ export function useReplayChartEma({
       });
       const previous = stateRef.current.get(indicator.id);
       const samePrefix = previous?.length === indicator.length
-        && all.length >= previous.bars.length
-        && previous.bars.slice(0, -1).every((bar, index) => bar.timestamp === all[index]?.timestamp);
+        && all.length >= previous.barCount
+        && previous.firstTimestamp === (all[0]?.timestamp ?? null)
+        && previous.lastTimestamp === (all[previous.barCount - 1]?.timestamp ?? null);
       if (!previous || !samePrefix) {
         const result = calculateEmaSeries(all, indicator.length, all.length - 1, 0);
         const values: Array<number | null> = Array(all.length).fill(null);
@@ -81,14 +84,17 @@ export function useReplayChartEma({
           .map((point) => ({ time: chartTime(all[point.sequence].timestamp), value: point.value })));
         stateRef.current.set(indicator.id, {
           length: indicator.length,
-          bars: all.map((bar) => ({ timestamp: bar.timestamp, close: bar.close })),
+          firstTimestamp: all[0]?.timestamp ?? null,
+          lastTimestamp: all.at(-1)?.timestamp ?? null,
+          barCount: all.length,
           values,
         });
         continue;
       }
-      const values = previous.values.slice(0, all.length);
+      const values = previous.values;
+      values.length = Math.min(values.length, all.length);
       while (values.length < all.length) values.push(null);
-      const start = Math.max(indicator.length - 1, previous.bars.length - 1);
+      const start = Math.max(indicator.length - 1, previous.barCount - 1);
       for (let index = start; index < all.length; index += 1) {
         if (index === indicator.length - 1) {
           values[index] = all.slice(0, indicator.length).reduce((sum, bar) => sum + bar.close, 0) / indicator.length;
@@ -102,7 +108,9 @@ export function useReplayChartEma({
       }
       stateRef.current.set(indicator.id, {
         length: indicator.length,
-        bars: all.map((bar) => ({ timestamp: bar.timestamp, close: bar.close })),
+        firstTimestamp: all[0]?.timestamp ?? null,
+        lastTimestamp: all.at(-1)?.timestamp ?? null,
+        barCount: all.length,
         values,
       });
     }

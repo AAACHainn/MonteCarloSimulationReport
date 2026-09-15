@@ -288,6 +288,7 @@ const createStatements = [
   )`,
   `CREATE TABLE IF NOT EXISTS "MarketBarBlock" (
     "datasetId" TEXT NOT NULL,
+    "blockSize" INTEGER NOT NULL DEFAULT 4096,
     "startSequence" INTEGER NOT NULL,
     "endSequence" INTEGER NOT NULL,
     "startTime" DATETIME NOT NULL,
@@ -299,8 +300,16 @@ const createStatements = [
     "volume" REAL,
     "volumeCount" INTEGER NOT NULL,
     "barCount" INTEGER NOT NULL,
-    PRIMARY KEY ("datasetId", "startSequence"),
+    PRIMARY KEY ("datasetId", "blockSize", "startSequence"),
     CONSTRAINT "MarketBarBlock_datasetId_fkey" FOREIGN KEY ("datasetId") REFERENCES "MarketDataset" ("id") ON DELETE CASCADE ON UPDATE CASCADE
+  )`,
+  `CREATE TABLE IF NOT EXISTS "MarketBarBlockBuildState" (
+    "datasetId" TEXT NOT NULL,
+    "blockSize" INTEGER NOT NULL,
+    "cursor" INTEGER NOT NULL DEFAULT -1,
+    "updatedAt" DATETIME NOT NULL,
+    PRIMARY KEY ("datasetId", "blockSize"),
+    CONSTRAINT "MarketBarBlockBuildState_datasetId_fkey" FOREIGN KEY ("datasetId") REFERENCES "MarketDataset" ("id") ON DELETE CASCADE ON UPDATE CASCADE
   )`,
   `CREATE TABLE IF NOT EXISTS "MarketDatasetImport" (
     "id" TEXT NOT NULL PRIMARY KEY,
@@ -429,7 +438,7 @@ const indexStatements = [
   `CREATE INDEX IF NOT EXISTS "ReplayJournalEntry_journalSessionId_no_idx" ON "ReplayJournalEntry"("journalSessionId", "no")`,
   `CREATE INDEX IF NOT EXISTS "ReplayJournalEntry_journalSessionId_openedSequence_idx" ON "ReplayJournalEntry"("journalSessionId", "openedSequence")`,
   `CREATE INDEX IF NOT EXISTS "ReplayJournalEntry_journalSessionId_closedSequence_idx" ON "ReplayJournalEntry"("journalSessionId", "closedSequence")`,
-  `CREATE INDEX IF NOT EXISTS "MarketBarBlock_datasetId_startTime_endTime_idx" ON "MarketBarBlock"("datasetId", "startTime", "endTime")`,
+  `CREATE INDEX IF NOT EXISTS "MarketBarBlock_datasetId_blockSize_startTime_endTime_idx" ON "MarketBarBlock"("datasetId", "blockSize", "startTime", "endTime")`,
   `CREATE INDEX IF NOT EXISTS "MarketDatasetImport_status_createdAt_idx" ON "MarketDatasetImport"("status", "createdAt")`,
   `CREATE INDEX IF NOT EXISTS "MarketDrawing_datasetId_createdAt_idx" ON "MarketDrawing"("datasetId", "createdAt")`,
   `CREATE UNIQUE INDEX IF NOT EXISTS "_TradeToTradeTag_AB_unique" ON "_TradeToTradeTag"("A", "B")`,
@@ -526,6 +535,36 @@ try {
   if (replayProgressTable.some((column) => column.name === "intervalMs")) {
     await prisma.$executeRawUnsafe(`ALTER TABLE "ReplayProgress" DROP COLUMN "intervalMs"`);
   }
+
+  const marketBarBlockTable = await prisma.$queryRawUnsafe(`PRAGMA table_info("MarketBarBlock")`);
+  if (!marketBarBlockTable.some((column) => column.name === "blockSize")) {
+    await prisma.$executeRawUnsafe(`CREATE TABLE "new_MarketBarBlock" (
+      "datasetId" TEXT NOT NULL,
+      "blockSize" INTEGER NOT NULL DEFAULT 4096,
+      "startSequence" INTEGER NOT NULL,
+      "endSequence" INTEGER NOT NULL,
+      "startTime" DATETIME NOT NULL,
+      "endTime" DATETIME NOT NULL,
+      "open" REAL NOT NULL,
+      "high" REAL NOT NULL,
+      "low" REAL NOT NULL,
+      "close" REAL NOT NULL,
+      "volume" REAL,
+      "volumeCount" INTEGER NOT NULL,
+      "barCount" INTEGER NOT NULL,
+      PRIMARY KEY ("datasetId", "blockSize", "startSequence"),
+      CONSTRAINT "MarketBarBlock_datasetId_fkey" FOREIGN KEY ("datasetId") REFERENCES "MarketDataset" ("id") ON DELETE CASCADE ON UPDATE CASCADE
+    )`);
+    await prisma.$executeRawUnsafe(`INSERT INTO "new_MarketBarBlock" (
+      "datasetId", "blockSize", "startSequence", "endSequence", "startTime", "endTime",
+      "open", "high", "low", "close", "volume", "volumeCount", "barCount"
+    ) SELECT "datasetId", 4096, "startSequence", "endSequence", "startTime", "endTime",
+      "open", "high", "low", "close", "volume", "volumeCount", "barCount" FROM "MarketBarBlock"`);
+    await prisma.$executeRawUnsafe(`DROP TABLE "MarketBarBlock"`);
+    await prisma.$executeRawUnsafe(`ALTER TABLE "new_MarketBarBlock" RENAME TO "MarketBarBlock"`);
+  }
+  await prisma.$executeRawUnsafe(`INSERT OR IGNORE INTO "MarketBarBlockBuildState" ("datasetId", "blockSize", "cursor", "updatedAt")
+    SELECT "id", 4096, "barBlockBuildCursor", CURRENT_TIMESTAMP FROM "MarketDataset" WHERE "barBlockBuildCursor" >= 0`);
 
   for (const statement of indexStatements) {
     await prisma.$executeRawUnsafe(statement);
