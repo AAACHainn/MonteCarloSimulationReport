@@ -1,5 +1,11 @@
 import { describe, expect, it } from "vitest";
-import { buildBarCountLabels, DEFAULT_BAR_COUNT_CONFIG, parseBarCountPreferences } from "./bar-count";
+import {
+  barCountWindowStartIndex,
+  buildBarCountLabelWindow,
+  buildBarCountLabels,
+  DEFAULT_BAR_COUNT_CONFIG,
+  parseBarCountPreferences,
+} from "./bar-count";
 import type { AggregatedMarketBarData, BarCountIndicatorConfig, TradingSessionConfig } from "./types";
 
 const rth: TradingSessionConfig = {
@@ -12,6 +18,7 @@ const rth: TradingSessionConfig = {
 const config: BarCountIndicatorConfig = {
   enabled: true,
   interval: 1,
+  recentTradingDays: 2,
   regularColor: "#64748B",
   bar18Color: "#DC2626",
   hourCloseColor: "#2563EB",
@@ -94,6 +101,26 @@ describe("RTH bar count", () => {
     expect(labels.map((label) => label.number)).toEqual([1, 1]);
   });
 
+  it("limits labels to the configured number of most recent trading days", () => {
+    const bars = [
+      ...sessionBars("2021-09-07", 300, 2),
+      ...sessionBars("2021-09-08", 300, 2),
+      ...sessionBars("2021-09-09", 300, 2),
+    ];
+    expect(barCountWindowStartIndex(bars, rth, 2)).toBe(2);
+    expect(barCountWindowStartIndex(bars, rth, 1)).toBe(4);
+    expect(barCountWindowStartIndex(bars, rth, 30)).toBe(0);
+    const window = buildBarCountLabelWindow({
+      bars,
+      displaySession: "RTH",
+      displayIntervalSeconds: 300,
+      session: rth,
+      config,
+    });
+    expect(window.startIndex).toBe(2);
+    expect(window.labels.map((label) => label.index)).toEqual([2, 3, 4, 5]);
+  });
+
   it("does not draw outside RTH or above one hour", () => {
     const bars = sessionBars("2021-09-07", 300, 2);
     expect(buildBarCountLabels({ bars, displaySession: "ETH", displayIntervalSeconds: 300, session: rth, config })).toEqual([]);
@@ -118,15 +145,18 @@ describe("RTH bar count", () => {
 
   it("parses stored preferences and falls back field by field", () => {
     expect(parseBarCountPreferences(JSON.stringify({
-      enabled: false, interval: 2, regularColor: "#abcdef", bar18Color: "bad", hourCloseColor: "#123456",
+      enabled: false, interval: 2, recentTradingDays: 3,
+      regularColor: "#abcdef", bar18Color: "bad", hourCloseColor: "#123456",
     }))).toEqual({
       enabled: false,
       interval: 2,
+      recentTradingDays: 3,
       regularColor: "#ABCDEF",
       bar18Color: DEFAULT_BAR_COUNT_CONFIG.bar18Color,
       hourCloseColor: "#123456",
     });
     expect(parseBarCountPreferences("not-json")).toEqual(DEFAULT_BAR_COUNT_CONFIG);
     expect(parseBarCountPreferences(JSON.stringify({ interval: 101 }))).toEqual(DEFAULT_BAR_COUNT_CONFIG);
+    expect(parseBarCountPreferences(JSON.stringify({ recentTradingDays: 31 }))).toEqual(DEFAULT_BAR_COUNT_CONFIG);
   });
 });

@@ -31,7 +31,7 @@ import {
 } from "@/lib/market-replay/engine";
 import { aggregateMarketBars, getAggregationBucket, mergeSourceBarInto } from "@/lib/market-replay/aggregation";
 import { calculateLatestAbr } from "@/lib/market-replay/abr";
-import { isValidBarCountInterval } from "@/lib/market-replay/bar-count";
+import { isValidBarCountInterval, isValidBarCountRecentTradingDays } from "@/lib/market-replay/bar-count";
 import { DisplayBarCache, MarketBarCache, ReplayWindowMemoryCache } from "@/lib/market-replay/bar-cache";
 import { tradingDayForTimestamp } from "@/lib/market-replay/chunks";
 import { datasetSession } from "@/lib/market-replay/dataset";
@@ -50,6 +50,8 @@ import {
   ABR_LENGTH_MIN,
   BAR_COUNT_INTERVAL_MAX,
   BAR_COUNT_INTERVAL_MIN,
+  BAR_COUNT_RECENT_TRADING_DAYS_MAX,
+  BAR_COUNT_RECENT_TRADING_DAYS_MIN,
   EMA_LENGTH_MAX,
   EMA_LENGTH_MIN,
   EMA_LINE_STYLES,
@@ -1621,6 +1623,19 @@ export function MarketReplayClient({ dataset, initialJournalFocus = null }: { da
     return true;
   }
 
+  function updateBarCountRecentTradingDays(value: number) {
+    if (!isValidBarCountRecentTradingDays(value)) {
+      setBarCountError(copy.marketReplay.barCountRecentTradingDaysRange(
+        BAR_COUNT_RECENT_TRADING_DAYS_MIN,
+        BAR_COUNT_RECENT_TRADING_DAYS_MAX,
+      ));
+      return false;
+    }
+    setBarCountConfig((current) => ({ ...current, recentTradingDays: value }));
+    setBarCountError(null);
+    return true;
+  }
+
   function addEma() {
     if (emaIndicators.length >= MAX_EMA_INDICATORS) {
       setEmaError(copy.marketReplay.emaLimit(MAX_EMA_INDICATORS));
@@ -2247,6 +2262,24 @@ export function MarketReplayClient({ dataset, initialJournalFocus = null }: { da
               <div className="flex shrink-0 items-center gap-2"><span className="text-xs text-slate-500">{barCountConfig.enabled ? copy.marketReplay.emaOn : copy.marketReplay.emaOff}</span><button type="button" role="switch" aria-checked={barCountConfig.enabled} aria-label={copy.marketReplay.barCountMaster} onClick={() => setBarCountConfig((current) => ({ ...current, enabled: !current.enabled }))} className={`relative h-6 w-11 rounded-full transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-600 focus-visible:ring-offset-2 ${barCountConfig.enabled ? "bg-blue-600" : "bg-slate-300"}`}><span className={`absolute left-0 top-0.5 h-5 w-5 rounded-full bg-white shadow-sm transition-transform ${barCountConfig.enabled ? "translate-x-5" : "translate-x-0.5"}`} /></button></div>
             </div>
             <div className="grid gap-3 border-t pt-3 sm:grid-cols-[7rem_1fr] sm:items-center">
+              <Label htmlFor="bar-count-recent-days" className="text-xs text-slate-500">{copy.marketReplay.barCountRecentTradingDays}</Label>
+              <Input
+                key={barCountConfig.recentTradingDays}
+                id="bar-count-recent-days"
+                type="number"
+                min={BAR_COUNT_RECENT_TRADING_DAYS_MIN}
+                max={BAR_COUNT_RECENT_TRADING_DAYS_MAX}
+                step="1"
+                defaultValue={barCountConfig.recentTradingDays}
+                aria-describedby={barCountError ? "bar-count-error" : undefined}
+                onBlur={(event) => {
+                  if (!updateBarCountRecentTradingDays(Number(event.currentTarget.value))) {
+                    event.currentTarget.value = String(barCountConfig.recentTradingDays);
+                  }
+                }}
+                onKeyDown={(event) => { if (event.key === "Enter") event.currentTarget.blur(); }}
+                className="h-8 w-24 font-mono text-xs"
+              />
               <Label htmlFor="bar-count-interval" className="text-xs text-slate-500">{copy.marketReplay.barCountInterval}</Label>
               <Input
                 key={barCountConfig.interval}
@@ -2256,6 +2289,7 @@ export function MarketReplayClient({ dataset, initialJournalFocus = null }: { da
                 max={BAR_COUNT_INTERVAL_MAX}
                 step="1"
                 defaultValue={barCountConfig.interval}
+                aria-describedby={barCountError ? "bar-count-error" : undefined}
                 onBlur={(event) => {
                   if (!updateBarCountInterval(Number(event.currentTarget.value))) event.currentTarget.value = String(barCountConfig.interval);
                 }}
@@ -2282,7 +2316,7 @@ export function MarketReplayClient({ dataset, initialJournalFocus = null }: { da
                 </div>
               ))}
             </div>
-            {barCountError ? <p className="text-xs text-red-600">{barCountError}</p> : null}
+            {barCountError ? <p id="bar-count-error" className="text-xs text-red-600" role="alert">{barCountError}</p> : null}
           </div>
           <div className="space-y-3 rounded-md border bg-slate-50 p-3">
             <div className="flex items-center justify-between gap-4">

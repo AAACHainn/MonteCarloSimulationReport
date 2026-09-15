@@ -25,6 +25,8 @@ export const ABR_LENGTH_MIN = 1;
 export const ABR_LENGTH_MAX = 1_000;
 export const BAR_COUNT_INTERVAL_MIN = 1;
 export const BAR_COUNT_INTERVAL_MAX = 100;
+export const BAR_COUNT_RECENT_TRADING_DAYS_MIN = 1;
+export const BAR_COUNT_RECENT_TRADING_DAYS_MAX = 30;
 export const MAX_EMA_INDICATORS = 5;
 export const EMA_LINE_WIDTHS = [1, 2, 3, 4] as const;
 export const EMA_LINE_STYLES = ["SOLID", "DASHED", "DOTTED"] as const;
@@ -66,6 +68,7 @@ export type AbrIndicatorConfig = {
 export type BarCountIndicatorConfig = {
   enabled: boolean;
   interval: number;
+  recentTradingDays: number;
   regularColor: string;
   bar18Color: string;
   hourCloseColor: string;
