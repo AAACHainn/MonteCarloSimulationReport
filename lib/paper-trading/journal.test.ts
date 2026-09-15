@@ -106,6 +106,27 @@ describe("paper replay journal", () => {
     expect(serialized).toMatchObject({ result: "BE", initialRiskAbr: null, actualRiskAbr: null, abrRr: null });
   });
 
+  it("serializes the selected Setup and keeps legacy entries unassigned", () => {
+    const base = {
+      id: "entry", no: 3, accountNo: 1, journalSessionId: "journal", lotId: "lot", direction: "LONG",
+      quantity: 1, openedSequence: 0, openedAt: new Date("2026-09-01T00:00:00Z"),
+      closedSequence: 1, closedAt: new Date("2026-09-01T00:01:00Z"), entryPrice: 100,
+      entryOrderType: "MARKET", exitPrice: 101, initialStopPrice: 99, abrValue: 2, abrLength: 8,
+      displayIntervalSeconds: 300, displaySession: "ETH", displayUtcOffsetMinutes: 0,
+      priceTickSize: 0.25, initialRisk: 1, actualRisk: 1, gainLoss: 1,
+      journalSession: { archivedAt: null },
+    } as const;
+    expect(serializeReplayJournalEntry({
+      ...base,
+      setupOptionId: "setup-1",
+      setupOption: { name: "Opening Range Breakout" },
+    })).toMatchObject({
+      setupOptionId: "setup-1",
+      setupOption: { name: "Opening Range Breakout" },
+    });
+    expect(serializeReplayJournalEntry(base)).toMatchObject({ setupOptionId: null, setupOption: null });
+  });
+
   it("waits for a legacy untracked position to flatten before starting journal lots", () => {
     const legacyState = { ...state, netQuantity: 1, averageEntryPrice: 100 };
     const add = advancePaperTrading({

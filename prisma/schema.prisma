@@ -95,6 +95,7 @@ model TradeOption {
   active           Boolean         @default(true)
   instrumentTrades Trade[]         @relation("TradeInstrumentOption")
   strategyTrades   Trade[]         @relation("TradeStrategyOption")
+  replayJournalSetups ReplayJournalEntry[] @relation("ReplayJournalSetupOption")
   createdAt        DateTime        @default(now())
   updatedAt        DateTime        @updatedAt
 
@@ -364,6 +365,8 @@ model ReplayJournalEntry {
   initialRisk              Float
   actualRisk               Float
   gainLoss                 Float
+  setupOptionId            String?
+  setupOption              TradeOption?         @relation("ReplayJournalSetupOption", fields: [setupOptionId], references: [id])
   createdAt                DateTime             @default(now())
 
   @@unique([journalSessionId, id])
@@ -371,6 +374,7 @@ model ReplayJournalEntry {
   @@index([journalSessionId, no])
   @@index([journalSessionId, openedSequence])
   @@index([journalSessionId, closedSequence])
+  @@index([setupOptionId])
 }
 
 model PaperOrder {

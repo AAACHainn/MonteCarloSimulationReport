@@ -119,6 +119,8 @@ export type ReplayJournalEntryDraft = PaperJournalContext & {
 export type ReplayJournalEntryData = ReplayJournalEntryDraft & {
   no: number;
   globalNo: number;
+  setupOptionId: string | null;
+  setupOption: { name: string } | null;
   result: "W" | "L" | "BE";
   initialRiskAbr: number | null;
   actualRiskAbr: number | null;

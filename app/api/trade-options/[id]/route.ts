@@ -27,13 +27,19 @@ export async function DELETE(_request: Request, context: RouteContext) {
   const { id } = await context.params;
   const option = await prisma.tradeOption.findUnique({
     where: { id },
-    include: { _count: { select: { instrumentTrades: true, strategyTrades: true } } },
+    include: {
+      _count: {
+        select: { instrumentTrades: true, strategyTrades: true, replayJournalSetups: true },
+      },
+    },
   });
   if (!option) {
     return NextResponse.json({ error: "未找到选项。" }, { status: 404 });
   }
 
-  const referenceCount = option._count.instrumentTrades + option._count.strategyTrades;
+  const referenceCount = option._count.instrumentTrades
+    + option._count.strategyTrades
+    + option._count.replayJournalSetups;
   if (referenceCount > 0) {
     await prisma.tradeOption.update({ where: { id }, data: { active: false } });
     return NextResponse.json({ ok: true, deactivated: true });

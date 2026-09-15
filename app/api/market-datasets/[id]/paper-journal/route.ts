@@ -22,7 +22,10 @@ export async function GET(request: Request, context: RouteContext) {
     : { journalSession: { datasetId: id }, no: { gt: cursor } };
   const records = await prisma.replayJournalEntry.findMany({
     where,
-    include: { journalSession: { select: { archivedAt: true } } },
+    include: {
+      journalSession: { select: { archivedAt: true } },
+      setupOption: { select: { name: true } },
+    },
     orderBy: { no: "asc" },
     take: take + 1,
   });

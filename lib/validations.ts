@@ -273,6 +273,10 @@ export const replayTradeAnnotationsQuerySchema = z.object({
   }
 });
 
+export const replayJournalSetupSchema = z.object({
+  setupOptionId: z.string().trim().min(1).max(120).nullable(),
+});
+
 export const paperResetSchema = z.object({ action: z.enum(["RESET", "CHANGE_START"]) });
 
 export const tradeOptionSchema = z.object({

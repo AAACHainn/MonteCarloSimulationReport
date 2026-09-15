@@ -212,8 +212,10 @@ const createStatements = [
     "initialRisk" REAL NOT NULL,
     "actualRisk" REAL NOT NULL,
     "gainLoss" REAL NOT NULL,
+    "setupOptionId" TEXT,
     "createdAt" DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
-    CONSTRAINT "ReplayJournalEntry_journalSessionId_fkey" FOREIGN KEY ("journalSessionId") REFERENCES "ReplayJournalSession" ("id") ON DELETE CASCADE ON UPDATE CASCADE
+    CONSTRAINT "ReplayJournalEntry_journalSessionId_fkey" FOREIGN KEY ("journalSessionId") REFERENCES "ReplayJournalSession" ("id") ON DELETE CASCADE ON UPDATE CASCADE,
+    CONSTRAINT "ReplayJournalEntry_setupOptionId_fkey" FOREIGN KEY ("setupOptionId") REFERENCES "TradeOption" ("id") ON DELETE SET NULL ON UPDATE CASCADE
   )`,
   `CREATE TABLE IF NOT EXISTS "PaperOrder" (
     "id" TEXT NOT NULL PRIMARY KEY,
@@ -395,7 +397,12 @@ const paperSessionColumns = [
 const paperOrderColumns = [["riskAmount", "REAL"]];
 const paperPositionLotColumns = [["initialStopPrice", "REAL"], ["entryOrderType", "TEXT"]];
 const replayJournalSessionColumns = [["nextEntryNo", "INTEGER NOT NULL DEFAULT 0"]];
-const replayJournalEntryColumns = [["initialStopPrice", "REAL"], ["entryOrderType", "TEXT"], ["accountNo", "INTEGER NOT NULL DEFAULT 0"]];
+const replayJournalEntryColumns = [
+  ["initialStopPrice", "REAL"],
+  ["entryOrderType", "TEXT"],
+  ["accountNo", "INTEGER NOT NULL DEFAULT 0"],
+  ["setupOptionId", "TEXT REFERENCES \"TradeOption\"(\"id\") ON DELETE SET NULL ON UPDATE CASCADE"],
+];
 const marketDatasetImportColumns = [
   ["importedBars", "INTEGER NOT NULL DEFAULT 0"],
   ["stage", "TEXT NOT NULL DEFAULT 'WAITING_UPLOAD'"],
@@ -438,6 +445,7 @@ const indexStatements = [
   `CREATE INDEX IF NOT EXISTS "ReplayJournalEntry_journalSessionId_no_idx" ON "ReplayJournalEntry"("journalSessionId", "no")`,
   `CREATE INDEX IF NOT EXISTS "ReplayJournalEntry_journalSessionId_openedSequence_idx" ON "ReplayJournalEntry"("journalSessionId", "openedSequence")`,
   `CREATE INDEX IF NOT EXISTS "ReplayJournalEntry_journalSessionId_closedSequence_idx" ON "ReplayJournalEntry"("journalSessionId", "closedSequence")`,
+  `CREATE INDEX IF NOT EXISTS "ReplayJournalEntry_setupOptionId_idx" ON "ReplayJournalEntry"("setupOptionId")`,
   `CREATE INDEX IF NOT EXISTS "MarketBarBlock_datasetId_blockSize_startTime_endTime_idx" ON "MarketBarBlock"("datasetId", "blockSize", "startTime", "endTime")`,
   `CREATE INDEX IF NOT EXISTS "MarketDatasetImport_status_createdAt_idx" ON "MarketDatasetImport"("status", "createdAt")`,
   `CREATE INDEX IF NOT EXISTS "MarketDrawing_datasetId_createdAt_idx" ON "MarketDrawing"("datasetId", "createdAt")`,
