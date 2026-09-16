@@ -121,9 +121,11 @@ export type ReplayJournalEntryData = ReplayJournalEntryDraft & {
   globalNo: number;
   setupOptionId: string | null;
   setupOption: { name: string } | null;
+  reasonTags: { id: string; name: string }[];
   result: "W" | "L" | "BE";
   initialRiskAbr: number | null;
   actualRiskAbr: number | null;
+  actualInitialRiskRatio: number | null;
   abrRr: number | null;
   initialRiskRr: number;
   actualRiskRr: number;

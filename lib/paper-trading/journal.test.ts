@@ -90,6 +90,7 @@ describe("paper replay journal", () => {
     expect(serialized).toMatchObject({
       no: 1, globalNo: 3,
       result: "W", initialRiskAbr: 0, actualRiskAbr: 0,
+      actualInitialRiskRatio: null,
       initialRiskRr: 4, actualRiskRr: 4, abrRr: 0.5,
     });
   });
@@ -125,6 +126,23 @@ describe("paper replay journal", () => {
       setupOption: { name: "Opening Range Breakout" },
     });
     expect(serializeReplayJournalEntry(base)).toMatchObject({ setupOptionId: null, setupOption: null });
+  });
+
+  it("calculates aRisk / iRisk and serializes multiple trade reasons", () => {
+    const serialized = serializeReplayJournalEntry({
+      id: "entry", no: 3, accountNo: 1, journalSessionId: "journal", lotId: "lot", direction: "LONG",
+      quantity: 1, openedSequence: 0, openedAt: new Date("2026-09-01T00:00:00Z"),
+      closedSequence: 1, closedAt: new Date("2026-09-01T00:01:00Z"), entryPrice: 100,
+      entryOrderType: "LIMIT", exitPrice: 102, initialStopPrice: 96, abrValue: 2, abrLength: 8,
+      displayIntervalSeconds: 300, displaySession: "ETH", displayUtcOffsetMinutes: 0,
+      priceTickSize: 0.25, initialRisk: 4, actualRisk: 3, gainLoss: 2,
+      reasonTags: [{ id: "tag-2", name: "回踩" }, { id: "tag-1", name: "突破" }],
+      journalSession: { archivedAt: null },
+    });
+    expect(serialized).toMatchObject({
+      actualInitialRiskRatio: 0.75,
+      reasonTags: [{ id: "tag-2", name: "回踩" }, { id: "tag-1", name: "突破" }],
+    });
   });
 
   it("waits for a legacy untracked position to flatten before starting journal lots", () => {

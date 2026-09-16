@@ -8,7 +8,7 @@ export async function GET() {
   return NextResponse.json(
     await prisma.tradeTag.findMany({
       orderBy: { name: "asc" },
-      include: { _count: { select: { trades: true } } },
+      include: { _count: { select: { trades: true, replayJournalEntries: true } } },
     }),
   );
 }
@@ -25,7 +25,7 @@ export async function POST(request: Request) {
         name: parsed.data.name,
         normalizedName: normalizeTagKey(parsed.data.name),
       },
-      include: { _count: { select: { trades: true } } },
+      include: { _count: { select: { trades: true, replayJournalEntries: true } } },
     });
     return NextResponse.json(tag, { status: 201 });
   } catch (error) {

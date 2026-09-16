@@ -2,15 +2,15 @@ import { NextResponse } from "next/server";
 import { prisma } from "@/lib/db";
 import { copy } from "@/lib/i18n";
 import { serializeReplayJournalEntry } from "@/lib/paper-trading/journal";
-import { replayJournalSetupSchema } from "@/lib/validations";
+import { replayJournalEntryUpdateSchema } from "@/lib/validations";
 
 type RouteContext = { params: Promise<{ id: string; entryId: string }> };
 
 export async function PATCH(request: Request, context: RouteContext) {
   const { id, entryId } = await context.params;
-  const parsed = replayJournalSetupSchema.safeParse(await request.json());
+  const parsed = replayJournalEntryUpdateSchema.safeParse(await request.json());
   if (!parsed.success) {
-    return NextResponse.json({ error: copy.paperTrading.setupInvalid }, { status: 400 });
+    return NextResponse.json({ error: copy.paperTrading.journalEntryUpdateInvalid }, { status: 400 });
   }
 
   const entry = await prisma.replayJournalEntry.findFirst({
@@ -31,12 +31,29 @@ export async function PATCH(request: Request, context: RouteContext) {
     }
   }
 
+  if (parsed.data.reasonTagIds) {
+    const reasonTagCount = await prisma.tradeTag.count({
+      where: { id: { in: parsed.data.reasonTagIds } },
+    });
+    if (reasonTagCount !== parsed.data.reasonTagIds.length) {
+      return NextResponse.json({ error: copy.paperTrading.reasonTagsInvalid }, { status: 400 });
+    }
+  }
+
+  const data = {
+    ...(parsed.data.setupOptionId !== undefined ? { setupOptionId: parsed.data.setupOptionId } : {}),
+    ...(parsed.data.reasonTagIds !== undefined ? {
+      reasonTags: { set: parsed.data.reasonTagIds.map((tagId) => ({ id: tagId })) },
+    } : {}),
+  };
+
   const updated = await prisma.replayJournalEntry.update({
     where: { id: entry.id },
-    data: { setupOptionId: parsed.data.setupOptionId },
+    data,
     include: {
       journalSession: { select: { archivedAt: true } },
       setupOption: { select: { name: true } },
+      reasonTags: { select: { id: true, name: true }, orderBy: { name: "asc" } },
     },
   });
   return NextResponse.json(serializeReplayJournalEntry(updated));

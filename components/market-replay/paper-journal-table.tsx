@@ -1,13 +1,14 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { ChevronLeft, ChevronRight, Loader2, Pencil, Trash2 } from "lucide-react";
+import { ChevronLeft, ChevronRight, Loader2, Pencil, Settings2, Trash2 } from "lucide-react";
 import Link from "next/link";
 import { Button } from "@/components/ui/button";
 import { ConfirmDialog } from "@/components/ui/confirm-dialog";
 import { Dialog } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import { MultiSelect } from "@/components/ui/multi-select";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { copy } from "@/lib/i18n";
 import { formatInterval } from "@/lib/market-replay/types";
@@ -44,6 +45,37 @@ type TradeOption = {
   name: string;
   active: boolean;
 };
+
+type TradeTag = {
+  id: string;
+  name: string;
+};
+
+type JournalColumnId =
+  | "no" | "date" | "direction" | "setup" | "reason" | "abr" | "initialRisk"
+  | "initialRiskAbr" | "actualRisk" | "actualRiskAbr" | "actualInitialRiskRatio"
+  | "gainLoss" | "result" | "abrRr" | "initialRiskRr" | "actualRiskRr";
+
+const journalColumns: { id: JournalColumnId; label: string; text: boolean; className?: string }[] = [
+  { id: "no", label: "No", text: false },
+  { id: "date", label: "Date", text: false },
+  { id: "direction", label: "Direction", text: false },
+  { id: "setup", label: copy.paperTrading.setup, text: true, className: "w-52 min-w-52 max-w-52" },
+  { id: "reason", label: copy.paperTrading.tradeReason, text: true, className: "w-64 min-w-64 max-w-64" },
+  { id: "abr", label: "ABR", text: false },
+  { id: "initialRisk", label: "iRisk", text: false },
+  { id: "initialRiskAbr", label: "iRisk / ABR", text: false },
+  { id: "actualRisk", label: "aRisk", text: false },
+  { id: "actualRiskAbr", label: "aRisk / ABR", text: false },
+  { id: "actualInitialRiskRatio", label: "aRisk / iRisk", text: false },
+  { id: "gainLoss", label: "Gain / Loss", text: false },
+  { id: "result", label: "Result", text: false },
+  { id: "abrRr", label: "ABR RR", text: false },
+  { id: "initialRiskRr", label: "iRisk RR", text: false },
+  { id: "actualRiskRr", label: "aRisk RR", text: false },
+];
+const defaultVisibleColumnIds = journalColumns.map((column) => column.id);
+const columnPreferenceKey = "replay-journal-visible-columns-v1";
 
 const noSetupValue = "__NO_SETUP__";
 const pageSizeOptions = Array.from({ length: 10 }, (_, index) => (index + 1) * 10);
@@ -92,6 +124,14 @@ export function PaperJournalTable({
   const [setupOptionsLoading, setSetupOptionsLoading] = useState(true);
   const [setupError, setSetupError] = useState<string | null>(null);
   const [savingSetupIds, setSavingSetupIds] = useState<Set<string>>(() => new Set());
+  const [reasonTagOptions, setReasonTagOptions] = useState<TradeTag[]>([]);
+  const [reasonTagsLoading, setReasonTagsLoading] = useState(true);
+  const [reasonTagsError, setReasonTagsError] = useState<string | null>(null);
+  const [savingReasonTagIds, setSavingReasonTagIds] = useState<Set<string>>(() => new Set());
+  const [visibleColumnsOpen, setVisibleColumnsOpen] = useState(false);
+  const [visibleColumnIds, setVisibleColumnIds] = useState<JournalColumnId[]>(defaultVisibleColumnIds);
+  const [draftVisibleColumnIds, setDraftVisibleColumnIds] = useState<JournalColumnId[]>(defaultVisibleColumnIds);
+  const [columnPreferencesLoaded, setColumnPreferencesLoaded] = useState(false);
 
   const load = useCallback(async ({
     cursor = 0,
@@ -161,6 +201,55 @@ export function PaperJournalTable({
     void loadSetupOptions();
     return () => { cancelled = true; };
   }, []);
+
+  useEffect(() => {
+    let cancelled = false;
+    async function loadReasonTags() {
+      setReasonTagsLoading(true);
+      try {
+        const response = await fetch("/api/trade-tags");
+        const data: unknown = await response.json();
+        if (!response.ok || !Array.isArray(data)) throw new Error(copy.paperTrading.reasonTagsLoadFailed);
+        if (!cancelled) {
+          setReasonTagOptions((data as TradeTag[]).map((tag) => ({ id: tag.id, name: tag.name })));
+          setReasonTagsError(null);
+        }
+      } catch {
+        if (!cancelled) setReasonTagsError(copy.paperTrading.reasonTagsLoadFailed);
+      } finally {
+        if (!cancelled) setReasonTagsLoading(false);
+      }
+    }
+    void loadReasonTags();
+    return () => { cancelled = true; };
+  }, []);
+
+  useEffect(() => {
+    if (scope !== "history") return;
+    const stored = window.localStorage.getItem(columnPreferenceKey);
+    if (stored) {
+      try {
+        const parsed: unknown = JSON.parse(stored);
+        if (Array.isArray(parsed)) {
+          const allowed = new Set<JournalColumnId>(defaultVisibleColumnIds);
+          const next = parsed.filter((value): value is JournalColumnId => typeof value === "string" && allowed.has(value as JournalColumnId));
+          if (next.length > 0) {
+            setVisibleColumnIds(next);
+            setDraftVisibleColumnIds(next);
+          }
+        }
+      } catch {
+        window.localStorage.removeItem(columnPreferenceKey);
+      }
+    }
+    setColumnPreferencesLoaded(true);
+  }, [scope]);
+
+  useEffect(() => {
+    if (scope === "history" && columnPreferencesLoaded) {
+      window.localStorage.setItem(columnPreferenceKey, JSON.stringify(visibleColumnIds));
+    }
+  }, [columnPreferencesLoaded, scope, visibleColumnIds]);
 
   const selectedSession = useMemo(
     () => sessions.find((session) => session.id === selectedSessionId) ?? null,
@@ -251,7 +340,11 @@ export function PaperJournalTable({
       });
       const data = await response.json() as ReplayJournalEntryData & { error?: string };
       if (!response.ok) throw new Error(data.error ?? copy.paperTrading.setupUpdateFailed);
-      setItems((current) => current.map((item) => item.id === entry.id ? data : item));
+      setItems((current) => current.map((item) => item.id === entry.id ? {
+        ...item,
+        setupOptionId: data.setupOptionId,
+        setupOption: data.setupOption,
+      } : item));
     } catch {
       setItems((current) => current.map((item) => item.id === entry.id ? {
         ...item,
@@ -267,12 +360,71 @@ export function PaperJournalTable({
     }
   }
 
+  async function updateReasonTags(entry: ReplayJournalEntryData, reasonTagIds: string[]) {
+    const currentIds = entry.reasonTags.map((tag) => tag.id);
+    if (currentIds.length === reasonTagIds.length && currentIds.every((id) => reasonTagIds.includes(id))) return true;
+    const previousReasonTags = entry.reasonTags;
+    const nextReasonTags = reasonTagIds
+      .map((id) => reasonTagOptions.find((tag) => tag.id === id))
+      .filter((tag): tag is TradeTag => Boolean(tag));
+
+    setReasonTagsError(null);
+    setItems((current) => current.map((item) => item.id === entry.id ? { ...item, reasonTags: nextReasonTags } : item));
+    setSavingReasonTagIds((current) => new Set(current).add(entry.id));
+
+    try {
+      const response = await fetch(`/api/market-datasets/${datasetId}/paper-journal/entries/${entry.id}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ reasonTagIds }),
+      });
+      const data = await response.json() as ReplayJournalEntryData & { error?: string };
+      if (!response.ok) throw new Error(data.error ?? copy.paperTrading.reasonTagsUpdateFailed);
+      setItems((current) => current.map((item) => item.id === entry.id ? {
+        ...item,
+        reasonTags: data.reasonTags,
+      } : item));
+      return true;
+    } catch {
+      setItems((current) => current.map((item) => item.id === entry.id ? {
+        ...item,
+        reasonTags: previousReasonTags,
+      } : item));
+      setReasonTagsError(copy.paperTrading.reasonTagsUpdateFailed);
+      return false;
+    } finally {
+      setSavingReasonTagIds((current) => {
+        const next = new Set(current);
+        next.delete(entry.id);
+        return next;
+      });
+    }
+  }
+
+  function openVisibleColumns() {
+    setDraftVisibleColumnIds(visibleColumnIds);
+    setVisibleColumnsOpen(true);
+  }
+
+  function toggleDraftColumn(columnId: JournalColumnId) {
+    setDraftVisibleColumnIds((current) => current.includes(columnId)
+      ? current.filter((id) => id !== columnId)
+      : defaultVisibleColumnIds.filter((id) => id === columnId || current.includes(id)));
+  }
+
+  function applyVisibleColumns() {
+    if (draftVisibleColumnIds.length === 0) return;
+    setVisibleColumnIds(draftVisibleColumnIds);
+    setVisibleColumnsOpen(false);
+  }
+
   if (loading && items.length === 0 && sessions.length === 0) return <div className="flex items-center gap-2 py-8 text-sm text-slate-500"><Loader2 className="h-4 w-4 animate-spin" />{copy.paperTrading.journalLoading}</div>;
   if (error && items.length === 0 && sessions.length === 0) return <p className="py-6 text-sm text-red-600" role="alert">{error}</p>;
   if (items.length === 0 && sessions.length === 0) return <p className="rounded-md border border-dashed p-6 text-center text-sm text-slate-500">{copy.paperTrading.noJournalEntries}</p>;
 
   const startRow = totalItems === 0 ? 0 : (page - 1) * pageSize + 1;
   const endRow = Math.min(page * pageSize, totalItems);
+  const visibleColumnSet = new Set(visibleColumnIds);
 
   return <div className="space-y-4" aria-busy={loading}>
     {scope === "history" && selectedSession ? <>
@@ -299,10 +451,16 @@ export function PaperJournalTable({
             </SelectContent>
           </Select>
         </div>
-        <Button type="button" variant="outline" size="sm" onClick={beginRename} disabled={loading || deleting}>
-          <Pencil className="h-4 w-4" aria-hidden="true" />
-          {copy.paperTrading.renameJournalSession}
-        </Button>
+        <div className="flex flex-wrap items-center gap-2">
+          <Button type="button" variant="outline" size="sm" onClick={openVisibleColumns}>
+            <Settings2 className="h-4 w-4" aria-hidden="true" />
+            {copy.paperTrading.setVisibleColumns}
+          </Button>
+          <Button type="button" variant="outline" size="sm" onClick={beginRename} disabled={loading || deleting}>
+            <Pencil className="h-4 w-4" aria-hidden="true" />
+            {copy.paperTrading.renameJournalSession}
+          </Button>
+        </div>
       </div>
       <div className="flex flex-wrap items-center gap-x-3 gap-y-2 rounded-md bg-slate-50 px-3 py-2 text-xs text-slate-600">
         <span className="font-medium text-slate-800">{selectedSession.name}</span>
@@ -344,14 +502,22 @@ export function PaperJournalTable({
     {error ? <p className="rounded-md border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-700" role="alert">{error}</p> : null}
     {status ? <p className="rounded-md border border-emerald-200 bg-emerald-50 px-3 py-2 text-sm text-emerald-700" role="status" aria-live="polite">{status}</p> : null}
     {setupError ? <p className="rounded-md border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-700" role="alert">{setupError}</p> : null}
+    {reasonTagsError ? <p className="rounded-md border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-700" role="alert">{reasonTagsError}</p> : null}
     <section className="space-y-2">
       <div className="overflow-x-auto rounded-md border bg-white">
-        <table className="w-full min-w-[1540px] border-collapse text-right text-sm tabular-nums">
+        <table className="w-full min-w-max border-collapse text-right text-sm tabular-nums">
           <thead className="bg-blue-50 text-xs text-slate-700"><tr>
-            {["No", "Date", "Direction", copy.paperTrading.setup, "ABR", "iRisk", "iRisk / ABR", "aRisk", "aRisk / ABR", "Gain / Loss", "Result", "ABR RR", "iRisk RR", "aRisk RR"].map((label) => <th key={label} className={`border-b border-r px-3 py-2 font-semibold last:border-r-0 ${label === copy.paperTrading.setup ? "w-52 min-w-52 max-w-52 text-left" : ""}`}>{label}</th>)}
+            {journalColumns.filter((column) => visibleColumnSet.has(column.id)).map((column) => (
+              <th
+                key={column.id}
+                className={`min-w-24 whitespace-nowrap border-b border-r px-3 py-2 font-semibold last:border-r-0 ${column.text ? "text-left" : ""} ${column.className ?? ""}`}
+              >
+                {column.label}
+              </th>
+            ))}
           </tr></thead>
           <tbody>{items.map((entry) => <tr key={entry.id} className="border-b last:border-b-0 hover:bg-slate-50">
-            <td className="border-r px-3 py-2">{onFocus ? <button
+            {visibleColumnSet.has("no") ? <td className="border-r px-3 py-2 last:border-r-0">{onFocus ? <button
               type="button"
               className="cursor-pointer font-medium text-blue-700 underline-offset-2 hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-600"
               onClick={() => onFocus(entry)}
@@ -359,10 +525,10 @@ export function PaperJournalTable({
               href={`/market-replay/${datasetId}/history/${entry.journalSessionId}?trade=${entry.no}`}
               className="font-medium text-blue-700 underline-offset-2 hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-600"
               aria-label={copy.paperTrading.openHistoricalReplay(entry.no)}
-            >{entry.no}</Link>}</td>
-            <td className="border-r px-3 py-2">{date(entry)}</td>
-            <td className="border-r px-3 py-2">{entry.direction === "LONG" ? copy.paperTrading.long : copy.paperTrading.short}</td>
-            <td className="w-52 min-w-52 max-w-52 border-r p-1 text-left">
+            >{entry.no}</Link>}</td> : null}
+            {visibleColumnSet.has("date") ? <td className="border-r px-3 py-2 last:border-r-0">{date(entry)}</td> : null}
+            {visibleColumnSet.has("direction") ? <td className="border-r px-3 py-2 last:border-r-0">{entry.direction === "LONG" ? copy.paperTrading.long : copy.paperTrading.short}</td> : null}
+            {visibleColumnSet.has("setup") ? <td className="w-52 min-w-52 max-w-52 border-r p-1 text-left last:border-r-0">
               <div className="min-w-0 max-w-full">
                 <Select
                   value={entry.setupOptionId ?? noSetupValue}
@@ -398,17 +564,31 @@ export function PaperJournalTable({
                   </SelectContent>
                 </Select>
               </div>
-            </td>
-            <td className="border-r px-3 py-2" title={`${formatInterval(entry.displayIntervalSeconds)} · ABR(${entry.abrLength})`}>{number(entry.abrValue)}</td>
-            <td className="border-r px-3 py-2">{number(entry.initialRisk)}</td>
-            <td className="border-r px-3 py-2">{ratio(entry.initialRiskAbr)}</td>
-            <td className="border-r px-3 py-2">{number(entry.actualRisk)}</td>
-            <td className="border-r px-3 py-2">{ratio(entry.actualRiskAbr)}</td>
-            <td className={`border-r px-3 py-2 font-medium ${entry.gainLoss > 0 ? "text-emerald-700" : entry.gainLoss < 0 ? "text-red-700" : ""}`}>{number(entry.gainLoss)}</td>
-            <td className="border-r px-3 py-2">{entry.result}</td>
-            <td className="border-r px-3 py-2">{ratio(entry.abrRr)}</td>
-            <td className="border-r px-3 py-2">{ratio(entry.initialRiskRr)}</td>
-            <td className="px-3 py-2">{ratio(entry.actualRiskRr)}</td>
+            </td> : null}
+            {visibleColumnSet.has("reason") ? <td className="w-64 min-w-64 max-w-64 border-r p-1 text-left last:border-r-0">
+              <MultiSelect
+                value={entry.reasonTags.map((tag) => tag.id)}
+                options={reasonTagOptions.map((tag) => ({ value: tag.id, label: tag.name }))}
+                onCommit={(values) => updateReasonTags(entry, values)}
+                placeholder={copy.paperTrading.chooseTradeReason}
+                emptyMessage={copy.paperTrading.noTradeReasonOptions}
+                ariaLabel={copy.paperTrading.editTradeReason(entry.no)}
+                saveLabel={copy.paperTrading.saveTradeReason}
+                cancelLabel={copy.common.cancel}
+                disabled={reasonTagsLoading || savingReasonTagIds.has(entry.id)}
+              />
+            </td> : null}
+            {visibleColumnSet.has("abr") ? <td className="border-r px-3 py-2 last:border-r-0" title={`${formatInterval(entry.displayIntervalSeconds)} · ABR(${entry.abrLength})`}>{number(entry.abrValue)}</td> : null}
+            {visibleColumnSet.has("initialRisk") ? <td className="border-r px-3 py-2 last:border-r-0">{number(entry.initialRisk)}</td> : null}
+            {visibleColumnSet.has("initialRiskAbr") ? <td className="border-r px-3 py-2 last:border-r-0">{ratio(entry.initialRiskAbr)}</td> : null}
+            {visibleColumnSet.has("actualRisk") ? <td className="border-r px-3 py-2 last:border-r-0">{number(entry.actualRisk)}</td> : null}
+            {visibleColumnSet.has("actualRiskAbr") ? <td className="border-r px-3 py-2 last:border-r-0">{ratio(entry.actualRiskAbr)}</td> : null}
+            {visibleColumnSet.has("actualInitialRiskRatio") ? <td className="border-r px-3 py-2 last:border-r-0">{ratio(entry.actualInitialRiskRatio)}</td> : null}
+            {visibleColumnSet.has("gainLoss") ? <td className={`border-r px-3 py-2 font-medium last:border-r-0 ${entry.gainLoss > 0 ? "text-emerald-700" : entry.gainLoss < 0 ? "text-red-700" : ""}`}>{number(entry.gainLoss)}</td> : null}
+            {visibleColumnSet.has("result") ? <td className="border-r px-3 py-2 last:border-r-0">{entry.result}</td> : null}
+            {visibleColumnSet.has("abrRr") ? <td className="border-r px-3 py-2 last:border-r-0">{ratio(entry.abrRr)}</td> : null}
+            {visibleColumnSet.has("initialRiskRr") ? <td className="border-r px-3 py-2 last:border-r-0">{ratio(entry.initialRiskRr)}</td> : null}
+            {visibleColumnSet.has("actualRiskRr") ? <td className="border-r px-3 py-2 last:border-r-0">{ratio(entry.actualRiskRr)}</td> : null}
           </tr>)}</tbody>
         </table>
       </div>
@@ -429,6 +609,41 @@ export function PaperJournalTable({
       </div>
     </div> : null}
     {scope === "current" && nextCursor !== null ? <div className="text-center"><Button type="button" variant="outline" disabled={loading} onClick={() => void load({ cursor: nextCursor, append: true, take: 100 })}>{loading ? <Loader2 className="h-4 w-4 animate-spin" /> : null}{copy.paperTrading.loadMoreJournal}</Button></div> : null}
+    <Dialog
+      open={visibleColumnsOpen}
+      title={copy.paperTrading.visibleColumnsTitle}
+      description={copy.paperTrading.visibleColumnsDescription}
+      onClose={() => setVisibleColumnsOpen(false)}
+      className="max-w-lg"
+    >
+      <div className="space-y-4">
+        <div className="grid gap-2 sm:grid-cols-2">
+          {journalColumns.map((column) => (
+            <label key={column.id} className="flex min-h-10 cursor-pointer items-center gap-3 rounded-md border px-3 py-2 text-sm text-slate-800 hover:bg-slate-50">
+              <input
+                type="checkbox"
+                className="h-4 w-4 rounded border-slate-300 accent-blue-600 focus-visible:ring-2 focus-visible:ring-ring"
+                checked={draftVisibleColumnIds.includes(column.id)}
+                onChange={() => toggleDraftColumn(column.id)}
+              />
+              <span>{column.label}</span>
+            </label>
+          ))}
+        </div>
+        {draftVisibleColumnIds.length === 0 ? <p className="text-xs text-red-600" role="alert">{copy.paperTrading.visibleColumnsRequired}</p> : null}
+        <div className="flex flex-wrap justify-between gap-2 border-t pt-4">
+          <Button type="button" variant="ghost" onClick={() => setDraftVisibleColumnIds(defaultVisibleColumnIds)}>
+            {copy.paperTrading.visibleColumnsReset}
+          </Button>
+          <div className="flex gap-2">
+            <Button type="button" variant="outline" onClick={() => setVisibleColumnsOpen(false)}>{copy.common.cancel}</Button>
+            <Button type="button" onClick={applyVisibleColumns} disabled={draftVisibleColumnIds.length === 0}>
+              {copy.paperTrading.visibleColumnsSave}
+            </Button>
+          </div>
+        </div>
+      </div>
+    </Dialog>
     <Dialog
       open={renameOpen}
       title={copy.paperTrading.renameJournalSessionTitle}

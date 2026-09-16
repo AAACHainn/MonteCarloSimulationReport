@@ -14,7 +14,7 @@ import { MAX_TAG_NAME_LENGTH } from "@/lib/trade-journal/tags";
 export type ManagedTradeTag = {
   id: string;
   name: string;
-  _count: { trades: number };
+  _count: { trades: number; replayJournalEntries: number };
 };
 
 export function TradeTagManager({ tags }: { tags: ManagedTradeTag[] }) {
@@ -170,7 +170,7 @@ export function TradeTagManager({ tags }: { tags: ManagedTradeTag[] }) {
                     <div className="min-w-0 flex-1">
                       <div className="truncate text-sm font-medium text-slate-950" title={tag.name}>{tag.name}</div>
                       <div className="mt-1 text-xs text-slate-500">
-                        {copy.masterData.tags.usageCount.replace("{count}", String(tag._count.trades))}
+                        {copy.masterData.tags.usageCount.replace("{count}", String(tag._count.trades + tag._count.replayJournalEntries))}
                       </div>
                     </div>
                     <Button
@@ -190,9 +190,9 @@ export function TradeTagManager({ tags }: { tags: ManagedTradeTag[] }) {
                       variant="ghost"
                       className="h-8 w-8 px-0"
                       onClick={() => setDeleteTag(tag)}
-                      disabled={editingId !== null || tag._count.trades > 0}
+                      disabled={editingId !== null || tag._count.trades + tag._count.replayJournalEntries > 0}
                       aria-label={copy.masterData.tags.delete}
-                      title={tag._count.trades > 0 ? copy.masterData.tags.deleteInUse : copy.masterData.tags.delete}
+                      title={tag._count.trades + tag._count.replayJournalEntries > 0 ? copy.masterData.tags.deleteInUse : copy.masterData.tags.delete}
                     >
                       <Trash2 className="h-4 w-4 text-red-600" />
                     </Button>

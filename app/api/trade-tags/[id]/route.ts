@@ -20,7 +20,7 @@ export async function PATCH(request: Request, context: RouteContext) {
         name: parsed.data.name,
         normalizedName: normalizeTagKey(parsed.data.name),
       },
-      include: { _count: { select: { trades: true } } },
+      include: { _count: { select: { trades: true, replayJournalEntries: true } } },
     });
     return NextResponse.json(tag);
   } catch (error) {
@@ -38,12 +38,12 @@ export async function DELETE(_request: Request, context: RouteContext) {
   const { id } = await context.params;
   const tag = await prisma.tradeTag.findUnique({
     where: { id },
-    include: { _count: { select: { trades: true } } },
+    include: { _count: { select: { trades: true, replayJournalEntries: true } } },
   });
   if (!tag) {
     return NextResponse.json({ error: "未找到标签。" }, { status: 404 });
   }
-  if (tag._count.trades > 0) {
+  if (tag._count.trades + tag._count.replayJournalEntries > 0) {
     return NextResponse.json({ error: "仍有交易正在使用此标签，无法删除。" }, { status: 409 });
   }
 

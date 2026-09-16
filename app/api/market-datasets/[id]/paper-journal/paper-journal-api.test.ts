@@ -29,6 +29,7 @@ function record() {
     displayIntervalSeconds: 300, displaySession: "ETH", displayUtcOffsetMinutes: 0,
     priceTickSize: 0.25, initialRisk: 1, actualRisk: 1, gainLoss: 2,
     setupOptionId: "setup-1", setupOption: { name: "Opening Range Breakout" },
+    reasonTags: [{ id: "tag-1", name: "趋势延续" }],
     journalSession: { archivedAt: null },
   };
 }
@@ -42,7 +43,7 @@ beforeEach(() => {
 });
 
 describe("replay paper journal API", () => {
-  it("loads and serializes the Setup relation", async () => {
+  it("loads and serializes the Setup and trade-reason relations", async () => {
     const response = await GET(new Request(
       "http://localhost/api/market-datasets/dataset-1/paper-journal?scope=current",
     ), context);
@@ -51,12 +52,14 @@ describe("replay paper journal API", () => {
       include: {
         journalSession: { select: { archivedAt: true } },
         setupOption: { select: { name: true } },
+        reasonTags: { select: { id: true, name: true }, orderBy: { name: "asc" } },
       },
     }));
     expect(await response.json()).toMatchObject({
       items: [{
         setupOptionId: "setup-1",
         setupOption: { name: "Opening Range Breakout" },
+        reasonTags: [{ id: "tag-1", name: "趋势延续" }],
       }],
     });
   });

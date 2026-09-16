@@ -14,7 +14,7 @@ export default async function MasterDataPage() {
     }),
     prisma.tradeTag.findMany({
       orderBy: { name: "asc" },
-      include: { _count: { select: { trades: true } } },
+      include: { _count: { select: { trades: true, replayJournalEntries: true } } },
     }),
   ]);
 

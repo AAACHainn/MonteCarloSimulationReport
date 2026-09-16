@@ -274,9 +274,15 @@ export const replayTradeAnnotationsQuerySchema = z.object({
   }
 });
 
-export const replayJournalSetupSchema = z.object({
-  setupOptionId: z.string().trim().min(1).max(120).nullable(),
-});
+export const replayJournalEntryUpdateSchema = z.object({
+  setupOptionId: z.string().trim().min(1).max(120).nullable().optional(),
+  reasonTagIds: z.array(z.string().trim().min(1).max(120))
+    .max(MAX_TAGS_PER_TRADE)
+    .refine((values) => new Set(values).size === values.length)
+    .optional(),
+}).refine(
+  (value) => value.setupOptionId !== undefined || value.reasonTagIds !== undefined,
+);
 
 export const replayJournalSessionNameSchema = z.object({
   name: z.string().trim()

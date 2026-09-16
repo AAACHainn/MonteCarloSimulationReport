@@ -65,6 +65,12 @@ const createStatements = [
     CONSTRAINT "_TradeToTradeTag_A_fkey" FOREIGN KEY ("A") REFERENCES "Trade" ("id") ON DELETE CASCADE ON UPDATE CASCADE,
     CONSTRAINT "_TradeToTradeTag_B_fkey" FOREIGN KEY ("B") REFERENCES "TradeTag" ("id") ON DELETE CASCADE ON UPDATE CASCADE
   )`,
+  `CREATE TABLE IF NOT EXISTS "_ReplayJournalReasonTags" (
+    "A" TEXT NOT NULL,
+    "B" TEXT NOT NULL,
+    CONSTRAINT "_ReplayJournalReasonTags_A_fkey" FOREIGN KEY ("A") REFERENCES "ReplayJournalEntry" ("id") ON DELETE CASCADE ON UPDATE CASCADE,
+    CONSTRAINT "_ReplayJournalReasonTags_B_fkey" FOREIGN KEY ("B") REFERENCES "TradeTag" ("id") ON DELETE CASCADE ON UPDATE CASCADE
+  )`,
   `CREATE TABLE IF NOT EXISTS "MarketDataset" (
     "id" TEXT NOT NULL PRIMARY KEY,
     "name" TEXT NOT NULL DEFAULT '回放会话',
@@ -450,6 +456,8 @@ const indexStatements = [
   `CREATE INDEX IF NOT EXISTS "ReplayJournalEntry_journalSessionId_openedSequence_idx" ON "ReplayJournalEntry"("journalSessionId", "openedSequence")`,
   `CREATE INDEX IF NOT EXISTS "ReplayJournalEntry_journalSessionId_closedSequence_idx" ON "ReplayJournalEntry"("journalSessionId", "closedSequence")`,
   `CREATE INDEX IF NOT EXISTS "ReplayJournalEntry_setupOptionId_idx" ON "ReplayJournalEntry"("setupOptionId")`,
+  `CREATE UNIQUE INDEX IF NOT EXISTS "_ReplayJournalReasonTags_AB_unique" ON "_ReplayJournalReasonTags"("A", "B")`,
+  `CREATE INDEX IF NOT EXISTS "_ReplayJournalReasonTags_B_index" ON "_ReplayJournalReasonTags"("B")`,
   `CREATE INDEX IF NOT EXISTS "MarketBarBlock_datasetId_blockSize_startTime_endTime_idx" ON "MarketBarBlock"("datasetId", "blockSize", "startTime", "endTime")`,
   `CREATE INDEX IF NOT EXISTS "MarketDatasetImport_status_createdAt_idx" ON "MarketDatasetImport"("status", "createdAt")`,
   `CREATE INDEX IF NOT EXISTS "MarketDrawing_datasetId_createdAt_idx" ON "MarketDrawing"("datasetId", "createdAt")`,

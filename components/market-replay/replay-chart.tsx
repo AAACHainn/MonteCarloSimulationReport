@@ -5,7 +5,7 @@ import {
   type MouseEvent as ReactMouseEvent,
   type PointerEvent as ReactPointerEvent,
 } from "react";
-import { Link2, Loader2, LogOut, RotateCcw, ShieldAlert, X } from "lucide-react";
+import { GripHorizontal, Link2, Loader2, LogOut, RotateCcw, ShieldAlert, X } from "lucide-react";
 import {
   CandlestickSeries, ColorType, createChart, CrosshairMode,
   HistogramSeries, type IChartApi, type IPriceLine, type ISeriesApi,
@@ -306,6 +306,8 @@ export function ReplayChart({
 }) {
   const containerRef = useRef<HTMLDivElement | null>(null);
   const interactionRef = useRef<HTMLDivElement | null>(null);
+  const orderTicketRef = useRef<HTMLDivElement | null>(null);
+  const orderTicketDragRef = useRef<{ pointerId: number; offsetX: number; offsetY: number } | null>(null);
   const chartRef = useRef<IChartApi | null>(null);
   const candleRef = useRef<ISeriesApi<"Candlestick"> | null>(null);
   const volumeRef = useRef<ISeriesApi<"Histogram"> | null>(null);
@@ -350,6 +352,7 @@ export function ReplayChart({
   const drawingDraftCoordinateRef = useRef<DrawingSegmentCoordinate | null>(null);
   const drawingPreviewRef = useRef<{ id: string; geometry: TrendLineGeometry } | null>(null);
   const [draft, setDraft] = useState<DraftOrder | null>(null);
+  const [orderTicketPosition, setOrderTicketPosition] = useState<{ x: number; y: number } | null>(null);
   const [defaultRiskAmount, setDefaultRiskAmount] = useState<number | null>(null);
   const [defaultTargetR, setDefaultTargetR] = useState(2);
   const [defaultSaved, setDefaultSaved] = useState(false);
@@ -529,8 +532,30 @@ export function ReplayChart({
     if (paperSessionId === null && draft !== null) {
       setDraft(null);
       setDraftError(null);
+      setOrderTicketPosition(null);
     }
   }, [draft, paperSessionId]);
+
+  useEffect(() => {
+    if (!draft) return;
+    const keepTicketInBounds = () => {
+      const interaction = interactionRef.current;
+      const ticket = orderTicketRef.current;
+      if (!interaction || !ticket) return;
+      const interactionRect = interaction.getBoundingClientRect();
+      const ticketRect = ticket.getBoundingClientRect();
+      setOrderTicketPosition((current) => current ? {
+        x: Math.min(Math.max(8, current.x), Math.max(8, interactionRect.width - ticketRect.width - 8)),
+        y: Math.min(Math.max(8, current.y), Math.max(8, interactionRect.height - ticketRect.height - 8)),
+      } : current);
+    };
+    const frame = requestAnimationFrame(keepTicketInBounds);
+    window.addEventListener("resize", keepTicketInBounds);
+    return () => {
+      cancelAnimationFrame(frame);
+      window.removeEventListener("resize", keepTicketInBounds);
+    };
+  }, [draft]);
 
   useEffect(() => {
     const close = (event: KeyboardEvent) => { if (event.key === "Escape") setContextMenu(null); };
@@ -801,9 +826,9 @@ export function ReplayChart({
     if (draft && paperSnapshot) {
       const side = draft.side === "BUY" ? copy.paperTrading.buy : copy.paperTrading.sell;
       const reference = createBracketRReference(draft.side, draft.entryPrice, draft.stopLoss);
-      addLine({ key: "draft:entry", price: draft.entryPrice, kind: "draft", field: "entryPrice" }, draft.entryPrice, "#2563eb", copy.paperTrading.orderLine(side, orderTypeLabel(draft.type)), true);
-      addLine({ key: "draft:sl", price: draft.stopLoss, kind: "draft", field: "stopLoss" }, draft.stopLoss, "#dc2626", bracketPriceLineTitle(reference, draft.stopLoss, priceTickSize), true);
-      addLine({ key: "draft:tp", price: draft.takeProfit, kind: "draft", field: "takeProfit" }, draft.takeProfit, "#16a34a", bracketPriceLineTitle(reference, draft.takeProfit, priceTickSize), true);
+      addLine({ key: "draft:entry", price: draft.entryPrice, kind: "draft", field: "entryPrice" }, draft.entryPrice, "rgba(37,99,235,0.5)", copy.paperTrading.orderLine(side, orderTypeLabel(draft.type)), true);
+      addLine({ key: "draft:sl", price: draft.stopLoss, kind: "draft", field: "stopLoss" }, draft.stopLoss, "rgba(220,38,38,0.5)", bracketPriceLineTitle(reference, draft.stopLoss, priceTickSize), true);
+      addLine({ key: "draft:tp", price: draft.takeProfit, kind: "draft", field: "takeProfit" }, draft.takeProfit, "rgba(22,163,74,0.5)", bracketPriceLineTitle(reference, draft.takeProfit, priceTickSize), true);
     }
     setLineActions((current) => sameLineActions(current, nextLineActions) ? current : nextLineActions);
   }, [draft, draftSizing, paperSnapshot, priceTickSize]);
@@ -1562,6 +1587,7 @@ export function ReplayChart({
       takeProfit: snapPriceToTick(targetPriceForR(side, contextMenu.price, stopLoss, targetR), priceTickSize),
       riskAmount, targetR, tpMode: "LINKED",
     });
+    setOrderTicketPosition(null);
     setDraftError(null); setDefaultSaved(false); setContextMenu(null);
   }
 
@@ -1611,7 +1637,7 @@ export function ReplayChart({
       stopLoss: draft.stopLoss, takeProfit: draft.takeProfit,
     });
     if (success) {
-      setDraft(null); setDraftError(null);
+      setDraft(null); setDraftError(null); setOrderTicketPosition(null);
     } else setDraftError(copy.paperTrading.draftSubmitFailed);
   }
 
@@ -1805,16 +1831,57 @@ export function ReplayChart({
       ) : null}
 
       {draft && paperSnapshot ? (
-        <div data-order-ticket data-testid="risk-order-ticket" className="absolute right-16 top-3 z-30 w-[292px] rounded-xl border border-slate-200 bg-white/95 shadow-xl backdrop-blur">
-          <div className="flex items-start justify-between border-b px-3 py-2.5">
-            <div>
+        <div
+          ref={orderTicketRef}
+          data-order-ticket
+          data-testid="risk-order-ticket"
+          className={`absolute z-30 w-[292px] rounded-xl border border-slate-200 bg-white/95 shadow-xl backdrop-blur ${orderTicketPosition ? "" : "right-16 top-3"}`}
+          style={orderTicketPosition ? { left: orderTicketPosition.x, top: orderTicketPosition.y } : undefined}
+        >
+          <div
+            className="flex touch-none select-none items-start gap-2 border-b px-3 py-2.5 cursor-move"
+            title={copy.paperTrading.dragOrderTicket}
+            onPointerDown={(event) => {
+              if (event.button !== 0 || (event.target as HTMLElement).closest("button,input")) return;
+              const ticket = orderTicketRef.current;
+              if (!ticket) return;
+              const rect = ticket.getBoundingClientRect();
+              orderTicketDragRef.current = {
+                pointerId: event.pointerId,
+                offsetX: event.clientX - rect.left,
+                offsetY: event.clientY - rect.top,
+              };
+              event.currentTarget.setPointerCapture(event.pointerId);
+              event.preventDefault();
+            }}
+            onPointerMove={(event) => {
+              const drag = orderTicketDragRef.current;
+              const interaction = interactionRef.current;
+              const ticket = orderTicketRef.current;
+              if (!drag || drag.pointerId !== event.pointerId || !interaction || !ticket) return;
+              const interactionRect = interaction.getBoundingClientRect();
+              const ticketRect = ticket.getBoundingClientRect();
+              setOrderTicketPosition({
+                x: Math.min(Math.max(8, event.clientX - interactionRect.left - drag.offsetX), Math.max(8, interactionRect.width - ticketRect.width - 8)),
+                y: Math.min(Math.max(8, event.clientY - interactionRect.top - drag.offsetY), Math.max(8, interactionRect.height - ticketRect.height - 8)),
+              });
+            }}
+            onPointerUp={(event) => {
+              if (orderTicketDragRef.current?.pointerId !== event.pointerId) return;
+              orderTicketDragRef.current = null;
+              if (event.currentTarget.hasPointerCapture(event.pointerId)) event.currentTarget.releasePointerCapture(event.pointerId);
+            }}
+            onPointerCancel={() => { orderTicketDragRef.current = null; }}
+          >
+            <GripHorizontal className="mt-0.5 h-4 w-4 shrink-0 text-slate-400" aria-hidden="true" />
+            <div className="min-w-0 flex-1">
               <div className="flex items-center gap-2">
                 <span className={`rounded px-1.5 py-0.5 text-[10px] font-bold ${draft.side === "BUY" ? "bg-blue-100 text-blue-700" : "bg-orange-100 text-orange-700"}`}>{draft.side === "BUY" ? copy.paperTrading.buy : copy.paperTrading.sell}</span>
                 <span className="text-sm font-semibold text-slate-950">{copy.paperTrading.draftTitle}</span>
               </div>
               <p className="mt-1 text-[11px] text-slate-500">{copy.paperTrading.draftDescription}</p>
             </div>
-            <Button type="button" variant="ghost" size="icon" className="-mr-1 -mt-1 h-7 w-7" aria-label={copy.paperTrading.cancelDraft} onClick={() => { setDraft(null); setDraftError(null); }}><X className="h-4 w-4" /></Button>
+            <Button type="button" variant="ghost" size="icon" className="-mr-1 -mt-1 h-7 w-7 shrink-0 cursor-pointer" aria-label={copy.paperTrading.cancelDraft} onClick={() => { setDraft(null); setDraftError(null); setOrderTicketPosition(null); }}><X className="h-4 w-4" /></Button>
           </div>
           <div className="space-y-3 p-3">
             <div className="grid grid-cols-3 gap-2">
@@ -1842,7 +1909,7 @@ export function ReplayChart({
             {!draftSizing?.ok ? <p className="text-xs text-red-600">{draftSizing ? sizingErrorText(draftSizing.error) : copy.paperTrading.invalidPrice}</p> : null}
             {draftError || paperError ? <p className="text-xs text-red-600">{draftError ?? paperError}</p> : null}
             <div className="grid grid-cols-[1fr_1.6fr] gap-2">
-              <Button type="button" variant="outline" size="sm" disabled={paperBusy} onClick={() => { setDraft(null); setDraftError(null); }}>{copy.paperTrading.cancelDraft}</Button>
+              <Button type="button" variant="outline" size="sm" disabled={paperBusy} onClick={() => { setDraft(null); setDraftError(null); setOrderTicketPosition(null); }}>{copy.paperTrading.cancelDraft}</Button>
               <Button type="button" size="sm" data-testid="confirm-risk-order" disabled={paperBusy || !draftSizing?.ok} onClick={() => void submitDraft()}>{paperBusy ? <Loader2 className="h-4 w-4 animate-spin" /> : null}{paperBusy ? copy.paperTrading.submitting : copy.paperTrading.confirmDraft}</Button>
             </div>
           </div>

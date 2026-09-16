@@ -24,6 +24,7 @@ export async function GET(request: Request, context: RouteContext) {
       include: {
         journalSession: { select: { archivedAt: true } },
         setupOption: { select: { name: true } },
+        reasonTags: { select: { id: true, name: true }, orderBy: { name: "asc" } },
       },
       orderBy: { no: "asc" },
       take: take + 1,
@@ -62,6 +63,7 @@ export async function GET(request: Request, context: RouteContext) {
     include: {
       journalSession: { select: { archivedAt: true } },
       setupOption: { select: { name: true } },
+      reasonTags: { select: { id: true, name: true }, orderBy: { name: "asc" } },
     },
     orderBy: [{ accountNo: "asc" }, { id: "asc" }],
     skip: (page - 1) * take,
