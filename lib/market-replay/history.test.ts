@@ -1,6 +1,12 @@
 import { describe, expect, it } from "vitest";
-import { marketBarBlockSizeForMultiplier, mergeReplayHistory, nextHistoryEndSequence, replayHistoryPageSize } from "./history";
-import type { AggregatedMarketBarData } from "./types";
+import {
+  contiguousCachedHistoryBefore,
+  marketBarBlockSizeForMultiplier,
+  mergeReplayHistory,
+  nextHistoryEndSequence,
+  replayHistoryPageSize,
+} from "./history";
+import type { AggregatedMarketBarData, TradingSessionConfig } from "./types";
 
 function bar(sequence: number, sourceCount = 1): AggregatedMarketBarData {
   return {
@@ -12,6 +18,11 @@ function bar(sequence: number, sourceCount = 1): AggregatedMarketBarData {
 }
 
 describe("replay history", () => {
+  const twentyFourSeven: TradingSessionConfig = {
+    mode: "TWENTY_FOUR_SEVEN", timezone: "UTC", openMinute: null, closeMinute: null,
+    weekdays: [1, 2, 3, 4, 5, 6, 7],
+  };
+
   it("deduplicates buckets, prefers the most complete revision and separates warmup", () => {
     const partial = { ...bar(2), sourceCount: 1, expectedCount: 2, status: "FORMING" as const };
     const complete = { ...bar(2, 2), expectedCount: 2 };
@@ -37,5 +48,38 @@ describe("replay history", () => {
   it("returns a backward cursor without crossing dataset start", () => {
     expect(nextHistoryEndSequence([bar(10)])).toBe(9);
     expect(nextHistoryEndSequence([bar(0)])).toBeNull();
+  });
+
+  it("uses only the cached suffix that attaches to the authoritative window", () => {
+    const result = contiguousCachedHistoryBefore(
+      [bar(10), bar(98), bar(99), bar(100)],
+      [bar(100), bar(101)],
+      10,
+      twentyFourSeven,
+    );
+    expect(result.map((item) => item.firstSequence)).toEqual([98, 99]);
+    expect(contiguousCachedHistoryBefore([bar(10)], [bar(100)], 10, twentyFourSeven)).toEqual([]);
+  });
+
+  it("limits each IndexedDB hydration to one history page", () => {
+    expect(contiguousCachedHistoryBefore([bar(98), bar(99)], [bar(100)], 1, twentyFourSeven)
+      .map((item) => item.firstSequence)).toEqual([99]);
+  });
+
+  it("connects adjacent daily sessions without accepting an arbitrary cache gap", () => {
+    const dailySession: TradingSessionConfig = {
+      mode: "DAILY_SESSION", timezone: "UTC", openMinute: 9 * 60 + 30, closeMinute: 16 * 60,
+      weekdays: [1, 2, 3, 4, 5],
+    };
+    const fridayClose = {
+      ...bar(10), timestamp: "2026-09-11T15:55:00.000Z", bucketEnd: "2026-09-11T16:00:00.000Z",
+    };
+    const mondayOpen = {
+      ...bar(100), timestamp: "2026-09-14T09:30:00.000Z", bucketEnd: "2026-09-14T09:35:00.000Z",
+    };
+    expect(contiguousCachedHistoryBefore([fridayClose], [mondayOpen], 10, dailySession)).toEqual([fridayClose]);
+    expect(contiguousCachedHistoryBefore([
+      { ...fridayClose, timestamp: "2026-09-10T15:55:00.000Z", bucketEnd: "2026-09-10T16:00:00.000Z" },
+    ], [mondayOpen], 10, dailySession)).toEqual([]);
   });
 });

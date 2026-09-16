@@ -438,13 +438,21 @@ export class DisplayBarCache {
       const done = transactionDone(transaction);
       const store = transaction.objectStore(DISPLAY_STORE_NAME);
       const range = IDBKeyRange.bound([this.scopeKey, ""], [this.scopeKey, "\uffff"]);
-      const records = await requestValue(store.getAll(range)) as StoredDisplayBar[];
+      const bars = await new Promise<AggregatedMarketBarData[]>((resolve, reject) => {
+        const descending: AggregatedMarketBarData[] = [];
+        const request = store.openCursor(range, "prev");
+        request.onerror = () => reject(request.error);
+        request.onsuccess = () => {
+          const cursor = request.result;
+          if (!cursor || descending.length >= count) return resolve(descending.reverse());
+          const record = cursor.value as StoredDisplayBar;
+          if (record.bar.lastSequence <= currentSequence) descending.push(record.bar);
+          cursor.continue();
+        };
+      });
       await done;
       void this.touch().catch(() => undefined);
-      return records
-        .filter((record) => record.bar.lastSequence <= currentSequence)
-        .slice(-count)
-        .map((record) => record.bar);
+      return bars;
     } catch {
       return [];
     }

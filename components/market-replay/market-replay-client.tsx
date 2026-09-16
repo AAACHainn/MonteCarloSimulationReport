@@ -62,6 +62,7 @@ import {
   REPLAY_HISTORY_BAR_LIMIT,
   REPLAY_HISTORY_COMPACT_TO,
   REPLAY_HISTORY_PREFETCH_THRESHOLD,
+  REPLAY_HISTORY_RAW_SOURCE_BUDGET,
   formatInterval,
   isValidDisplayInterval,
   type AggregatedMarketBarData,
@@ -70,7 +71,12 @@ import {
   type MarketDatasetSummary,
   type ReplayState,
 } from "@/lib/market-replay/types";
-import { mergeReplayHistory, nextHistoryEndSequence, replayHistoryPageSize } from "@/lib/market-replay/history";
+import {
+  contiguousCachedHistoryBefore,
+  mergeReplayHistory,
+  nextHistoryEndSequence,
+  replayHistoryPageSize,
+} from "@/lib/market-replay/history";
 import type {
   PaperOrderType,
   PaperSessionSnapshot,
@@ -182,15 +188,6 @@ function formatDatasetTime(value: string, timezone: string) {
 }
 
 type JournalFocus = { sequence: number; no: number; globalNo: number };
-
-function scheduleIdleTask(task: () => void) {
-  if (typeof window !== "undefined" && "requestIdleCallback" in window) {
-    const id = window.requestIdleCallback(task, { timeout: 1_000 });
-    return () => window.cancelIdleCallback(id);
-  }
-  const id = setTimeout(task, 0);
-  return () => clearTimeout(id);
-}
 
 export function MarketReplayClient({ dataset, initialJournalFocus = null }: { dataset: MarketDatasetSummary; initialJournalFocus?: JournalFocus | null }) {
   const [bars, setBars] = useState<AggregatedMarketBarData[]>([]);
@@ -315,7 +312,7 @@ export function MarketReplayClient({ dataset, initialJournalFocus = null }: { da
   const historyAbortRef = useRef<AbortController | null>(null);
   const historyLoadingRef = useRef(false);
   const historyHasEarlierRef = useRef(true);
-  const historyCacheCheckedRef = useRef(false);
+  const historyLastBarsBeforeRef = useRef<number | null>(null);
   const historyEpochRef = useRef(0);
   const pendingSaveRef = useRef<ReplayState | null>(null);
   const saveTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -621,7 +618,7 @@ export function MarketReplayClient({ dataset, initialJournalFocus = null }: { da
     historyAbortRef.current?.abort();
     historyAbortRef.current = null;
     historyLoadingRef.current = false;
-    historyCacheCheckedRef.current = false;
+    historyLastBarsBeforeRef.current = null;
     const requestId = ++windowRequestRef.current;
     windowAbortRef.current?.abort();
     windowAbortRef.current = null;
@@ -696,21 +693,34 @@ export function MarketReplayClient({ dataset, initialJournalFocus = null }: { da
     historyLoadingRef.current = true;
     try {
       const warmupCount = Math.min(EMA_LENGTH_MAX, indicatorWarmupCountRef.current);
-      const cache = getDisplayCache(displayIntervalSeconds, displaySession);
-      const cached = await cache.readBefore(currentSequence, REPLAY_HISTORY_BAR_LIMIT + warmupCount);
-      if (!stillCurrent()) return false;
-      let merged = mergeReplayHistory(
-        [cached, warmupBarsRef.current, barsRef.current],
-        warmupCount,
+      const currentBars = barsRef.current;
+      const pageSize = Math.min(
+        REPLAY_HISTORY_BAR_LIMIT - currentBars.length,
+        replayHistoryPageSize(dataset.sourceIntervalSeconds, displayIntervalSeconds),
       );
-      if (merged.bars.length < REPLAY_HISTORY_BAR_LIMIT) {
-        const cursor = nextHistoryEndSequence(merged.bars);
+      if (!currentBars.length || pageSize <= 0) return false;
+      const session = resolveDisplaySession(dataset, displaySession) ?? marketSession;
+      const cache = getDisplayCache(displayIntervalSeconds, displaySession);
+      const cached = await cache.readBefore(
+        currentSequence,
+        Math.min(REPLAY_HISTORY_BAR_LIMIT + warmupCount, currentBars.length + pageSize + warmupCount),
+      );
+      if (!stillCurrent()) return false;
+      let cachedPage = contiguousCachedHistoryBefore(
+        cached,
+        currentBars,
+        pageSize,
+        session,
+      );
+      if (!cachedPage.length) {
+        const cursor = nextHistoryEndSequence(currentBars);
         if (cursor !== null) {
-          const oldestTimestamp = merged.bars[0]?.timestamp ?? dataset.startTime;
+          const oldestTimestamp = currentBars[0]?.timestamp ?? dataset.startTime;
           const startDate = tradingDayForTimestamp(oldestTimestamp, marketSession);
-          const sourceBars = await marketCache.readCachedBarsBefore(cursor, startDate);
+          const sourceBars = await marketCache.readCachedBarsBefore(cursor, startDate, {
+            maxBars: REPLAY_HISTORY_RAW_SOURCE_BUDGET,
+          });
           if (sourceBars.length && stillCurrent()) {
-            const session = resolveDisplaySession(dataset, displaySession) ?? marketSession;
             const aggregated = aggregateMarketBars({
               bars: sourceBars,
               sourceSeconds: dataset.sourceIntervalSeconds,
@@ -721,28 +731,30 @@ export function MarketReplayClient({ dataset, initialJournalFocus = null }: { da
             }).map((bar, index, all) => index === all.length - 1 && bar.status === "FORMING"
               ? { ...bar, status: bar.sourceCount === bar.expectedCount ? "COMPLETE" as const : "INCOMPLETE" as const }
               : bar);
-            merged = mergeReplayHistory(
-              [aggregated, merged.warmupBars, merged.bars],
-              warmupCount,
+            cachedPage = contiguousCachedHistoryBefore(
+              aggregated,
+              currentBars,
+              pageSize,
+              session,
             );
             void cache.persist(aggregated);
           }
         }
       }
-      if (!stillCurrent()) return false;
-      const added = merged.bars.length > barsRef.current.length;
-      if (added) {
-        barsRef.current = merged.bars;
-        warmupBarsRef.current = merged.warmupBars;
-        startTransition(() => {
-          setBars(merged.bars);
-          setWarmupBars(merged.warmupBars);
-        });
-      }
+      if (!cachedPage.length || !stillCurrent()) return false;
+      const merged = mergeReplayHistory(
+        [cachedPage, warmupBarsRef.current, currentBars],
+        warmupCount,
+      );
+      barsRef.current = merged.bars;
+      warmupBarsRef.current = merged.warmupBars;
+      startTransition(() => {
+        setBars(merged.bars);
+        setWarmupBars(merged.warmupBars);
+      });
       historyHasEarlierRef.current = nextHistoryEndSequence(merged.bars) !== null;
-      return added;
+      return merged.bars.length > currentBars.length;
     } finally {
-      historyCacheCheckedRef.current = true;
       historyLoadingRef.current = false;
     }
   }, [dataset, getDisplayCache, journalReview, latestReplayRef, marketCache, marketSession]);
@@ -803,15 +815,6 @@ export function MarketReplayClient({ dataset, initialJournalFocus = null }: { da
     }
   }, [beginBuffering, dataset.id, dataset.sourceIntervalSeconds, endBuffering, getDisplayCache, hydrateCachedHistory, journalReview, latestReplayRef]);
 
-  useEffect(() => {
-    const current = replay;
-    if (!current || current.status === "playing" || journalReview || !bars.length) return;
-    const cancel = scheduleIdleTask(() => {
-      void hydrateCachedHistory(current.currentSequence, current.displayIntervalSeconds, current.displaySession);
-    });
-    return cancel;
-  }, [bars.length, hydrateCachedHistory, journalReview, replay]);
-
   const handleVisibleSequenceRange = useCallback((range: ReplayVisibleSequenceRange) => {
     if (annotationTimerRef.current) clearTimeout(annotationTimerRef.current);
     annotationTimerRef.current = setTimeout(() => {
@@ -820,7 +823,10 @@ export function MarketReplayClient({ dataset, initialJournalFocus = null }: { da
       ));
       void loadTradeAnnotations(visible);
     }, 120);
-    if (historyCacheCheckedRef.current && range.barsBefore <= REPLAY_HISTORY_PREFETCH_THRESHOLD) {
+    const previousBarsBefore = historyLastBarsBeforeRef.current;
+    historyLastBarsBeforeRef.current = range.barsBefore;
+    const movedLeft = previousBarsBefore !== null && range.barsBefore < previousBarsBefore - 1;
+    if (movedLeft && range.barsBefore <= REPLAY_HISTORY_PREFETCH_THRESHOLD) {
       void loadEarlierHistory();
     }
   }, [loadEarlierHistory, loadTradeAnnotations]);
