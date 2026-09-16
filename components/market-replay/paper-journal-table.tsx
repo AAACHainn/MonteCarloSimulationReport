@@ -2,6 +2,7 @@
 
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { Loader2, Trash2 } from "lucide-react";
+import Link from "next/link";
 import { Button } from "@/components/ui/button";
 import { ConfirmDialog } from "@/components/ui/confirm-dialog";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
@@ -199,7 +200,15 @@ export function PaperJournalTable({
             {["No", "Date", "Direction", copy.paperTrading.setup, "ABR", "iRisk", "iRisk / ABR", "aRisk", "aRisk / ABR", "Gain / Loss", "Result", "ABR RR", "iRisk RR", "aRisk RR"].map((label) => <th key={label} className={`border-b border-r px-3 py-2 font-semibold last:border-r-0 ${label === copy.paperTrading.setup ? "w-52 min-w-52 max-w-52 text-left" : ""}`}>{label}</th>)}
           </tr></thead>
           <tbody>{group.entries.map((entry) => <tr key={entry.id} className="border-b last:border-b-0 hover:bg-slate-50">
-            <td className="border-r px-3 py-2"><button type="button" className="cursor-pointer font-medium text-blue-700 underline-offset-2 hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-600" onClick={() => onFocus ? onFocus(entry) : window.location.assign(`/market-replay/${datasetId}?focusSequence=${entry.openedSequence}&journalNo=${entry.globalNo}`)}>{entry.no}</button></td>
+            <td className="border-r px-3 py-2">{onFocus ? <button
+              type="button"
+              className="cursor-pointer font-medium text-blue-700 underline-offset-2 hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-600"
+              onClick={() => onFocus(entry)}
+            >{entry.no}</button> : <Link
+              href={`/market-replay/${datasetId}/history/${entry.journalSessionId}?trade=${entry.no}`}
+              className="font-medium text-blue-700 underline-offset-2 hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-600"
+              aria-label={copy.paperTrading.openHistoricalReplay(entry.no)}
+            >{entry.no}</Link>}</td>
             <td className="border-r px-3 py-2">{date(entry)}</td>
             <td className="border-r px-3 py-2">{entry.direction === "LONG" ? copy.paperTrading.long : copy.paperTrading.short}</td>
             <td className="w-52 min-w-52 max-w-52 border-r p-1 text-left">

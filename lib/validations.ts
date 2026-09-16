@@ -263,6 +263,7 @@ export const replayTradeAnnotationsQuerySchema = z.object({
   fromSequence: z.coerce.number().int().min(0).optional(),
   toSequence: z.coerce.number().int().min(0).optional(),
   journalNo: z.coerce.number().int().positive().optional(),
+  journalSessionId: z.string().trim().min(1).max(128).optional(),
 }).superRefine((value, context) => {
   const rangeProvided = value.fromSequence !== undefined || value.toSequence !== undefined;
   if (value.journalNo === undefined && (!rangeProvided || value.fromSequence === undefined || value.toSequence === undefined)) {

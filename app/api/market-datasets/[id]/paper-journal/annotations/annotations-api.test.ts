@@ -65,6 +65,7 @@ describe("replay trade annotation API", () => {
     expect(mocks.journalFindMany).toHaveBeenCalledWith(expect.objectContaining({
       where: {
         journalSessionId: "journal-current",
+        journalSession: { datasetId: "dataset-1" },
         OR: [
           { openedSequence: { gte: 10, lte: 30 } },
           { closedSequence: { gte: 10, lte: 30 } },
@@ -76,6 +77,21 @@ describe("replay trade annotation API", () => {
     const body = await response.json();
     expect(body.items.map((item: { no: number }) => item.no)).toEqual([3, 4]);
     expect(body.truncated).toBe(false);
+  });
+
+  it("isolates historical range queries to the requested journal session", async () => {
+    mocks.journalFindMany.mockResolvedValue([record(2, 1)]);
+    const response = await GET(new Request(
+      "http://localhost/api/annotations?fromSequence=10&toSequence=30&journalSessionId=journal-archived",
+    ), context);
+    expect(response.status).toBe(200);
+    expect(mocks.paperSessionFindUnique).not.toHaveBeenCalled();
+    expect(mocks.journalFindMany).toHaveBeenCalledWith(expect.objectContaining({
+      where: expect.objectContaining({
+        journalSessionId: "journal-archived",
+        journalSession: { datasetId: "dataset-1" },
+      }),
+    }));
   });
 
   it("caps a dense window at one hundred newest trades", async () => {

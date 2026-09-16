@@ -30,6 +30,7 @@ export async function GET(request: Request, context: RouteContext) {
     fromSequence: url.searchParams.get("fromSequence") ?? undefined,
     toSequence: url.searchParams.get("toSequence") ?? undefined,
     journalNo: url.searchParams.get("journalNo") ?? undefined,
+    journalSessionId: url.searchParams.get("journalSessionId") ?? undefined,
   });
   if (!parsed.success) {
     return NextResponse.json({ error: parsed.error.issues[0]?.message }, { status: 400 });
@@ -40,7 +41,12 @@ export async function GET(request: Request, context: RouteContext) {
 
   if (parsed.data.journalNo !== undefined) {
     const record = await prisma.replayJournalEntry.findFirst({
-      where: { no: parsed.data.journalNo, journalSession: { datasetId: id } },
+      where: parsed.data.journalSessionId
+        ? {
+            accountNo: parsed.data.journalNo,
+            journalSession: { id: parsed.data.journalSessionId, datasetId: id },
+          }
+        : { no: parsed.data.journalNo, journalSession: { datasetId: id } },
       select: ANNOTATION_SELECT,
     });
     return NextResponse.json({
@@ -49,30 +55,36 @@ export async function GET(request: Request, context: RouteContext) {
     });
   }
 
-  const current = await prisma.paperTradingSession.findUnique({
-    where: { datasetId: id },
-    select: { journalSessionId: true },
-  });
-  if (!current?.journalSessionId) return NextResponse.json({ items: [], truncated: false });
+  let journalSessionId = parsed.data.journalSessionId;
+  if (!journalSessionId) {
+    const current = await prisma.paperTradingSession.findUnique({
+      where: { datasetId: id },
+      select: { journalSessionId: true },
+    });
+    journalSessionId = current?.journalSessionId ?? undefined;
+  }
+  if (!journalSessionId) return NextResponse.json({ items: [], truncated: false });
 
   const fromSequence = parsed.data.fromSequence!;
   const toSequence = parsed.data.toSequence!;
+  const historicalSessionRequested = parsed.data.journalSessionId !== undefined;
   const records = await prisma.replayJournalEntry.findMany({
     where: {
-      journalSessionId: current.journalSessionId,
+      journalSessionId,
+      journalSession: { datasetId: id },
       OR: [
         { openedSequence: { gte: fromSequence, lte: toSequence } },
         { closedSequence: { gte: fromSequence, lte: toSequence } },
       ],
     },
-    orderBy: { no: "desc" },
-    take: REPLAY_TRADE_ANNOTATION_LIMIT + 1,
+    orderBy: { no: historicalSessionRequested ? "asc" : "desc" },
+    ...(historicalSessionRequested ? {} : { take: REPLAY_TRADE_ANNOTATION_LIMIT + 1 }),
     select: ANNOTATION_SELECT,
   });
-  const truncated = records.length > REPLAY_TRADE_ANNOTATION_LIMIT;
-  const items = records
-    .slice(0, REPLAY_TRADE_ANNOTATION_LIMIT)
-    .reverse()
-    .map(serializeReplayTradeAnnotation);
+  const truncated = !historicalSessionRequested && records.length > REPLAY_TRADE_ANNOTATION_LIMIT;
+  const visibleRecords = historicalSessionRequested
+    ? records
+    : records.slice(0, REPLAY_TRADE_ANNOTATION_LIMIT).reverse();
+  const items = visibleRecords.map(serializeReplayTradeAnnotation);
   return NextResponse.json({ items, truncated });
 }

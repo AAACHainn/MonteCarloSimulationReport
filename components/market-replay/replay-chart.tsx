@@ -248,6 +248,7 @@ export function ReplayChart({
   onOpenDrawingStyle, emaEnabled, emaIndicators, abrEnabled, abrLength, volumeVisible,
   displaySession, barCountSession, barCountConfig, paperSnapshot,
   tradeAnnotations, tradeAnnotationsTruncated, focusSequence = null,
+  readOnly = false,
   paperBusy, paperError, onSubmitOrder, onOrderPriceChange,
   onCancelOrder, onClosePosition, onDraftActiveChange, onOpenPaperAccount, onVisibleSequenceRangeChange,
 }: {
@@ -283,6 +284,7 @@ export function ReplayChart({
   tradeAnnotations: ReplayTradeAnnotationData[];
   tradeAnnotationsTruncated: boolean;
   focusSequence?: number | null;
+  readOnly?: boolean;
   paperBusy: boolean;
   paperError: string | null;
   onSubmitOrder: (order: { side: PaperSide; type: "LIMIT" | "STOP"; quantity: number; riskAmount: number; price: number; stopLoss: number; takeProfit: number }) => Promise<boolean>;
@@ -1508,6 +1510,7 @@ export function ReplayChart({
 
   function openContextMenu(event: ReactMouseEvent<HTMLDivElement>) {
     event.preventDefault();
+    if (readOnly) return;
     if (drawingToolRef.current || drawingDraftRef.current || drawingPreviewRef.current) return;
     if ((event.target as HTMLElement).closest("[data-order-ticket],[data-context-menu],[data-line-action]")) return;
     const series = candleRef.current;
