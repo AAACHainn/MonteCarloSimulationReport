@@ -64,6 +64,7 @@ import {
 import {
   createBracketRReference,
   formatRMultiple,
+  priceDifferenceFromEntry,
   protectiveOrderRReference,
   rMultipleAtPrice,
   type PriceRReference,
@@ -238,6 +239,14 @@ function sizingErrorText(error: RiskSizingError) {
 
 function orderTypeLabel(type: "LIMIT" | "STOP") {
   return type === "LIMIT" ? copy.paperTrading.limit : copy.paperTrading.stop;
+}
+
+function bracketPriceLineTitle(reference: PriceRReference | null, price: number, priceTickSize: number) {
+  const ratio = formatRMultiple(rMultipleAtPrice(reference, price));
+  const difference = priceDifferenceFromEntry(reference, price);
+  return difference === null
+    ? ratio
+    : copy.paperTrading.priceLineRiskAndDifference(ratio, formatPriceForTick(difference, priceTickSize));
 }
 
 export function ReplayChart({
@@ -773,19 +782,19 @@ export function ReplayChart({
         const color = isStop ? "#dc2626" : order.isProtective ? "#16a34a" : order.side === "BUY" ? "#2563eb" : "#ea580c";
         const rReference = order.isProtective ? protectiveOrderRReference(paperSnapshot!, order) : null;
         const title = order.isProtective
-          ? formatRMultiple(rMultipleAtPrice(rReference, order.price))
+          ? bracketPriceLineTitle(rReference, order.price, priceTickSize)
           : copy.paperTrading.orderLine(order.side === "BUY" ? copy.paperTrading.buy : copy.paperTrading.sell, order.type === "LIMIT" ? copy.paperTrading.limit : copy.paperTrading.stop);
         addLine({ key: order.id, price: order.price, kind: "order", field: "price", orderId: order.id, rReference: rReference ?? undefined }, order.price, color, title, order.isProtective);
         addAction({ key: order.id, price: order.price, color, label: order.isProtective ? title : `${title} · ${number(order.quantity)}`, kind: "cancel", orderId: order.id });
       }
       if (!order.isProtective && order.stopLoss !== null) {
         const reference = order.price === null ? null : createBracketRReference(order.side, order.price, order.stopLoss);
-        const title = formatRMultiple(rMultipleAtPrice(reference, order.stopLoss));
-        addLine({ key: `${order.id}:sl`, price: order.stopLoss, kind: "order", field: "stopLoss", orderId: order.id }, order.stopLoss, "#dc2626", title, true);
+        const title = bracketPriceLineTitle(reference, order.stopLoss, priceTickSize);
+        addLine({ key: `${order.id}:sl`, price: order.stopLoss, kind: "order", field: "stopLoss", orderId: order.id, rReference: reference ?? undefined }, order.stopLoss, "#dc2626", title, true);
       }
       if (!order.isProtective && order.takeProfit !== null) {
         const reference = order.price === null || order.stopLoss === null ? null : createBracketRReference(order.side, order.price, order.stopLoss);
-        const title = formatRMultiple(rMultipleAtPrice(reference, order.takeProfit));
+        const title = bracketPriceLineTitle(reference, order.takeProfit, priceTickSize);
         addLine({ key: `${order.id}:tp`, price: order.takeProfit, kind: "order", field: "takeProfit", orderId: order.id, rReference: reference ?? undefined }, order.takeProfit, "#16a34a", title, true);
       }
     }
@@ -793,11 +802,11 @@ export function ReplayChart({
       const side = draft.side === "BUY" ? copy.paperTrading.buy : copy.paperTrading.sell;
       const reference = createBracketRReference(draft.side, draft.entryPrice, draft.stopLoss);
       addLine({ key: "draft:entry", price: draft.entryPrice, kind: "draft", field: "entryPrice" }, draft.entryPrice, "#2563eb", copy.paperTrading.orderLine(side, orderTypeLabel(draft.type)), true);
-      addLine({ key: "draft:sl", price: draft.stopLoss, kind: "draft", field: "stopLoss" }, draft.stopLoss, "#dc2626", formatRMultiple(rMultipleAtPrice(reference, draft.stopLoss)), true);
-      addLine({ key: "draft:tp", price: draft.takeProfit, kind: "draft", field: "takeProfit" }, draft.takeProfit, "#16a34a", formatRMultiple(rMultipleAtPrice(reference, draft.takeProfit)), true);
+      addLine({ key: "draft:sl", price: draft.stopLoss, kind: "draft", field: "stopLoss" }, draft.stopLoss, "#dc2626", bracketPriceLineTitle(reference, draft.stopLoss, priceTickSize), true);
+      addLine({ key: "draft:tp", price: draft.takeProfit, kind: "draft", field: "takeProfit" }, draft.takeProfit, "#16a34a", bracketPriceLineTitle(reference, draft.takeProfit, priceTickSize), true);
     }
     setLineActions((current) => sameLineActions(current, nextLineActions) ? current : nextLineActions);
-  }, [draft, draftSizing, paperSnapshot]);
+  }, [draft, draftSizing, paperSnapshot, priceTickSize]);
 
   const moveDraftLine = useCallback((current: DraftOrder, field: LineTarget["field"], price: number): DraftOrder => {
     price = snapPriceToTick(price, priceTickSize);
@@ -1478,7 +1487,7 @@ export function ReplayChart({
         });
       } else {
         activeDrag.previewPrice = price;
-        const rLabel = target.rReference ? formatRMultiple(rMultipleAtPrice(target.rReference, price)) : null;
+        const rLabel = target.rReference ? bracketPriceLineTitle(target.rReference, price, priceTickSize) : null;
         priceLinesRef.current.get(target.key)?.applyOptions({ price, ...(rLabel ? { title: rLabel } : {}) });
         setLineActions((current) => current.map((action) => action.key === target.key ? { ...action, price, y, ...(rLabel ? { label: rLabel } : {}) } : action));
       }

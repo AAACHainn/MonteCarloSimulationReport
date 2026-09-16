@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import {
   createBracketRReference,
   formatRMultiple,
+  priceDifferenceFromEntry,
   protectiveOrderRReference,
   rMultipleAtPrice,
 } from "./line-r-multiple";
@@ -30,6 +31,15 @@ describe("paper trading price-line R multiples", () => {
     expect(formatRMultiple(1.234)).toBe("1.23R");
     expect(formatRMultiple(-0.001)).toBe("0.00R");
     expect(formatRMultiple(null)).toBe("—R");
+  });
+
+  it("calculates an absolute price difference from the entry", () => {
+    const longReference = createBracketRReference("BUY", 6086.5, 6081);
+    const shortReference = createBracketRReference("SELL", 6086.5, 6092);
+    expect(priceDifferenceFromEntry(longReference, 6081)).toBe(5.5);
+    expect(priceDifferenceFromEntry(longReference, 6097.5)).toBe(11);
+    expect(priceDifferenceFromEntry(shortReference, 6092)).toBe(5.5);
+    expect(priceDifferenceFromEntry(null, 6081)).toBeNull();
   });
 
   it("resolves an active protective order against its original bracket stop", () => {

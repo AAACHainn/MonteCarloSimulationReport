@@ -28,6 +28,11 @@ export function rMultipleAtPrice(reference: PriceRReference | null, price: numbe
   return Object.is(value, -0) ? 0 : value;
 }
 
+export function priceDifferenceFromEntry(reference: PriceRReference | null, price: number) {
+  if (!reference || !isPositiveFinite(price)) return null;
+  return Math.abs(price - reference.entryPrice);
+}
+
 export function formatRMultiple(value: number | null) {
   if (value === null || !Number.isFinite(value)) return "—R";
   const normalized = Math.abs(value) < 0.005 ? 0 : value;

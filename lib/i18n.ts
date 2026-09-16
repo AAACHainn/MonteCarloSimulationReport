@@ -544,6 +544,7 @@ export const dictionaries = {
       orderLine: (side: string, type: string) => `${side} ${type}`,
       stopLine: (amount: string) => `SL · -1R / -${amount}`,
       targetLine: (ratio: string, amount: string) => `TP · +${ratio}R / +${amount}`,
+      priceLineRiskAndDifference: (ratio: string, difference: string) => `${ratio} · 差 ${difference}`,
       collapsePanel: "收起交易面板",
       expandPanel: "展开交易面板",
       accountDisabled: "模拟交易未启用，普通 K 线回放不受影响。",
