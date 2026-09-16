@@ -3,6 +3,8 @@ import {
   compileReplayJournalFilters,
   createEmptyReplayJournalFilters,
   hasActiveReplayJournalFilters,
+  NO_SETUP_FILTER_VALUE,
+  readReplayJournalFilters,
 } from "./journal-filters";
 import type { ReplayJournalEntryData } from "./types";
 
@@ -46,5 +48,19 @@ describe("replay journal expression filters", () => {
 
     expect(hasActiveReplayJournalFilters(filters)).toBe(true);
     expect(compileReplayJournalFilters(filters).error).toBe("INVALID_EXPRESSION");
+  });
+
+  it("combines direction, Setup, and result selections", () => {
+    const filters = readReplayJournalFilters(new URLSearchParams([
+      ["directions", "LONG"],
+      ["setupOptionIds", NO_SETUP_FILTER_VALUE],
+      ["results", "W"],
+    ]));
+    const compiled = compileReplayJournalFilters(filters);
+
+    expect(compiled.test(entry())).toBe(true);
+    expect(compiled.test(entry({ direction: "SHORT" }))).toBe(false);
+    expect(compiled.test(entry({ setupOptionId: "setup-1" }))).toBe(false);
+    expect(compiled.test(entry({ result: "L" }))).toBe(false);
   });
 });

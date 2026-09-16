@@ -11,6 +11,7 @@ import { ExpressionFilterPopover } from "@/components/ui/expression-filter-popov
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { MultiSelect } from "@/components/ui/multi-select";
+import { MultiOptionFilterPopover, type FilterOption } from "@/components/ui/multi-option-filter-popover";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { formatNumber, formatPercent } from "@/lib/format";
 import { copy } from "@/lib/i18n";
@@ -18,11 +19,14 @@ import { formatInterval } from "@/lib/market-replay/types";
 import { utcDateParts } from "@/lib/market-replay/display-timezone";
 import {
   compileReplayJournalFilters,
+  countActiveReplayJournalFilters,
   createEmptyReplayJournalFilters,
   hasActiveReplayJournalFilters,
-  replayJournalFilterKeys,
-  type ReplayJournalFilterKey,
+  NO_SETUP_FILTER_VALUE,
+  replayJournalExpressionFilterKeys,
+  type ReplayJournalExpressionFilterKey,
   type ReplayJournalFilters,
+  type ReplayJournalOptionFilterKey,
 } from "@/lib/paper-trading/journal-filters";
 import type { ReplayJournalEntryData, ReplayJournalSummary } from "@/lib/paper-trading/types";
 
@@ -43,6 +47,10 @@ type Payload = {
   nextCursor: number | null;
   selectedSessionId?: string | null;
   summary?: ReplayJournalSummary;
+  filterOptions?: {
+    setups: FilterOption[];
+    hasEntriesWithoutSetup: boolean;
+  };
   pagination?: {
     page: number;
     pageSize: number;
@@ -68,23 +76,30 @@ type JournalColumnId =
   | "initialRiskAbr" | "actualRisk" | "actualRiskAbr" | "actualInitialRiskRatio"
   | "gainLoss" | "result" | "abrRr" | "initialRiskRr" | "actualRiskRr";
 
-const journalColumns: { id: JournalColumnId; label: string; text: boolean; className?: string; filterKey?: ReplayJournalFilterKey }[] = [
+const journalColumns: {
+  id: JournalColumnId;
+  label: string;
+  text: boolean;
+  className?: string;
+  expressionFilterKey?: ReplayJournalExpressionFilterKey;
+  optionFilterKey?: ReplayJournalOptionFilterKey;
+}[] = [
   { id: "no", label: "No", text: false },
   { id: "date", label: "Date", text: false },
-  { id: "direction", label: "Direction", text: false },
-  { id: "setup", label: copy.paperTrading.setup, text: true, className: "w-52 min-w-52 max-w-52" },
+  { id: "direction", label: "Direction", text: false, optionFilterKey: "directions" },
+  { id: "setup", label: copy.paperTrading.setup, text: true, className: "w-52 min-w-52 max-w-52", optionFilterKey: "setupOptionIds" },
   { id: "reason", label: copy.paperTrading.tradeReason, text: true, className: "w-64 min-w-64 max-w-64" },
   { id: "abr", label: "ABR", text: false },
   { id: "initialRisk", label: "iRisk", text: false },
-  { id: "initialRiskAbr", label: "iRisk / ABR", text: false, filterKey: "initialRiskAbr" },
+  { id: "initialRiskAbr", label: "iRisk / ABR", text: false, expressionFilterKey: "initialRiskAbr" },
   { id: "actualRisk", label: "aRisk", text: false },
-  { id: "actualRiskAbr", label: "aRisk / ABR", text: false, filterKey: "actualRiskAbr" },
-  { id: "actualInitialRiskRatio", label: "aRisk / iRisk", text: false, filterKey: "actualInitialRiskRatio" },
+  { id: "actualRiskAbr", label: "aRisk / ABR", text: false, expressionFilterKey: "actualRiskAbr" },
+  { id: "actualInitialRiskRatio", label: "aRisk / iRisk", text: false, expressionFilterKey: "actualInitialRiskRatio" },
   { id: "gainLoss", label: "Gain / Loss", text: false },
-  { id: "result", label: "Result", text: false },
-  { id: "abrRr", label: "ABR RR", text: false, filterKey: "abrRr" },
-  { id: "initialRiskRr", label: "iRisk RR", text: false, filterKey: "initialRiskRr" },
-  { id: "actualRiskRr", label: "aRisk RR", text: false, filterKey: "actualRiskRr" },
+  { id: "result", label: "Result", text: false, optionFilterKey: "results" },
+  { id: "abrRr", label: "ABR RR", text: false, expressionFilterKey: "abrRr" },
+  { id: "initialRiskRr", label: "iRisk RR", text: false, expressionFilterKey: "initialRiskRr" },
+  { id: "actualRiskRr", label: "aRisk RR", text: false, expressionFilterKey: "actualRiskRr" },
 ];
 const defaultVisibleColumnIds = journalColumns.map((column) => column.id);
 const columnPreferenceKey = "replay-journal-visible-columns-v1";
@@ -148,6 +163,8 @@ export function PaperJournalTable({
   const [filterDrafts, setFilterDrafts] = useState<ReplayJournalFilters>(createEmptyReplayJournalFilters);
   const [appliedFilters, setAppliedFilters] = useState<ReplayJournalFilters>(createEmptyReplayJournalFilters);
   const [openFilter, setOpenFilter] = useState<string | null>(null);
+  const [setupFilterOptions, setSetupFilterOptions] = useState<FilterOption[]>([]);
+  const [hasEntriesWithoutSetup, setHasEntriesWithoutSetup] = useState(false);
   const appliedFiltersRef = useRef(appliedFilters);
   const loadRequestIdRef = useRef(0);
 
@@ -175,10 +192,13 @@ export function PaperJournalTable({
       });
       if (sessionId) params.set("sessionId", sessionId);
       if (scope === "history") {
-        for (const key of replayJournalFilterKeys) {
+        for (const key of replayJournalExpressionFilterKeys) {
           const expression = appliedFiltersRef.current[key].trim();
           if (expression) params.set(key, expression);
         }
+        for (const value of appliedFiltersRef.current.directions) params.append("directions", value);
+        for (const value of appliedFiltersRef.current.setupOptionIds) params.append("setupOptionIds", value);
+        for (const value of appliedFiltersRef.current.results) params.append("results", value);
       }
       const response = await fetch(`/api/market-datasets/${datasetId}/paper-journal?${params}`);
       const data = await response.json() as Payload & { error?: string };
@@ -193,6 +213,8 @@ export function PaperJournalTable({
         setTotalItems(data.pagination?.totalItems ?? 0);
         setTotalPages(data.pagination?.totalPages ?? 1);
         setSummary(data.summary ?? null);
+        setSetupFilterOptions(data.filterOptions?.setups ?? []);
+        setHasEntriesWithoutSetup(data.filterOptions?.hasEntriesWithoutSetup ?? false);
       }
       setNextCursor(data.nextCursor);
       setError(null);
@@ -206,13 +228,23 @@ export function PaperJournalTable({
 
   useEffect(() => { void load(); }, [load]);
 
-  function changeExpressionFilter(key: ReplayJournalFilterKey, value: string) {
+  function changeExpressionFilter(key: ReplayJournalExpressionFilterKey, value: string) {
     const next = { ...filterDrafts, [key]: value };
     setFilterDrafts(next);
     if (compileReplayJournalFilters(next).error) return;
 
     appliedFiltersRef.current = next;
     setAppliedFilters(next);
+    setPage(1);
+    void load({ sessionId: selectedSessionId ?? undefined, requestedPage: 1, take: pageSize });
+  }
+
+  function changeOptionFilter(key: ReplayJournalOptionFilterKey, values: string[]) {
+    const nextDrafts = { ...filterDrafts, [key]: values };
+    const nextApplied = { ...appliedFiltersRef.current, [key]: values } as ReplayJournalFilters;
+    setFilterDrafts(nextDrafts);
+    appliedFiltersRef.current = nextApplied;
+    setAppliedFilters(nextApplied);
     setPage(1);
     void load({ sessionId: selectedSessionId ?? undefined, requestedPage: 1, take: pageSize });
   }
@@ -474,8 +506,23 @@ export function PaperJournalTable({
   const startRow = totalItems === 0 ? 0 : (page - 1) * pageSize + 1;
   const endRow = Math.min(page * pageSize, totalItems);
   const visibleColumnSet = new Set(visibleColumnIds);
-  const activeFilterCount = replayJournalFilterKeys.filter((key) => appliedFilters[key].trim() !== "").length;
+  const activeFilterCount = countActiveReplayJournalFilters(appliedFilters);
   const hasActiveFilters = hasActiveReplayJournalFilters(appliedFilters);
+  const optionFilters: Record<ReplayJournalOptionFilterKey, FilterOption[]> = {
+    directions: [
+      { value: "LONG", label: copy.paperTrading.long },
+      { value: "SHORT", label: copy.paperTrading.short },
+    ],
+    setupOptionIds: [
+      ...(hasEntriesWithoutSetup ? [{ value: NO_SETUP_FILTER_VALUE, label: copy.paperTrading.clearSetup }] : []),
+      ...setupFilterOptions,
+    ],
+    results: [
+      { value: "W", label: copy.paperTrading.journalResultWin },
+      { value: "L", label: copy.paperTrading.journalResultLoss },
+      { value: "BE", label: copy.paperTrading.journalResultBreakEven },
+    ],
+  };
 
   return <div className="space-y-4" aria-busy={loading}>
     {scope === "history" && selectedSession ? <>
@@ -614,15 +661,27 @@ export function PaperJournalTable({
               >
                 <div className={`flex items-center gap-1 ${column.text ? "justify-start" : "justify-end"}`}>
                   <span>{column.label}</span>
-                  {scope === "history" && column.filterKey ? <ExpressionFilterPopover
-                    id={`replay-${column.filterKey}`}
+                  {scope === "history" && column.expressionFilterKey ? <ExpressionFilterPopover
+                    id={`replay-${column.expressionFilterKey}`}
                     label={column.label}
                     conditionLabel={copy.paperTrading.journalFilterCondition(column.label)}
-                    expression={filterDrafts[column.filterKey]}
+                    expression={filterDrafts[column.expressionFilterKey]}
                     openFilter={openFilter}
                     setOpenFilter={setOpenFilter}
-                    onExpressionChange={(value) => changeExpressionFilter(column.filterKey!, value)}
-                    onClear={() => changeExpressionFilter(column.filterKey!, "")}
+                    onExpressionChange={(value) => changeExpressionFilter(column.expressionFilterKey!, value)}
+                    onClear={() => changeExpressionFilter(column.expressionFilterKey!, "")}
+                    disabled={loading}
+                  /> : null}
+                  {scope === "history" && column.optionFilterKey ? <MultiOptionFilterPopover
+                    id={`replay-${column.optionFilterKey}`}
+                    label={column.label}
+                    conditionLabel={copy.paperTrading.journalFilterCondition(column.label)}
+                    values={filterDrafts[column.optionFilterKey]}
+                    options={optionFilters[column.optionFilterKey]}
+                    openFilter={openFilter}
+                    setOpenFilter={setOpenFilter}
+                    onChange={(values) => changeOptionFilter(column.optionFilterKey!, values)}
+                    onClear={() => changeOptionFilter(column.optionFilterKey!, [])}
                     disabled={loading}
                   /> : null}
                 </div>

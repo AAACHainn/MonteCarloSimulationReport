@@ -157,6 +157,38 @@ describe("replay paper journal API", () => {
     });
     expect(data.pagination).toMatchObject({ totalItems: 2, totalPages: 1 });
     expect(data.sessions[0].entryCount).toBe(3);
+    expect(data.filterOptions).toEqual({
+      setups: [{ value: "setup-1", label: "Opening Range Breakout" }],
+      hasEntriesWithoutSetup: false,
+    });
+  });
+
+  it("filters Direction, Setup, and Result before statistics", async () => {
+    mocks.journalSessionFindMany.mockResolvedValue([{
+      id: "journal-1", name: "回放会话 1", replayGeneration: 1, initialCapital: 10_000,
+      currency: "USD", archivedAt: null, createdAt: new Date("2026-09-16T12:00:00Z"),
+      _count: { entries: 3 },
+    }]);
+    mocks.entryFindMany.mockResolvedValue([
+      { ...record(), id: "long-with-setup", gainLoss: 2 },
+      { ...record(), id: "short-loss", direction: "SHORT", gainLoss: -1 },
+      { ...record(), id: "long-without-setup", gainLoss: 4, setupOptionId: null, setupOption: null },
+    ]);
+
+    const response = await GET(new Request(
+      "http://localhost/api/market-datasets/dataset-1/paper-journal?scope=history"
+      + "&directions=LONG&setupOptionIds=__NO_SETUP__&results=W",
+    ), context);
+
+    expect(response.status).toBe(200);
+    const data = await response.json();
+    expect(data.items.map((item: { id: string }) => item.id)).toEqual(["long-without-setup"]);
+    expect(data.summary).toMatchObject({ tradeCount: 1, winRate: 100, totalProfitPoints: 4, totalLossPoints: 0 });
+    expect(data.pagination).toMatchObject({ totalItems: 1, totalPages: 1 });
+    expect(data.filterOptions).toEqual({
+      setups: [{ value: "setup-1", label: "Opening Range Breakout" }],
+      hasEntriesWithoutSetup: true,
+    });
   });
 
   it("rejects invalid filter expressions", async () => {

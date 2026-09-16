@@ -71,7 +71,17 @@ export async function GET(request: Request, context: RouteContext) {
     },
     orderBy: [{ accountNo: "asc" }, { id: "asc" }],
   }) : [];
-  const filteredRecords = allRecords.map(serializeReplayJournalEntry).filter(compiledFilters.test);
+  const serializedRecords = allRecords.map(serializeReplayJournalEntry);
+  const setupFilterOptions = new Map<string, string>();
+  let hasEntriesWithoutSetup = false;
+  for (const record of serializedRecords) {
+    if (record.setupOptionId && record.setupOption) {
+      setupFilterOptions.set(record.setupOptionId, record.setupOption.name);
+    } else {
+      hasEntriesWithoutSetup = true;
+    }
+  }
+  const filteredRecords = serializedRecords.filter(compiledFilters.test);
   const totalItems = filteredRecords.length;
   const totalPages = Math.max(1, Math.ceil(totalItems / take));
   const page = Math.min(requestedPage, totalPages);
@@ -88,6 +98,10 @@ export async function GET(request: Request, context: RouteContext) {
       _count: undefined,
     })),
     selectedSessionId: selectedSession?.id ?? null,
+    filterOptions: {
+      setups: [...setupFilterOptions].map(([value, label]) => ({ value, label })),
+      hasEntriesWithoutSetup,
+    },
     summary: calculateReplayJournalSummary(filteredRecords),
     pagination: { page, pageSize: take, totalItems, totalPages },
     nextCursor: null,
