@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { advancePaperTrading } from "./engine";
-import { closeLotsFifo, serializeReplayJournalEntry } from "./journal";
+import { calculateReplayJournalSummary, closeLotsFifo, serializeReplayJournalEntry } from "./journal";
 import type { PaperJournalContext, PaperOrderData, PaperPositionLotData, PaperSessionState } from "./types";
 
 const context: PaperJournalContext = {
@@ -34,6 +34,35 @@ function ids() {
 }
 
 describe("paper replay journal", () => {
+  it("calculates full-session win rate, profit/loss points, and actual profit-loss ratio", () => {
+    const summary = calculateReplayJournalSummary([
+      { gainLoss: 9.9, priceTickSize: 0.01 },
+      { gainLoss: -6.1, priceTickSize: 0.01 },
+      { gainLoss: 5.8, priceTickSize: 0.01 },
+      { gainLoss: -7.4, priceTickSize: 0.01 },
+      { gainLoss: -2.2, priceTickSize: 0.01 },
+      { gainLoss: -1.5, priceTickSize: 0.01 },
+    ]);
+    expect(summary.tradeCount).toBe(6);
+    expect(summary.winRate).toBeCloseTo(100 / 3);
+    expect(summary.totalProfitPoints).toBeCloseTo(15.7);
+    expect(summary.totalLossPoints).toBeCloseTo(17.2);
+    expect(summary.actualProfitLossRatio).toBeCloseTo(15.7 / 17.2);
+  });
+
+  it("returns no actual profit-loss ratio when the session has no losses", () => {
+    expect(calculateReplayJournalSummary([
+      { gainLoss: 3, priceTickSize: 0.01 },
+      { gainLoss: 0, priceTickSize: 0.01 },
+    ])).toEqual({
+      tradeCount: 2,
+      winRate: 50,
+      totalProfitPoints: 3,
+      totalLossPoints: 0,
+      actualProfitLossRatio: null,
+    });
+  });
+
   it.each(["MARKET", "LIMIT", "STOP"] as const)("keeps the %s entry order type on a new lot", (type) => {
     const result = advancePaperTrading({
       state,

@@ -3,6 +3,7 @@ import type {
   PaperPositionLotData,
   ReplayJournalEntryData,
   ReplayJournalEntryDraft,
+  ReplayJournalSummary,
   ReplayTradeAnnotationData,
 } from "./types";
 
@@ -21,6 +22,32 @@ export const DEFAULT_PAPER_JOURNAL_CONTEXT: PaperJournalContext = {
   displayUtcOffsetMinutes: 0,
   priceTickSize: 0.01,
 };
+
+export function calculateReplayJournalSummary(
+  entries: ReadonlyArray<{ gainLoss: number; priceTickSize: number }>,
+): ReplayJournalSummary {
+  let winningTrades = 0;
+  let totalProfitPoints = 0;
+  let totalLossPoints = 0;
+
+  for (const entry of entries) {
+    const result = replayJournalResult(entry.gainLoss, entry.priceTickSize);
+    if (result === "W") {
+      winningTrades += 1;
+      totalProfitPoints += entry.gainLoss;
+    } else if (result === "L") {
+      totalLossPoints += Math.abs(entry.gainLoss);
+    }
+  }
+
+  return {
+    tradeCount: entries.length,
+    winRate: entries.length === 0 ? 0 : (winningTrades / entries.length) * 100,
+    totalProfitPoints,
+    totalLossPoints,
+    actualProfitLossRatio: totalLossPoints > EPSILON ? totalProfitPoints / totalLossPoints : null,
+  };
+}
 
 export function updateLotAdverseRisk(lots: PaperPositionLotData[], price: number) {
   for (const lot of lots) {

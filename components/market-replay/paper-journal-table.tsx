@@ -4,16 +4,18 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 import { ChevronLeft, ChevronRight, Loader2, Pencil, Settings2, Trash2 } from "lucide-react";
 import Link from "next/link";
 import { Button } from "@/components/ui/button";
+import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { ConfirmDialog } from "@/components/ui/confirm-dialog";
 import { Dialog } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { MultiSelect } from "@/components/ui/multi-select";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
+import { formatNumber, formatPercent } from "@/lib/format";
 import { copy } from "@/lib/i18n";
 import { formatInterval } from "@/lib/market-replay/types";
 import { utcDateParts } from "@/lib/market-replay/display-timezone";
-import type { ReplayJournalEntryData } from "@/lib/paper-trading/types";
+import type { ReplayJournalEntryData, ReplayJournalSummary } from "@/lib/paper-trading/types";
 
 type JournalSessionSummary = {
   id: string;
@@ -31,6 +33,7 @@ type Payload = {
   sessions: JournalSessionSummary[];
   nextCursor: number | null;
   selectedSessionId?: string | null;
+  summary?: ReplayJournalSummary;
   pagination?: {
     page: number;
     pageSize: number;
@@ -132,6 +135,7 @@ export function PaperJournalTable({
   const [visibleColumnIds, setVisibleColumnIds] = useState<JournalColumnId[]>(defaultVisibleColumnIds);
   const [draftVisibleColumnIds, setDraftVisibleColumnIds] = useState<JournalColumnId[]>(defaultVisibleColumnIds);
   const [columnPreferencesLoaded, setColumnPreferencesLoaded] = useState(false);
+  const [summary, setSummary] = useState<ReplayJournalSummary | null>(null);
 
   const load = useCallback(async ({
     cursor = 0,
@@ -166,6 +170,7 @@ export function PaperJournalTable({
         setPageSize(data.pagination?.pageSize ?? take);
         setTotalItems(data.pagination?.totalItems ?? 0);
         setTotalPages(data.pagination?.totalPages ?? 1);
+        setSummary(data.summary ?? null);
       }
       setNextCursor(data.nextCursor);
       setError(null);
@@ -436,6 +441,7 @@ export function PaperJournalTable({
             onValueChange={(value) => {
               setStatus(null);
               setSelectedSessionId(value);
+              setSummary(null);
               setPage(1);
               void load({ sessionId: value, requestedPage: 1, take: pageSize });
             }}
@@ -469,6 +475,37 @@ export function PaperJournalTable({
         <span>{selectedSession.archivedAt ? copy.paperTrading.journalArchived : copy.paperTrading.journalCurrent}</span>
         {selectedSession.archivedAt ? <Button type="button" variant="ghost" size="sm" className="ml-auto h-7 text-red-600" onClick={() => setDeleteTarget(selectedSession.id)}><Trash2 className="h-3.5 w-3.5" aria-hidden="true" />{copy.paperTrading.deleteJournalSession}</Button> : null}
       </div>
+      {summary ? <Card className="shadow-none">
+        <CardHeader className="p-4 pb-3">
+          <CardTitle>{copy.paperTrading.journalStatistics}</CardTitle>
+          <CardDescription>{copy.paperTrading.journalStatisticsDescription}</CardDescription>
+        </CardHeader>
+        <CardContent className="grid gap-3 p-4 pt-0 sm:grid-cols-3">
+          <JournalStat
+            label={copy.paperTrading.journalWinRate}
+            value={formatPercent(summary.winRate)}
+          />
+          <div className="rounded-md border bg-slate-50 p-3">
+            <div className="grid grid-cols-2 gap-4">
+              <JournalStatValue
+                label={copy.paperTrading.totalProfitPoints}
+                value={formatNumber(summary.totalProfitPoints)}
+                valueClassName="text-emerald-700"
+              />
+              <JournalStatValue
+                label={copy.paperTrading.totalLossPoints}
+                value={formatNumber(summary.totalLossPoints)}
+                valueClassName="text-red-700"
+              />
+            </div>
+          </div>
+          <JournalStat
+            label={copy.paperTrading.actualProfitLossRatio}
+            value={summary.actualProfitLossRatio === null ? copy.common.dash : formatNumber(summary.actualProfitLossRatio)}
+            description={copy.paperTrading.actualProfitLossRatioDescription}
+          />
+        </CardContent>
+      </Card> : null}
       <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
         <p className="flex items-center gap-2 text-sm text-slate-600">
           {loading ? <Loader2 className="h-4 w-4 animate-spin" aria-hidden="true" /> : null}
@@ -677,4 +714,38 @@ export function PaperJournalTable({
     </Dialog>
     <ConfirmDialog open={deleteTarget !== null} title={copy.paperTrading.deleteJournalSessionTitle} description={copy.paperTrading.deleteJournalSessionConfirm} isLoading={deleting} onCancel={() => setDeleteTarget(null)} onConfirm={() => void confirmDelete()} />
   </div>;
+}
+
+function JournalStat({
+  label,
+  value,
+  description,
+}: {
+  label: string;
+  value: string;
+  description?: string;
+}) {
+  return (
+    <div className="rounded-md border bg-slate-50 p-3">
+      <JournalStatValue label={label} value={value} />
+      {description ? <p className="mt-1 text-xs text-slate-500">{description}</p> : null}
+    </div>
+  );
+}
+
+function JournalStatValue({
+  label,
+  value,
+  valueClassName = "text-slate-950",
+}: {
+  label: string;
+  value: string;
+  valueClassName?: string;
+}) {
+  return (
+    <div className="min-w-0">
+      <p className="text-xs font-medium text-slate-600">{label}</p>
+      <p className={`mt-1 text-xl font-semibold tabular-nums ${valueClassName}`}>{value}</p>
+    </div>
+  );
 }

@@ -1,7 +1,7 @@
 import { NextResponse } from "next/server";
 import { prisma } from "@/lib/db";
 import { copy } from "@/lib/i18n";
-import { serializeReplayJournalEntry } from "@/lib/paper-trading/journal";
+import { calculateReplayJournalSummary, serializeReplayJournalEntry } from "@/lib/paper-trading/journal";
 
 type RouteContext = { params: Promise<{ id: string }> };
 
@@ -55,10 +55,7 @@ export async function GET(request: Request, context: RouteContext) {
   }
 
   const requestedPage = Math.max(1, Math.floor(Number(url.searchParams.get("page") ?? 1) || 1));
-  const totalItems = selectedSession?._count.entries ?? 0;
-  const totalPages = Math.max(1, Math.ceil(totalItems / take));
-  const page = Math.min(requestedPage, totalPages);
-  const records = selectedSession ? await prisma.replayJournalEntry.findMany({
+  const allRecords = selectedSession ? await prisma.replayJournalEntry.findMany({
     where: { journalSessionId: selectedSession.id },
     include: {
       journalSession: { select: { archivedAt: true } },
@@ -66,9 +63,12 @@ export async function GET(request: Request, context: RouteContext) {
       reasonTags: { select: { id: true, name: true }, orderBy: { name: "asc" } },
     },
     orderBy: [{ accountNo: "asc" }, { id: "asc" }],
-    skip: (page - 1) * take,
-    take,
   }) : [];
+  const totalItems = allRecords.length;
+  const totalPages = Math.max(1, Math.ceil(totalItems / take));
+  const page = Math.min(requestedPage, totalPages);
+  const pageStart = (page - 1) * take;
+  const records = allRecords.slice(pageStart, pageStart + take);
 
   return NextResponse.json({
     items: records.map(serializeReplayJournalEntry),
@@ -80,6 +80,7 @@ export async function GET(request: Request, context: RouteContext) {
       _count: undefined,
     })),
     selectedSessionId: selectedSession?.id ?? null,
+    summary: calculateReplayJournalSummary(allRecords),
     pagination: { page, pageSize: take, totalItems, totalPages },
     nextCursor: null,
   });

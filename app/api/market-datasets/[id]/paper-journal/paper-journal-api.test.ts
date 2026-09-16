@@ -64,7 +64,7 @@ describe("replay paper journal API", () => {
     });
   });
 
-  it("defaults history to the latest session and paginates only that session", async () => {
+  it("loads the latest session once and paginates its full record set in code", async () => {
     mocks.journalSessionFindMany.mockResolvedValue([
       {
         id: "journal-latest",
@@ -87,22 +87,42 @@ describe("replay paper journal API", () => {
         _count: { entries: 5 },
       },
     ]);
+    mocks.entryFindMany.mockResolvedValue(Array.from({ length: 35 }, (_, index) => ({
+      ...record(),
+      id: `entry-${index + 1}`,
+      no: index + 1,
+      accountNo: index + 1,
+      journalSessionId: "journal-latest",
+    })));
 
     const response = await GET(new Request(
       "http://localhost/api/market-datasets/dataset-1/paper-journal?scope=history&page=2&take=20",
     ), context);
 
     expect(response.status).toBe(200);
-    expect(mocks.entryFindMany).toHaveBeenCalledWith(expect.objectContaining({
+    expect(mocks.entryFindMany).toHaveBeenCalledWith({
       where: { journalSessionId: "journal-latest" },
-      skip: 20,
-      take: 20,
-    }));
+      include: {
+        journalSession: { select: { archivedAt: true } },
+        setupOption: { select: { name: true } },
+        reasonTags: { select: { id: true, name: true }, orderBy: { name: "asc" } },
+      },
+      orderBy: [{ accountNo: "asc" }, { id: "asc" }],
+    });
     const data = await response.json();
     expect(data).toMatchObject({
       selectedSessionId: "journal-latest",
+      summary: {
+        tradeCount: 35,
+        winRate: 100,
+        totalProfitPoints: 70,
+        totalLossPoints: 0,
+        actualProfitLossRatio: null,
+      },
       pagination: { page: 2, pageSize: 20, totalItems: 35, totalPages: 2 },
     });
+    expect(data.items).toHaveLength(15);
+    expect(data.items[0]).toMatchObject({ id: "entry-21", no: 21 });
     expect(data.sessions).toEqual(expect.arrayContaining([
       expect.objectContaining({ id: "journal-latest", name: "午盘训练", entryCount: 35 }),
     ]));

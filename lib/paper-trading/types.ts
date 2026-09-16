@@ -133,6 +133,14 @@ export type ReplayJournalEntryData = ReplayJournalEntryDraft & {
   archivedAt: string | null;
 };
 
+export type ReplayJournalSummary = {
+  tradeCount: number;
+  winRate: number;
+  totalProfitPoints: number;
+  totalLossPoints: number;
+  actualProfitLossRatio: number | null;
+};
+
 export type ReplayTradeAnnotationData = {
   id: string;
   no: number;
