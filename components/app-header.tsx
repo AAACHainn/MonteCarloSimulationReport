@@ -15,7 +15,7 @@ const navItems = [
 
 export function AppHeader() {
   const pathname = usePathname();
-  if (/^\/market-replay\/[^/]+\/?$/.test(pathname)) return null;
+  if (/^\/market-replay\/[^/]+(?:\/history\/[^/]+)?\/?$/.test(pathname)) return null;
 
   return (
     <header className="border-b bg-white">
