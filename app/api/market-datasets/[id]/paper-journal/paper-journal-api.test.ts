@@ -127,4 +127,50 @@ describe("replay paper journal API", () => {
       expect.objectContaining({ id: "journal-latest", name: "午盘训练", entryCount: 35 }),
     ]));
   });
+
+  it("filters calculated columns before statistics and code pagination", async () => {
+    mocks.journalSessionFindMany.mockResolvedValue([{
+      id: "journal-1", name: "回放会话 1", replayGeneration: 1, initialCapital: 10_000,
+      currency: "USD", archivedAt: null, createdAt: new Date("2026-09-16T12:00:00Z"),
+      _count: { entries: 3 },
+    }]);
+    mocks.entryFindMany.mockResolvedValue([
+      { ...record(), id: "winner-1", gainLoss: 2, actualRisk: 1 },
+      { ...record(), id: "loser", gainLoss: -1, actualRisk: 1 },
+      { ...record(), id: "winner-2", gainLoss: 4, actualRisk: 2 },
+    ]);
+
+    const response = await GET(new Request(
+      "http://localhost/api/market-datasets/dataset-1/paper-journal?scope=history&actualRiskRr=%5B2%2C2%5D",
+    ), context);
+
+    expect(response.status).toBe(200);
+    expect(mocks.entryFindMany).toHaveBeenCalledTimes(1);
+    const data = await response.json();
+    expect(data.items.map((item: { id: string }) => item.id)).toEqual(["winner-1", "winner-2"]);
+    expect(data.summary).toEqual({
+      tradeCount: 2,
+      winRate: 100,
+      totalProfitPoints: 6,
+      totalLossPoints: 0,
+      actualProfitLossRatio: null,
+    });
+    expect(data.pagination).toMatchObject({ totalItems: 2, totalPages: 1 });
+    expect(data.sessions[0].entryCount).toBe(3);
+  });
+
+  it("rejects invalid filter expressions", async () => {
+    mocks.journalSessionFindMany.mockResolvedValue([{
+      id: "journal-1", name: "回放会话 1", replayGeneration: 1, initialCapital: 10_000,
+      currency: "USD", archivedAt: null, createdAt: new Date("2026-09-16T12:00:00Z"),
+      _count: { entries: 1 },
+    }]);
+
+    const response = await GET(new Request(
+      "http://localhost/api/market-datasets/dataset-1/paper-journal?scope=history&abrRr=p%3E",
+    ), context);
+
+    expect(response.status).toBe(400);
+    expect(mocks.entryFindMany).not.toHaveBeenCalled();
+  });
 });

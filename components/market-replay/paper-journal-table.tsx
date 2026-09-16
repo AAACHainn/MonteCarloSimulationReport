@@ -1,12 +1,13 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useState } from "react";
-import { ChevronLeft, ChevronRight, Loader2, Pencil, Settings2, Trash2 } from "lucide-react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { ChevronLeft, ChevronRight, Loader2, Pencil, RotateCcw, Settings2, Trash2 } from "lucide-react";
 import Link from "next/link";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { ConfirmDialog } from "@/components/ui/confirm-dialog";
 import { Dialog } from "@/components/ui/dialog";
+import { ExpressionFilterPopover } from "@/components/ui/expression-filter-popover";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { MultiSelect } from "@/components/ui/multi-select";
@@ -15,6 +16,14 @@ import { formatNumber, formatPercent } from "@/lib/format";
 import { copy } from "@/lib/i18n";
 import { formatInterval } from "@/lib/market-replay/types";
 import { utcDateParts } from "@/lib/market-replay/display-timezone";
+import {
+  compileReplayJournalFilters,
+  createEmptyReplayJournalFilters,
+  hasActiveReplayJournalFilters,
+  replayJournalFilterKeys,
+  type ReplayJournalFilterKey,
+  type ReplayJournalFilters,
+} from "@/lib/paper-trading/journal-filters";
 import type { ReplayJournalEntryData, ReplayJournalSummary } from "@/lib/paper-trading/types";
 
 type JournalSessionSummary = {
@@ -59,7 +68,7 @@ type JournalColumnId =
   | "initialRiskAbr" | "actualRisk" | "actualRiskAbr" | "actualInitialRiskRatio"
   | "gainLoss" | "result" | "abrRr" | "initialRiskRr" | "actualRiskRr";
 
-const journalColumns: { id: JournalColumnId; label: string; text: boolean; className?: string }[] = [
+const journalColumns: { id: JournalColumnId; label: string; text: boolean; className?: string; filterKey?: ReplayJournalFilterKey }[] = [
   { id: "no", label: "No", text: false },
   { id: "date", label: "Date", text: false },
   { id: "direction", label: "Direction", text: false },
@@ -67,15 +76,15 @@ const journalColumns: { id: JournalColumnId; label: string; text: boolean; class
   { id: "reason", label: copy.paperTrading.tradeReason, text: true, className: "w-64 min-w-64 max-w-64" },
   { id: "abr", label: "ABR", text: false },
   { id: "initialRisk", label: "iRisk", text: false },
-  { id: "initialRiskAbr", label: "iRisk / ABR", text: false },
+  { id: "initialRiskAbr", label: "iRisk / ABR", text: false, filterKey: "initialRiskAbr" },
   { id: "actualRisk", label: "aRisk", text: false },
-  { id: "actualRiskAbr", label: "aRisk / ABR", text: false },
-  { id: "actualInitialRiskRatio", label: "aRisk / iRisk", text: false },
+  { id: "actualRiskAbr", label: "aRisk / ABR", text: false, filterKey: "actualRiskAbr" },
+  { id: "actualInitialRiskRatio", label: "aRisk / iRisk", text: false, filterKey: "actualInitialRiskRatio" },
   { id: "gainLoss", label: "Gain / Loss", text: false },
   { id: "result", label: "Result", text: false },
-  { id: "abrRr", label: "ABR RR", text: false },
-  { id: "initialRiskRr", label: "iRisk RR", text: false },
-  { id: "actualRiskRr", label: "aRisk RR", text: false },
+  { id: "abrRr", label: "ABR RR", text: false, filterKey: "abrRr" },
+  { id: "initialRiskRr", label: "iRisk RR", text: false, filterKey: "initialRiskRr" },
+  { id: "actualRiskRr", label: "aRisk RR", text: false, filterKey: "actualRiskRr" },
 ];
 const defaultVisibleColumnIds = journalColumns.map((column) => column.id);
 const columnPreferenceKey = "replay-journal-visible-columns-v1";
@@ -136,6 +145,11 @@ export function PaperJournalTable({
   const [draftVisibleColumnIds, setDraftVisibleColumnIds] = useState<JournalColumnId[]>(defaultVisibleColumnIds);
   const [columnPreferencesLoaded, setColumnPreferencesLoaded] = useState(false);
   const [summary, setSummary] = useState<ReplayJournalSummary | null>(null);
+  const [filterDrafts, setFilterDrafts] = useState<ReplayJournalFilters>(createEmptyReplayJournalFilters);
+  const [appliedFilters, setAppliedFilters] = useState<ReplayJournalFilters>(createEmptyReplayJournalFilters);
+  const [openFilter, setOpenFilter] = useState<string | null>(null);
+  const appliedFiltersRef = useRef(appliedFilters);
+  const loadRequestIdRef = useRef(0);
 
   const load = useCallback(async ({
     cursor = 0,
@@ -150,6 +164,7 @@ export function PaperJournalTable({
     requestedPage?: number;
     take?: number;
   } = {}) => {
+    const requestId = ++loadRequestIdRef.current;
     setLoading(true);
     try {
       const params = new URLSearchParams({
@@ -159,9 +174,16 @@ export function PaperJournalTable({
         take: String(take),
       });
       if (sessionId) params.set("sessionId", sessionId);
+      if (scope === "history") {
+        for (const key of replayJournalFilterKeys) {
+          const expression = appliedFiltersRef.current[key].trim();
+          if (expression) params.set(key, expression);
+        }
+      }
       const response = await fetch(`/api/market-datasets/${datasetId}/paper-journal?${params}`);
       const data = await response.json() as Payload & { error?: string };
       if (!response.ok) throw new Error(data.error ?? copy.paperTrading.journalLoadFailed);
+      if (requestId !== loadRequestIdRef.current) return;
       setItems((current) => append ? [...current, ...data.items] : data.items);
       setSessions(data.sessions);
       if (scope === "history") {
@@ -175,13 +197,35 @@ export function PaperJournalTable({
       setNextCursor(data.nextCursor);
       setError(null);
     } catch (cause) {
+      if (requestId !== loadRequestIdRef.current) return;
       setError(cause instanceof Error ? cause.message : copy.paperTrading.journalLoadFailed);
     } finally {
-      setLoading(false);
+      if (requestId === loadRequestIdRef.current) setLoading(false);
     }
   }, [datasetId, scope]);
 
   useEffect(() => { void load(); }, [load]);
+
+  function changeExpressionFilter(key: ReplayJournalFilterKey, value: string) {
+    const next = { ...filterDrafts, [key]: value };
+    setFilterDrafts(next);
+    if (compileReplayJournalFilters(next).error) return;
+
+    appliedFiltersRef.current = next;
+    setAppliedFilters(next);
+    setPage(1);
+    void load({ sessionId: selectedSessionId ?? undefined, requestedPage: 1, take: pageSize });
+  }
+
+  function clearAllExpressionFilters() {
+    const next = createEmptyReplayJournalFilters();
+    setFilterDrafts(next);
+    appliedFiltersRef.current = next;
+    setAppliedFilters(next);
+    setOpenFilter(null);
+    setPage(1);
+    void load({ sessionId: selectedSessionId ?? undefined, requestedPage: 1, take: pageSize });
+  }
 
   useEffect(() => {
     let cancelled = false;
@@ -430,6 +474,8 @@ export function PaperJournalTable({
   const startRow = totalItems === 0 ? 0 : (page - 1) * pageSize + 1;
   const endRow = Math.min(page * pageSize, totalItems);
   const visibleColumnSet = new Set(visibleColumnIds);
+  const activeFilterCount = replayJournalFilterKeys.filter((key) => appliedFilters[key].trim() !== "").length;
+  const hasActiveFilters = hasActiveReplayJournalFilters(appliedFilters);
 
   return <div className="space-y-4" aria-busy={loading}>
     {scope === "history" && selectedSession ? <>
@@ -478,7 +524,11 @@ export function PaperJournalTable({
       {summary ? <Card className="shadow-none">
         <CardHeader className="p-4 pb-3">
           <CardTitle>{copy.paperTrading.journalStatistics}</CardTitle>
-          <CardDescription>{copy.paperTrading.journalStatisticsDescription}</CardDescription>
+          <CardDescription>
+            {hasActiveFilters
+              ? copy.paperTrading.journalStatisticsFilteredDescription
+              : copy.paperTrading.journalStatisticsDescription}
+          </CardDescription>
         </CardHeader>
         <CardContent className="grid gap-3 p-4 pt-0 sm:grid-cols-3">
           <JournalStat
@@ -507,13 +557,26 @@ export function PaperJournalTable({
         </CardContent>
       </Card> : null}
       <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
-        <p className="flex items-center gap-2 text-sm text-slate-600">
-          {loading ? <Loader2 className="h-4 w-4 animate-spin" aria-hidden="true" /> : null}
-          {copy.paperTrading.journalPaginationRange
-            .replace("{start}", startRow.toLocaleString("zh-CN"))
-            .replace("{end}", endRow.toLocaleString("zh-CN"))
-            .replace("{total}", totalItems.toLocaleString("zh-CN"))}
-        </p>
+        <div className="flex flex-wrap items-center gap-2">
+          <p className="flex items-center gap-2 text-sm text-slate-600">
+            {loading ? <Loader2 className="h-4 w-4 animate-spin" aria-hidden="true" /> : null}
+            {copy.paperTrading.journalPaginationRange
+              .replace("{start}", startRow.toLocaleString("zh-CN"))
+              .replace("{end}", endRow.toLocaleString("zh-CN"))
+              .replace("{total}", totalItems.toLocaleString("zh-CN"))}
+          </p>
+          {hasActiveFilters ? <Button
+            type="button"
+            variant="ghost"
+            size="sm"
+            className="h-8 text-xs"
+            onClick={clearAllExpressionFilters}
+            disabled={loading}
+          >
+            <RotateCcw className="h-3.5 w-3.5" aria-hidden="true" />
+            {copy.paperTrading.journalFiltersActive(activeFilterCount)} · {copy.paperTrading.clearJournalFilters}
+          </Button> : null}
+        </div>
         <div className="flex items-center gap-2">
           <span className="text-sm text-slate-600">{copy.tradeJournals.pagination.rowsPerPage}</span>
           <Select
@@ -549,11 +612,28 @@ export function PaperJournalTable({
                 key={column.id}
                 className={`min-w-24 whitespace-nowrap border-b border-r px-3 py-2 font-semibold last:border-r-0 ${column.text ? "text-left" : ""} ${column.className ?? ""}`}
               >
-                {column.label}
+                <div className={`flex items-center gap-1 ${column.text ? "justify-start" : "justify-end"}`}>
+                  <span>{column.label}</span>
+                  {scope === "history" && column.filterKey ? <ExpressionFilterPopover
+                    id={`replay-${column.filterKey}`}
+                    label={column.label}
+                    conditionLabel={copy.paperTrading.journalFilterCondition(column.label)}
+                    expression={filterDrafts[column.filterKey]}
+                    openFilter={openFilter}
+                    setOpenFilter={setOpenFilter}
+                    onExpressionChange={(value) => changeExpressionFilter(column.filterKey!, value)}
+                    onClear={() => changeExpressionFilter(column.filterKey!, "")}
+                    disabled={loading}
+                  /> : null}
+                </div>
               </th>
             ))}
           </tr></thead>
-          <tbody>{items.map((entry) => <tr key={entry.id} className="border-b last:border-b-0 hover:bg-slate-50">
+          <tbody>{items.length === 0 && scope === "history" ? <tr>
+            <td colSpan={visibleColumnIds.length} className="px-4 py-8 text-center text-sm text-slate-500">
+              {hasActiveFilters ? copy.paperTrading.noFilteredJournalEntries : copy.paperTrading.noJournalEntries}
+            </td>
+          </tr> : items.map((entry) => <tr key={entry.id} className="border-b last:border-b-0 hover:bg-slate-50">
             {visibleColumnSet.has("no") ? <td className="border-r px-3 py-2 last:border-r-0">{onFocus ? <button
               type="button"
               className="cursor-pointer font-medium text-blue-700 underline-offset-2 hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-600"

@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { prisma } from "@/lib/db";
 import { copy } from "@/lib/i18n";
+import { compileReplayJournalFilters, readReplayJournalFilters } from "@/lib/paper-trading/journal-filters";
 import { calculateReplayJournalSummary, serializeReplayJournalEntry } from "@/lib/paper-trading/journal";
 
 type RouteContext = { params: Promise<{ id: string }> };
@@ -54,6 +55,12 @@ export async function GET(request: Request, context: RouteContext) {
     return NextResponse.json({ error: copy.paperTrading.journalNotFound }, { status: 404 });
   }
 
+  const filters = readReplayJournalFilters(url.searchParams);
+  const compiledFilters = compileReplayJournalFilters(filters);
+  if (compiledFilters.error) {
+    return NextResponse.json({ error: copy.paperTrading.journalFilterInvalid }, { status: 400 });
+  }
+
   const requestedPage = Math.max(1, Math.floor(Number(url.searchParams.get("page") ?? 1) || 1));
   const allRecords = selectedSession ? await prisma.replayJournalEntry.findMany({
     where: { journalSessionId: selectedSession.id },
@@ -64,14 +71,15 @@ export async function GET(request: Request, context: RouteContext) {
     },
     orderBy: [{ accountNo: "asc" }, { id: "asc" }],
   }) : [];
-  const totalItems = allRecords.length;
+  const filteredRecords = allRecords.map(serializeReplayJournalEntry).filter(compiledFilters.test);
+  const totalItems = filteredRecords.length;
   const totalPages = Math.max(1, Math.ceil(totalItems / take));
   const page = Math.min(requestedPage, totalPages);
   const pageStart = (page - 1) * take;
-  const records = allRecords.slice(pageStart, pageStart + take);
+  const records = filteredRecords.slice(pageStart, pageStart + take);
 
   return NextResponse.json({
-    items: records.map(serializeReplayJournalEntry),
+    items: records,
     sessions: sessions.map((session) => ({
       ...session,
       createdAt: session.createdAt.toISOString(),
@@ -80,7 +88,7 @@ export async function GET(request: Request, context: RouteContext) {
       _count: undefined,
     })),
     selectedSessionId: selectedSession?.id ?? null,
-    summary: calculateReplayJournalSummary(allRecords),
+    summary: calculateReplayJournalSummary(filteredRecords),
     pagination: { page, pageSize: take, totalItems, totalPages },
     nextCursor: null,
   });

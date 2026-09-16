@@ -4,7 +4,7 @@ import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import Image from "next/image";
 import { useRouter } from "next/navigation";
 import { createPortal } from "react-dom";
-import { ArrowDown, ArrowUp, ArrowUpDown, Check, ChevronLeft, ChevronRight, Download, Eye, EyeOff, Filter, HelpCircle, Pencil, Plus, RotateCcw, Trash2, X } from "lucide-react";
+import { ArrowDown, ArrowUp, ArrowUpDown, Check, ChevronLeft, ChevronRight, Download, Eye, EyeOff, Filter, Pencil, Plus, RotateCcw, Trash2, X } from "lucide-react";
 import { ScreenshotPreviewDialog } from "@/components/trade-journals/screenshot-preview-dialog";
 import { JournalTradeBrowser } from "@/components/trade-journals/journal-trade-browser";
 import { SqnStatLabel } from "@/components/trade-journals/sqn-stat-label";
@@ -13,6 +13,7 @@ import { Button } from "@/components/ui/button";
 import { ConfirmDialog } from "@/components/ui/confirm-dialog";
 import { DatePicker } from "@/components/ui/date-picker";
 import { Input } from "@/components/ui/input";
+import { ExpressionFilterPopover } from "@/components/ui/expression-filter-popover";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { formatMoney, formatNumber, formatPercent } from "@/lib/format";
@@ -616,20 +617,17 @@ export function JournalTradeTable({
               className="text-right"
               disabled={editingId !== null}
               filter={
-                <ColumnFilterPopover
+                <ExpressionFilterPopover
                   id="r"
                   openFilter={openFilter}
                   setOpenFilter={setOpenFilter}
-                  active={isRFilterActive(filters)}
                   label={copy.tradeJournals.filters.rMode}
                   disabled={editingId !== null}
-                >
-                  <RFilterPanel
-                    expression={filters.rExpression}
-                    onExpressionChange={(value) => setFilter("rExpression", value)}
-                    onClear={() => setFilter("rExpression", "")}
-                  />
-                </ColumnFilterPopover>
+                  conditionLabel={copy.tradeJournals.filters.rMode}
+                  expression={filters.rExpression}
+                  onExpressionChange={(value) => setFilter("rExpression", value)}
+                  onClear={() => setFilter("rExpression", "")}
+                />
               }
             />
             <FilterableHead
@@ -1107,61 +1105,6 @@ function DateFilterPanel({
         </FilterPanelField>
       </div>
       <ClearColumnButton onClick={onClear} disabled={dateFrom === "" && dateTo === ""} />
-    </div>
-  );
-}
-
-function RFilterPanel({
-  expression,
-  onExpressionChange,
-  onClear,
-}: {
-  expression: string;
-  onExpressionChange: (value: string) => void;
-  onClear: () => void;
-}) {
-  const compiled = useMemo(() => compileRExpressionFilter(expression), [expression]);
-  const hasError = expression.trim() !== "" && compiled.error !== null;
-
-  return (
-    <div className="space-y-3">
-      <div className="flex items-center justify-between gap-2">
-        <p className="text-xs font-medium text-slate-500">{copy.tradeJournals.filters.rMode}</p>
-        <div className="group relative">
-          <button
-            type="button"
-            className="flex h-7 w-7 items-center justify-center rounded-md text-slate-400 transition-colors hover:bg-slate-100 hover:text-slate-700 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
-            aria-label={copy.tradeJournals.filters.rExpressionHelpTitle}
-          >
-            <HelpCircle className="h-4 w-4" />
-          </button>
-          <div className="pointer-events-none absolute right-0 top-8 z-[160] hidden w-72 rounded-md border bg-white p-3 text-xs leading-5 text-slate-600 shadow-lg group-hover:block group-focus-within:block">
-            <div className="mb-1 font-medium text-slate-950">{copy.tradeJournals.filters.rExpressionHelpTitle}</div>
-            <p>{copy.tradeJournals.filters.rExpressionHelpVariable}</p>
-            <p>{copy.tradeJournals.filters.rExpressionHelpOperators}</p>
-            <div className="mt-2 space-y-1 font-mono text-[11px] text-slate-700">
-              {copy.tradeJournals.filters.rExpressionExamples.map((example) => (
-                <div key={example}>{example}</div>
-              ))}
-            </div>
-          </div>
-        </div>
-      </div>
-      <FilterPanelField label={copy.tradeJournals.filters.rExpression}>
-        <div className="space-y-1">
-          <Input
-            value={expression}
-            onChange={(event) => onExpressionChange(event.target.value)}
-            placeholder={copy.tradeJournals.filters.rExpressionPlaceholder}
-            className={cn("h-9 font-mono", hasError && "border-red-300 focus-visible:ring-red-100")}
-            aria-invalid={hasError}
-          />
-          {hasError ? (
-            <p className="text-xs text-red-600">{copy.tradeJournals.filters.rExpressionError}</p>
-          ) : null}
-        </div>
-      </FilterPanelField>
-      <ClearColumnButton onClick={onClear} disabled={expression.trim() === ""} />
     </div>
   );
 }
