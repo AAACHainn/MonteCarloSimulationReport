@@ -10,38 +10,66 @@ export async function GET(request: Request, context: RouteContext) {
   const url = new URL(request.url);
   const scope = url.searchParams.get("scope") === "current" ? "current" : "history";
   const cursor = Math.max(0, Number(url.searchParams.get("cursor") ?? 0) || 0);
-  const take = Math.min(200, Math.max(10, Number(url.searchParams.get("take") ?? 100) || 100));
+  const defaultTake = scope === "history" ? 20 : 100;
+  const take = Math.min(100, Math.max(10, Math.floor(Number(url.searchParams.get("take") ?? defaultTake) || defaultTake)));
   const dataset = await prisma.marketDataset.findUnique({ where: { id }, select: { id: true } });
   if (!dataset) return NextResponse.json({ error: copy.marketReplay.datasetNotFound }, { status: 404 });
 
-  const current = await prisma.paperTradingSession.findUnique({
-    where: { datasetId: id }, select: { journalSessionId: true },
+  if (scope === "current") {
+    const current = await prisma.paperTradingSession.findUnique({
+      where: { datasetId: id }, select: { journalSessionId: true },
+    });
+    const records = await prisma.replayJournalEntry.findMany({
+      where: { journalSessionId: current?.journalSessionId ?? "__none__", no: { gt: cursor } },
+      include: {
+        journalSession: { select: { archivedAt: true } },
+        setupOption: { select: { name: true } },
+      },
+      orderBy: { no: "asc" },
+      take: take + 1,
+    });
+    const hasMore = records.length > take;
+    const pageRecords = records.slice(0, take);
+    return NextResponse.json({
+      items: pageRecords.map(serializeReplayJournalEntry),
+      sessions: [],
+      nextCursor: hasMore ? pageRecords.at(-1)?.no ?? null : null,
+    });
+  }
+
+  const sessions = await prisma.replayJournalSession.findMany({
+    where: { datasetId: id, entries: { some: {} } },
+    orderBy: [{ createdAt: "desc" }, { id: "desc" }],
+    select: {
+      id: true, name: true, replayGeneration: true, initialCapital: true, currency: true,
+      archivedAt: true, createdAt: true, _count: { select: { entries: true } },
+    },
   });
-  const where = scope === "current"
-    ? { journalSessionId: current?.journalSessionId ?? "__none__", no: { gt: cursor } }
-    : { journalSession: { datasetId: id }, no: { gt: cursor } };
-  const records = await prisma.replayJournalEntry.findMany({
-    where,
+  const requestedSessionId = url.searchParams.get("sessionId")?.trim() || null;
+  const selectedSession = requestedSessionId
+    ? sessions.find((session) => session.id === requestedSessionId)
+    : sessions[0];
+  if (requestedSessionId && !selectedSession) {
+    return NextResponse.json({ error: copy.paperTrading.journalNotFound }, { status: 404 });
+  }
+
+  const requestedPage = Math.max(1, Math.floor(Number(url.searchParams.get("page") ?? 1) || 1));
+  const totalItems = selectedSession?._count.entries ?? 0;
+  const totalPages = Math.max(1, Math.ceil(totalItems / take));
+  const page = Math.min(requestedPage, totalPages);
+  const records = selectedSession ? await prisma.replayJournalEntry.findMany({
+    where: { journalSessionId: selectedSession.id },
     include: {
       journalSession: { select: { archivedAt: true } },
       setupOption: { select: { name: true } },
     },
-    orderBy: { no: "asc" },
-    take: take + 1,
-  });
-  const hasMore = records.length > take;
-  const pageRecords = records.slice(0, take);
-  const items = pageRecords.map(serializeReplayJournalEntry);
-  const sessions = scope === "history" ? await prisma.replayJournalSession.findMany({
-    where: { datasetId: id, entries: { some: {} } },
-    orderBy: { createdAt: "desc" },
-    select: {
-      id: true, replayGeneration: true, initialCapital: true, currency: true,
-      archivedAt: true, createdAt: true, _count: { select: { entries: true } },
-    },
+    orderBy: [{ accountNo: "asc" }, { id: "asc" }],
+    skip: (page - 1) * take,
+    take,
   }) : [];
+
   return NextResponse.json({
-    items,
+    items: records.map(serializeReplayJournalEntry),
     sessions: sessions.map((session) => ({
       ...session,
       createdAt: session.createdAt.toISOString(),
@@ -49,6 +77,8 @@ export async function GET(request: Request, context: RouteContext) {
       entryCount: session._count.entries,
       _count: undefined,
     })),
-    nextCursor: hasMore ? pageRecords.at(-1)?.no ?? null : null,
+    selectedSessionId: selectedSession?.id ?? null,
+    pagination: { page, pageSize: take, totalItems, totalPages },
+    nextCursor: null,
   });
 }

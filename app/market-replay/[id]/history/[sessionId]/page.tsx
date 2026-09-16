@@ -29,6 +29,7 @@ export default async function HistoricalReplayPage({
     where: { id: sessionId, datasetId: id, entries: { some: {} } },
     select: {
       id: true,
+      name: true,
       replayGeneration: true,
       archivedAt: true,
     },
@@ -74,7 +75,7 @@ export default async function HistoricalReplayPage({
     ? requestedDisplaySession
     : "ETH";
   const historyHref = `/market-replay/${id}/trade-history`;
-  const title = copy.paperTrading.historicalReplayTitle(session.replayGeneration);
+  const title = session.name || copy.paperTrading.historicalReplayTitle(session.replayGeneration);
 
   return <div className="relative left-1/2 flex h-[calc(100dvh-4.3125rem)] w-[calc(100vw-2rem)] max-w-none -translate-x-1/2 flex-col gap-3 overflow-hidden sm:w-[calc(100vw-3rem)]">
     <div className="shrink-0 space-y-2">

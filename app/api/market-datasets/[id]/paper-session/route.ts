@@ -27,7 +27,12 @@ export async function POST(request: Request, context: RouteContext) {
       ]);
       if (!progress || !dataset) return false;
       const journal = await tx.replayJournalSession.create({
-        data: { datasetId: id, replayGeneration: progress.generation, ...parsed.data },
+        data: {
+          datasetId: id,
+          name: copy.paperTrading.journalSession(progress.generation),
+          replayGeneration: progress.generation,
+          ...parsed.data,
+        },
       });
       await tx.paperTradingSession.create({
         data: {

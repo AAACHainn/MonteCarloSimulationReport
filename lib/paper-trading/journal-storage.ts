@@ -1,4 +1,5 @@
 import type { Prisma } from "@prisma/client";
+import { copy } from "@/lib/i18n";
 import type { PaperPositionLotData, ReplayJournalEntryDraft } from "./types";
 
 type SessionForJournal = {
@@ -20,6 +21,7 @@ export async function ensureReplayJournalSession(
   const journal = await tx.replayJournalSession.create({
     data: {
       datasetId: session.datasetId,
+      name: copy.paperTrading.journalSession(replayGeneration),
       replayGeneration,
       initialCapital: session.initialCapital,
       currency: session.currency,

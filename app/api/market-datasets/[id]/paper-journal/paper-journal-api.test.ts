@@ -60,4 +60,48 @@ describe("replay paper journal API", () => {
       }],
     });
   });
+
+  it("defaults history to the latest session and paginates only that session", async () => {
+    mocks.journalSessionFindMany.mockResolvedValue([
+      {
+        id: "journal-latest",
+        name: "午盘训练",
+        replayGeneration: 7,
+        initialCapital: 10_000,
+        currency: "USD",
+        archivedAt: null,
+        createdAt: new Date("2026-09-16T12:00:00Z"),
+        _count: { entries: 35 },
+      },
+      {
+        id: "journal-old",
+        name: "回放会话 6",
+        replayGeneration: 6,
+        initialCapital: 10_000,
+        currency: "USD",
+        archivedAt: new Date("2026-09-15T12:00:00Z"),
+        createdAt: new Date("2026-09-15T10:00:00Z"),
+        _count: { entries: 5 },
+      },
+    ]);
+
+    const response = await GET(new Request(
+      "http://localhost/api/market-datasets/dataset-1/paper-journal?scope=history&page=2&take=20",
+    ), context);
+
+    expect(response.status).toBe(200);
+    expect(mocks.entryFindMany).toHaveBeenCalledWith(expect.objectContaining({
+      where: { journalSessionId: "journal-latest" },
+      skip: 20,
+      take: 20,
+    }));
+    const data = await response.json();
+    expect(data).toMatchObject({
+      selectedSessionId: "journal-latest",
+      pagination: { page: 2, pageSize: 20, totalItems: 35, totalPages: 2 },
+    });
+    expect(data.sessions).toEqual(expect.arrayContaining([
+      expect.objectContaining({ id: "journal-latest", name: "午盘训练", entryCount: 35 }),
+    ]));
+  });
 });

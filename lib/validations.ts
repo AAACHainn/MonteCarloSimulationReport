@@ -278,6 +278,12 @@ export const replayJournalSetupSchema = z.object({
   setupOptionId: z.string().trim().min(1).max(120).nullable(),
 });
 
+export const replayJournalSessionNameSchema = z.object({
+  name: z.string().trim()
+    .min(1, copy.paperTrading.journalSessionNameRequired)
+    .max(80, copy.paperTrading.journalSessionNameTooLong),
+});
+
 export const paperResetSchema = z.object({ action: z.enum(["RESET", "CHANGE_START"]) });
 
 export const tradeOptionSchema = z.object({

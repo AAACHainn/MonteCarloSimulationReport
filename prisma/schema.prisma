@@ -296,6 +296,7 @@ model ReplayJournalSession {
   id             String               @id @default(cuid())
   datasetId      String
   dataset        MarketDataset        @relation(fields: [datasetId], references: [id], onDelete: Cascade)
+  name           String               @default("回放会话")
   replayGeneration Int
   initialCapital Float
   currency       String

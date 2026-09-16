@@ -67,7 +67,7 @@ const createStatements = [
   )`,
   `CREATE TABLE IF NOT EXISTS "MarketDataset" (
     "id" TEXT NOT NULL PRIMARY KEY,
-    "name" TEXT NOT NULL,
+    "name" TEXT NOT NULL DEFAULT '回放会话',
     "description" TEXT,
     "symbol" TEXT NOT NULL,
     "timeframe" TEXT NOT NULL,
@@ -152,6 +152,7 @@ const createStatements = [
   `CREATE TABLE IF NOT EXISTS "ReplayJournalSession" (
     "id" TEXT NOT NULL PRIMARY KEY,
     "datasetId" TEXT NOT NULL,
+    "name" TEXT NOT NULL,
     "replayGeneration" INTEGER NOT NULL,
     "initialCapital" REAL NOT NULL,
     "currency" TEXT NOT NULL,
@@ -396,7 +397,10 @@ const paperSessionColumns = [
 ];
 const paperOrderColumns = [["riskAmount", "REAL"]];
 const paperPositionLotColumns = [["initialStopPrice", "REAL"], ["entryOrderType", "TEXT"]];
-const replayJournalSessionColumns = [["nextEntryNo", "INTEGER NOT NULL DEFAULT 0"]];
+const replayJournalSessionColumns = [
+  ["name", "TEXT NOT NULL DEFAULT '回放会话'"],
+  ["nextEntryNo", "INTEGER NOT NULL DEFAULT 0"],
+];
 const replayJournalEntryColumns = [
   ["initialStopPrice", "REAL"],
   ["entryOrderType", "TEXT"],
@@ -524,6 +528,11 @@ try {
       WHERE "ranked"."id" = "ReplayJournalEntry"."id"
     )
     WHERE "accountNo" = 0
+  `);
+  await prisma.$executeRawUnsafe(`
+    UPDATE "ReplayJournalSession"
+    SET "name" = '回放会话 ' || "replayGeneration"
+    WHERE "name" IS NULL OR TRIM("name") = ''
   `);
   await prisma.$executeRawUnsafe(`
     UPDATE "ReplayJournalSession"
