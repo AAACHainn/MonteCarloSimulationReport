@@ -9,6 +9,7 @@ export async function buildMarketBarBlocks(
   datasetId: string,
   barCount: number,
   blockSizes: readonly number[] = [MARKET_BAR_BLOCK_SIZE],
+  maxBatchesPerSize = Number.POSITIVE_INFINITY,
 ) {
   if (!barCount) return;
   for (const blockSize of blockSizes) {
@@ -23,6 +24,7 @@ export async function buildMarketBarBlocks(
     const cursor = Math.max(state?.cursor ?? -1, legacy?.barBlockBuildCursor ?? -1);
     if (cursor >= barCount - 1) continue;
     let start = Math.floor((cursor + 1) / blockSize) * blockSize;
+    let completedBatches = 0;
     while (start < barCount) {
       const bars = await prisma.marketBar.findMany({
         where: { datasetId, sequence: { gte: start } },
@@ -66,7 +68,9 @@ export async function buildMarketBarBlocks(
       });
       const nextCursor = hasMore ? lastBlockStart - 1 : barCount - 1;
       await persistBuildBatch(datasetId, blockSize, nextCursor, blocks);
+      completedBatches += 1;
       if (!hasMore) break;
+      if (completedBatches >= maxBatchesPerSize) break;
       start = lastBlockStart;
       await new Promise<void>((resolve) => setTimeout(resolve, 0));
     }
@@ -128,7 +132,9 @@ export function scheduleMarketBarBlockBuild(
   const active = builds.get(buildKey);
   if (active) return active;
   const operation = new Promise<void>((resolve) => setTimeout(resolve, 0))
-    .then(() => buildMarketBarBlocks(datasetId, barCount, requestedBlockSizes))
+    // A window read may nudge a legacy backfill forward, but it must never
+    // start a sustained million-row scan that competes with replay writes.
+    .then(() => buildMarketBarBlocks(datasetId, barCount, requestedBlockSizes, 1))
     .finally(() => {
       if (builds.get(buildKey) === operation) builds.delete(buildKey);
     });

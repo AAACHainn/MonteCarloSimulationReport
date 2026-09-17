@@ -599,6 +599,8 @@ describe("replay advance with real SQLite", () => {
       `http://localhost/api/window?displayIntervalSeconds=60&displaySession=RTH&endSequence=${count - 1}&visibleCount=500&warmupCount=100`,
     ), context("cme-window"));
     expect(rthResponse.status).toBe(200);
+    expect(rthResponse.headers.get("X-Replay-Window-Strategy")).toBe("raw-session-indexed");
+    expect(rthResponse.headers.get("Server-Timing")).toContain("window;dur=");
     const rthBody = await rthResponse.json();
     expect(rthBody.visibleBars).toHaveLength(500);
     expect(rthBody.warmupBars).toHaveLength(100);
@@ -609,6 +611,13 @@ describe("replay advance with real SQLite", () => {
       getAggregationBucket(Date.parse(bar.timestamp), 60, 60, rth) !== null
     ))).toBe(true);
     expect(new Set(rthBars.map((bar: { timestamp: string }) => bar.timestamp.slice(0, 10))).size).toBeGreaterThan(1);
+    const plan = await prisma.$queryRawUnsafe<Array<{ detail: string }>>(
+      'EXPLAIN QUERY PLAN SELECT "sequence", "timestamp" FROM "MarketBar" WHERE "datasetId" = ? AND "timestamp" >= ? AND "timestamp" < ? ORDER BY "timestamp" ASC',
+      "cme-window",
+      new Date("2021-09-13T13:30:00.000Z"),
+      new Date("2021-09-13T20:15:00.000Z"),
+    );
+    expect(plan.some((step) => step.detail.includes("MarketBar_datasetId_timestamp_key"))).toBe(true);
 
     const hourlyResponse = await windowGET(new Request(
       `http://localhost/api/window?displayIntervalSeconds=3600&displaySession=RTH&endSequence=${count - 1}&visibleCount=20&warmupCount=0`,

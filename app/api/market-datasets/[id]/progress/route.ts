@@ -1,5 +1,5 @@
 import { NextResponse } from "next/server";
-import { prisma } from "@/lib/db";
+import { prisma, replayDatabaseQueryCount } from "@/lib/db";
 import { replayProgressSchema } from "@/lib/validations";
 import { copy } from "@/lib/i18n";
 import { datasetSourceInterval } from "@/lib/market-replay/dataset";
@@ -7,11 +7,15 @@ import { resolveDisplaySession } from "@/lib/market-replay/chart-sessions";
 import { isValidDisplayInterval } from "@/lib/market-replay/types";
 import { getPaperSessionSnapshot } from "@/lib/paper-trading/serialize";
 import { archiveAndDeletePaperSession } from "@/lib/paper-trading/journal-storage";
+import { attachReplayDiagnostics } from "@/lib/market-replay/server-diagnostics";
 
 type RouteContext = { params: Promise<{ id: string }> };
 
 export async function GET(_request: Request, context: RouteContext) {
+  const startedAt = performance.now();
+  const queryStart = replayDatabaseQueryCount();
   const { id } = await context.params;
+  const transactionStartedAt = performance.now();
   const state = await prisma.$transaction(async (tx) => {
     let progress = await tx.replayProgress.findUnique({ where: { datasetId: id } });
     const snapshot = await getPaperSessionSnapshot(id, tx);
@@ -24,7 +28,12 @@ export async function GET(_request: Request, context: RouteContext) {
     }
     return { progress, snapshot };
   });
-  return NextResponse.json(state);
+  return attachReplayDiagnostics(NextResponse.json(state), {
+    startedAt,
+    queryStart,
+    strategy: "authoritative-progress",
+    phases: { transaction: performance.now() - transactionStartedAt },
+  });
 }
 
 export async function PUT(request: Request, context: RouteContext) {

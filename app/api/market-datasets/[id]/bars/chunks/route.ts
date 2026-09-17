@@ -4,10 +4,12 @@ import { copy } from "@/lib/i18n";
 import { chunkRequestBounds, tradingDayBounds, tradingDayForTimestamp } from "@/lib/market-replay/chunks";
 import { datasetSession, datasetSourceInterval, serializeSourceBar } from "@/lib/market-replay/dataset";
 import { replayChunksSchema } from "@/lib/validations";
+import { attachReplayDiagnostics } from "@/lib/market-replay/server-diagnostics";
 
 type RouteContext = { params: Promise<{ id: string }> };
 
 export async function GET(request: Request, context: RouteContext) {
+  const startedAt = performance.now();
   const queryStart = replayDatabaseQueryCount();
   const { id } = await context.params;
   const searchParams = new URL(request.url).searchParams;
@@ -70,8 +72,9 @@ export async function GET(request: Request, context: RouteContext) {
     chunks,
     nextStartDate: next ? tradingDayForTimestamp(next.timestamp, session) : null,
   });
-  if (queryStart !== null) {
-    response.headers.set("X-Replay-Database-Queries", String((replayDatabaseQueryCount() ?? queryStart) - queryStart));
-  }
-  return response;
+  return attachReplayDiagnostics(response, {
+    startedAt,
+    queryStart,
+    strategy: "source-day-chunks",
+  });
 }

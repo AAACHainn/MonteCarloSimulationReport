@@ -313,7 +313,7 @@ try {
   });
   const scopeKey = [benchmarkId, dataset.dataVersion, 1, "ETH", sessionFingerprint].map(encodeURIComponent).join("|");
   await evaluate(`new Promise((resolve, reject) => {
-    const request = indexedDB.open('market-replay-bars-v1', 2);
+    const request = indexedDB.open('market-replay-bars-v1', 3);
     request.onerror = () => reject(request.error);
     request.onsuccess = () => {
       const database = request.result;

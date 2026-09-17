@@ -16,9 +16,10 @@ import {
 
 const DATABASE_NAME = "market-replay-bars-v1";
 const STORE_NAME = "daily-chunks";
+const METADATA_STORE_NAME = "daily-chunk-metadata";
 const DISPLAY_STORE_NAME = "display-bars";
 const DISPLAY_SCOPE_STORE_NAME = "display-scopes";
-const DATABASE_VERSION = 2;
+const DATABASE_VERSION = 3;
 const MEMORY_CHUNK_LIMIT = 14;
 const DISPLAY_CACHE_EVICT_TO_RATIO = 0.8;
 
@@ -33,6 +34,8 @@ export type StoredMarketChunk = MarketBarDayChunk & {
   requestStartDate?: string;
   nextStartDate?: string | null;
 };
+
+type StoredMarketChunkMetadata = Pick<StoredMarketChunk, "key" | "serializedBytes" | "writtenAt">;
 
 export type DisplayBarCacheScope = {
   datasetId: string;
@@ -110,6 +113,9 @@ export class MarketBarCache {
   private nextRanges = new Map<string, string | null>();
   private database: Promise<IDBDatabase | null> | null = null;
   private persistentDisabled = false;
+  private disposed = false;
+  private persistenceQueue = Promise.resolve();
+  private controllers = new Set<AbortController>();
   private writeCounter = Date.now();
 
   constructor(
@@ -133,8 +139,14 @@ export class MarketBarCache {
     this.database = new Promise((resolve) => {
       if (this.persistentDisabled || typeof indexedDB === "undefined") return resolve(null);
       const request = indexedDB.open(DATABASE_NAME, DATABASE_VERSION);
-      request.onupgradeneeded = () => {
+      request.onupgradeneeded = (event) => {
         if (!request.result.objectStoreNames.contains(STORE_NAME)) request.result.createObjectStore(STORE_NAME, { keyPath: "key" });
+        if (!request.result.objectStoreNames.contains(METADATA_STORE_NAME)) {
+          request.result.createObjectStore(METADATA_STORE_NAME, { keyPath: "key" });
+          // The previous cache format has no lightweight size metadata. It is
+          // safe to rebuild this market-only cache instead of deserializing it.
+          if (event.oldVersion > 0) request.transaction?.objectStore(STORE_NAME).clear();
+        }
         if (!request.result.objectStoreNames.contains(DISPLAY_STORE_NAME)) {
           request.result.createObjectStore(DISPLAY_STORE_NAME, { keyPath: ["scopeKey", "timestamp"] });
         }
@@ -142,7 +154,17 @@ export class MarketBarCache {
           request.result.createObjectStore(DISPLAY_SCOPE_STORE_NAME, { keyPath: "scopeKey" });
         }
       };
-      request.onsuccess = () => resolve(request.result);
+      request.onsuccess = () => {
+        const database = request.result;
+        database.onversionchange = () => {
+          database.close();
+          this.database = null;
+        };
+        if (this.disposed) {
+          database.close();
+          resolve(null);
+        } else resolve(database);
+      };
       request.onerror = () => { this.persistentDisabled = true; resolve(null); };
       request.onblocked = () => { this.persistentDisabled = true; resolve(null); };
     });
@@ -191,9 +213,9 @@ export class MarketBarCache {
   }
 
   private async evict(database: IDBDatabase, incomingBytes = 0, incomingKeys = new Set<string>()) {
-    const read = database.transaction(STORE_NAME, "readonly");
+    const read = database.transaction(METADATA_STORE_NAME, "readonly");
     const readDone = transactionDone(read);
-    const storedRecords = await requestValue(read.objectStore(STORE_NAME).getAll()) as StoredMarketChunk[];
+    const storedRecords = await requestValue(read.objectStore(METADATA_STORE_NAME).getAll()) as StoredMarketChunkMetadata[];
     await readDone;
     const records = incomingKeys.size
       ? storedRecords.filter((record) => !incomingKeys.has(record.key))
@@ -203,8 +225,11 @@ export class MarketBarCache {
       this.budgetBytes,
     ).filter((key) => key !== "__incoming__");
     if (!keys.length) return;
-    const write = database.transaction(STORE_NAME, "readwrite");
-    for (const key of keys) write.objectStore(STORE_NAME).delete(key);
+    const write = database.transaction([STORE_NAME, METADATA_STORE_NAME], "readwrite");
+    for (const key of keys) {
+      write.objectStore(STORE_NAME).delete(key);
+      write.objectStore(METADATA_STORE_NAME).delete(key);
+    }
     await transactionDone(write);
   }
 
@@ -217,9 +242,13 @@ export class MarketBarCache {
     const incomingKeys = new Set(uniqueRecords.map((record) => record.key));
     const attempt = async () => {
       await this.evict(database, incomingBytes, incomingKeys);
-      const transaction = database.transaction(STORE_NAME, "readwrite");
+      const transaction = database.transaction([STORE_NAME, METADATA_STORE_NAME], "readwrite");
       const store = transaction.objectStore(STORE_NAME);
-      for (const record of uniqueRecords) store.put(record);
+      const metadata = transaction.objectStore(METADATA_STORE_NAME);
+      for (const record of uniqueRecords) {
+        store.put(record);
+        metadata.put({ key: record.key, serializedBytes: record.serializedBytes, writtenAt: record.writtenAt });
+      }
       await transactionDone(transaction);
     };
     try {
@@ -235,6 +264,13 @@ export class MarketBarCache {
         this.database = Promise.resolve(null);
       }
     }
+  }
+
+  private queuePersistence(records: StoredMarketChunk[]) {
+    if (!records.length || this.disposed) return;
+    this.persistenceQueue = this.persistenceQueue
+      .catch(() => undefined)
+      .then(() => this.disposed ? undefined : this.persistMany(records));
   }
 
   private toRecord(chunk: MarketBarDayChunk, requestStartDate: string, nextStartDate: string | null): StoredMarketChunk {
@@ -286,9 +322,12 @@ export class MarketBarCache {
         startDate,
         dates: uncovered.join(","),
       });
+      const controller = new AbortController();
+      this.controllers.add(controller);
       const request = this.fetcher.call(
         globalThis,
         `/api/market-datasets/${this.dataset.id}/bars/chunks?${params}`,
+        { signal: controller.signal },
       ).then(async (response) => {
         const body = await response.json();
         if (!response.ok) throw new Error(body?.error ?? "Unable to load market bars.");
@@ -296,6 +335,7 @@ export class MarketBarCache {
       });
       for (const date of uncovered) this.dateInflight.set(date, request);
       request.finally(() => {
+        this.controllers.delete(controller);
         for (const date of uncovered) {
           if (this.dateInflight.get(date) === request) this.dateInflight.delete(date);
         }
@@ -315,8 +355,11 @@ export class MarketBarCache {
         persistence.push(record);
       }
     }
-    await this.persistMany(persistence);
-    const result = await Promise.all(expected.map((date) => this.read(date)));
+    this.queuePersistence(persistence);
+    const fetchedByDate = new Map(persistence.map((record) => [record.tradingDay, record]));
+    const result = expected.map((date, index) => (
+      this.memory.get(this.key(date)) ?? fetchedByDate.get(date) ?? cached[index]
+    ));
     const nextStartDate = this.nextRanges.has(startDate)
       ? this.nextRanges.get(startDate)!
       : addCalendarDays(startDate, expected.length);
@@ -393,9 +436,19 @@ export class MarketBarCache {
   }
 
   prefetch(startDate: string) {
+    if (this.disposed) return;
     void this.loadRange(startDate).then((loaded) => {
       if (loaded.nextStartDate) void this.loadRange(loaded.nextStartDate).catch(() => undefined);
     }).catch(() => undefined);
+  }
+
+  dispose() {
+    this.disposed = true;
+    for (const controller of this.controllers) controller.abort();
+    this.controllers.clear();
+    this.dateInflight.clear();
+    void this.database?.then((database) => database?.close());
+    this.database = Promise.resolve(null);
   }
 }
 
@@ -403,6 +456,7 @@ export class MarketBarCache {
 export class DisplayBarCache {
   private database: Promise<IDBDatabase | null> | null = null;
   private disabled = false;
+  private disposed = false;
   readonly scopeKey: string;
 
   constructor(private scope: DisplayBarCacheScope, private budgetBytes = MARKET_DISPLAY_CACHE_BUDGET_BYTES) {
@@ -414,8 +468,12 @@ export class DisplayBarCache {
     this.database = new Promise((resolve) => {
       if (this.disabled || typeof indexedDB === "undefined") return resolve(null);
       const request = indexedDB.open(DATABASE_NAME, DATABASE_VERSION);
-      request.onupgradeneeded = () => {
+      request.onupgradeneeded = (event) => {
         if (!request.result.objectStoreNames.contains(STORE_NAME)) request.result.createObjectStore(STORE_NAME, { keyPath: "key" });
+        if (!request.result.objectStoreNames.contains(METADATA_STORE_NAME)) {
+          request.result.createObjectStore(METADATA_STORE_NAME, { keyPath: "key" });
+          if (event.oldVersion > 0) request.transaction?.objectStore(STORE_NAME).clear();
+        }
         if (!request.result.objectStoreNames.contains(DISPLAY_STORE_NAME)) {
           request.result.createObjectStore(DISPLAY_STORE_NAME, { keyPath: ["scopeKey", "timestamp"] });
         }
@@ -423,7 +481,17 @@ export class DisplayBarCache {
           request.result.createObjectStore(DISPLAY_SCOPE_STORE_NAME, { keyPath: "scopeKey" });
         }
       };
-      request.onsuccess = () => resolve(request.result);
+      request.onsuccess = () => {
+        const database = request.result;
+        database.onversionchange = () => {
+          database.close();
+          this.database = null;
+        };
+        if (this.disposed) {
+          database.close();
+          resolve(null);
+        } else resolve(database);
+      };
       request.onerror = () => { this.disabled = true; resolve(null); };
       request.onblocked = () => { this.disabled = true; resolve(null); };
     });
@@ -549,6 +617,12 @@ export class DisplayBarCache {
     } catch (error) {
       if (isQuotaError(error)) this.disabled = true;
     }
+  }
+
+  dispose() {
+    this.disposed = true;
+    void this.database?.then((database) => database?.close());
+    this.database = Promise.resolve(null);
   }
 }
 

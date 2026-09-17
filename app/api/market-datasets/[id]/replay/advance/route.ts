@@ -1,6 +1,6 @@
 import { randomUUID } from "node:crypto";
 import { NextResponse } from "next/server";
-import { prisma } from "@/lib/db";
+import { prisma, replayDatabaseQueryCount } from "@/lib/db";
 import { copy } from "@/lib/i18n";
 import { aggregateMarketBars, getAggregationBucket } from "@/lib/market-replay/aggregation";
 import { resolveDisplaySession } from "@/lib/market-replay/chart-sessions";
@@ -8,10 +8,13 @@ import { datasetSourceInterval, serializeSourceBar } from "@/lib/market-replay/d
 import { syncReplayToTarget } from "@/lib/market-replay/replay-sync";
 import { MAX_DISPLAY_ADVANCE_SOURCE_BARS, isValidDisplayInterval } from "@/lib/market-replay/types";
 import { paperAdvanceSchema } from "@/lib/validations";
+import { attachReplayDiagnostics } from "@/lib/market-replay/server-diagnostics";
 
 type RouteContext = { params: Promise<{ id: string }> };
 
 export async function POST(request: Request, context: RouteContext) {
+  const startedAt = performance.now();
+  const queryStart = replayDatabaseQueryCount();
   const { id } = await context.params;
   const parsed = paperAdvanceSchema.safeParse(await request.json());
   if (!parsed.success) return NextResponse.json({ error: parsed.error.issues[0]?.message }, { status: 400 });
@@ -121,7 +124,7 @@ export async function POST(request: Request, context: RouteContext) {
     status: bar.sourceCount === bar.expectedCount ? "COMPLETE" as const : "INCOMPLETE" as const,
   }));
 
-  return NextResponse.json({
+  const response = NextResponse.json({
     currentSequence: targetSequence,
     advancedBars: parsed.data.displayIntervalSeconds === undefined ? advanced.map(serializeSourceBar) : [],
     completedDisplayBucketStart,
@@ -131,5 +134,10 @@ export async function POST(request: Request, context: RouteContext) {
     snapshot: outcome.response.snapshot,
     generation: outcome.response.generation,
     syncVersion: outcome.response.syncVersion,
+  });
+  return attachReplayDiagnostics(response, {
+    startedAt,
+    queryStart,
+    strategy: parsed.data.displayIntervalSeconds === undefined ? "source-advance" : "display-bucket-advance",
   });
 }
