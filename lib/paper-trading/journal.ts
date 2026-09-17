@@ -104,7 +104,7 @@ export function serializeReplayJournalEntry(entry: {
   displayIntervalSeconds: number; displaySession: string; displayUtcOffsetMinutes: number;
   priceTickSize: number; initialRisk: number; actualRisk: number; gainLoss: number; lotId: string;
   setupOptionId?: string | null; setupOption?: { name: string } | null;
-  reasonTags?: { id: string; name: string }[];
+  tradeReasons?: { id: string; name: string }[];
   journalSession: { archivedAt: Date | null };
 }): ReplayJournalEntryData {
   const abr = entry.abrValue !== null && entry.abrValue > 0 ? entry.abrValue : null;
@@ -115,7 +115,7 @@ export function serializeReplayJournalEntry(entry: {
     id: entry.id, no: entry.accountNo, globalNo: entry.no, journalSessionId: entry.journalSessionId,
     setupOptionId: entry.setupOptionId ?? null,
     setupOption: entry.setupOption ? { name: entry.setupOption.name } : null,
-    reasonTags: entry.reasonTags?.map((tag) => ({ id: tag.id, name: tag.name })) ?? [],
+    tradeReasons: entry.tradeReasons?.map((reason) => ({ id: reason.id, name: reason.name })) ?? [],
     lotId: entry.lotId, direction: entry.direction as "LONG" | "SHORT", quantity: entry.quantity,
     openedSequence: entry.openedSequence, openedAt: entry.openedAt.toISOString(),
     closedSequence: entry.closedSequence, closedAt: entry.closedAt.toISOString(),

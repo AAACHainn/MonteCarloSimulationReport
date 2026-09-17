@@ -11,14 +11,16 @@ export const replayJournalExpressionFilterKeys = [
 ] as const;
 
 export type ReplayJournalExpressionFilterKey = (typeof replayJournalExpressionFilterKeys)[number];
-export type ReplayJournalOptionFilterKey = "directions" | "setupOptionIds" | "results";
+export type ReplayJournalOptionFilterKey = "directions" | "setupOptionIds" | "tradeReasonIds" | "results";
 export type ReplayJournalFilters = Record<ReplayJournalExpressionFilterKey, string> & {
   directions: ReplayJournalEntryData["direction"][];
   setupOptionIds: string[];
+  tradeReasonIds: string[];
   results: ReplayJournalEntryData["result"][];
 };
 
 export const NO_SETUP_FILTER_VALUE = "__NO_SETUP__";
+export const NO_TRADE_REASON_FILTER_VALUE = "__NO_TRADE_REASON__";
 
 export function createEmptyReplayJournalFilters(): ReplayJournalFilters {
   return {
@@ -30,6 +32,7 @@ export function createEmptyReplayJournalFilters(): ReplayJournalFilters {
     actualRiskRr: "",
     directions: [],
     setupOptionIds: [],
+    tradeReasonIds: [],
     results: [],
   };
 }
@@ -40,6 +43,7 @@ export function readReplayJournalFilters(searchParams: URLSearchParams): ReplayJ
   filters.directions = unique(searchParams.getAll("directions"))
     .filter((value): value is ReplayJournalEntryData["direction"] => value === "LONG" || value === "SHORT");
   filters.setupOptionIds = unique(searchParams.getAll("setupOptionIds").map((value) => value.trim()).filter(Boolean));
+  filters.tradeReasonIds = unique(searchParams.getAll("tradeReasonIds").map((value) => value.trim()).filter(Boolean));
   filters.results = unique(searchParams.getAll("results"))
     .filter((value): value is ReplayJournalEntryData["result"] => value === "W" || value === "L" || value === "BE");
   return filters;
@@ -59,6 +63,12 @@ export function compileReplayJournalFilters(filters: ReplayJournalFilters) {
       if (filters.directions.length > 0 && !filters.directions.includes(entry.direction)) return false;
       const setupValue = entry.setupOptionId ?? NO_SETUP_FILTER_VALUE;
       if (filters.setupOptionIds.length > 0 && !filters.setupOptionIds.includes(setupValue)) return false;
+      if (filters.tradeReasonIds.length > 0) {
+        const matchesEmpty = entry.tradeReasons.length === 0
+          && filters.tradeReasonIds.includes(NO_TRADE_REASON_FILTER_VALUE);
+        const matchesReason = entry.tradeReasons.some((reason) => filters.tradeReasonIds.includes(reason.id));
+        if (!matchesEmpty && !matchesReason) return false;
+      }
       if (filters.results.length > 0 && !filters.results.includes(entry.result)) return false;
 
       return replayJournalExpressionFilterKeys.every((key) => {
@@ -79,6 +89,7 @@ export function countActiveReplayJournalFilters(filters: ReplayJournalFilters) {
   return replayJournalExpressionFilterKeys.filter((key) => filters[key].trim() !== "").length
     + Number(filters.directions.length > 0)
     + Number(filters.setupOptionIds.length > 0)
+    + Number(filters.tradeReasonIds.length > 0)
     + Number(filters.results.length > 0);
 }
 

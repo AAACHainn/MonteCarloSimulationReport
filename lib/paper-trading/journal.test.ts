@@ -165,12 +165,12 @@ describe("paper replay journal", () => {
       entryOrderType: "LIMIT", exitPrice: 102, initialStopPrice: 96, abrValue: 2, abrLength: 8,
       displayIntervalSeconds: 300, displaySession: "ETH", displayUtcOffsetMinutes: 0,
       priceTickSize: 0.25, initialRisk: 4, actualRisk: 3, gainLoss: 2,
-      reasonTags: [{ id: "tag-2", name: "回踩" }, { id: "tag-1", name: "突破" }],
+      tradeReasons: [{ id: "reason-2", name: "回踩" }, { id: "reason-1", name: "突破" }],
       journalSession: { archivedAt: null },
     });
     expect(serialized).toMatchObject({
       actualInitialRiskRatio: 0.75,
-      reasonTags: [{ id: "tag-2", name: "回踩" }, { id: "tag-1", name: "突破" }],
+      tradeReasons: [{ id: "reason-2", name: "回踩" }, { id: "reason-1", name: "突破" }],
     });
   });
 

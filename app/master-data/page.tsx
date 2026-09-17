@@ -1,5 +1,6 @@
 import { Breadcrumbs } from "@/components/breadcrumbs";
 import { TradeOptionManager } from "@/components/master-data/trade-option-manager";
+import { TradeReasonManager } from "@/components/master-data/trade-reason-manager";
 import { TradeTagManager } from "@/components/master-data/trade-tag-manager";
 import { prisma } from "@/lib/db";
 import { copy } from "@/lib/i18n";
@@ -7,14 +8,18 @@ import { copy } from "@/lib/i18n";
 export const dynamic = "force-dynamic";
 
 export default async function MasterDataPage() {
-  const [strategies, tags] = await Promise.all([
+  const [strategies, reasons, tags] = await Promise.all([
     prisma.tradeOption.findMany({
       where: { type: "STRATEGY" },
       orderBy: [{ active: "desc" }, { name: "asc" }],
     }),
+    prisma.tradeReason.findMany({
+      orderBy: { name: "asc" },
+      include: { _count: { select: { replayJournalEntries: true } } },
+    }),
     prisma.tradeTag.findMany({
       orderBy: { name: "asc" },
-      include: { _count: { select: { trades: true, replayJournalEntries: true } } },
+      include: { _count: { select: { trades: true } } },
     }),
   ]);
 
@@ -28,6 +33,7 @@ export default async function MasterDataPage() {
       </section>
       <div className="space-y-6">
         <TradeOptionManager type="STRATEGY" options={strategies} />
+        <TradeReasonManager reasons={reasons} />
         <TradeTagManager tags={tags} />
       </div>
     </div>

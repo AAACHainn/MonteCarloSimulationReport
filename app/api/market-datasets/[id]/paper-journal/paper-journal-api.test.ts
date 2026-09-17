@@ -29,7 +29,7 @@ function record() {
     displayIntervalSeconds: 300, displaySession: "ETH", displayUtcOffsetMinutes: 0,
     priceTickSize: 0.25, initialRisk: 1, actualRisk: 1, gainLoss: 2,
     setupOptionId: "setup-1", setupOption: { name: "Opening Range Breakout" },
-    reasonTags: [{ id: "tag-1", name: "趋势延续" }],
+    tradeReasons: [{ id: "reason-1", name: "趋势延续" }],
     journalSession: { archivedAt: null },
   };
 }
@@ -52,14 +52,14 @@ describe("replay paper journal API", () => {
       include: {
         journalSession: { select: { archivedAt: true } },
         setupOption: { select: { name: true } },
-        reasonTags: { select: { id: true, name: true }, orderBy: { name: "asc" } },
+        tradeReasons: { select: { id: true, name: true }, orderBy: { name: "asc" } },
       },
     }));
     expect(await response.json()).toMatchObject({
       items: [{
         setupOptionId: "setup-1",
         setupOption: { name: "Opening Range Breakout" },
-        reasonTags: [{ id: "tag-1", name: "趋势延续" }],
+        tradeReasons: [{ id: "reason-1", name: "趋势延续" }],
       }],
     });
   });
@@ -105,7 +105,7 @@ describe("replay paper journal API", () => {
       include: {
         journalSession: { select: { archivedAt: true } },
         setupOption: { select: { name: true } },
-        reasonTags: { select: { id: true, name: true }, orderBy: { name: "asc" } },
+        tradeReasons: { select: { id: true, name: true }, orderBy: { name: "asc" } },
       },
       orderBy: [{ accountNo: "asc" }, { id: "asc" }],
     });
@@ -160,10 +160,12 @@ describe("replay paper journal API", () => {
     expect(data.filterOptions).toEqual({
       setups: [{ value: "setup-1", label: "Opening Range Breakout" }],
       hasEntriesWithoutSetup: false,
+      tradeReasons: [{ value: "reason-1", label: "趋势延续" }],
+      hasEntriesWithoutTradeReason: false,
     });
   });
 
-  it("filters Direction, Setup, and Result before statistics", async () => {
+  it("filters Direction, Setup, trade reason, and Result before statistics", async () => {
     mocks.journalSessionFindMany.mockResolvedValue([{
       id: "journal-1", name: "回放会话 1", replayGeneration: 1, initialCapital: 10_000,
       currency: "USD", archivedAt: null, createdAt: new Date("2026-09-16T12:00:00Z"),
@@ -172,12 +174,12 @@ describe("replay paper journal API", () => {
     mocks.entryFindMany.mockResolvedValue([
       { ...record(), id: "long-with-setup", gainLoss: 2 },
       { ...record(), id: "short-loss", direction: "SHORT", gainLoss: -1 },
-      { ...record(), id: "long-without-setup", gainLoss: 4, setupOptionId: null, setupOption: null },
+      { ...record(), id: "long-without-setup", gainLoss: 4, setupOptionId: null, setupOption: null, tradeReasons: [] },
     ]);
 
     const response = await GET(new Request(
       "http://localhost/api/market-datasets/dataset-1/paper-journal?scope=history"
-      + "&directions=LONG&setupOptionIds=__NO_SETUP__&results=W",
+      + "&directions=LONG&setupOptionIds=__NO_SETUP__&tradeReasonIds=__NO_TRADE_REASON__&results=W",
     ), context);
 
     expect(response.status).toBe(200);
@@ -188,6 +190,8 @@ describe("replay paper journal API", () => {
     expect(data.filterOptions).toEqual({
       setups: [{ value: "setup-1", label: "Opening Range Breakout" }],
       hasEntriesWithoutSetup: true,
+      tradeReasons: [{ value: "reason-1", label: "趋势延续" }],
+      hasEntriesWithoutTradeReason: true,
     });
   });
 

@@ -23,6 +23,7 @@ import {
   createEmptyReplayJournalFilters,
   hasActiveReplayJournalFilters,
   NO_SETUP_FILTER_VALUE,
+  NO_TRADE_REASON_FILTER_VALUE,
   replayJournalExpressionFilterKeys,
   type ReplayJournalExpressionFilterKey,
   type ReplayJournalFilters,
@@ -50,6 +51,8 @@ type Payload = {
   filterOptions?: {
     setups: FilterOption[];
     hasEntriesWithoutSetup: boolean;
+    tradeReasons: FilterOption[];
+    hasEntriesWithoutTradeReason: boolean;
   };
   pagination?: {
     page: number;
@@ -66,7 +69,7 @@ type TradeOption = {
   active: boolean;
 };
 
-type TradeTag = {
+type TradeReason = {
   id: string;
   name: string;
 };
@@ -88,7 +91,7 @@ const journalColumns: {
   { id: "date", label: "Date", text: false },
   { id: "direction", label: "Direction", text: false, optionFilterKey: "directions" },
   { id: "setup", label: copy.paperTrading.setup, text: true, className: "w-52 min-w-52 max-w-52", optionFilterKey: "setupOptionIds" },
-  { id: "reason", label: copy.paperTrading.tradeReason, text: true, className: "w-64 min-w-64 max-w-64" },
+  { id: "reason", label: copy.paperTrading.tradeReason, text: true, className: "w-64 min-w-64 max-w-64", optionFilterKey: "tradeReasonIds" },
   { id: "abr", label: "ABR", text: false },
   { id: "initialRisk", label: "iRisk", text: false },
   { id: "initialRiskAbr", label: "iRisk / ABR", text: false, expressionFilterKey: "initialRiskAbr" },
@@ -151,10 +154,10 @@ export function PaperJournalTable({
   const [setupOptionsLoading, setSetupOptionsLoading] = useState(true);
   const [setupError, setSetupError] = useState<string | null>(null);
   const [savingSetupIds, setSavingSetupIds] = useState<Set<string>>(() => new Set());
-  const [reasonTagOptions, setReasonTagOptions] = useState<TradeTag[]>([]);
-  const [reasonTagsLoading, setReasonTagsLoading] = useState(true);
-  const [reasonTagsError, setReasonTagsError] = useState<string | null>(null);
-  const [savingReasonTagIds, setSavingReasonTagIds] = useState<Set<string>>(() => new Set());
+  const [tradeReasonOptions, setTradeReasonOptions] = useState<TradeReason[]>([]);
+  const [tradeReasonsLoading, setTradeReasonsLoading] = useState(true);
+  const [tradeReasonsError, setTradeReasonsError] = useState<string | null>(null);
+  const [savingTradeReasonIds, setSavingTradeReasonIds] = useState<Set<string>>(() => new Set());
   const [visibleColumnsOpen, setVisibleColumnsOpen] = useState(false);
   const [visibleColumnIds, setVisibleColumnIds] = useState<JournalColumnId[]>(defaultVisibleColumnIds);
   const [draftVisibleColumnIds, setDraftVisibleColumnIds] = useState<JournalColumnId[]>(defaultVisibleColumnIds);
@@ -165,6 +168,8 @@ export function PaperJournalTable({
   const [openFilter, setOpenFilter] = useState<string | null>(null);
   const [setupFilterOptions, setSetupFilterOptions] = useState<FilterOption[]>([]);
   const [hasEntriesWithoutSetup, setHasEntriesWithoutSetup] = useState(false);
+  const [tradeReasonFilterOptions, setTradeReasonFilterOptions] = useState<FilterOption[]>([]);
+  const [hasEntriesWithoutTradeReason, setHasEntriesWithoutTradeReason] = useState(false);
   const appliedFiltersRef = useRef(appliedFilters);
   const loadRequestIdRef = useRef(0);
 
@@ -198,6 +203,7 @@ export function PaperJournalTable({
         }
         for (const value of appliedFiltersRef.current.directions) params.append("directions", value);
         for (const value of appliedFiltersRef.current.setupOptionIds) params.append("setupOptionIds", value);
+        for (const value of appliedFiltersRef.current.tradeReasonIds) params.append("tradeReasonIds", value);
         for (const value of appliedFiltersRef.current.results) params.append("results", value);
       }
       const response = await fetch(`/api/market-datasets/${datasetId}/paper-journal?${params}`);
@@ -215,6 +221,8 @@ export function PaperJournalTable({
         setSummary(data.summary ?? null);
         setSetupFilterOptions(data.filterOptions?.setups ?? []);
         setHasEntriesWithoutSetup(data.filterOptions?.hasEntriesWithoutSetup ?? false);
+        setTradeReasonFilterOptions(data.filterOptions?.tradeReasons ?? []);
+        setHasEntriesWithoutTradeReason(data.filterOptions?.hasEntriesWithoutTradeReason ?? false);
       }
       setNextCursor(data.nextCursor);
       setError(null);
@@ -285,23 +293,23 @@ export function PaperJournalTable({
 
   useEffect(() => {
     let cancelled = false;
-    async function loadReasonTags() {
-      setReasonTagsLoading(true);
+    async function loadTradeReasons() {
+      setTradeReasonsLoading(true);
       try {
-        const response = await fetch("/api/trade-tags");
+        const response = await fetch("/api/trade-reasons");
         const data: unknown = await response.json();
-        if (!response.ok || !Array.isArray(data)) throw new Error(copy.paperTrading.reasonTagsLoadFailed);
+        if (!response.ok || !Array.isArray(data)) throw new Error(copy.paperTrading.tradeReasonsLoadFailed);
         if (!cancelled) {
-          setReasonTagOptions((data as TradeTag[]).map((tag) => ({ id: tag.id, name: tag.name })));
-          setReasonTagsError(null);
+          setTradeReasonOptions((data as TradeReason[]).map((reason) => ({ id: reason.id, name: reason.name })));
+          setTradeReasonsError(null);
         }
       } catch {
-        if (!cancelled) setReasonTagsError(copy.paperTrading.reasonTagsLoadFailed);
+        if (!cancelled) setTradeReasonsError(copy.paperTrading.tradeReasonsLoadFailed);
       } finally {
-        if (!cancelled) setReasonTagsLoading(false);
+        if (!cancelled) setTradeReasonsLoading(false);
       }
     }
-    void loadReasonTags();
+    void loadTradeReasons();
     return () => { cancelled = true; };
   }, []);
 
@@ -441,40 +449,40 @@ export function PaperJournalTable({
     }
   }
 
-  async function updateReasonTags(entry: ReplayJournalEntryData, reasonTagIds: string[]) {
-    const currentIds = entry.reasonTags.map((tag) => tag.id);
-    if (currentIds.length === reasonTagIds.length && currentIds.every((id) => reasonTagIds.includes(id))) return true;
-    const previousReasonTags = entry.reasonTags;
-    const nextReasonTags = reasonTagIds
-      .map((id) => reasonTagOptions.find((tag) => tag.id === id))
-      .filter((tag): tag is TradeTag => Boolean(tag));
+  async function updateTradeReasons(entry: ReplayJournalEntryData, tradeReasonIds: string[]) {
+    const currentIds = entry.tradeReasons.map((reason) => reason.id);
+    if (currentIds.length === tradeReasonIds.length && currentIds.every((id) => tradeReasonIds.includes(id))) return true;
+    const previousTradeReasons = entry.tradeReasons;
+    const nextTradeReasons = tradeReasonIds
+      .map((id) => tradeReasonOptions.find((reason) => reason.id === id))
+      .filter((reason): reason is TradeReason => Boolean(reason));
 
-    setReasonTagsError(null);
-    setItems((current) => current.map((item) => item.id === entry.id ? { ...item, reasonTags: nextReasonTags } : item));
-    setSavingReasonTagIds((current) => new Set(current).add(entry.id));
+    setTradeReasonsError(null);
+    setItems((current) => current.map((item) => item.id === entry.id ? { ...item, tradeReasons: nextTradeReasons } : item));
+    setSavingTradeReasonIds((current) => new Set(current).add(entry.id));
 
     try {
       const response = await fetch(`/api/market-datasets/${datasetId}/paper-journal/entries/${entry.id}`, {
         method: "PATCH",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ reasonTagIds }),
+        body: JSON.stringify({ tradeReasonIds }),
       });
       const data = await response.json() as ReplayJournalEntryData & { error?: string };
-      if (!response.ok) throw new Error(data.error ?? copy.paperTrading.reasonTagsUpdateFailed);
+      if (!response.ok) throw new Error(data.error ?? copy.paperTrading.tradeReasonsUpdateFailed);
       setItems((current) => current.map((item) => item.id === entry.id ? {
         ...item,
-        reasonTags: data.reasonTags,
+        tradeReasons: data.tradeReasons,
       } : item));
       return true;
     } catch {
       setItems((current) => current.map((item) => item.id === entry.id ? {
         ...item,
-        reasonTags: previousReasonTags,
+        tradeReasons: previousTradeReasons,
       } : item));
-      setReasonTagsError(copy.paperTrading.reasonTagsUpdateFailed);
+      setTradeReasonsError(copy.paperTrading.tradeReasonsUpdateFailed);
       return false;
     } finally {
-      setSavingReasonTagIds((current) => {
+      setSavingTradeReasonIds((current) => {
         const next = new Set(current);
         next.delete(entry.id);
         return next;
@@ -516,6 +524,10 @@ export function PaperJournalTable({
     setupOptionIds: [
       ...(hasEntriesWithoutSetup ? [{ value: NO_SETUP_FILTER_VALUE, label: copy.paperTrading.clearSetup }] : []),
       ...setupFilterOptions,
+    ],
+    tradeReasonIds: [
+      ...(hasEntriesWithoutTradeReason ? [{ value: NO_TRADE_REASON_FILTER_VALUE, label: copy.paperTrading.noTradeReason }] : []),
+      ...tradeReasonFilterOptions,
     ],
     results: [
       { value: "W", label: copy.paperTrading.journalResultWin },
@@ -649,7 +661,7 @@ export function PaperJournalTable({
     {error ? <p className="rounded-md border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-700" role="alert">{error}</p> : null}
     {status ? <p className="rounded-md border border-emerald-200 bg-emerald-50 px-3 py-2 text-sm text-emerald-700" role="status" aria-live="polite">{status}</p> : null}
     {setupError ? <p className="rounded-md border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-700" role="alert">{setupError}</p> : null}
-    {reasonTagsError ? <p className="rounded-md border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-700" role="alert">{reasonTagsError}</p> : null}
+    {tradeReasonsError ? <p className="rounded-md border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-700" role="alert">{tradeReasonsError}</p> : null}
     <section className="space-y-2">
       <div className="overflow-x-auto rounded-md border bg-white">
         <table className="w-full min-w-max border-collapse text-right text-sm tabular-nums">
@@ -743,15 +755,15 @@ export function PaperJournalTable({
             </td> : null}
             {visibleColumnSet.has("reason") ? <td className="w-64 min-w-64 max-w-64 border-r p-1 text-left last:border-r-0">
               <MultiSelect
-                value={entry.reasonTags.map((tag) => tag.id)}
-                options={reasonTagOptions.map((tag) => ({ value: tag.id, label: tag.name }))}
-                onCommit={(values) => updateReasonTags(entry, values)}
+                value={entry.tradeReasons.map((reason) => reason.id)}
+                options={tradeReasonOptions.map((reason) => ({ value: reason.id, label: reason.name }))}
+                onCommit={(values) => updateTradeReasons(entry, values)}
                 placeholder={copy.paperTrading.chooseTradeReason}
                 emptyMessage={copy.paperTrading.noTradeReasonOptions}
                 ariaLabel={copy.paperTrading.editTradeReason(entry.no)}
                 saveLabel={copy.paperTrading.saveTradeReason}
                 cancelLabel={copy.common.cancel}
-                disabled={reasonTagsLoading || savingReasonTagIds.has(entry.id)}
+                disabled={tradeReasonsLoading || savingTradeReasonIds.has(entry.id)}
               />
             </td> : null}
             {visibleColumnSet.has("abr") ? <td className="border-r px-3 py-2 last:border-r-0" title={`${formatInterval(entry.displayIntervalSeconds)} · ABR(${entry.abrLength})`}>{number(entry.abrValue)}</td> : null}

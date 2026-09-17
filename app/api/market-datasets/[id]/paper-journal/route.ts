@@ -25,7 +25,7 @@ export async function GET(request: Request, context: RouteContext) {
       include: {
         journalSession: { select: { archivedAt: true } },
         setupOption: { select: { name: true } },
-        reasonTags: { select: { id: true, name: true }, orderBy: { name: "asc" } },
+        tradeReasons: { select: { id: true, name: true }, orderBy: { name: "asc" } },
       },
       orderBy: { no: "asc" },
       take: take + 1,
@@ -67,19 +67,23 @@ export async function GET(request: Request, context: RouteContext) {
     include: {
       journalSession: { select: { archivedAt: true } },
       setupOption: { select: { name: true } },
-      reasonTags: { select: { id: true, name: true }, orderBy: { name: "asc" } },
+      tradeReasons: { select: { id: true, name: true }, orderBy: { name: "asc" } },
     },
     orderBy: [{ accountNo: "asc" }, { id: "asc" }],
   }) : [];
   const serializedRecords = allRecords.map(serializeReplayJournalEntry);
   const setupFilterOptions = new Map<string, string>();
+  const tradeReasonFilterOptions = new Map<string, string>();
   let hasEntriesWithoutSetup = false;
+  let hasEntriesWithoutTradeReason = false;
   for (const record of serializedRecords) {
     if (record.setupOptionId && record.setupOption) {
       setupFilterOptions.set(record.setupOptionId, record.setupOption.name);
     } else {
       hasEntriesWithoutSetup = true;
     }
+    if (record.tradeReasons.length === 0) hasEntriesWithoutTradeReason = true;
+    for (const reason of record.tradeReasons) tradeReasonFilterOptions.set(reason.id, reason.name);
   }
   const filteredRecords = serializedRecords.filter(compiledFilters.test);
   const totalItems = filteredRecords.length;
@@ -101,6 +105,8 @@ export async function GET(request: Request, context: RouteContext) {
     filterOptions: {
       setups: [...setupFilterOptions].map(([value, label]) => ({ value, label })),
       hasEntriesWithoutSetup,
+      tradeReasons: [...tradeReasonFilterOptions].map(([value, label]) => ({ value, label })),
+      hasEntriesWithoutTradeReason,
     },
     summary: calculateReplayJournalSummary(filteredRecords),
     pagination: { page, pageSize: take, totalItems, totalPages },

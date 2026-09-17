@@ -59,17 +59,24 @@ const createStatements = [
     "createdAt" DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
     "updatedAt" DATETIME NOT NULL
   )`,
+  `CREATE TABLE IF NOT EXISTS "TradeReason" (
+    "id" TEXT NOT NULL PRIMARY KEY,
+    "name" TEXT NOT NULL,
+    "normalizedName" TEXT NOT NULL,
+    "createdAt" DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    "updatedAt" DATETIME NOT NULL
+  )`,
   `CREATE TABLE IF NOT EXISTS "_TradeToTradeTag" (
     "A" TEXT NOT NULL,
     "B" TEXT NOT NULL,
     CONSTRAINT "_TradeToTradeTag_A_fkey" FOREIGN KEY ("A") REFERENCES "Trade" ("id") ON DELETE CASCADE ON UPDATE CASCADE,
     CONSTRAINT "_TradeToTradeTag_B_fkey" FOREIGN KEY ("B") REFERENCES "TradeTag" ("id") ON DELETE CASCADE ON UPDATE CASCADE
   )`,
-  `CREATE TABLE IF NOT EXISTS "_ReplayJournalReasonTags" (
+  `CREATE TABLE IF NOT EXISTS "_ReplayJournalTradeReasons" (
     "A" TEXT NOT NULL,
     "B" TEXT NOT NULL,
-    CONSTRAINT "_ReplayJournalReasonTags_A_fkey" FOREIGN KEY ("A") REFERENCES "ReplayJournalEntry" ("id") ON DELETE CASCADE ON UPDATE CASCADE,
-    CONSTRAINT "_ReplayJournalReasonTags_B_fkey" FOREIGN KEY ("B") REFERENCES "TradeTag" ("id") ON DELETE CASCADE ON UPDATE CASCADE
+    CONSTRAINT "_ReplayJournalTradeReasons_A_fkey" FOREIGN KEY ("A") REFERENCES "ReplayJournalEntry" ("id") ON DELETE CASCADE ON UPDATE CASCADE,
+    CONSTRAINT "_ReplayJournalTradeReasons_B_fkey" FOREIGN KEY ("B") REFERENCES "TradeReason" ("id") ON DELETE CASCADE ON UPDATE CASCADE
   )`,
   `CREATE TABLE IF NOT EXISTS "MarketDataset" (
     "id" TEXT NOT NULL PRIMARY KEY,
@@ -436,6 +443,8 @@ const indexStatements = [
   `CREATE INDEX IF NOT EXISTS "TradeOption_type_active_idx" ON "TradeOption"("type", "active")`,
   `CREATE UNIQUE INDEX IF NOT EXISTS "TradeTag_normalizedName_key" ON "TradeTag"("normalizedName")`,
   `CREATE INDEX IF NOT EXISTS "TradeTag_name_idx" ON "TradeTag"("name")`,
+  `CREATE UNIQUE INDEX IF NOT EXISTS "TradeReason_normalizedName_key" ON "TradeReason"("normalizedName")`,
+  `CREATE INDEX IF NOT EXISTS "TradeReason_name_idx" ON "TradeReason"("name")`,
   `CREATE INDEX IF NOT EXISTS "MarketDataset_createdAt_idx" ON "MarketDataset"("createdAt")`,
   `CREATE UNIQUE INDEX IF NOT EXISTS "MarketBar_datasetId_timestamp_key" ON "MarketBar"("datasetId", "timestamp")`,
   `CREATE UNIQUE INDEX IF NOT EXISTS "PaperTradingSession_datasetId_key" ON "PaperTradingSession"("datasetId")`,
@@ -456,8 +465,8 @@ const indexStatements = [
   `CREATE INDEX IF NOT EXISTS "ReplayJournalEntry_journalSessionId_openedSequence_idx" ON "ReplayJournalEntry"("journalSessionId", "openedSequence")`,
   `CREATE INDEX IF NOT EXISTS "ReplayJournalEntry_journalSessionId_closedSequence_idx" ON "ReplayJournalEntry"("journalSessionId", "closedSequence")`,
   `CREATE INDEX IF NOT EXISTS "ReplayJournalEntry_setupOptionId_idx" ON "ReplayJournalEntry"("setupOptionId")`,
-  `CREATE UNIQUE INDEX IF NOT EXISTS "_ReplayJournalReasonTags_AB_unique" ON "_ReplayJournalReasonTags"("A", "B")`,
-  `CREATE INDEX IF NOT EXISTS "_ReplayJournalReasonTags_B_index" ON "_ReplayJournalReasonTags"("B")`,
+  `CREATE UNIQUE INDEX IF NOT EXISTS "_ReplayJournalTradeReasons_AB_unique" ON "_ReplayJournalTradeReasons"("A", "B")`,
+  `CREATE INDEX IF NOT EXISTS "_ReplayJournalTradeReasons_B_index" ON "_ReplayJournalTradeReasons"("B")`,
   `CREATE INDEX IF NOT EXISTS "MarketBarBlock_datasetId_blockSize_startTime_endTime_idx" ON "MarketBarBlock"("datasetId", "blockSize", "startTime", "endTime")`,
   `CREATE INDEX IF NOT EXISTS "MarketDatasetImport_status_createdAt_idx" ON "MarketDatasetImport"("status", "createdAt")`,
   `CREATE INDEX IF NOT EXISTS "MarketDrawing_datasetId_createdAt_idx" ON "MarketDrawing"("datasetId", "createdAt")`,
@@ -468,6 +477,24 @@ const indexStatements = [
 try {
   for (const statement of createStatements) {
     await prisma.$executeRawUnsafe(statement);
+  }
+
+  const legacyReasonTables = await prisma.$queryRawUnsafe(
+    `SELECT "name" FROM "sqlite_master" WHERE "type" = 'table' AND "name" = '_ReplayJournalReasonTags'`,
+  );
+  if (legacyReasonTables.length > 0) {
+    await prisma.$executeRawUnsafe(`
+      INSERT OR IGNORE INTO "TradeReason" ("id", "name", "normalizedName", "createdAt", "updatedAt")
+      SELECT DISTINCT "TradeTag"."id", "TradeTag"."name", "TradeTag"."normalizedName", "TradeTag"."createdAt", "TradeTag"."updatedAt"
+      FROM "TradeTag"
+      INNER JOIN "_ReplayJournalReasonTags"
+        ON "_ReplayJournalReasonTags"."B" = "TradeTag"."id"
+    `);
+    await prisma.$executeRawUnsafe(`
+      INSERT OR IGNORE INTO "_ReplayJournalTradeReasons" ("A", "B")
+      SELECT "A", "B" FROM "_ReplayJournalReasonTags"
+    `);
+    await prisma.$executeRawUnsafe(`DROP TABLE "_ReplayJournalReasonTags"`);
   }
 
   const existingTradeColumns = await prisma.$queryRawUnsafe(`PRAGMA table_info("Trade")`);

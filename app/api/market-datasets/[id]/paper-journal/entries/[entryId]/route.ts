@@ -31,19 +31,19 @@ export async function PATCH(request: Request, context: RouteContext) {
     }
   }
 
-  if (parsed.data.reasonTagIds) {
-    const reasonTagCount = await prisma.tradeTag.count({
-      where: { id: { in: parsed.data.reasonTagIds } },
+  if (parsed.data.tradeReasonIds) {
+    const tradeReasonCount = await prisma.tradeReason.count({
+      where: { id: { in: parsed.data.tradeReasonIds } },
     });
-    if (reasonTagCount !== parsed.data.reasonTagIds.length) {
-      return NextResponse.json({ error: copy.paperTrading.reasonTagsInvalid }, { status: 400 });
+    if (tradeReasonCount !== parsed.data.tradeReasonIds.length) {
+      return NextResponse.json({ error: copy.paperTrading.tradeReasonsInvalid }, { status: 400 });
     }
   }
 
   const data = {
     ...(parsed.data.setupOptionId !== undefined ? { setupOptionId: parsed.data.setupOptionId } : {}),
-    ...(parsed.data.reasonTagIds !== undefined ? {
-      reasonTags: { set: parsed.data.reasonTagIds.map((tagId) => ({ id: tagId })) },
+    ...(parsed.data.tradeReasonIds !== undefined ? {
+      tradeReasons: { set: parsed.data.tradeReasonIds.map((reasonId) => ({ id: reasonId })) },
     } : {}),
   };
 
@@ -53,7 +53,7 @@ export async function PATCH(request: Request, context: RouteContext) {
     include: {
       journalSession: { select: { archivedAt: true } },
       setupOption: { select: { name: true } },
-      reasonTags: { select: { id: true, name: true }, orderBy: { name: "asc" } },
+      tradeReasons: { select: { id: true, name: true }, orderBy: { name: "asc" } },
     },
   });
   return NextResponse.json(serializeReplayJournalEntry(updated));

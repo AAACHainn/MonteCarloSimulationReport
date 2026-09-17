@@ -14,6 +14,11 @@ import {
   MAX_REPLAY_SYNC_SOURCE_BARS,
   isPlaybackRate,
 } from "./market-replay/types";
+import {
+  MAX_TRADE_REASON_NAME_LENGTH,
+  MAX_TRADE_REASONS_PER_ENTRY,
+  normalizeTradeReasonName,
+} from "./paper-trading/trade-reasons";
 
 const displaySessionSchema = z.enum(["ETH", "RTH"]);
 
@@ -276,12 +281,12 @@ export const replayTradeAnnotationsQuerySchema = z.object({
 
 export const replayJournalEntryUpdateSchema = z.object({
   setupOptionId: z.string().trim().min(1).max(120).nullable().optional(),
-  reasonTagIds: z.array(z.string().trim().min(1).max(120))
-    .max(MAX_TAGS_PER_TRADE)
+  tradeReasonIds: z.array(z.string().trim().min(1).max(120))
+    .max(MAX_TRADE_REASONS_PER_ENTRY)
     .refine((values) => new Set(values).size === values.length)
     .optional(),
 }).refine(
-  (value) => value.setupOptionId !== undefined || value.reasonTagIds !== undefined,
+  (value) => value.setupOptionId !== undefined || value.tradeReasonIds !== undefined,
 );
 
 export const replayJournalSessionNameSchema = z.object({
@@ -321,6 +326,22 @@ export const tradeTagSchema = z.object({
 });
 
 export const tradeTagUpdateSchema = tradeTagSchema;
+
+export const tradeReasonNameSchema = z
+  .string()
+  .transform(normalizeTradeReasonName)
+  .pipe(
+    z
+      .string()
+      .min(1, copy.api.tradeReasonNameRequired)
+      .max(MAX_TRADE_REASON_NAME_LENGTH, copy.api.tradeReasonNameTooLong),
+  );
+
+export const tradeReasonSchema = z.object({
+  name: tradeReasonNameSchema,
+});
+
+export const tradeReasonUpdateSchema = tradeReasonSchema;
 
 export const tradeTagsReplaceSchema = z.object({
   tags: z

@@ -4,6 +4,7 @@ import {
   createEmptyReplayJournalFilters,
   hasActiveReplayJournalFilters,
   NO_SETUP_FILTER_VALUE,
+  NO_TRADE_REASON_FILTER_VALUE,
   readReplayJournalFilters,
 } from "./journal-filters";
 import type { ReplayJournalEntryData } from "./types";
@@ -11,7 +12,7 @@ import type { ReplayJournalEntryData } from "./types";
 function entry(overrides: Partial<ReplayJournalEntryData> = {}): ReplayJournalEntryData {
   return {
     id: "entry-1", lotId: "lot-1", no: 1, globalNo: 1, journalSessionId: "session-1",
-    setupOptionId: null, setupOption: null, reasonTags: [], archivedAt: null,
+    setupOptionId: null, setupOption: null, tradeReasons: [], archivedAt: null,
     direction: "LONG", quantity: 1, openedSequence: 1, openedAt: "2026-01-01T00:00:00.000Z",
     closedSequence: 2, closedAt: "2026-01-01T00:01:00.000Z", entryPrice: 100,
     entryOrderType: "MARKET", exitPrice: 102, initialStopPrice: 99, initialRisk: 1,
@@ -50,10 +51,11 @@ describe("replay journal expression filters", () => {
     expect(compileReplayJournalFilters(filters).error).toBe("INVALID_EXPRESSION");
   });
 
-  it("combines direction, Setup, and result selections", () => {
+  it("combines direction, Setup, trade reason, and result selections", () => {
     const filters = readReplayJournalFilters(new URLSearchParams([
       ["directions", "LONG"],
       ["setupOptionIds", NO_SETUP_FILTER_VALUE],
+      ["tradeReasonIds", NO_TRADE_REASON_FILTER_VALUE],
       ["results", "W"],
     ]));
     const compiled = compileReplayJournalFilters(filters);
@@ -61,6 +63,16 @@ describe("replay journal expression filters", () => {
     expect(compiled.test(entry())).toBe(true);
     expect(compiled.test(entry({ direction: "SHORT" }))).toBe(false);
     expect(compiled.test(entry({ setupOptionId: "setup-1" }))).toBe(false);
+    expect(compiled.test(entry({ tradeReasons: [{ id: "reason-1", name: "趋势突破" }] }))).toBe(false);
     expect(compiled.test(entry({ result: "L" }))).toBe(false);
+  });
+
+  it("matches any selected trade reason", () => {
+    const filters = createEmptyReplayJournalFilters();
+    filters.tradeReasonIds = ["reason-2"];
+    const compiled = compileReplayJournalFilters(filters);
+
+    expect(compiled.test(entry({ tradeReasons: [{ id: "reason-1", name: "回踩" }, { id: "reason-2", name: "突破" }] }))).toBe(true);
+    expect(compiled.test(entry({ tradeReasons: [{ id: "reason-1", name: "回踩" }] }))).toBe(false);
   });
 });

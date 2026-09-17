@@ -4,7 +4,7 @@ const mocks = vi.hoisted(() => ({
   entryFindFirst: vi.fn(),
   entryUpdate: vi.fn(),
   optionFindFirst: vi.fn(),
-  tagCount: vi.fn(),
+  reasonCount: vi.fn(),
 }));
 
 vi.mock("@/lib/db", () => ({
@@ -14,7 +14,7 @@ vi.mock("@/lib/db", () => ({
       update: mocks.entryUpdate,
     },
     tradeOption: { findFirst: mocks.optionFindFirst },
-    tradeTag: { count: mocks.tagCount },
+    tradeReason: { count: mocks.reasonCount },
   },
 }));
 
@@ -39,7 +39,7 @@ function record(setupOptionId: string | null, setupName: string | null) {
     displayIntervalSeconds: 300, displaySession: "ETH", displayUtcOffsetMinutes: 0,
     priceTickSize: 0.25, initialRisk: 1, actualRisk: 1, gainLoss: 2,
     setupOptionId, setupOption: setupName ? { name: setupName } : null,
-    reasonTags: [{ id: "tag-1", name: "趋势延续" }],
+    tradeReasons: [{ id: "reason-1", name: "趋势延续" }],
     journalSession: { archivedAt: new Date("2026-09-02T00:00:00Z") },
   };
 }
@@ -48,7 +48,7 @@ beforeEach(() => {
   vi.clearAllMocks();
   mocks.entryFindFirst.mockResolvedValue({ id: "entry-1" });
   mocks.optionFindFirst.mockResolvedValue({ id: "setup-1" });
-  mocks.tagCount.mockResolvedValue(2);
+  mocks.reasonCount.mockResolvedValue(2);
   mocks.entryUpdate.mockResolvedValue(record("setup-1", "Opening Range Breakout"));
 });
 
@@ -85,28 +85,28 @@ describe("replay journal Setup API", () => {
     expect(await response.json()).toMatchObject({ setupOptionId: null, setupOption: null });
   });
 
-  it("assigns multiple base-data tags as trade reasons", async () => {
+  it("assigns multiple base-data trade reasons", async () => {
     const response = await PATCH(new Request("http://localhost/api/entries/entry-1", {
       method: "PATCH",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ reasonTagIds: ["tag-1", "tag-2"] }),
+      body: JSON.stringify({ tradeReasonIds: ["reason-1", "reason-2"] }),
     }), context);
     expect(response.status).toBe(200);
-    expect(mocks.tagCount).toHaveBeenCalledWith({ where: { id: { in: ["tag-1", "tag-2"] } } });
+    expect(mocks.reasonCount).toHaveBeenCalledWith({ where: { id: { in: ["reason-1", "reason-2"] } } });
     expect(mocks.entryUpdate).toHaveBeenCalledWith(expect.objectContaining({
-      data: { reasonTags: { set: [{ id: "tag-1" }, { id: "tag-2" }] } },
+      data: { tradeReasons: { set: [{ id: "reason-1" }, { id: "reason-2" }] } },
       include: expect.objectContaining({
-        reasonTags: { select: { id: true, name: true }, orderBy: { name: "asc" } },
+        tradeReasons: { select: { id: true, name: true }, orderBy: { name: "asc" } },
       }),
     }));
   });
 
-  it("rejects a missing trade-reason tag", async () => {
-    mocks.tagCount.mockResolvedValue(1);
+  it("rejects a missing trade reason", async () => {
+    mocks.reasonCount.mockResolvedValue(1);
     const response = await PATCH(new Request("http://localhost/api/entries/entry-1", {
       method: "PATCH",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ reasonTagIds: ["tag-1", "missing"] }),
+      body: JSON.stringify({ tradeReasonIds: ["reason-1", "missing"] }),
     }), context);
     expect(response.status).toBe(400);
     expect(mocks.entryUpdate).not.toHaveBeenCalled();
