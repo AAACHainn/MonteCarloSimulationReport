@@ -45,7 +45,6 @@ type JournalSessionSummary = {
 type Payload = {
   items: ReplayJournalEntryData[];
   sessions: JournalSessionSummary[];
-  nextCursor: number | null;
   selectedSessionId?: string | null;
   summary?: ReplayJournalSummary;
   filterOptions?: {
@@ -140,7 +139,6 @@ export function PaperJournalTable({
   const [pageSize, setPageSize] = useState(20);
   const [totalItems, setTotalItems] = useState(0);
   const [totalPages, setTotalPages] = useState(1);
-  const [nextCursor, setNextCursor] = useState<number | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [status, setStatus] = useState<string | null>(null);
@@ -174,14 +172,10 @@ export function PaperJournalTable({
   const loadRequestIdRef = useRef(0);
 
   const load = useCallback(async ({
-    cursor = 0,
-    append = false,
     sessionId,
     requestedPage = 1,
-    take = scope === "history" ? 20 : 100,
+    take = 20,
   }: {
-    cursor?: number;
-    append?: boolean;
     sessionId?: string;
     requestedPage?: number;
     take?: number;
@@ -191,7 +185,6 @@ export function PaperJournalTable({
     try {
       const params = new URLSearchParams({
         scope,
-        cursor: String(cursor),
         page: String(requestedPage),
         take: String(take),
       });
@@ -210,21 +203,20 @@ export function PaperJournalTable({
       const data = await response.json() as Payload & { error?: string };
       if (!response.ok) throw new Error(data.error ?? copy.paperTrading.journalLoadFailed);
       if (requestId !== loadRequestIdRef.current) return;
-      setItems((current) => append ? [...current, ...data.items] : data.items);
+      setItems(data.items);
       setSessions(data.sessions);
+      setPage(data.pagination?.page ?? 1);
+      setPageSize(data.pagination?.pageSize ?? take);
+      setTotalItems(data.pagination?.totalItems ?? data.items.length);
+      setTotalPages(data.pagination?.totalPages ?? 1);
       if (scope === "history") {
         setSelectedSessionId(data.selectedSessionId ?? null);
-        setPage(data.pagination?.page ?? 1);
-        setPageSize(data.pagination?.pageSize ?? take);
-        setTotalItems(data.pagination?.totalItems ?? 0);
-        setTotalPages(data.pagination?.totalPages ?? 1);
         setSummary(data.summary ?? null);
         setSetupFilterOptions(data.filterOptions?.setups ?? []);
         setHasEntriesWithoutSetup(data.filterOptions?.hasEntriesWithoutSetup ?? false);
         setTradeReasonFilterOptions(data.filterOptions?.tradeReasons ?? []);
         setHasEntriesWithoutTradeReason(data.filterOptions?.hasEntriesWithoutTradeReason ?? false);
       }
-      setNextCursor(data.nextCursor);
       setError(null);
     } catch (cause) {
       if (requestId !== loadRequestIdRef.current) return;
@@ -314,7 +306,6 @@ export function PaperJournalTable({
   }, []);
 
   useEffect(() => {
-    if (scope !== "history") return;
     const stored = window.localStorage.getItem(columnPreferenceKey);
     if (stored) {
       try {
@@ -332,13 +323,13 @@ export function PaperJournalTable({
       }
     }
     setColumnPreferencesLoaded(true);
-  }, [scope]);
+  }, []);
 
   useEffect(() => {
-    if (scope === "history" && columnPreferencesLoaded) {
+    if (columnPreferencesLoaded) {
       window.localStorage.setItem(columnPreferenceKey, JSON.stringify(visibleColumnIds));
     }
-  }, [columnPreferencesLoaded, scope, visibleColumnIds]);
+  }, [columnPreferencesLoaded, visibleColumnIds]);
 
   const selectedSession = useMemo(
     () => sessions.find((session) => session.id === selectedSessionId) ?? null,
@@ -658,6 +649,39 @@ export function PaperJournalTable({
         </div>
       </div>
     </> : null}
+    {scope === "current" ? <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+      <p className="flex items-center gap-2 text-sm text-slate-600">
+        {loading ? <Loader2 className="h-4 w-4 animate-spin" aria-hidden="true" /> : null}
+        {copy.paperTrading.journalPaginationRange
+          .replace("{start}", startRow.toLocaleString("zh-CN"))
+          .replace("{end}", endRow.toLocaleString("zh-CN"))
+          .replace("{total}", totalItems.toLocaleString("zh-CN"))}
+      </p>
+      <div className="flex flex-wrap items-center gap-2">
+        <Button type="button" variant="outline" size="sm" onClick={openVisibleColumns}>
+          <Settings2 className="h-4 w-4" aria-hidden="true" />
+          {copy.paperTrading.setVisibleColumns}
+        </Button>
+        <span className="text-sm text-slate-600">{copy.tradeJournals.pagination.rowsPerPage}</span>
+        <Select
+          value={String(pageSize)}
+          onValueChange={(value) => {
+            const nextPageSize = Number(value);
+            setPageSize(nextPageSize);
+            setPage(1);
+            void load({ requestedPage: 1, take: nextPageSize });
+          }}
+          disabled={loading}
+        >
+          <SelectTrigger className="w-24" aria-label={copy.tradeJournals.pagination.rowsPerPage}>
+            <SelectValue />
+          </SelectTrigger>
+          <SelectContent>
+            {pageSizeOptions.map((value) => <SelectItem key={value} value={String(value)}>{value}</SelectItem>)}
+          </SelectContent>
+        </Select>
+      </div>
+    </div> : null}
     {error ? <p className="rounded-md border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-700" role="alert">{error}</p> : null}
     {status ? <p className="rounded-md border border-emerald-200 bg-emerald-50 px-3 py-2 text-sm text-emerald-700" role="status" aria-live="polite">{status}</p> : null}
     {setupError ? <p className="rounded-md border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-700" role="alert">{setupError}</p> : null}
@@ -781,22 +805,21 @@ export function PaperJournalTable({
         </table>
       </div>
     </section>
-    {scope === "history" && selectedSession ? <div className="flex flex-col gap-3 border-t pt-4 sm:flex-row sm:items-center sm:justify-between">
+    {(scope === "current" || selectedSession) && totalItems > 0 ? <div className="flex flex-col gap-3 border-t pt-4 sm:flex-row sm:items-center sm:justify-between">
       <p className="text-sm text-slate-600">
         {copy.tradeJournals.pagination.page
           .replace("{page}", page.toLocaleString("zh-CN"))
           .replace("{totalPages}", totalPages.toLocaleString("zh-CN"))}
       </p>
       <div className="flex items-center gap-2">
-        <Button type="button" variant="outline" size="sm" disabled={loading || page <= 1} onClick={() => void load({ sessionId: selectedSession.id, requestedPage: page - 1, take: pageSize })}>
+        <Button type="button" variant="outline" size="sm" disabled={loading || page <= 1} onClick={() => void load({ sessionId: selectedSession?.id, requestedPage: page - 1, take: pageSize })}>
           <ChevronLeft className="h-4 w-4" aria-hidden="true" />{copy.tradeJournals.pagination.previous}
         </Button>
-        <Button type="button" variant="outline" size="sm" disabled={loading || page >= totalPages} onClick={() => void load({ sessionId: selectedSession.id, requestedPage: page + 1, take: pageSize })}>
+        <Button type="button" variant="outline" size="sm" disabled={loading || page >= totalPages} onClick={() => void load({ sessionId: selectedSession?.id, requestedPage: page + 1, take: pageSize })}>
           {copy.tradeJournals.pagination.next}<ChevronRight className="h-4 w-4" aria-hidden="true" />
         </Button>
       </div>
     </div> : null}
-    {scope === "current" && nextCursor !== null ? <div className="text-center"><Button type="button" variant="outline" disabled={loading} onClick={() => void load({ cursor: nextCursor, append: true, take: 100 })}>{loading ? <Loader2 className="h-4 w-4 animate-spin" /> : null}{copy.paperTrading.loadMoreJournal}</Button></div> : null}
     <Dialog
       open={visibleColumnsOpen}
       title={copy.paperTrading.visibleColumnsTitle}

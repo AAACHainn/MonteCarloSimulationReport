@@ -649,7 +649,6 @@ export const dictionaries = {
       historicalReplayLoadFailed: "无法重建这段历史回放，请返回交易日志历史后重试。",
       openHistoricalReplay: (no: number) => `在独立历史回放中查看 No ${no}`,
       backToJournalHistory: "返回交易日志历史",
-      loadMoreJournal: "加载更多",
       deleteJournalEntry: "删除这条历史交易日志",
       deleteJournalEntryTitle: "删除历史交易日志",
       deleteJournalEntryConfirm: "确定删除这条历史交易日志吗？原始成交和训练统计不会改变。",

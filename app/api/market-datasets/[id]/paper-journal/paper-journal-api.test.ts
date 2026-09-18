@@ -61,7 +61,36 @@ describe("replay paper journal API", () => {
         setupOption: { name: "Opening Range Breakout" },
         tradeReasons: [{ id: "reason-1", name: "趋势延续" }],
       }],
+      pagination: { page: 1, pageSize: 20, totalItems: 1, totalPages: 1 },
     });
+  });
+
+  it("loads the current session once and paginates its full record set in code", async () => {
+    mocks.entryFindMany.mockResolvedValue(Array.from({ length: 35 }, (_, index) => ({
+      ...record(),
+      id: `entry-${index + 1}`,
+      no: index + 1,
+      accountNo: index + 1,
+    })));
+
+    const response = await GET(new Request(
+      "http://localhost/api/market-datasets/dataset-1/paper-journal?scope=current&page=2&take=20",
+    ), context);
+
+    expect(response.status).toBe(200);
+    expect(mocks.entryFindMany).toHaveBeenCalledWith({
+      where: { journalSessionId: "journal-1" },
+      include: {
+        journalSession: { select: { archivedAt: true } },
+        setupOption: { select: { name: true } },
+        tradeReasons: { select: { id: true, name: true }, orderBy: { name: "asc" } },
+      },
+      orderBy: [{ accountNo: "asc" }, { id: "asc" }],
+    });
+    const data = await response.json();
+    expect(data.pagination).toEqual({ page: 2, pageSize: 20, totalItems: 35, totalPages: 2 });
+    expect(data.items).toHaveLength(15);
+    expect(data.items[0]).toMatchObject({ id: "entry-21", no: 21 });
   });
 
   it("loads the latest session once and paginates its full record set in code", async () => {

@@ -10,9 +10,8 @@ export async function GET(request: Request, context: RouteContext) {
   const { id } = await context.params;
   const url = new URL(request.url);
   const scope = url.searchParams.get("scope") === "current" ? "current" : "history";
-  const cursor = Math.max(0, Number(url.searchParams.get("cursor") ?? 0) || 0);
-  const defaultTake = scope === "history" ? 20 : 100;
-  const take = Math.min(100, Math.max(10, Math.floor(Number(url.searchParams.get("take") ?? defaultTake) || defaultTake)));
+  const take = Math.min(100, Math.max(10, Math.floor(Number(url.searchParams.get("take") ?? 20) || 20)));
+  const requestedPage = Math.max(1, Math.floor(Number(url.searchParams.get("page") ?? 1) || 1));
   const dataset = await prisma.marketDataset.findUnique({ where: { id }, select: { id: true } });
   if (!dataset) return NextResponse.json({ error: copy.marketReplay.datasetNotFound }, { status: 404 });
 
@@ -20,22 +19,24 @@ export async function GET(request: Request, context: RouteContext) {
     const current = await prisma.paperTradingSession.findUnique({
       where: { datasetId: id }, select: { journalSessionId: true },
     });
-    const records = await prisma.replayJournalEntry.findMany({
-      where: { journalSessionId: current?.journalSessionId ?? "__none__", no: { gt: cursor } },
+    const allRecords = await prisma.replayJournalEntry.findMany({
+      where: { journalSessionId: current?.journalSessionId ?? "__none__" },
       include: {
         journalSession: { select: { archivedAt: true } },
         setupOption: { select: { name: true } },
         tradeReasons: { select: { id: true, name: true }, orderBy: { name: "asc" } },
       },
-      orderBy: { no: "asc" },
-      take: take + 1,
+      orderBy: [{ accountNo: "asc" }, { id: "asc" }],
     });
-    const hasMore = records.length > take;
-    const pageRecords = records.slice(0, take);
+    const serializedRecords = allRecords.map(serializeReplayJournalEntry);
+    const totalItems = serializedRecords.length;
+    const totalPages = Math.max(1, Math.ceil(totalItems / take));
+    const page = Math.min(requestedPage, totalPages);
+    const pageStart = (page - 1) * take;
     return NextResponse.json({
-      items: pageRecords.map(serializeReplayJournalEntry),
+      items: serializedRecords.slice(pageStart, pageStart + take),
       sessions: [],
-      nextCursor: hasMore ? pageRecords.at(-1)?.no ?? null : null,
+      pagination: { page, pageSize: take, totalItems, totalPages },
     });
   }
 
@@ -61,7 +62,6 @@ export async function GET(request: Request, context: RouteContext) {
     return NextResponse.json({ error: copy.paperTrading.journalFilterInvalid }, { status: 400 });
   }
 
-  const requestedPage = Math.max(1, Math.floor(Number(url.searchParams.get("page") ?? 1) || 1));
   const allRecords = selectedSession ? await prisma.replayJournalEntry.findMany({
     where: { journalSessionId: selectedSession.id },
     include: {
@@ -110,6 +110,5 @@ export async function GET(request: Request, context: RouteContext) {
     },
     summary: calculateReplayJournalSummary(filteredRecords),
     pagination: { page, pageSize: take, totalItems, totalPages },
-    nextCursor: null,
   });
 }
