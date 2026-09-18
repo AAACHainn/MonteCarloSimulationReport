@@ -55,6 +55,7 @@ import { formatUtcDateTime, utcDateParts } from "@/lib/market-replay/display-tim
 import { formatPriceForTick, priceDecimalsForTick, snapPriceToTick } from "@/lib/market-replay/price-ticks";
 import { ReplayTradeAnnotationPrimitive } from "@/lib/market-replay/trade-annotation-primitive";
 import { BarCountPrimitive } from "@/lib/market-replay/bar-count-primitive";
+import { CandleCountdownPrimitive } from "@/lib/market-replay/candle-countdown-primitive";
 import {
   calculateRiskSizing,
   orderTypeForEntry,
@@ -257,6 +258,7 @@ export function ReplayChart({
   onOpenDrawingStyle, emaEnabled, emaIndicators, abrEnabled, abrLength, volumeVisible,
   displaySession, barCountSession, barCountConfig, paperSnapshot,
   tradeAnnotations, tradeAnnotationsTruncated, focusSequence = null,
+  candleCountdownEnabled = false, playbackActive = false, currentSourceTimestamp = null, sourceIntervalSeconds,
   readOnly = false,
   paperBusy, paperError, onSubmitOrder, onOrderPriceChange,
   onCancelOrder, onClosePosition, onDraftActiveChange, onOpenPaperAccount, onVisibleSequenceRangeChange,
@@ -267,6 +269,10 @@ export function ReplayChart({
   warmupBars: AggregatedMarketBarData[];
   displayUtcOffsetMinutes: number;
   displayIntervalSeconds: number;
+  sourceIntervalSeconds?: number;
+  candleCountdownEnabled?: boolean;
+  playbackActive?: boolean;
+  currentSourceTimestamp?: string | null;
   measurementArmed: boolean;
   candlestickStyle: CandlestickStyle;
   onMeasurementArmedChange: (armed: boolean) => void;
@@ -315,6 +321,7 @@ export function ReplayChart({
   const lineTargetsRef = useRef(new Map<string, LineTarget>());
   const tradeAnnotationPrimitiveRef = useRef<ReplayTradeAnnotationPrimitive | null>(null);
   const barCountPrimitiveRef = useRef<BarCountPrimitive | null>(null);
+  const candleCountdownPrimitiveRef = useRef<CandleCountdownPrimitive | null>(null);
   const trendLinePrimitiveRef = useRef<TrendLinePrimitive | null>(null);
   const fibonacciPrimitiveRef = useRef<FibonacciRetracementPrimitive | null>(null);
   const lastDataRef = useRef<AggregatedMarketBarData[]>([]);
@@ -596,10 +603,12 @@ export function ReplayChart({
     const fibonacciPrimitive = new FibonacciRetracementPrimitive();
     const tradeAnnotationPrimitive = new ReplayTradeAnnotationPrimitive();
     const barCountPrimitive = new BarCountPrimitive();
+    const candleCountdownPrimitive = new CandleCountdownPrimitive();
     candles.attachPrimitive(trendLinePrimitive);
     candles.attachPrimitive(fibonacciPrimitive);
     candles.attachPrimitive(tradeAnnotationPrimitive);
     candles.attachPrimitive(barCountPrimitive);
+    candles.attachPrimitive(candleCountdownPrimitive);
     tradeAnnotationPrimitive.setData({ entries: tradeAnnotationsRef.current, bars: barsRef.current });
     const observer = new ResizeObserver(([entry]) => {
       if (entry?.contentRect.width && entry.contentRect.height) {
@@ -617,6 +626,7 @@ export function ReplayChart({
     fibonacciPrimitiveRef.current = fibonacciPrimitive;
     tradeAnnotationPrimitiveRef.current = tradeAnnotationPrimitive;
     barCountPrimitiveRef.current = barCountPrimitive;
+    candleCountdownPrimitiveRef.current = candleCountdownPrimitive;
     syncDrawingPrimitive();
     return () => {
       observer.disconnect();
@@ -627,10 +637,12 @@ export function ReplayChart({
       candles.detachPrimitive(fibonacciPrimitive);
       candles.detachPrimitive(tradeAnnotationPrimitive);
       candles.detachPrimitive(barCountPrimitive);
+      candles.detachPrimitive(candleCountdownPrimitive);
       trendLinePrimitiveRef.current = null;
       fibonacciPrimitiveRef.current = null;
       tradeAnnotationPrimitiveRef.current = null;
       barCountPrimitiveRef.current = null;
+      candleCountdownPrimitiveRef.current = null;
       chart.remove(); chartRef.current = null; candleRef.current = null; volumeRef.current = null;
       priceLines.clear(); lineTargets.clear(); lastDataRef.current = [];
     };
@@ -761,6 +773,16 @@ export function ReplayChart({
       config: barCountConfig,
     });
   }, [barCountConfig, barCountSession, bars, displayIntervalSeconds, displaySession]);
+
+  useEffect(() => {
+    candleCountdownPrimitiveRef.current?.setData({
+      bars,
+      currentSourceTimestamp,
+      enabled: candleCountdownEnabled,
+      playing: playbackActive,
+      sourceIntervalSeconds: sourceIntervalSeconds ?? displayIntervalSeconds,
+    });
+  }, [bars, candleCountdownEnabled, currentSourceTimestamp, displayIntervalSeconds, playbackActive, sourceIntervalSeconds]);
 
   useReplayChartEma({
     chartRef,

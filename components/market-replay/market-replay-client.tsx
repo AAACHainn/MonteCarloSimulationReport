@@ -292,6 +292,8 @@ export function MarketReplayClient({ dataset, initialJournalFocus = null }: { da
     abrSettingsLoaded,
     volumeVisible,
     setVolumeVisible,
+    candleCountdownEnabled,
+    setCandleCountdownEnabled,
     barCountConfig,
     setBarCountConfig,
     defaultTrendLineStyle,
@@ -2173,6 +2175,10 @@ export function MarketReplayClient({ dataset, initialJournalFocus = null }: { da
             warmupBars={warmupBars}
             displayUtcOffsetMinutes={displayUtcOffsetMinutes}
             displayIntervalSeconds={replay.displayIntervalSeconds}
+            sourceIntervalSeconds={dataset.sourceIntervalSeconds}
+            candleCountdownEnabled={candleCountdownEnabled}
+            playbackActive={replay.status === "playing"}
+            currentSourceTimestamp={currentBar?.timestamp ?? null}
             measurementArmed={measurementArmed}
             candlestickStyle={candlestickStyleDraft ?? candlestickStyle}
             onMeasurementArmedChange={setMeasurementArmed}
@@ -2369,6 +2375,10 @@ export function MarketReplayClient({ dataset, initialJournalFocus = null }: { da
 
       <Dialog open={settingsDialog === "indicators"} title={copy.marketReplay.indicatorSettings} description={copy.marketReplay.indicatorSettingsDescription} onClose={() => setSettingsDialog(null)}>
         <div className="space-y-4">
+          <div className="flex items-center justify-between rounded-md border bg-slate-50 p-3">
+            <div><p className="text-sm font-medium text-slate-950">{copy.marketReplay.candleCountdownTitle}</p><p className="mt-0.5 text-xs text-slate-500">{copy.marketReplay.candleCountdownDescription}</p></div>
+            <div className="flex shrink-0 items-center gap-2"><span className="text-xs text-slate-500">{candleCountdownEnabled ? copy.marketReplay.emaOn : copy.marketReplay.emaOff}</span><button type="button" role="switch" aria-checked={candleCountdownEnabled} aria-label={copy.marketReplay.candleCountdownToggle} onClick={() => setCandleCountdownEnabled((enabled) => !enabled)} className={`relative h-6 w-11 rounded-full transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-600 focus-visible:ring-offset-2 ${candleCountdownEnabled ? "bg-blue-600" : "bg-slate-300"}`}><span className={`absolute left-0 top-0.5 h-5 w-5 rounded-full bg-white shadow-sm transition-transform ${candleCountdownEnabled ? "translate-x-5" : "translate-x-0.5"}`} /></button></div>
+          </div>
           <div className="flex items-center justify-between rounded-md border bg-slate-50 p-3">
             <div><p className="text-sm font-medium text-slate-950">{copy.marketReplay.volumeTitle}</p><p className="mt-0.5 text-xs text-slate-500">{copy.marketReplay.volumeDescription}</p></div>
             <div className="flex items-center gap-2"><span className="text-xs text-slate-500">{volumeVisible ? copy.marketReplay.volumeOn : copy.marketReplay.volumeOff}</span><button type="button" role="switch" aria-checked={volumeVisible} aria-label={copy.marketReplay.volumeToggle} onClick={() => setVolumeVisible((visible) => !visible)} className={`relative h-6 w-11 rounded-full transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-600 focus-visible:ring-offset-2 ${volumeVisible ? "bg-blue-600" : "bg-slate-300"}`}><span className={`absolute left-0 top-0.5 h-5 w-5 rounded-full bg-white shadow-sm transition-transform ${volumeVisible ? "translate-x-5" : "translate-x-0.5"}`} /></button></div>

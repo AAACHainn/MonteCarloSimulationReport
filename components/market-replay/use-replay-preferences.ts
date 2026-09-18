@@ -42,6 +42,7 @@ import {
 const EMA_SETTINGS_STORAGE_KEY = "market-replay-ema-settings-v1";
 const ABR_SETTINGS_STORAGE_KEY = "market-replay-abr-settings-v1";
 const VOLUME_VISIBILITY_STORAGE_KEY = "market-replay-volume-visibility-v1";
+const CANDLE_COUNTDOWN_VISIBILITY_STORAGE_KEY = "market-replay-candle-countdown-visibility-v1";
 const BAR_COUNT_SETTINGS_STORAGE_KEY = "market-replay-bar-count-settings-v1";
 const DISPLAY_TIMEZONE_STORAGE_KEY = "market-replay-display-timezone-v1";
 const CANDLESTICK_STYLE_STORAGE_KEY = "market-replay-candlestick-style-v1";
@@ -114,6 +115,8 @@ export function useReplayPreferences(dataset: { id: string; startTime: string; t
   const [abrSettingsLoaded, setAbrSettingsLoaded] = useState(false);
   const [volumeVisible, setVolumeVisible] = useState(true);
   const [volumeVisibilityLoaded, setVolumeVisibilityLoaded] = useState(false);
+  const [candleCountdownEnabled, setCandleCountdownEnabled] = useState(false);
+  const [candleCountdownSettingsLoaded, setCandleCountdownSettingsLoaded] = useState(false);
   const [barCountConfig, setBarCountConfig] = useState(() => ({ ...DEFAULT_BAR_COUNT_CONFIG }));
   const [barCountSettingsLoaded, setBarCountSettingsLoaded] = useState(false);
   const [defaultTrendLineStyle, setDefaultTrendLineStyle] = useState<TrendLineStyle>(DEFAULT_TREND_LINE_STYLE);
@@ -152,6 +155,15 @@ export function useReplayPreferences(dataset: { id: string; startTime: string; t
       setVolumeVisible(true);
     }
     setVolumeVisibilityLoaded(true);
+  }, []);
+
+  useEffect(() => {
+    try {
+      setCandleCountdownEnabled(window.localStorage.getItem(CANDLE_COUNTDOWN_VISIBILITY_STORAGE_KEY) === "true");
+    } catch {
+      setCandleCountdownEnabled(false);
+    }
+    setCandleCountdownSettingsLoaded(true);
   }, []);
 
   useEffect(() => {
@@ -230,6 +242,15 @@ export function useReplayPreferences(dataset: { id: string; startTime: string; t
   }, [volumeVisibilityLoaded, volumeVisible]);
 
   useEffect(() => {
+    if (!candleCountdownSettingsLoaded) return;
+    try {
+      window.localStorage.setItem(CANDLE_COUNTDOWN_VISIBILITY_STORAGE_KEY, String(candleCountdownEnabled));
+    } catch {
+      // Browser storage can be unavailable; the countdown setting still applies to this page session.
+    }
+  }, [candleCountdownEnabled, candleCountdownSettingsLoaded]);
+
+  useEffect(() => {
     if (!barCountSettingsLoaded) return;
     try {
       window.localStorage.setItem(BAR_COUNT_SETTINGS_STORAGE_KEY, JSON.stringify(barCountConfig));
@@ -285,6 +306,8 @@ export function useReplayPreferences(dataset: { id: string; startTime: string; t
     abrSettingsLoaded,
     volumeVisible,
     setVolumeVisible,
+    candleCountdownEnabled,
+    setCandleCountdownEnabled,
     barCountConfig,
     setBarCountConfig,
     defaultTrendLineStyle,
