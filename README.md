@@ -1,24 +1,79 @@
 # 交易系统分析台
 
-交易系统分析台是一个面向个人交易者的本地 Web 应用。它用于记录逐笔交易、管理历史样本，并通过有放回 Bootstrap 抽样运行蒙特卡洛模拟，帮助用户分析交易系统的收益分布、回撤风险、爆仓概率和最大连亏。
+交易系统分析台是一个面向个人交易者的本地 Web 应用，围绕“行情训练、交易记录和风险评估”提供一套完整工具：导入历史 K 线并隐藏未来数据进行逐根回放，在回放中进行模拟交易和复盘；维护真实交易日志；再使用历史交易的 `R-multiple` 运行蒙特卡洛模拟，评估收益分布、回撤、爆仓概率和最大连亏。
 
-当前版本定位为单用户本地使用的 MVP，不包含登录、权限管理、多租户隔离和云端部署。
+当前版本定位为单用户本地使用，不包含登录、权限管理、多租户隔离和云端部署。
 
 ## 核心功能
+
+### K 线回放
+
+K 线回放是当前项目的主要训练模块，入口为 `/market-replay`。完整流程是：导入行情数据集 → 选择回放起点 → 隐藏未来数据逐根推进 → 在图表上分析和模拟下单 → 通过交易日志与历史回放复盘。
+
+#### 行情导入
+
+- 支持标准 OHLCV `CSV` 和 `CSV.GZ` 文件。
+- 支持 Databento CME parent-symbol OHLCV 文件；填写 ES、NQ 等合约根代码后，系统会按成交量和 CME 换月规则保留当时的季度主力合约。
+- 源周期可以自动识别，也可以手动填写；时间戳没有时区信息时，按导入时选择的 IANA 时区解释。
+- 可配置最小价格变动、24/7 或单个日内交易时段，以及交易星期。
+- 导入采用持久化任务和流式处理，页面会显示上传、扫描、写入和发布进度；中断或失败的任务可以重试。
+- 单个文件和解压后内容默认上限均为 5 GB，单数据集最多 20,000,000 根源 K 线。
+
+标准 CSV 至少需要以下列，`volume` 可选：
+
+```csv
+timestamp,open,high,low,close,volume
+2026-01-02T09:30:00Z,6010.25,6011.50,6009.75,6011.00,1284
+2026-01-02T09:31:00Z,6011.00,6012.00,6010.50,6011.75,946
+```
+
+`timestamp` 表示源 K 线的开盘时间，数据必须严格按时间升序排列且不能重复。系统会校验 OHLC 关系、源周期间隔和交易时段对齐情况。
+
+#### 回放与图表
+
+- 可以从任意可用时间建立回放。选中的起点 K 线会先保持隐藏，执行“下一根”后才揭示。
+- 支持单步、连续播放、暂停和 `1×–100×` 倍速；时间戳缺口、周末和休市不会产生额外等待，页面进入后台时会自动暂停。
+- 回放始终按源 K 线顺序推进；显示周期可在 1 秒至 24 小时之间选择，只要不小于源周期且是源周期的整数倍。
+- 高周期 K 线会随源数据逐步形成，并区分形成中、完整和数据不完整三种状态。切换显示周期不会改变回放位置或模拟交易结果。
+- CME 股指期货支持 ETH/RTH 图表时段切换；其他数据集按照导入时配置的交易时段展示。
+- 支持独立设置图表显示时区、K 线颜色与样式，并按需显示成交量和 K 线倒计时。
+- 内置最多 5 条可配置 EMA，以及 ABR 和 Bar Count 指标。所有指标只使用已经揭示的行情，不读取未来数据。
+- 提供区间测量、趋势线、斐波那契回撤和绘图对象管理，绘图样式可以保存为模板。
+- 图表按窗口读取行情并使用多级块汇总聚合，不会把完整的千万级源数据一次性发送到浏览器。
+
+#### 模拟交易
+
+- 每个回放数据集可以创建独立模拟账户，配置初始资金、币种、手续费和滑点。
+- 支持市价单、限价单、止损触发单、止损/止盈保护单，以及撤单、全部平仓和反手。
+- 订单从下一根源 K 线开始生效，模拟撮合始终逐根处理源数据，不会因为图表切换到高周期而改变成交结果。
+- 可直接在图表价格处创建风险定额订单，通过入场、止损和目标价自动计算数量、预计盈亏和净盈亏比。
+- 图表会展示活动订单线、持仓和真实成交位置；训练统计包含权益、已实现/未实现盈亏、最大回撤、胜率、Profit Factor 和最大连赢/连亏等指标。
+
+#### 交易日志与历史复盘
+
+- 系统按 FIFO 自动将开平仓成交配对成回放交易日志，并保留 Setup、交易理由、盈亏点数和实际盈亏比。
+- 日志支持筛选、列显示设置、会话统计和自定义回放会话名称。
+- 重置回放或重新选择起点时，当前训练会话会归档；历史日志不会改变原始成交和训练统计。
+- 任意历史交易都可以在独立的只读历史回放中重建，便于查看当时可见的 K 线、指标和成交标记，同时不影响当前回放进度。
 
 ### 交易日志
 
 - 按账户创建独立交易日志。
-- 记录日期、品种、策略、入场价、止损价、风险额、目标价和平仓价。
-- 自动计算实际 `R-multiple`。
-- 为每笔交易保存截图，支持预览和删除确认。
-- 使用 ZIP 导出或导入日志备份。
+- 记录日期、品种、策略、入场价、止损价、风险额、目标价和平仓价，并自动计算实际 `R-multiple`。
+- 支持交易截图、全局标签、策略代码、表格/浏览视图和筛选统计。
+- 使用 ZIP 导出、导入或合并日志备份。
 - 将日志交易直接作为蒙特卡洛模拟样本。
+
+### 基础数据
+
+- 集中维护交易品种、交易策略、交易理由和全局标签。
+- 基础数据可以被交易日志和 K 线回放训练日志复用。
+- 已被历史记录引用的选项会保留关联，避免删除后破坏已有数据。
 
 ### 数据集与 CSV 上传
 
-- 创建交易数据集并上传历史成交记录。
-- 支持以下 CSV 字段：
+- 创建蒙特卡洛交易数据集并上传历史成交记录。
+- 支持字段：
 
 ```text
 date,symbol,direction,pnl,riskAmount,rMultiple,note
@@ -36,7 +91,7 @@ rMultiple = pnl / riskAmount
 - 使用有放回 Bootstrap 抽样生成多轮权益曲线。
 - 支持固定风险、复利和阶梯复利三种资金管理模式。
 - 支持配置初始资金、每笔风险比例、模拟次数、每轮交易数和破产线。
-- 输出盈利概率、爆仓概率、最终权益统计、最大回撤、最大连亏和分位数权益曲线。
+- 输出盈利概率、爆仓概率、最终权益统计、最大回撤、最大连亏、直方图和分位数权益曲线。
 - 保存模拟历史，便于后续查看报告。
 
 ## 技术栈
@@ -45,11 +100,9 @@ rMultiple = pnl / riskAmount
 - TypeScript
 - Tailwind CSS
 - shadcn/ui 风格本地组件
-- Prisma ORM
-- SQLite
-- Recharts
-- Zod
-- csv-parse
+- Prisma ORM + SQLite
+- Lightweight Charts + Recharts
+- Zod + csv-parse
 - Vitest
 - pnpm
 
@@ -57,7 +110,7 @@ rMultiple = pnl / riskAmount
 
 ### 使用 Docker Compose 开发
 
-项目可以在 WSL 内使用 Docker Compose 启动，无需在 WSL 中额外安装 Node.js 或 pnpm。
+项目可以在 WSL 或安装了 Docker Desktop 的环境中使用 Docker Compose 启动，无需另外安装 Node.js 或 pnpm。
 
 首次启动或依赖变更后执行：
 
@@ -77,78 +130,37 @@ docker compose logs -f app
 docker compose down
 ```
 
-重新构建并启动：
-
-```bash
-docker compose up --build -d
-```
-
 浏览器访问：
 
 ```text
 http://localhost:3001
 ```
 
-Compose 默认将宿主机的 `3001` 端口映射到容器内的 `3000` 端口。如果需要使用其他宿主机端口，可以在启动时设置 `APP_PORT`，例如：
+Compose 默认将宿主机的 `3001` 端口映射到容器内的 `3000` 端口。需要使用其他端口时，可以在启动命令中设置 `APP_PORT`：
 
 ```bash
 APP_PORT=8080 docker compose up --build -d
 ```
 
-局域网内其他设备可以通过 `http://<宿主机 IP>:3001` 访问。Compose 默认以开发模式运行 Next.js，并挂载当前源码目录以支持热更新。依赖和 `.next` 缓存保存在 Docker 命名卷中。SQLite 数据库仍保存在 `prisma/dev.db`，交易截图仍保存在 `storage/`；执行 `docker compose down` 不会删除这些业务数据。
-
-### 使用生产镜像部署
-
-发布镜像使用生产模式运行 Next.js，并在容器启动时自动执行已提交的 Prisma 迁移。拉取并启动 `v0.1`：
-
-```bash
-docker pull sudongpojiaozi/monte-carlo-simulation-report:v0.1
-docker compose -f compose.prod.yaml up -d
-```
-
-浏览器访问：
-
-```text
-http://localhost:3001
-```
-
-生产 Compose 默认使用两个 Docker 命名卷：
-
-- `app_data`：保存 SQLite 数据库 `/data/dev.db`
-- `app_storage`：保存交易截图 `/app/storage`
-
-执行 `docker compose -f compose.prod.yaml down` 不会删除业务数据。升级镜像后，重新拉取并启动：
-
-```bash
-docker compose -f compose.prod.yaml pull
-docker compose -f compose.prod.yaml up -d
-```
-
-如需调整宿主机端口，可以设置 `APP_PORT`：
-
-```bash
-APP_PORT=8080 docker compose -f compose.prod.yaml up -d
-```
+Compose 以开发模式运行 Next.js，并挂载当前源码目录以支持热更新。依赖和 `.next` 缓存保存在 Docker 命名卷中；SQLite 数据库、行情导入文件和交易截图仍保存在项目目录内，执行 `docker compose down` 不会删除这些业务数据。
 
 ### 直接使用本地 Node.js
 
-### 1. 安装依赖
+要求使用项目声明的 pnpm 版本，建议通过 Corepack 执行。
+
+1. 安装依赖：
 
 ```powershell
 corepack pnpm install
 ```
 
-### 2. 配置环境变量
-
-在项目根目录创建 `.env`：
+2. 在项目根目录创建 `.env`：
 
 ```env
 DATABASE_URL="file:./dev.db"
 ```
 
-### 3. 初始化数据库
-
-常规方式：
+3. 初始化数据库：
 
 ```powershell
 corepack pnpm prisma migrate dev
@@ -160,17 +172,37 @@ corepack pnpm prisma migrate dev
 corepack pnpm run db:init-sqlite
 ```
 
-### 4. 启动开发服务器
+4. 启动开发服务器：
 
 ```powershell
 corepack pnpm dev
 ```
 
-访问：
+浏览器访问：
 
 ```text
 http://localhost:3000
 ```
+
+## 页面入口
+
+- `/`：首页
+- `/market-replay`：行情数据导入与 K 线回放
+- `/market-replay/[id]/trade-history`：回放交易日志与历史会话
+- `/trade-journals`：交易日志
+- `/master-data`：基础数据（品种、交易策略、交易理由和全局标签）
+- `/datasets`：蒙特卡洛交易数据集
+- `/simulations/new`：新建蒙特卡洛模拟
+- `/simulations/history`：模拟历史
+
+## 数据存储
+
+- SQLite 数据库：`prisma/dev.db`
+- 行情导入临时文件：`.market-imports/`
+- 交易截图：`storage/`
+- 模拟报告、回放进度、模拟账户、订单、成交和训练日志：通过 Prisma 保存到 SQLite
+
+`.env`、数据库文件、导入临时文件、截图、日志、依赖目录和构建产物不应提交到 Git 仓库。
 
 ## 验证
 
@@ -180,21 +212,4 @@ corepack pnpm test
 corepack pnpm run build
 ```
 
-如果 Windows 下构建时提示 Prisma query engine DLL 被占用，请先停止正在运行的开发服务器，再重新执行构建。
-
-## 数据存储
-
-- SQLite 数据库文件：`prisma/dev.db`
-- 交易截图：本地文件系统
-- 模拟报告：通过 Prisma 保存到 SQLite
-
-`.env`、数据库文件、截图、日志、依赖目录和构建产物不应提交到 Git 仓库。
-
-## 页面入口
-
-- `/`：首页
-- `/trade-journals`：交易日志
-- `/master-data`：基础数据（交易策略与全局标签）
-- `/datasets`：交易数据集
-- `/simulations/new`：新建模拟
-- `/simulations/history`：模拟历史
+如果 Windows 下构建时提示 Prisma query engine DLL 被占用，请先停止属于本项目的 Next.js/Node 开发进程，再重新执行构建。
