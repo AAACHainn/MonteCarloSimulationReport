@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState, type KeyboardEvent as ReactKeyboardEvent, type PointerEvent as ReactPointerEvent } from "react";
 import { ChevronLeft, ChevronRight, Loader2, Pencil, RotateCcw, Settings2, Trash2 } from "lucide-react";
 import Link from "next/link";
 import { Button } from "@/components/ui/button";
@@ -17,6 +17,16 @@ import { formatNumber, formatPercent } from "@/lib/format";
 import { copy } from "@/lib/i18n";
 import { formatInterval } from "@/lib/market-replay/types";
 import { utcDateParts } from "@/lib/market-replay/display-timezone";
+import {
+  MAX_JOURNAL_COLUMN_WIDTH,
+  MIN_JOURNAL_COLUMN_WIDTH,
+  clampJournalColumnWidth,
+  normalizeJournalTableWidth,
+  parseStoredJournalColumnWidths,
+  parseStoredJournalTableOffset,
+  parseStoredJournalTableWidth,
+  resizeJournalTableFromStartEdge,
+} from "@/lib/market-replay/journal-column-widths";
 import {
   compileReplayJournalFilters,
   countActiveReplayJournalFilters,
@@ -82,29 +92,35 @@ const journalColumns: {
   id: JournalColumnId;
   label: string;
   text: boolean;
-  className?: string;
+  defaultWidth: number;
   expressionFilterKey?: ReplayJournalExpressionFilterKey;
   optionFilterKey?: ReplayJournalOptionFilterKey;
 }[] = [
-  { id: "no", label: "No", text: false },
-  { id: "date", label: "Date", text: false },
-  { id: "direction", label: "Direction", text: false, optionFilterKey: "directions" },
-  { id: "setup", label: copy.paperTrading.setup, text: true, className: "w-52 min-w-52 max-w-52", optionFilterKey: "setupOptionIds" },
-  { id: "reason", label: copy.paperTrading.tradeReason, text: true, className: "w-64 min-w-64 max-w-64", optionFilterKey: "tradeReasonIds" },
-  { id: "abr", label: "ABR", text: false },
-  { id: "initialRisk", label: "iRisk", text: false },
-  { id: "initialRiskAbr", label: "iRisk / ABR", text: false, expressionFilterKey: "initialRiskAbr" },
-  { id: "actualRisk", label: "aRisk", text: false },
-  { id: "actualRiskAbr", label: "aRisk / ABR", text: false, expressionFilterKey: "actualRiskAbr" },
-  { id: "actualInitialRiskRatio", label: "aRisk / iRisk", text: false, expressionFilterKey: "actualInitialRiskRatio" },
-  { id: "gainLoss", label: "Gain / Loss", text: false },
-  { id: "result", label: "Result", text: false, optionFilterKey: "results" },
-  { id: "abrRr", label: "ABR RR", text: false, expressionFilterKey: "abrRr" },
-  { id: "initialRiskRr", label: "iRisk RR", text: false, expressionFilterKey: "initialRiskRr" },
-  { id: "actualRiskRr", label: "aRisk RR", text: false, expressionFilterKey: "actualRiskRr" },
+  { id: "no", label: "No", text: false, defaultWidth: 72 },
+  { id: "date", label: "Date", text: false, defaultWidth: 120 },
+  { id: "direction", label: "Direction", text: false, defaultWidth: 112, optionFilterKey: "directions" },
+  { id: "setup", label: copy.paperTrading.setup, text: true, defaultWidth: 208, optionFilterKey: "setupOptionIds" },
+  { id: "reason", label: copy.paperTrading.tradeReason, text: true, defaultWidth: 256, optionFilterKey: "tradeReasonIds" },
+  { id: "abr", label: "ABR", text: false, defaultWidth: 104 },
+  { id: "initialRisk", label: "iRisk", text: false, defaultWidth: 104 },
+  { id: "initialRiskAbr", label: "iRisk / ABR", text: false, defaultWidth: 128, expressionFilterKey: "initialRiskAbr" },
+  { id: "actualRisk", label: "aRisk", text: false, defaultWidth: 104 },
+  { id: "actualRiskAbr", label: "aRisk / ABR", text: false, defaultWidth: 128, expressionFilterKey: "actualRiskAbr" },
+  { id: "actualInitialRiskRatio", label: "aRisk / iRisk", text: false, defaultWidth: 128, expressionFilterKey: "actualInitialRiskRatio" },
+  { id: "gainLoss", label: "Gain / Loss", text: false, defaultWidth: 128 },
+  { id: "result", label: "Result", text: false, defaultWidth: 104, optionFilterKey: "results" },
+  { id: "abrRr", label: "ABR RR", text: false, defaultWidth: 112, expressionFilterKey: "abrRr" },
+  { id: "initialRiskRr", label: "iRisk RR", text: false, defaultWidth: 112, expressionFilterKey: "initialRiskRr" },
+  { id: "actualRiskRr", label: "aRisk RR", text: false, defaultWidth: 112, expressionFilterKey: "actualRiskRr" },
 ];
 const defaultVisibleColumnIds = journalColumns.map((column) => column.id);
+const defaultColumnWidths = Object.fromEntries(
+  journalColumns.map((column) => [column.id, column.defaultWidth]),
+) as Record<JournalColumnId, number>;
 const columnPreferenceKey = "replay-journal-visible-columns-v1";
+const columnWidthPreferenceKey = "replay-journal-column-widths-v1";
+const tableWidthPreferenceKey = "replay-journal-table-width-v1";
+const tableOffsetPreferenceKey = "replay-journal-table-offset-v1";
 
 const noSetupValue = "__NO_SETUP__";
 const pageSizeOptions = Array.from({ length: 10 }, (_, index) => (index + 1) * 10);
@@ -160,6 +176,13 @@ export function PaperJournalTable({
   const [visibleColumnIds, setVisibleColumnIds] = useState<JournalColumnId[]>(defaultVisibleColumnIds);
   const [draftVisibleColumnIds, setDraftVisibleColumnIds] = useState<JournalColumnId[]>(defaultVisibleColumnIds);
   const [columnPreferencesLoaded, setColumnPreferencesLoaded] = useState(false);
+  const [columnWidths, setColumnWidths] = useState<Record<JournalColumnId, number>>(defaultColumnWidths);
+  const [columnWidthsLoaded, setColumnWidthsLoaded] = useState(false);
+  const [tableWidthPreference, setTableWidthPreference] = useState<number | null>(null);
+  const [tableLeftOffset, setTableLeftOffset] = useState(0);
+  const [tableViewportElement, setTableViewportElement] = useState<HTMLElement | null>(null);
+  const [tableViewportWidth, setTableViewportWidth] = useState(0);
+  const [resizingTarget, setResizingTarget] = useState<JournalColumnId | "table-start" | "table-end" | null>(null);
   const [summary, setSummary] = useState<ReplayJournalSummary | null>(null);
   const [filterDrafts, setFilterDrafts] = useState<ReplayJournalFilters>(createEmptyReplayJournalFilters);
   const [appliedFilters, setAppliedFilters] = useState<ReplayJournalFilters>(createEmptyReplayJournalFilters);
@@ -170,6 +193,26 @@ export function PaperJournalTable({
   const [hasEntriesWithoutTradeReason, setHasEntriesWithoutTradeReason] = useState(false);
   const appliedFiltersRef = useRef(appliedFilters);
   const loadRequestIdRef = useRef(0);
+  const resizeRef = useRef<
+    | {
+      kind: "column";
+      columnId: JournalColumnId;
+      pointerId: number;
+      startX: number;
+      startColumnWidth: number;
+      startTableWidth: number;
+    }
+    | {
+      kind: "table";
+      edge: "start" | "end";
+      pointerId: number;
+      startX: number;
+      startTableWidth: number;
+      startTableOffset: number;
+      minimumWidth: number;
+    }
+    | null
+  >(null);
 
   const load = useCallback(async ({
     sessionId,
@@ -323,6 +366,18 @@ export function PaperJournalTable({
       }
     }
     setColumnPreferencesLoaded(true);
+
+    setColumnWidths(parseStoredJournalColumnWidths(
+      window.localStorage.getItem(columnWidthPreferenceKey),
+      defaultColumnWidths,
+    ));
+    setTableWidthPreference(parseStoredJournalTableWidth(
+      window.localStorage.getItem(tableWidthPreferenceKey),
+    ));
+    setTableLeftOffset(parseStoredJournalTableOffset(
+      window.localStorage.getItem(tableOffsetPreferenceKey),
+    ));
+    setColumnWidthsLoaded(true);
   }, []);
 
   useEffect(() => {
@@ -330,6 +385,27 @@ export function PaperJournalTable({
       window.localStorage.setItem(columnPreferenceKey, JSON.stringify(visibleColumnIds));
     }
   }, [columnPreferencesLoaded, visibleColumnIds]);
+
+  useEffect(() => {
+    if (columnWidthsLoaded) {
+      window.localStorage.setItem(columnWidthPreferenceKey, JSON.stringify(columnWidths));
+      if (tableWidthPreference === null) {
+        window.localStorage.removeItem(tableWidthPreferenceKey);
+      } else {
+        window.localStorage.setItem(tableWidthPreferenceKey, String(tableWidthPreference));
+      }
+      window.localStorage.setItem(tableOffsetPreferenceKey, String(tableLeftOffset));
+    }
+  }, [columnWidths, columnWidthsLoaded, tableLeftOffset, tableWidthPreference]);
+
+  useEffect(() => {
+    if (!tableViewportElement) return;
+    const updateWidth = () => setTableViewportWidth(tableViewportElement.clientWidth);
+    updateWidth();
+    const observer = new ResizeObserver(updateWidth);
+    observer.observe(tableViewportElement);
+    return () => observer.disconnect();
+  }, [tableViewportElement]);
 
   const selectedSession = useMemo(
     () => sessions.find((session) => session.id === selectedSessionId) ?? null,
@@ -498,6 +574,136 @@ export function PaperJournalTable({
     setVisibleColumnsOpen(false);
   }
 
+  function startResize(
+    columnId: JournalColumnId,
+    isTableEdge: boolean,
+    event: ReactPointerEvent<HTMLDivElement>,
+  ) {
+    if (isTableEdge) {
+      startTableResize("end", event);
+      return;
+    }
+
+    event.preventDefault();
+    event.currentTarget.setPointerCapture(event.pointerId);
+    resizeRef.current = {
+      kind: "column",
+      columnId,
+      pointerId: event.pointerId,
+      startX: event.clientX,
+      startColumnWidth: columnWidths[columnId],
+      startTableWidth: visibleTableWidth,
+    };
+    setResizingTarget(columnId);
+  }
+
+  function startTableResize(
+    edge: "start" | "end",
+    event: ReactPointerEvent<HTMLDivElement>,
+  ) {
+    event.preventDefault();
+    event.currentTarget.setPointerCapture(event.pointerId);
+    resizeRef.current = {
+      kind: "table",
+      edge,
+      pointerId: event.pointerId,
+      startX: event.clientX,
+      startTableWidth: visibleTableWidth,
+      startTableOffset: tableLeftOffset,
+      minimumWidth: Math.max(baseTableWidth, tableViewportWidth),
+    };
+    setResizingTarget(edge === "start" ? "table-start" : "table-end");
+  }
+
+  function continueResize(event: ReactPointerEvent<HTMLDivElement>) {
+    const resize = resizeRef.current;
+    if (!resize || resize.pointerId !== event.pointerId) return;
+    const pointerDelta = event.clientX - resize.startX;
+    if (resize.kind === "table") {
+      if (resize.edge === "start") {
+        const next = resizeJournalTableFromStartEdge({
+          startWidth: resize.startTableWidth,
+          startOffset: resize.startTableOffset,
+          pointerDelta,
+          minimumWidth: resize.minimumWidth,
+        });
+        setTableWidthPreference(next.width);
+        setTableLeftOffset(next.offset);
+      } else {
+        setTableWidthPreference(Math.max(
+          resize.minimumWidth,
+          normalizeJournalTableWidth(resize.startTableWidth + pointerDelta),
+        ));
+      }
+      return;
+    }
+
+    const nextColumnWidth = clampJournalColumnWidth(resize.startColumnWidth + pointerDelta);
+    const appliedDelta = nextColumnWidth - resize.startColumnWidth;
+    setColumnWidths((current) => ({ ...current, [resize.columnId]: nextColumnWidth }));
+    setTableWidthPreference(normalizeJournalTableWidth(resize.startTableWidth + appliedDelta));
+  }
+
+  function finishResize(event: ReactPointerEvent<HTMLDivElement>) {
+    const resize = resizeRef.current;
+    if (!resize || resize.pointerId !== event.pointerId) return;
+    if (event.currentTarget.hasPointerCapture(event.pointerId)) {
+      event.currentTarget.releasePointerCapture(event.pointerId);
+    }
+    resizeRef.current = null;
+    setResizingTarget(null);
+  }
+
+  function resizeWithKeyboard(
+    columnId: JournalColumnId,
+    isTableEdge: boolean,
+    event: ReactKeyboardEvent<HTMLDivElement>,
+  ) {
+    if (isTableEdge) {
+      resizeTableEdgeWithKeyboard("end", event);
+      return;
+    }
+    if (event.key !== "ArrowLeft" && event.key !== "ArrowRight") return;
+    event.preventDefault();
+    const step = event.shiftKey ? 24 : 8;
+    const direction = event.key === "ArrowRight" ? 1 : -1;
+
+    const nextColumnWidth = clampJournalColumnWidth(columnWidths[columnId] + direction * step);
+    const appliedDelta = nextColumnWidth - columnWidths[columnId];
+    setColumnWidths((current) => ({ ...current, [columnId]: nextColumnWidth }));
+    setTableWidthPreference(normalizeJournalTableWidth(visibleTableWidth + appliedDelta));
+  }
+
+  function resizeTableEdgeWithKeyboard(
+    edge: "start" | "end",
+    event: ReactKeyboardEvent<HTMLDivElement>,
+  ) {
+    if (event.key !== "ArrowLeft" && event.key !== "ArrowRight") return;
+    event.preventDefault();
+    const step = event.shiftKey ? 24 : 8;
+    resizeTableWithKeyboard(edge, event.key === "ArrowRight" ? step : -step);
+  }
+
+  function resizeTableWithKeyboard(edge: "start" | "end", pointerDelta: number) {
+    const minimumWidth = Math.max(baseTableWidth, tableViewportWidth);
+    if (edge === "start") {
+      const next = resizeJournalTableFromStartEdge({
+        startWidth: visibleTableWidth,
+        startOffset: tableLeftOffset,
+        pointerDelta,
+        minimumWidth,
+      });
+      setTableWidthPreference(next.width);
+      setTableLeftOffset(next.offset);
+      return;
+    }
+
+    setTableWidthPreference(Math.max(
+      minimumWidth,
+      normalizeJournalTableWidth(visibleTableWidth + pointerDelta),
+    ));
+  }
+
   if (loading && items.length === 0 && sessions.length === 0) return <div className="flex items-center gap-2 py-8 text-sm text-slate-500"><Loader2 className="h-4 w-4 animate-spin" />{copy.paperTrading.journalLoading}</div>;
   if (error && items.length === 0 && sessions.length === 0) return <p className="py-6 text-sm text-red-600" role="alert">{error}</p>;
   if (items.length === 0 && sessions.length === 0) return <p className="rounded-md border border-dashed p-6 text-center text-sm text-slate-500">{copy.paperTrading.noJournalEntries}</p>;
@@ -505,6 +711,21 @@ export function PaperJournalTable({
   const startRow = totalItems === 0 ? 0 : (page - 1) * pageSize + 1;
   const endRow = Math.min(page * pageSize, totalItems);
   const visibleColumnSet = new Set(visibleColumnIds);
+  const visibleColumns = journalColumns.filter((column) => visibleColumnSet.has(column.id));
+  const baseTableWidth = visibleColumns.reduce((total, column) => total + columnWidths[column.id], 0);
+  const visibleTableWidth = Math.max(baseTableWidth, tableViewportWidth, tableWidthPreference ?? 0);
+  const distributedTableExtraWidth = visibleColumns.length === 0
+    ? 0
+    : (visibleTableWidth - baseTableWidth) / visibleColumns.length;
+  let accumulatedTableWidth = 0;
+  const visibleColumnEdges = visibleColumns.map((column, index) => {
+    accumulatedTableWidth += columnWidths[column.id] + distributedTableExtraWidth;
+    return {
+      column,
+      position: accumulatedTableWidth,
+      isTableEdge: index === visibleColumns.length - 1,
+    };
+  });
   const activeFilterCount = countActiveReplayJournalFilters(appliedFilters);
   const hasActiveFilters = hasActiveReplayJournalFilters(appliedFilters);
   const optionFilters: Record<ReplayJournalOptionFilterKey, FilterOption[]> = {
@@ -581,9 +802,11 @@ export function PaperJournalTable({
           </CardDescription>
         </CardHeader>
         <CardContent className="grid gap-3 p-4 pt-0 sm:grid-cols-3">
-          <JournalStat
-            label={copy.paperTrading.journalWinRate}
-            value={formatPercent(summary.winRate)}
+          <JournalWinRateStat
+            winRate={formatPercent(summary.winRate)}
+            winningTradeCount={summary.winningTradeCount}
+            losingTradeCount={summary.losingTradeCount}
+            breakEvenTradeCount={summary.breakEvenTradeCount}
           />
           <div className="rounded-md border bg-slate-50 p-3">
             <div className="grid grid-cols-2 gap-4">
@@ -686,15 +909,71 @@ export function PaperJournalTable({
     {status ? <p className="rounded-md border border-emerald-200 bg-emerald-50 px-3 py-2 text-sm text-emerald-700" role="status" aria-live="polite">{status}</p> : null}
     {setupError ? <p className="rounded-md border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-700" role="alert">{setupError}</p> : null}
     {tradeReasonsError ? <p className="rounded-md border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-700" role="alert">{tradeReasonsError}</p> : null}
-    <section className="space-y-2">
-      <div className="overflow-x-auto rounded-md border bg-white">
-        <table className="w-full min-w-max border-collapse text-right text-sm tabular-nums">
-          <thead className="bg-blue-50 text-xs text-slate-700"><tr>
-            {journalColumns.filter((column) => visibleColumnSet.has(column.id)).map((column) => (
-              <th
+    <section ref={setTableViewportElement} className="space-y-2">
+      <div
+        className={`relative rounded-md border bg-white ${resizingTarget ? "select-none" : ""}`}
+        style={{ width: visibleTableWidth, minWidth: visibleTableWidth, marginLeft: tableLeftOffset }}
+      >
+        <div
+          role="separator"
+          aria-orientation="vertical"
+          aria-label={copy.paperTrading.resizeJournalTableStart}
+          aria-valuemin={Math.max(baseTableWidth, tableViewportWidth)}
+          aria-valuemax={Number.MAX_SAFE_INTEGER}
+          aria-valuenow={Math.round(visibleTableWidth)}
+          tabIndex={0}
+          title={copy.paperTrading.resizeJournalTableStartHint}
+          className={`group absolute -left-1.5 top-0 z-20 h-full w-3 cursor-col-resize touch-none focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring after:absolute after:inset-y-0 after:left-1/2 after:w-px after:-translate-x-1/2 after:content-[''] hover:after:w-0.5 hover:after:bg-blue-600 focus-visible:after:w-0.5 focus-visible:after:bg-blue-600 ${resizingTarget === "table-start" ? "after:w-0.5 after:bg-blue-600" : "after:bg-transparent"}`}
+          onPointerDown={(event) => startTableResize("start", event)}
+          onPointerMove={continueResize}
+          onPointerUp={finishResize}
+          onPointerCancel={finishResize}
+          onKeyDown={(event) => resizeTableEdgeWithKeyboard("start", event)}
+        />
+        {visibleColumnEdges.map(({ column, position, isTableEdge }) => (
+          <div
+            key={`resize-${column.id}`}
+            role="separator"
+            aria-orientation="vertical"
+            aria-label={isTableEdge
+              ? copy.paperTrading.resizeJournalTableEnd
+              : copy.paperTrading.resizeJournalColumn(column.label)}
+            aria-valuemin={isTableEdge
+              ? Math.max(baseTableWidth, tableViewportWidth)
+              : MIN_JOURNAL_COLUMN_WIDTH}
+            aria-valuemax={isTableEdge ? Number.MAX_SAFE_INTEGER : MAX_JOURNAL_COLUMN_WIDTH}
+            aria-valuenow={isTableEdge ? Math.round(visibleTableWidth) : columnWidths[column.id]}
+            tabIndex={0}
+            title={isTableEdge
+              ? copy.paperTrading.resizeJournalTableEndHint
+              : copy.paperTrading.resizeJournalColumnHint}
+            className={`group absolute top-0 z-20 h-full -translate-x-1/2 cursor-col-resize touch-none focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring after:absolute after:inset-y-0 after:left-1/2 after:w-px after:-translate-x-1/2 after:content-[''] hover:after:w-0.5 hover:after:bg-blue-600 focus-visible:after:w-0.5 focus-visible:after:bg-blue-600 ${isTableEdge ? "w-3" : "w-2"} ${resizingTarget === (isTableEdge ? "table-end" : column.id) ? "after:w-0.5 after:bg-blue-600" : "after:bg-transparent"}`}
+            style={{ left: position }}
+            onPointerDown={(event) => startResize(column.id, isTableEdge, event)}
+            onPointerMove={continueResize}
+            onPointerUp={finishResize}
+            onPointerCancel={finishResize}
+            onKeyDown={(event) => resizeWithKeyboard(column.id, isTableEdge, event)}
+          />
+        ))}
+        <table
+          className="table-fixed border-collapse border-r border-slate-200 text-right text-sm tabular-nums [&_td]:overflow-hidden [&_td]:whitespace-nowrap"
+          style={{ width: visibleTableWidth, minWidth: visibleTableWidth }}
+        >
+          <colgroup>
+            {visibleColumns.map((column) => (
+              <col
                 key={column.id}
-                className={`min-w-24 whitespace-nowrap border-b border-r px-3 py-2 font-semibold last:border-r-0 ${column.text ? "text-left" : ""} ${column.className ?? ""}`}
-              >
+                style={{ width: columnWidths[column.id] + distributedTableExtraWidth }}
+              />
+            ))}
+          </colgroup>
+          <thead className="bg-blue-50 text-xs text-slate-700"><tr>
+            {visibleColumns.map((column) => (
+                <th
+                  key={column.id}
+                  className={`relative whitespace-nowrap border-b border-r px-3 py-2 font-semibold last:border-r-0 ${column.text ? "text-left" : ""}`}
+                >
                 <div className={`flex items-center gap-1 ${column.text ? "justify-start" : "justify-end"}`}>
                   <span>{column.label}</span>
                   {scope === "history" && column.expressionFilterKey ? <ExpressionFilterPopover
@@ -721,8 +1000,8 @@ export function PaperJournalTable({
                     disabled={loading}
                   /> : null}
                 </div>
-              </th>
-            ))}
+                </th>
+              ))}
           </tr></thead>
           <tbody>{items.length === 0 && scope === "history" ? <tr>
             <td colSpan={visibleColumnIds.length} className="px-4 py-8 text-center text-sm text-slate-500">
@@ -740,7 +1019,7 @@ export function PaperJournalTable({
             >{entry.no}</Link>}</td> : null}
             {visibleColumnSet.has("date") ? <td className="border-r px-3 py-2 last:border-r-0">{date(entry)}</td> : null}
             {visibleColumnSet.has("direction") ? <td className="border-r px-3 py-2 last:border-r-0">{entry.direction === "LONG" ? copy.paperTrading.long : copy.paperTrading.short}</td> : null}
-            {visibleColumnSet.has("setup") ? <td className="w-52 min-w-52 max-w-52 border-r p-1 text-left last:border-r-0">
+            {visibleColumnSet.has("setup") ? <td className="border-r p-1 text-left last:border-r-0">
               <div className="min-w-0 max-w-full">
                 <Select
                   value={entry.setupOptionId ?? noSetupValue}
@@ -777,7 +1056,7 @@ export function PaperJournalTable({
                 </Select>
               </div>
             </td> : null}
-            {visibleColumnSet.has("reason") ? <td className="w-64 min-w-64 max-w-64 border-r p-1 text-left last:border-r-0">
+            {visibleColumnSet.has("reason") ? <td className="border-r p-1 text-left last:border-r-0">
               <MultiSelect
                 value={entry.tradeReasons.map((reason) => reason.id)}
                 options={tradeReasonOptions.map((reason) => ({ value: reason.id, label: reason.name }))}
@@ -903,6 +1182,52 @@ function JournalStat({
     <div className="rounded-md border bg-slate-50 p-3">
       <JournalStatValue label={label} value={value} />
       {description ? <p className="mt-1 text-xs text-slate-500">{description}</p> : null}
+    </div>
+  );
+}
+
+function JournalWinRateStat({
+  winRate,
+  winningTradeCount,
+  losingTradeCount,
+  breakEvenTradeCount,
+}: {
+  winRate: string;
+  winningTradeCount: number;
+  losingTradeCount: number;
+  breakEvenTradeCount: number;
+}) {
+  const counts = [
+    {
+      label: copy.paperTrading.journalTakeProfitTrades,
+      value: winningTradeCount,
+      className: "text-emerald-700",
+    },
+    {
+      label: copy.paperTrading.journalStopLossTrades,
+      value: losingTradeCount,
+      className: "text-red-700",
+    },
+    {
+      label: copy.paperTrading.journalBreakEvenTrades,
+      value: breakEvenTradeCount,
+      className: "text-slate-700",
+    },
+  ];
+
+  return (
+    <div className="rounded-md border bg-slate-50 p-3">
+      <JournalStatValue label={copy.paperTrading.journalWinRate} value={winRate} />
+      <div className="mt-3 grid grid-cols-3 gap-2 border-t border-slate-200 pt-2">
+        {counts.map((count) => (
+          <div key={count.label} className="min-w-0">
+            <p className="truncate text-xs text-slate-500">{count.label}</p>
+            <p className={`mt-0.5 truncate text-xs font-semibold tabular-nums ${count.className}`}>
+              {copy.paperTrading.journalTradeCountValue(count.value)}
+            </p>
+          </div>
+        ))}
+      </div>
     </div>
   );
 }

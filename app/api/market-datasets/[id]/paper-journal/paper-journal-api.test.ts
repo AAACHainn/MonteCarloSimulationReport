@@ -143,6 +143,9 @@ describe("replay paper journal API", () => {
       selectedSessionId: "journal-latest",
       summary: {
         tradeCount: 35,
+        winningTradeCount: 35,
+        losingTradeCount: 0,
+        breakEvenTradeCount: 0,
         winRate: 100,
         totalProfitPoints: 70,
         totalLossPoints: 0,
@@ -179,6 +182,9 @@ describe("replay paper journal API", () => {
     expect(data.items.map((item: { id: string }) => item.id)).toEqual(["winner-1", "winner-2"]);
     expect(data.summary).toEqual({
       tradeCount: 2,
+      winningTradeCount: 2,
+      losingTradeCount: 0,
+      breakEvenTradeCount: 0,
       winRate: 100,
       totalProfitPoints: 6,
       totalLossPoints: 0,

@@ -135,6 +135,9 @@ export type ReplayJournalEntryData = ReplayJournalEntryDraft & {
 
 export type ReplayJournalSummary = {
   tradeCount: number;
+  winningTradeCount: number;
+  losingTradeCount: number;
+  breakEvenTradeCount: number;
   winRate: number;
   totalProfitPoints: number;
   totalLossPoints: number;

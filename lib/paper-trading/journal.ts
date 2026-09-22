@@ -27,6 +27,8 @@ export function calculateReplayJournalSummary(
   entries: ReadonlyArray<{ gainLoss: number; priceTickSize: number }>,
 ): ReplayJournalSummary {
   let winningTrades = 0;
+  let losingTrades = 0;
+  let breakEvenTrades = 0;
   let totalProfitPoints = 0;
   let totalLossPoints = 0;
 
@@ -36,12 +38,18 @@ export function calculateReplayJournalSummary(
       winningTrades += 1;
       totalProfitPoints += entry.gainLoss;
     } else if (result === "L") {
+      losingTrades += 1;
       totalLossPoints += Math.abs(entry.gainLoss);
+    } else {
+      breakEvenTrades += 1;
     }
   }
 
   return {
     tradeCount: entries.length,
+    winningTradeCount: winningTrades,
+    losingTradeCount: losingTrades,
+    breakEvenTradeCount: breakEvenTrades,
     winRate: entries.length === 0 ? 0 : (winningTrades / entries.length) * 100,
     totalProfitPoints,
     totalLossPoints,

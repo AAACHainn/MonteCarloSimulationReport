@@ -44,6 +44,9 @@ describe("paper replay journal", () => {
       { gainLoss: -1.5, priceTickSize: 0.01 },
     ]);
     expect(summary.tradeCount).toBe(6);
+    expect(summary.winningTradeCount).toBe(2);
+    expect(summary.losingTradeCount).toBe(4);
+    expect(summary.breakEvenTradeCount).toBe(0);
     expect(summary.winRate).toBeCloseTo(100 / 3);
     expect(summary.totalProfitPoints).toBeCloseTo(15.7);
     expect(summary.totalLossPoints).toBeCloseTo(17.2);
@@ -56,6 +59,9 @@ describe("paper replay journal", () => {
       { gainLoss: 0, priceTickSize: 0.01 },
     ])).toEqual({
       tradeCount: 2,
+      winningTradeCount: 1,
+      losingTradeCount: 0,
+      breakEvenTradeCount: 1,
       winRate: 50,
       totalProfitPoints: 3,
       totalLossPoints: 0,
