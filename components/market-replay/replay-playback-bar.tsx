@@ -36,7 +36,15 @@ export function ReplayPlaybackBar({
     : replay.status === "finished" ? copy.marketReplay.finished : copy.marketReplay.pause;
   return (
     <div className="flex h-14 shrink-0 items-center gap-2 border-t bg-slate-50/80 px-3">
-      <Button type="button" size="sm" className="h-9" title={copy.marketReplay.playbackTiming(sourceIntervalSeconds / replay.playbackRate)} onClick={onToggle} disabled={replay.status === "finished" || journalReview}>
+      <Button
+        type="button"
+        size="sm"
+        className="h-9"
+        title={`${copy.marketReplay.playbackTiming(sourceIntervalSeconds / replay.playbackRate)}\n${copy.marketReplay.playbackShortcutHint(copy.marketReplay.playbackShortcut)}`}
+        aria-keyshortcuts="Control+ArrowDown"
+        onClick={onToggle}
+        disabled={replay.status === "finished" || journalReview}
+      >
         {replay.status === "playing" ? <Pause className="h-4 w-4" /> : <Play className="h-4 w-4" />}{replay.status === "playing" ? copy.marketReplay.pause : copy.marketReplay.play}
       </Button>
       <Button type="button" size="sm" variant="outline" className="h-9" onClick={onNext} disabled={replay.status === "finished" || replay.status === "playing" || journalReview}>
@@ -60,4 +68,3 @@ export function ReplayPlaybackBar({
     </div>
   );
 }
-

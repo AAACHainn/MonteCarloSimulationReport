@@ -192,6 +192,8 @@ export const dictionaries = {
       speed: "播放速度",
       playbackRate: (rate: number) => `${rate}×`,
       playbackTiming: (seconds: number) => `每 ${Number(seconds.toFixed(3))} 秒处理一根源 K 线。`,
+      playbackShortcut: "Ctrl + ↓",
+      playbackShortcutHint: (shortcut: string) => `快捷键：${shortcut}`,
       displayInterval: "显示周期",
       displaySession: "交易时段",
       displaySessionEth: "ETH",

@@ -1477,9 +1477,9 @@ export function MarketReplayClient({ dataset, initialJournalFocus = null }: { da
     }
   }
 
-  function togglePlayback() {
+  const togglePlayback = useCallback(() => {
     const current = latestReplayRef.current;
-    if (!current || viewChangingRef.current) return;
+    if (!current || viewChangingRef.current || journalReview || current.status === "finished") return;
     manualStepsRef.current.cancel();
     playbackEpochRef.current += 1;
     if (current.status === "playing") pausePlayback("user");
@@ -1494,7 +1494,7 @@ export function MarketReplayClient({ dataset, initialJournalFocus = null }: { da
       playbackClockRef.current = performance.now();
       lastSyncStartedAtRef.current = performance.now();
     }
-  }
+  }, [flushVisible, journalReview, lastSyncStartedAtRef, latestReplayRef, pausePlayback, playPlayback, queueSave]);
 
   const revealNextBar = useCallback(() => {
     const current = latestReplayRef.current;
@@ -1600,6 +1600,21 @@ export function MarketReplayClient({ dataset, initialJournalFocus = null }: { da
     window.addEventListener("keydown", onKeyDown);
     return () => window.removeEventListener("keydown", onKeyDown);
   }, [confirmAction, revealNextBar, settingsDialog, startDialogOpen]);
+
+  useEffect(() => {
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (!event.ctrlKey || event.altKey || event.shiftKey || event.metaKey || event.key !== "ArrowDown") return;
+      const target = event.target as HTMLElement | null;
+      if (
+        settingsDialog || startDialogOpen || confirmAction || journalReview
+        || target?.closest("input, textarea, select, [contenteditable='true'], [role='dialog']")
+      ) return;
+      event.preventDefault();
+      togglePlayback();
+    };
+    window.addEventListener("keydown", onKeyDown);
+    return () => window.removeEventListener("keydown", onKeyDown);
+  }, [confirmAction, journalReview, settingsDialog, startDialogOpen, togglePlayback]);
 
   useEffect(() => {
     const onKeyDown = (event: KeyboardEvent) => {
