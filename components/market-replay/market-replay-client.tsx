@@ -3,10 +3,11 @@
 import { TZDate } from "@date-fns/tz";
 import Link from "next/link";
 import { startTransition, useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { BookOpen, ListTree, Loader2, Palette, Plus, RotateCcw, Ruler, Settings2, Trash2, TrendingUp, WalletCards, X } from "lucide-react";
+import { BookOpen, ListTree, Loader2, Palette, RotateCcw, Ruler, Settings2, Trash2, TrendingUp, WalletCards, X } from "lucide-react";
 import * as Popover from "@radix-ui/react-popover";
 import { ReplayChart, type ReplayVisibleSequenceRange } from "@/components/market-replay/replay-chart";
 import { ReplayAutoPauseNotice } from "@/components/market-replay/replay-auto-pause-notice";
+import { IndicatorSettingsDialog } from "@/components/market-replay/indicator-settings-dialog";
 import { ReplayStartDialog } from "@/components/market-replay/replay-start-dialog";
 import { DEFAULT_REPLAY_MAX_VISIBLE_BARS } from "@/lib/market-replay/chart-range";
 import type { CandlestickStyle } from "@/lib/market-replay/candlestick-style";
@@ -52,8 +53,6 @@ import {
   BAR_COUNT_RECENT_TRADING_DAYS_MIN,
   EMA_LENGTH_MAX,
   EMA_LENGTH_MIN,
-  EMA_LINE_STYLES,
-  EMA_LINE_WIDTHS,
   MAX_EMA_INDICATORS,
   REPLAY_HISTORY_BAR_LIMIT,
   REPLAY_HISTORY_COMPACT_TO,
@@ -2494,216 +2493,33 @@ export function MarketReplayClient({ dataset, initialJournalFocus = null }: { da
         ) : null}
       </Dialog>
 
-      <Dialog open={settingsDialog === "indicators"} title={copy.marketReplay.indicatorSettings} description={copy.marketReplay.indicatorSettingsDescription} onClose={() => setSettingsDialog(null)}>
-        <div className="space-y-4">
-          <div className="flex items-center justify-between rounded-md border bg-slate-50 p-3">
-            <div><p className="text-sm font-medium text-slate-950">{copy.marketReplay.candleCountdownTitle}</p><p className="mt-0.5 text-xs text-slate-500">{copy.marketReplay.candleCountdownDescription}</p></div>
-            <div className="flex shrink-0 items-center gap-2"><span className="text-xs text-slate-500">{candleCountdownEnabled ? copy.marketReplay.emaOn : copy.marketReplay.emaOff}</span><button type="button" role="switch" aria-checked={candleCountdownEnabled} aria-label={copy.marketReplay.candleCountdownToggle} onClick={() => setCandleCountdownEnabled((enabled) => !enabled)} className={`relative h-6 w-11 rounded-full transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-600 focus-visible:ring-offset-2 ${candleCountdownEnabled ? "bg-blue-600" : "bg-slate-300"}`}><span className={`absolute left-0 top-0.5 h-5 w-5 rounded-full bg-white shadow-sm transition-transform ${candleCountdownEnabled ? "translate-x-5" : "translate-x-0.5"}`} /></button></div>
-          </div>
-          <div className="flex items-center justify-between rounded-md border bg-slate-50 p-3">
-            <div><p className="text-sm font-medium text-slate-950">{copy.marketReplay.volumeTitle}</p><p className="mt-0.5 text-xs text-slate-500">{copy.marketReplay.volumeDescription}</p></div>
-            <div className="flex items-center gap-2"><span className="text-xs text-slate-500">{volumeVisible ? copy.marketReplay.volumeOn : copy.marketReplay.volumeOff}</span><button type="button" role="switch" aria-checked={volumeVisible} aria-label={copy.marketReplay.volumeToggle} onClick={() => setVolumeVisible((visible) => !visible)} className={`relative h-6 w-11 rounded-full transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-600 focus-visible:ring-offset-2 ${volumeVisible ? "bg-blue-600" : "bg-slate-300"}`}><span className={`absolute left-0 top-0.5 h-5 w-5 rounded-full bg-white shadow-sm transition-transform ${volumeVisible ? "translate-x-5" : "translate-x-0.5"}`} /></button></div>
-          </div>
-          <div className="space-y-3 rounded-md border bg-slate-50 p-3">
-            <div className="flex items-center justify-between gap-4">
-              <div><p className="text-sm font-medium text-slate-950">{copy.marketReplay.barCountTitle}</p><p className="mt-0.5 text-xs text-slate-500">{copy.marketReplay.barCountDescription}</p></div>
-              <div className="flex shrink-0 items-center gap-2"><span className="text-xs text-slate-500">{barCountConfig.enabled ? copy.marketReplay.emaOn : copy.marketReplay.emaOff}</span><button type="button" role="switch" aria-checked={barCountConfig.enabled} aria-label={copy.marketReplay.barCountMaster} onClick={() => setBarCountConfig((current) => ({ ...current, enabled: !current.enabled }))} className={`relative h-6 w-11 rounded-full transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-600 focus-visible:ring-offset-2 ${barCountConfig.enabled ? "bg-blue-600" : "bg-slate-300"}`}><span className={`absolute left-0 top-0.5 h-5 w-5 rounded-full bg-white shadow-sm transition-transform ${barCountConfig.enabled ? "translate-x-5" : "translate-x-0.5"}`} /></button></div>
-            </div>
-            <div className="grid gap-3 border-t pt-3 sm:grid-cols-[7rem_1fr] sm:items-center">
-              <Label htmlFor="bar-count-recent-days" className="text-xs text-slate-500">{copy.marketReplay.barCountRecentTradingDays}</Label>
-              <Input
-                key={barCountConfig.recentTradingDays}
-                id="bar-count-recent-days"
-                type="number"
-                min={BAR_COUNT_RECENT_TRADING_DAYS_MIN}
-                max={BAR_COUNT_RECENT_TRADING_DAYS_MAX}
-                step="1"
-                defaultValue={barCountConfig.recentTradingDays}
-                aria-describedby={barCountError ? "bar-count-error" : undefined}
-                onBlur={(event) => {
-                  if (!updateBarCountRecentTradingDays(Number(event.currentTarget.value))) {
-                    event.currentTarget.value = String(barCountConfig.recentTradingDays);
-                  }
-                }}
-                onKeyDown={(event) => { if (event.key === "Enter") event.currentTarget.blur(); }}
-                className="h-8 w-24 font-mono text-xs"
-              />
-              <Label htmlFor="bar-count-interval" className="text-xs text-slate-500">{copy.marketReplay.barCountInterval}</Label>
-              <Input
-                key={barCountConfig.interval}
-                id="bar-count-interval"
-                type="number"
-                min={BAR_COUNT_INTERVAL_MIN}
-                max={BAR_COUNT_INTERVAL_MAX}
-                step="1"
-                defaultValue={barCountConfig.interval}
-                aria-describedby={barCountError ? "bar-count-error" : undefined}
-                onBlur={(event) => {
-                  if (!updateBarCountInterval(Number(event.currentTarget.value))) event.currentTarget.value = String(barCountConfig.interval);
-                }}
-                onKeyDown={(event) => { if (event.key === "Enter") event.currentTarget.blur(); }}
-                className="h-8 w-24 font-mono text-xs"
-              />
-              {([
-                ["regularColor", copy.marketReplay.barCountRegularColor],
-                ["bar18Color", copy.marketReplay.barCountBar18Color],
-                ["hourCloseColor", copy.marketReplay.barCountHourCloseColor],
-              ] as const).map(([key, label]) => (
-                <div key={key} className="contents">
-                  <Label htmlFor={`bar-count-${key}`} className="text-xs text-slate-500">{label}</Label>
-                  <div className="flex items-center gap-2">
-                    <Input
-                      id={`bar-count-${key}`}
-                      type="color"
-                      value={barCountConfig[key]}
-                      onChange={(event) => setBarCountConfig((current) => ({ ...current, [key]: event.target.value.toUpperCase() }))}
-                      className="h-9 w-14 cursor-pointer p-1"
-                    />
-                    <span className="font-mono text-xs text-slate-500">{barCountConfig[key].toUpperCase()}</span>
-                  </div>
-                </div>
-              ))}
-            </div>
-            {barCountError ? <p id="bar-count-error" className="text-xs text-red-600" role="alert">{barCountError}</p> : null}
-          </div>
-          <div className="space-y-3 rounded-md border bg-slate-50 p-3">
-            <div className="flex items-center justify-between gap-4">
-              <div><p className="text-sm font-medium text-slate-950">{copy.marketReplay.abrTitle}</p><p className="mt-0.5 text-xs text-slate-500">{copy.marketReplay.abrDescription}</p></div>
-              <div className="flex shrink-0 items-center gap-2"><span className="text-xs text-slate-500">{abrEnabled ? copy.marketReplay.emaOn : copy.marketReplay.emaOff}</span><button type="button" role="switch" aria-checked={abrEnabled} aria-label={copy.marketReplay.abrMaster} onClick={() => setAbrEnabled((enabled) => !enabled)} className={`relative h-6 w-11 rounded-full transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-600 focus-visible:ring-offset-2 ${abrEnabled ? "bg-blue-600" : "bg-slate-300"}`}><span className={`absolute left-0 top-0.5 h-5 w-5 rounded-full bg-white shadow-sm transition-transform ${abrEnabled ? "translate-x-5" : "translate-x-0.5"}`} /></button></div>
-            </div>
-            <div className="flex items-center gap-3 border-t pt-3">
-              <Label htmlFor="abr-length" className="text-xs text-slate-500">{copy.marketReplay.abrLength}</Label>
-              <Input
-                key={abrLength}
-                id="abr-length"
-                type="number"
-                min={ABR_LENGTH_MIN}
-                max={ABR_LENGTH_MAX}
-                step="1"
-                defaultValue={abrLength}
-                onBlur={(event) => {
-                  if (!updateAbrLength(Number(event.currentTarget.value))) event.currentTarget.value = String(abrLength);
-                }}
-                onKeyDown={(event) => { if (event.key === "Enter") event.currentTarget.blur(); }}
-                className="h-8 w-24 font-mono text-xs"
-              />
-              <span className="text-xs text-slate-500">{copy.marketReplay.abrName(abrLength)}</span>
-            </div>
-            {abrError ? <p className="text-xs text-red-600">{abrError}</p> : null}
-          </div>
-          <div className="flex items-center justify-between rounded-md border bg-slate-50 p-3">
-            <div><p className="text-sm font-medium text-slate-950">{copy.marketReplay.emaTitle}</p><p className="mt-0.5 text-xs text-slate-500">{copy.marketReplay.emaDescription}</p></div>
-            <div className="flex items-center gap-2"><span className="text-xs text-slate-500">{emaEnabled ? copy.marketReplay.emaOn : copy.marketReplay.emaOff}</span><button type="button" role="switch" aria-checked={emaEnabled} aria-label={copy.marketReplay.emaMaster} onClick={() => setEmaEnabled((enabled) => !enabled)} className={`relative h-6 w-11 rounded-full transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-600 focus-visible:ring-offset-2 ${emaEnabled ? "bg-blue-600" : "bg-slate-300"}`}><span className={`absolute left-0 top-0.5 h-5 w-5 rounded-full bg-white shadow-sm transition-transform ${emaEnabled ? "translate-x-5" : "translate-x-0.5"}`} /></button></div>
-          </div>
-          <div className="space-y-3">
-            {emaIndicators.map((indicator) => (
-              <div key={indicator.id} className="space-y-3 rounded-md border p-3">
-                <div className="flex items-center gap-3">
-                  <input
-                    type="checkbox"
-                    checked={indicator.visible}
-                    onChange={(event) => setEmaIndicators((current) => current.map((item) => (
-                      item.id === indicator.id ? { ...item, visible: event.target.checked } : item
-                    )))}
-                    aria-label={copy.marketReplay.emaLineToggle(indicator.length)}
-                    className="h-4 w-4 rounded border-slate-300"
-                  />
-                  <span className="h-2.5 w-2.5 rounded-full" style={{ backgroundColor: indicator.color }} aria-hidden="true" />
-                  <span className="w-12 text-sm font-medium text-slate-700">{copy.marketReplay.emaShortName}</span>
-                  <Label htmlFor={`ema-length-${indicator.id}`} className="text-xs text-slate-500">{copy.marketReplay.emaLength}</Label>
-                  <Input
-                    key={`${indicator.id}-${indicator.length}`}
-                    id={`ema-length-${indicator.id}`}
-                    type="number"
-                    min={EMA_LENGTH_MIN}
-                    max={EMA_LENGTH_MAX}
-                    step="1"
-                    defaultValue={indicator.length}
-                    onBlur={(event) => {
-                      if (!setEmaLength(indicator.id, Number(event.currentTarget.value))) {
-                        event.currentTarget.value = String(indicator.length);
-                      }
-                    }}
-                    onKeyDown={(event) => { if (event.key === "Enter") event.currentTarget.blur(); }}
-                    className="h-8 w-24 font-mono text-xs"
-                  />
-                  <Button
-                    type="button"
-                    variant="ghost"
-                    size="icon"
-                    onClick={() => {
-                      setEmaIndicators((current) => current.filter((item) => item.id !== indicator.id));
-                      setEmaError(null);
-                    }}
-                    aria-label={copy.marketReplay.emaRemove(indicator.length)}
-                    className="ml-auto h-8 w-8 text-slate-500"
-                  >
-                    <X className="h-4 w-4" />
-                  </Button>
-                </div>
-                <div className="grid gap-3 border-t pt-3 sm:grid-cols-[6rem_1fr] sm:items-center">
-                  <Label htmlFor={`ema-color-${indicator.id}`} className="text-xs text-slate-500">{copy.marketReplay.lineColor}</Label>
-                  <div className="flex items-center gap-2">
-                    <Input
-                      id={`ema-color-${indicator.id}`}
-                      type="color"
-                      value={indicator.color}
-                      onChange={(event) => setEmaIndicators((current) => current.map((item) => (
-                        item.id === indicator.id ? { ...item, color: event.target.value.toUpperCase() } : item
-                      )))}
-                      className="h-9 w-14 cursor-pointer p-1"
-                    />
-                    <span className="font-mono text-xs text-slate-500">{indicator.color.toUpperCase()}</span>
-                  </div>
-                  <Label className="text-xs text-slate-500">{copy.marketReplay.lineWidth}</Label>
-                  <div className="flex gap-1">
-                    {EMA_LINE_WIDTHS.map((lineWidth) => (
-                      <button
-                        key={lineWidth}
-                        type="button"
-                        aria-label={`${copy.marketReplay.lineWidth} ${lineWidth}`}
-                        aria-pressed={indicator.lineWidth === lineWidth}
-                        onClick={() => setEmaIndicators((current) => current.map((item) => (
-                          item.id === indicator.id ? { ...item, lineWidth } : item
-                        )))}
-                        className={`flex h-9 w-10 items-center justify-center rounded-md border ${indicator.lineWidth === lineWidth ? "border-blue-600 bg-blue-50" : "border-slate-200 hover:bg-slate-50"}`}
-                      >
-                        <span className="block w-5 bg-slate-700" style={{ height: lineWidth }} />
-                      </button>
-                    ))}
-                  </div>
-                  <Label className="text-xs text-slate-500">{copy.marketReplay.lineStyle}</Label>
-                  <div className="grid grid-cols-3 gap-1">
-                    {EMA_LINE_STYLES.map((lineStyle) => {
-                      const label = lineStyle === "SOLID"
-                        ? copy.marketReplay.lineSolid
-                        : lineStyle === "DASHED"
-                          ? copy.marketReplay.lineDashed
-                          : copy.marketReplay.lineDotted;
-                      return (
-                        <button
-                          key={lineStyle}
-                          type="button"
-                          aria-pressed={indicator.lineStyle === lineStyle}
-                          onClick={() => setEmaIndicators((current) => current.map((item) => (
-                            item.id === indicator.id ? { ...item, lineStyle } : item
-                          )))}
-                          className={`rounded-md border px-2 py-2 text-xs ${indicator.lineStyle === lineStyle ? "border-blue-600 bg-blue-50 text-blue-700" : "border-slate-200 text-slate-600 hover:bg-slate-50"}`}
-                        >
-                          {label}
-                        </button>
-                      );
-                    })}
-                  </div>
-                </div>
-              </div>
-            ))}
-          </div>
-          <Button type="button" variant="outline" size="sm" onClick={addEma} disabled={emaIndicators.length >= MAX_EMA_INDICATORS}><Plus className="h-4 w-4" />{copy.marketReplay.emaAdd}</Button>
-          {emaError ? <p className="text-xs text-red-600">{emaError}</p> : null}
-        </div>
-      </Dialog>
-
+      <IndicatorSettingsDialog
+        open={settingsDialog === "indicators"}
+        onClose={() => setSettingsDialog(null)}
+        candleCountdown={{
+          enabled: candleCountdownEnabled,
+          onChange: setCandleCountdownEnabled,
+        }}
+        volumeVisible={volumeVisible}
+        onVolumeVisibleChange={setVolumeVisible}
+        barCountConfig={barCountConfig}
+        setBarCountConfig={setBarCountConfig}
+        onBarCountRecentTradingDaysChange={updateBarCountRecentTradingDays}
+        onBarCountIntervalChange={updateBarCountInterval}
+        barCountError={barCountError}
+        abrEnabled={abrEnabled}
+        onAbrEnabledChange={setAbrEnabled}
+        abrLength={abrLength}
+        onAbrLengthChange={updateAbrLength}
+        abrError={abrError}
+        emaEnabled={emaEnabled}
+        onEmaEnabledChange={setEmaEnabled}
+        emaIndicators={emaIndicators}
+        setEmaIndicators={setEmaIndicators}
+        onEmaLengthChange={setEmaLength}
+        onAddEma={addEma}
+        emaError={emaError}
+      />
       <Dialog open={settingsDialog === "paper"} title={copy.marketReplay.accountSettings} description={copy.marketReplay.accountSettingsDescription} className="max-w-3xl" onClose={() => setSettingsDialog(null)}>
         <div className="space-y-4">
           <PaperAccountStrip snapshot={paperSnapshot} />

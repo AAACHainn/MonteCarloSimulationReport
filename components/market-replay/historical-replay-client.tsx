@@ -1,15 +1,15 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { ListTree, Loader2, Palette, Plus, Ruler, Settings2, Trash2, TrendingUp, X } from "lucide-react";
+import { ListTree, Loader2, Palette, Ruler, Settings2, Trash2, TrendingUp, X } from "lucide-react";
 import * as Popover from "@radix-ui/react-popover";
 import { ReplayChart } from "@/components/market-replay/replay-chart";
+import { IndicatorSettingsDialog } from "@/components/market-replay/indicator-settings-dialog";
 import { useReplayPreferences } from "@/components/market-replay/use-replay-preferences";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { Button } from "@/components/ui/button";
 import { Dialog } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
-import { Label } from "@/components/ui/label";
 import { copy } from "@/lib/i18n";
 import { isValidBarCountInterval, isValidBarCountRecentTradingDays } from "@/lib/market-replay/bar-count";
 import type { CandlestickStyle } from "@/lib/market-replay/candlestick-style";
@@ -93,17 +93,6 @@ function parseStoredDrawings(value: string | null, datasetId: string): MarketDra
   } catch {
     return [];
   }
-}
-
-function SettingSwitch({ checked, label, onChange }: { checked: boolean; label: string; onChange: () => void }) {
-  return <button
-    type="button"
-    role="switch"
-    aria-checked={checked}
-    aria-label={label}
-    onClick={onChange}
-    className={`relative h-6 w-11 rounded-full transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-600 focus-visible:ring-offset-2 ${checked ? "bg-blue-600" : "bg-slate-300"}`}
-  ><span className={`absolute left-0 top-0.5 h-5 w-5 rounded-full bg-white shadow-sm transition-transform ${checked ? "translate-x-5" : "translate-x-0.5"}`} /></button>;
 }
 
 export function HistoricalReplayClient({
@@ -305,21 +294,46 @@ export function HistoricalReplayClient({
   function updateAbrLength(value: number) {
     if (!Number.isInteger(value) || value < ABR_LENGTH_MIN || value > ABR_LENGTH_MAX) {
       setIndicatorError(copy.marketReplay.abrLengthRange(ABR_LENGTH_MIN, ABR_LENGTH_MAX));
-      return;
+      return false;
     }
     setAbrLength(value);
     setIndicatorError(null);
+    return true;
   }
 
   function updateEmaLength(id: string, value: number) {
     if (!Number.isInteger(value) || value < EMA_LENGTH_MIN || value > EMA_LENGTH_MAX) {
       setIndicatorError(copy.marketReplay.emaLengthRange(EMA_LENGTH_MIN, EMA_LENGTH_MAX));
-      return;
+      return false;
     }
     setEmaIndicators((current) => current.map((indicator) => indicator.id === id
       ? { ...indicator, length: value }
       : indicator));
     setIndicatorError(null);
+    return true;
+  }
+
+  function updateBarCountRecentTradingDays(value: number) {
+    if (!isValidBarCountRecentTradingDays(value)) {
+      setIndicatorError(copy.marketReplay.barCountRecentTradingDaysRange(
+        BAR_COUNT_RECENT_TRADING_DAYS_MIN,
+        BAR_COUNT_RECENT_TRADING_DAYS_MAX,
+      ));
+      return false;
+    }
+    setBarCountConfig((current) => ({ ...current, recentTradingDays: value }));
+    setIndicatorError(null);
+    return true;
+  }
+
+  function updateBarCountInterval(value: number) {
+    if (!isValidBarCountInterval(value)) {
+      setIndicatorError(copy.marketReplay.barCountIntervalRange(BAR_COUNT_INTERVAL_MIN, BAR_COUNT_INTERVAL_MAX));
+      return false;
+    }
+    setBarCountConfig((current) => ({ ...current, interval: value }));
+    setIndicatorError(null);
+    return true;
   }
 
   function addEma() {
@@ -461,32 +475,28 @@ export function HistoricalReplayClient({
       </div> : null}
     </Dialog>
 
-    <Dialog open={settingsDialog === "indicators"} title={copy.marketReplay.indicatorSettings} description={copy.marketReplay.indicatorSettingsDescription} onClose={() => setSettingsDialog(null)}>
-      <div className="space-y-4">
-        <div className="flex items-center justify-between rounded-md border bg-slate-50 p-3"><div><p className="text-sm font-medium text-slate-950">{copy.marketReplay.volumeTitle}</p><p className="mt-0.5 text-xs text-slate-500">{copy.marketReplay.volumeDescription}</p></div><SettingSwitch checked={volumeVisible} label={copy.marketReplay.volumeToggle} onChange={() => setVolumeVisible((current) => !current)} /></div>
-        <div className="space-y-3 rounded-md border bg-slate-50 p-3">
-          <div className="flex items-center justify-between gap-4"><div><p className="text-sm font-medium text-slate-950">{copy.marketReplay.barCountTitle}</p><p className="mt-0.5 text-xs text-slate-500">{copy.marketReplay.barCountDescription}</p></div><SettingSwitch checked={barCountConfig.enabled} label={copy.marketReplay.barCountMaster} onChange={() => setBarCountConfig((current) => ({ ...current, enabled: !current.enabled }))} /></div>
-          <div className="grid grid-cols-[1fr_auto] items-center gap-3 border-t pt-3">
-            <Label htmlFor="history-bar-count-days">{copy.marketReplay.barCountRecentTradingDays}</Label><Input id="history-bar-count-days" type="number" min={BAR_COUNT_RECENT_TRADING_DAYS_MIN} max={BAR_COUNT_RECENT_TRADING_DAYS_MAX} value={barCountConfig.recentTradingDays} onChange={(event) => { const value = Number(event.target.value); if (isValidBarCountRecentTradingDays(value)) setBarCountConfig((current) => ({ ...current, recentTradingDays: value })); }} className="h-8 w-24" />
-            <Label htmlFor="history-bar-count-interval">{copy.marketReplay.barCountInterval}</Label><Input id="history-bar-count-interval" type="number" min={BAR_COUNT_INTERVAL_MIN} max={BAR_COUNT_INTERVAL_MAX} value={barCountConfig.interval} onChange={(event) => { const value = Number(event.target.value); if (isValidBarCountInterval(value)) setBarCountConfig((current) => ({ ...current, interval: value })); }} className="h-8 w-24" />
-          </div>
-        </div>
-        <div className="space-y-3 rounded-md border bg-slate-50 p-3">
-          <div className="flex items-center justify-between gap-4"><div><p className="text-sm font-medium text-slate-950">{copy.marketReplay.abrTitle}</p><p className="mt-0.5 text-xs text-slate-500">{copy.marketReplay.abrDescription}</p></div><SettingSwitch checked={abrEnabled} label={copy.marketReplay.abrMaster} onChange={() => setAbrEnabled((current) => !current)} /></div>
-          <div className="flex items-center gap-3 border-t pt-3"><Label htmlFor="history-abr-length">{copy.marketReplay.abrLength}</Label><Input id="history-abr-length" type="number" min={ABR_LENGTH_MIN} max={ABR_LENGTH_MAX} defaultValue={abrLength} onBlur={(event) => updateAbrLength(Number(event.target.value))} className="h-8 w-24" /></div>
-        </div>
-        <div className="space-y-3 rounded-md border bg-slate-50 p-3">
-          <div className="flex items-center justify-between gap-4"><div><p className="text-sm font-medium text-slate-950">{copy.marketReplay.emaTitle}</p><p className="mt-0.5 text-xs text-slate-500">{copy.marketReplay.emaDescription}</p></div><SettingSwitch checked={emaEnabled} label={copy.marketReplay.emaMaster} onChange={() => setEmaEnabled((current) => !current)} /></div>
-          <div className="space-y-2 border-t pt-3">{emaIndicators.map((indicator) => <div key={indicator.id} className="flex items-center gap-3 rounded-md border bg-white p-2">
-            <input type="checkbox" checked={indicator.visible} onChange={(event) => setEmaIndicators((current) => current.map((item) => item.id === indicator.id ? { ...item, visible: event.target.checked } : item))} aria-label={copy.marketReplay.emaLineToggle(indicator.length)} className="h-4 w-4 rounded border-slate-300" />
-            <Input type="color" value={indicator.color} aria-label={copy.marketReplay.lineColor} onChange={(event) => setEmaIndicators((current) => current.map((item) => item.id === indicator.id ? { ...item, color: event.target.value.toUpperCase() } : item))} className="h-8 w-12 cursor-pointer p-1" />
-            <Label htmlFor={`history-ema-${indicator.id}`}>{copy.marketReplay.emaLength}</Label><Input id={`history-ema-${indicator.id}`} type="number" min={EMA_LENGTH_MIN} max={EMA_LENGTH_MAX} defaultValue={indicator.length} onBlur={(event) => updateEmaLength(indicator.id, Number(event.target.value))} className="h-8 w-24" />
-            <Button type="button" variant="ghost" size="icon" className="ml-auto h-8 w-8 text-slate-500" aria-label={copy.marketReplay.emaRemove(indicator.length)} onClick={() => setEmaIndicators((current) => current.filter((item) => item.id !== indicator.id))}><X className="h-4 w-4" /></Button>
-          </div>)}</div>
-          <Button type="button" variant="outline" size="sm" onClick={addEma} disabled={emaIndicators.length >= MAX_EMA_INDICATORS}><Plus className="h-4 w-4" />{copy.marketReplay.emaAdd}</Button>
-        </div>
-        {indicatorError ? <p className="text-xs text-red-600" role="alert">{indicatorError}</p> : null}
-      </div>
-    </Dialog>
+    <IndicatorSettingsDialog
+      open={settingsDialog === "indicators"}
+      onClose={() => setSettingsDialog(null)}
+      volumeVisible={volumeVisible}
+      onVolumeVisibleChange={setVolumeVisible}
+      barCountConfig={barCountConfig}
+      setBarCountConfig={setBarCountConfig}
+      onBarCountRecentTradingDaysChange={updateBarCountRecentTradingDays}
+      onBarCountIntervalChange={updateBarCountInterval}
+      barCountError={indicatorError}
+      abrEnabled={abrEnabled}
+      onAbrEnabledChange={setAbrEnabled}
+      abrLength={abrLength}
+      onAbrLengthChange={updateAbrLength}
+      abrError={indicatorError}
+      emaEnabled={emaEnabled}
+      onEmaEnabledChange={setEmaEnabled}
+      emaIndicators={emaIndicators}
+      setEmaIndicators={setEmaIndicators}
+      onEmaLengthChange={updateEmaLength}
+      onAddEma={addEma}
+      emaError={indicatorError}
+    />
   </>;
 }

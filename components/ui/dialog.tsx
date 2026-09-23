@@ -10,10 +10,11 @@ type DialogProps = {
   description?: string;
   children: ReactNode;
   className?: string;
+  contentClassName?: string;
   onClose: () => void;
 };
 
-export function Dialog({ open, title, description, children, className, onClose }: DialogProps) {
+export function Dialog({ open, title, description, children, className, contentClassName, onClose }: DialogProps) {
   useEffect(() => {
     if (!open) return;
     const onKeyDown = (event: KeyboardEvent) => {
@@ -51,7 +52,7 @@ export function Dialog({ open, title, description, children, className, onClose 
             <X className="h-4 w-4" />
           </button>
         </header>
-        <div className="min-h-0 flex-1 overflow-y-auto p-5">{children}</div>
+        <div className={cn("min-h-0 flex-1 overflow-y-auto p-5", contentClassName)}>{children}</div>
       </section>
     </div>
   );
