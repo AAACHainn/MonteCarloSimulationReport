@@ -2,21 +2,39 @@ import { describe, expect, it } from "vitest";
 import { createPlaybackIntentTracker, retryReplayRead } from "./playback-lifecycle";
 
 describe("playback intent ownership", () => {
-  it("allows the operation that paused playback to restore it", () => {
+  it("resumes only after every temporary suspension is released", () => {
     const tracker = createPlaybackIntentTracker();
-    expect(tracker.mayResume(tracker.suspend(true))).toBe(true);
+    tracker.play();
+    const first = tracker.suspend();
+    const second = tracker.suspend();
+    expect(tracker.release(first)).toBe(false);
+    expect(tracker.release(second)).toBe(true);
+    expect(tracker.release(second)).toBe(false);
   });
 
-  it("does not let an old operation override a later user pause", () => {
+  it("does not resume after a later user pause", () => {
     const tracker = createPlaybackIntentTracker();
-    const operation = tracker.suspend(true);
-    tracker.invalidate();
-    expect(tracker.mayResume(operation)).toBe(false);
+    tracker.play();
+    const operation = tracker.suspend();
+    tracker.pause();
+    expect(tracker.release(operation)).toBe(false);
   });
 
-  it("does not start playback when the operation began while paused", () => {
+  it("waits for an existing operation when the user requests playback", () => {
     const tracker = createPlaybackIntentTracker();
-    expect(tracker.mayResume(tracker.suspend(false))).toBe(false);
+    const operation = tracker.suspend();
+    tracker.play();
+    expect(tracker.canPlay()).toBe(false);
+    expect(tracker.release(operation)).toBe(true);
+  });
+
+  it("invalidates asynchronous work after a newer user intent", () => {
+    const tracker = createPlaybackIntentTracker();
+    const oldPlayback = tracker.play();
+    tracker.pause();
+    const newPlayback = tracker.play();
+    expect(tracker.isCurrent(oldPlayback)).toBe(false);
+    expect(tracker.isCurrent(newPlayback)).toBe(true);
   });
 });
 

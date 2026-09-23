@@ -1,26 +1,60 @@
-export type ReplayPauseReason =
-  | "user"
+export type ReplayAutoPauseReason =
   | "page-hidden"
-  | "operation"
   | "operation-failed"
   | "source-failed"
   | "sync-conflict"
-  | "state-mismatch"
-  | "finished";
+  | "state-mismatch";
 
-export type ReplaySuspension = {
-  intent: number;
-  wasPlaying: boolean;
+export type ReplayPauseReason = "user" | "operation" | ReplayAutoPauseReason | "finished";
+
+export type ReplayPlaybackIntent = {
+  version: number;
 };
 
-/** Tracks who owns permission to resume after a temporary operation. */
+export type ReplaySuspension = {
+  id: number;
+};
+
+/** Separates user playback intent from one or more temporary operation blockers. */
 export function createPlaybackIntentTracker() {
-  let intent = 0;
+  let version = 0;
+  let nextSuspensionId = 0;
+  let wantsToPlay = false;
+  const suspensions = new Set<number>();
+
+  const current = (): ReplayPlaybackIntent => ({ version });
+
   return {
-    current: () => intent,
-    invalidate: () => { intent += 1; return intent; },
-    suspend: (wasPlaying: boolean): ReplaySuspension => ({ intent, wasPlaying }),
-    mayResume: (suspension: ReplaySuspension) => suspension.wasPlaying && suspension.intent === intent,
+    current,
+    isCurrent: (intent: ReplayPlaybackIntent) => intent.version === version,
+    wantsToPlay: () => wantsToPlay,
+    canPlay: () => wantsToPlay && suspensions.size === 0,
+    play: () => {
+      version += 1;
+      wantsToPlay = true;
+      return current();
+    },
+    pause: () => {
+      version += 1;
+      wantsToPlay = false;
+      return current();
+    },
+    suspend: (): ReplaySuspension => {
+      const suspension = { id: ++nextSuspensionId };
+      suspensions.add(suspension.id);
+      return suspension;
+    },
+    release: (suspension: ReplaySuspension) => {
+      const released = suspensions.delete(suspension.id);
+      return released && wantsToPlay && suspensions.size === 0;
+    },
+    hasSuspensions: () => suspensions.size > 0,
+    finish: () => {
+      version += 1;
+      wantsToPlay = false;
+      suspensions.clear();
+      return current();
+    },
   };
 }
 

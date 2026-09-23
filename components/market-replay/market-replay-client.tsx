@@ -6,6 +6,7 @@ import { startTransition, useCallback, useEffect, useMemo, useRef, useState } fr
 import { BookOpen, ListTree, Loader2, Palette, Plus, RotateCcw, Ruler, Settings2, Trash2, TrendingUp, WalletCards, X } from "lucide-react";
 import * as Popover from "@radix-ui/react-popover";
 import { ReplayChart, type ReplayVisibleSequenceRange } from "@/components/market-replay/replay-chart";
+import { ReplayAutoPauseNotice } from "@/components/market-replay/replay-auto-pause-notice";
 import { ReplayStartDialog } from "@/components/market-replay/replay-start-dialog";
 import { DEFAULT_REPLAY_MAX_VISIBLE_BARS } from "@/lib/market-replay/chart-range";
 import type { CandlestickStyle } from "@/lib/market-replay/candlestick-style";
@@ -91,7 +92,11 @@ import {
 
 import { useReplayState } from "@/lib/market-replay/use-replay-state";
 import { useReplayPlayback } from "@/lib/market-replay/use-replay-playback";
-import { retryReplayRead, type ReplaySuspension } from "@/lib/market-replay/playback-lifecycle";
+import {
+  retryReplayRead,
+  type ReplayPlaybackIntent,
+  type ReplaySuspension,
+} from "@/lib/market-replay/playback-lifecycle";
 import { useReplayWindowCaches } from "@/lib/market-replay/use-replay-window-cache";
 import { useReplayAccountRuntime } from "@/lib/market-replay/use-replay-account-runtime";
 import { createReplayStepQueue } from "@/lib/market-replay/step-queue";
@@ -216,11 +221,17 @@ export function MarketReplayClient({ dataset, initialJournalFocus = null }: { da
   const [replay, setReplay, latestReplayRef] = useReplayState();
   const {
     pauseReason,
+    autoPauseEvent,
     play: playPlayback,
     pause: pausePlayback,
+    autoPause: autoPausePlayback,
     suspend: suspendPlayback,
     restore: restorePlayback,
     finish: finishPlayback,
+    dismissAutoPause,
+    captureIntent: capturePlaybackIntent,
+    isIntentCurrent: isPlaybackIntentCurrent,
+    shouldResume: shouldResumePlayback,
   } = useReplayPlayback(latestReplayRef, setReplay);
   const [startValue, setStartValue] = useState(() => dateTimeLocalValue(dataset.startTime, dataset.timezone));
   const [startDialogOpen, setStartDialogOpen] = useState(false);
@@ -935,10 +946,10 @@ export function MarketReplayClient({ dataset, initialJournalFocus = null }: { da
     ).then(() => {
       restorePlayback(suspension);
     }).catch((error) => {
-      pausePlayback("operation-failed");
       setEmaError(error instanceof Error ? error.message : copy.marketReplay.loadError);
+      restorePlayback(suspension);
     });
-  }, [abrSettingsLoaded, emaSettingsLoaded, indicatorWarmupCount, latestReplayRef, loadWindow, pausePlayback, restorePlayback, suspendPlayback]);
+  }, [abrSettingsLoaded, emaSettingsLoaded, indicatorWarmupCount, latestReplayRef, loadWindow, restorePlayback, suspendPlayback]);
 
   const reloadPaper = useCallback(async () => {
     const response = await fetch(`/api/market-datasets/${dataset.id}/paper-session`);
@@ -999,6 +1010,7 @@ export function MarketReplayClient({ dataset, initialJournalFocus = null }: { da
       const next = createReplayState(dataset.barCount, progress.startSequence, progress.playbackRate,
         progress.displayIntervalSeconds ?? dataset.sourceIntervalSeconds!, progress.currentSequence,
         progress.generation, progress.syncVersion, progress.displaySession ?? "ETH");
+      if (shouldResumePlayback() && next.status !== "finished") next.status = "playing";
       setReplay(next);
       await loadWindow(next.currentSequence, next.displayIntervalSeconds, next.displaySession, indicatorWarmupCountRef.current);
       setRecoveryNotice(visibleSequence > next.currentSequence ? copy.marketReplay.recoveredWithRollback(visibleSequence - next.currentSequence) : null);
@@ -1007,17 +1019,25 @@ export function MarketReplayClient({ dataset, initialJournalFocus = null }: { da
     paperDeltaAccumulatorRef.current = createPaperDeltaAccumulator(progress?.currentSequence ?? -1);
     playbackAccumulatorRef.current = 0;
     playbackClockRef.current = performance.now();
-  }, [commitConfirmedPaperSnapshot, dataset, latestReplayRef, loadWindow, paperDeltaAccumulatorRef, setReplay]);
+  }, [commitConfirmedPaperSnapshot, dataset, latestReplayRef, loadWindow, paperDeltaAccumulatorRef, setReplay, shouldResumePlayback]);
 
   const startSync = useCallback(async (keepalive = false, silent = false) => {
+    const syncIntent = capturePlaybackIntent();
     if (!paperSessionLoadedRef.current) await paperSessionLoadRef.current;
     if (syncingRef.current) return syncCompletionRef.current;
     const current = latestReplayRef.current;
     if (!current || current.currentSequence <= current.confirmedSequence) return true;
     if (current.currentSequence - current.confirmedSequence > REPLAY_SYNC_BATCH_SIZE) {
       recoveryRequiredRef.current = true;
-      pausePlayback("state-mismatch");
-      await recoverReplay();
+      const suspension = suspendPlayback();
+      try {
+        await recoverReplay();
+      } catch (error) {
+        setPaperError(error instanceof Error ? error.message : copy.marketReplay.syncMismatch);
+        autoPausePlayback("state-mismatch", syncIntent);
+      } finally {
+        restorePlayback(suspension);
+      }
       return false;
     }
     syncingRef.current = true;
@@ -1028,8 +1048,15 @@ export function MarketReplayClient({ dataset, initialJournalFocus = null }: { da
       || frozenAccumulator.toSequence !== current.currentSequence) {
       syncingRef.current = false;
       recoveryRequiredRef.current = true;
-      pausePlayback("state-mismatch");
-      await recoverReplay();
+      const suspension = suspendPlayback();
+      try {
+        await recoverReplay();
+      } catch (error) {
+        setPaperError(error instanceof Error ? error.message : copy.marketReplay.syncMismatch);
+        autoPausePlayback("state-mismatch", syncIntent);
+      } finally {
+        restorePlayback(suspension);
+      }
       return false;
     }
     paperDeltaAccumulatorRef.current = createPaperDeltaAccumulator(current.currentSequence);
@@ -1092,10 +1119,17 @@ export function MarketReplayClient({ dataset, initialJournalFocus = null }: { da
       return true;
     })().catch(async (error) => {
       recoveryRequiredRef.current = true;
-      pausePlayback("sync-conflict");
       setPaperError(error instanceof Error ? error.message : copy.paperTrading.advanceFailed);
       await advanceCompletionRef.current.catch(() => undefined);
-      try { await recoverReplay(); } catch { /* A later action retries authoritative recovery. */ }
+      if (!isPlaybackIntentCurrent(syncIntent)) return false;
+      const suspension = suspendPlayback();
+      try {
+        await recoverReplay();
+      } catch {
+        autoPausePlayback("sync-conflict", syncIntent);
+      } finally {
+        restorePlayback(suspension);
+      }
       return false;
     }).finally(() => {
       syncingRef.current = false;
@@ -1104,7 +1138,7 @@ export function MarketReplayClient({ dataset, initialJournalFocus = null }: { da
     });
     syncCompletionRef.current = operation;
     return operation;
-  }, [confirmedPaperSnapshotRef, dataset.dataVersion, dataset.id, getDisplayCache, lastSyncStartedAtRef, latestReplayRef, loadTradeAnnotations, paperDeltaAccumulatorRef, paperSessionLoadedRef, paperSessionLoadRef, paperSnapshotRef, pausePlayback, recoverReplay, setReplay, syncCompletionRef, syncLatencyMsRef, syncRequestCounterRef, syncingRef]);
+  }, [autoPausePlayback, capturePlaybackIntent, confirmedPaperSnapshotRef, dataset.dataVersion, dataset.id, getDisplayCache, isPlaybackIntentCurrent, lastSyncStartedAtRef, latestReplayRef, loadTradeAnnotations, paperDeltaAccumulatorRef, paperSessionLoadedRef, paperSessionLoadRef, paperSnapshotRef, recoverReplay, restorePlayback, setReplay, suspendPlayback, syncCompletionRef, syncLatencyMsRef, syncRequestCounterRef, syncingRef]);
 
   const flushVisible = useCallback(async (keepalive = false) => {
     while (true) {
@@ -1115,7 +1149,10 @@ export function MarketReplayClient({ dataset, initialJournalFocus = null }: { da
     }
   }, [latestReplayRef, startSync, syncCompletionRef, syncingRef]);
 
-  const fastForwardToNextVisibleBar = useCallback(async (shouldContinue: () => boolean = () => true) => {
+  const fastForwardToNextVisibleBar = useCallback(async (
+    shouldContinue: () => boolean = () => true,
+    playbackIntent?: ReplayPlaybackIntent,
+  ) => {
     let current = latestReplayRef.current;
     if (!current || viewChangingRef.current || advancingRef.current || paperMutationActiveRef.current) return false;
     viewChangingRef.current = true;
@@ -1176,18 +1213,25 @@ export function MarketReplayClient({ dataset, initialJournalFocus = null }: { da
     } catch (error) {
       recoveryRequiredRef.current = true;
       setPaperError(error instanceof Error ? error.message : copy.paperTrading.advanceFailed);
-      pausePlayback("operation-failed");
-      try { await recoverReplay(); } catch { /* A later action retries authoritative recovery. */ }
+      const suspension = suspendPlayback();
+      try {
+        await recoverReplay();
+      } catch {
+        autoPausePlayback("operation-failed", playbackIntent);
+      } finally {
+        restorePlayback(suspension);
+      }
       return false;
     } finally {
       endBuffering();
       viewChangingRef.current = false;
     }
-  }, [abrLength, beginBuffering, commitConfirmedPaperSnapshot, confirmedPaperSnapshotRef, dataset.id, displayUtcOffsetMinutes, endBuffering, flushVisible, latestReplayRef, loadWindow, paperDeltaAccumulatorRef, paperMutationActiveRef, paperMutationChainRef, pausePlayback, recoverReplay, setReplay]);
+  }, [abrLength, autoPausePlayback, beginBuffering, commitConfirmedPaperSnapshot, confirmedPaperSnapshotRef, dataset.id, displayUtcOffsetMinutes, endBuffering, flushVisible, latestReplayRef, loadWindow, paperDeltaAccumulatorRef, paperMutationActiveRef, paperMutationChainRef, recoverReplay, restorePlayback, setReplay, suspendPlayback]);
 
   const processLocalBars = useCallback(async (
     requestedCount: number,
     shouldContinue: () => boolean = () => true,
+    playbackIntent?: ReplayPlaybackIntent,
   ) => {
     const frameStartedAt = performance.now();
     let current = latestReplayRef.current;
@@ -1210,7 +1254,16 @@ export function MarketReplayClient({ dataset, initialJournalFocus = null }: { da
         if (!shouldContinue()) return 0;
       }
       if (recoveryRequiredRef.current) {
-        await recoverReplay();
+        const suspension = suspendPlayback();
+        try {
+          await recoverReplay();
+        } catch (error) {
+          setPaperError(error instanceof Error ? error.message : copy.marketReplay.syncMismatch);
+          autoPausePlayback("state-mismatch", playbackIntent);
+          return 0;
+        } finally {
+          restorePlayback(suspension);
+        }
         current = latestReplayRef.current;
         if (!shouldContinue() || !current) return 0;
       }
@@ -1316,7 +1369,7 @@ export function MarketReplayClient({ dataset, initialJournalFocus = null }: { da
       endBuffering();
       recoveryRequiredRef.current = true;
       setPaperError(error instanceof Error ? error.message : copy.paperTrading.advanceFailed);
-      pausePlayback("source-failed");
+      autoPausePlayback("source-failed", playbackIntent);
       return 0;
     } finally {
       performance.measure("market-replay-source-frame", { start: frameStartedAt, end: performance.now() });
@@ -1324,7 +1377,7 @@ export function MarketReplayClient({ dataset, initialJournalFocus = null }: { da
       advancingRef.current = false;
       resolveAdvance();
     }
-  }, [abrLength, beginBuffering, dataset.barCount, dataset.priceTickSize, dataset.sourceIntervalSeconds, dataset.startTime, displayMarketSession, displayUtcOffsetMinutes, endBuffering, latestReplayRef, marketCache, marketSession, paperDeltaAccumulatorRef, paperMutationActiveRef, paperSessionLoadedRef, paperSessionLoadRef, paperSnapshotRef, pausePlayback, recoverReplay, setReplay, syncLatencyMsRef, syncingRef]);
+  }, [abrLength, autoPausePlayback, beginBuffering, dataset.barCount, dataset.priceTickSize, dataset.sourceIntervalSeconds, dataset.startTime, displayMarketSession, displayUtcOffsetMinutes, endBuffering, latestReplayRef, marketCache, marketSession, paperDeltaAccumulatorRef, paperMutationActiveRef, paperSessionLoadedRef, paperSessionLoadRef, paperSnapshotRef, recoverReplay, restorePlayback, setReplay, suspendPlayback, syncLatencyMsRef, syncingRef]);
 
   const replayStatus = replay?.status;
   useEffect(() => {
@@ -1335,6 +1388,7 @@ export function MarketReplayClient({ dataset, initialJournalFocus = null }: { da
     if (replayStatus !== "playing") return;
     let cancelled = false;
     const epoch = ++playbackEpochRef.current;
+    const playbackIntent = capturePlaybackIntent();
     const isCurrentPlayback = () => !cancelled
       && playbackEpochRef.current === epoch
       && latestReplayRef.current?.status === "playing";
@@ -1374,11 +1428,11 @@ export function MarketReplayClient({ dataset, initialJournalFocus = null }: { da
             displayMarketSession,
           ) : undefined;
           if (nextSource && !nextBucket) {
-            await fastForwardToNextVisibleBar(isCurrentPlayback);
+            await fastForwardToNextVisibleBar(isCurrentPlayback, playbackIntent);
             playbackAccumulatorRef.current = 0;
             playbackClockRef.current = performance.now();
           } else {
-            const processed = await processLocalBars(advance.count, isCurrentPlayback);
+            const processed = await processLocalBars(advance.count, isCurrentPlayback, playbackIntent);
             playbackAccumulatorRef.current += Math.max(0, advance.count - processed);
           }
         }
@@ -1391,7 +1445,7 @@ export function MarketReplayClient({ dataset, initialJournalFocus = null }: { da
       } catch (error) {
         endBuffering();
         setPaperError(error instanceof Error ? error.message : copy.marketReplay.loadError);
-        pausePlayback("source-failed");
+        autoPausePlayback("source-failed", playbackIntent);
       } finally {
         if (isCurrentPlayback()) frame = requestAnimationFrame(tick);
       }
@@ -1402,19 +1456,19 @@ export function MarketReplayClient({ dataset, initialJournalFocus = null }: { da
       if (playbackEpochRef.current === epoch) playbackEpochRef.current += 1;
       cancelAnimationFrame(frame);
     };
-  }, [beginBuffering, dataset.sourceIntervalSeconds, dataset.startTime, displayMarketSession, endBuffering, fastForwardToNextVisibleBar, lastSyncStartedAtRef, latestReplayRef, marketCache, marketSession, pausePlayback, processLocalBars, replayStatus, startSync, syncLatencyMsRef, syncingRef]);
+  }, [autoPausePlayback, beginBuffering, capturePlaybackIntent, dataset.sourceIntervalSeconds, dataset.startTime, displayMarketSession, endBuffering, fastForwardToNextVisibleBar, lastSyncStartedAtRef, latestReplayRef, marketCache, marketSession, processLocalBars, replayStatus, startSync, syncLatencyMsRef, syncingRef]);
 
   useEffect(() => {
     const pauseWhenHidden = () => {
       if (document.visibilityState !== "hidden") return;
       playbackEpochRef.current += 1;
       manualStepsRef.current.cancel();
-      if (latestReplayRef.current?.status === "playing") pausePlayback("page-hidden");
+      autoPausePlayback("page-hidden");
       void advanceCompletionRef.current.then(() => flushVisible());
     };
     document.addEventListener("visibilitychange", pauseWhenHidden);
     return () => document.removeEventListener("visibilitychange", pauseWhenHidden);
-  }, [flushVisible, latestReplayRef, pausePlayback]);
+  }, [autoPausePlayback, flushVisible, latestReplayRef]);
 
   useEffect(() => {
     const manualSteps = manualStepsRef.current;
@@ -1459,9 +1513,12 @@ export function MarketReplayClient({ dataset, initialJournalFocus = null }: { da
     next.confirmedSequence = data.currentSequence;
     paperDeltaAccumulatorRef.current = createPaperDeltaAccumulator(data.currentSequence);
     lastSyncStartedAtRef.current = performance.now();
+    recoveryRequiredRef.current = false;
     setStartValue(value);
+    const startSuspension = startDialogSuspensionRef.current;
     startDialogSuspensionRef.current = null;
-    if (latestReplayRef.current) pausePlayback("user");
+    if (latestReplayRef.current) pausePlayback();
+    restorePlayback(startSuspension);
     setStartError(null); setReplay(next);
     commitConfirmedPaperSnapshot(null);
     await loadWindow(next.currentSequence, next.displayIntervalSeconds, next.displaySession, indicatorWarmupCountRef.current);
@@ -1482,19 +1539,32 @@ export function MarketReplayClient({ dataset, initialJournalFocus = null }: { da
     if (!current || viewChangingRef.current || journalReview || current.status === "finished") return;
     manualStepsRef.current.cancel();
     playbackEpochRef.current += 1;
-    if (current.status === "playing") pausePlayback("user");
-    else playPlayback();
-    const next = latestReplayRef.current ?? current;
-    if (next.status !== "playing") {
+    if (current.status === "playing") {
+      pausePlayback();
+      const next = latestReplayRef.current ?? current;
       void advanceCompletionRef.current.then(async () => {
         await flushVisible();
         queueSave(latestReplayRef.current ?? next, true);
       });
-    } else {
-      playbackClockRef.current = performance.now();
-      lastSyncStartedAtRef.current = performance.now();
+      return;
     }
-  }, [flushVisible, journalReview, lastSyncStartedAtRef, latestReplayRef, pausePlayback, playPlayback, queueSave]);
+
+    const intent = playPlayback();
+    playbackClockRef.current = performance.now();
+    lastSyncStartedAtRef.current = performance.now();
+    if (recoveryRequiredRef.current) {
+      const suspension = suspendPlayback();
+      void recoverReplay().catch((error) => {
+        setPaperError(error instanceof Error ? error.message : copy.marketReplay.loadError);
+        autoPausePlayback("state-mismatch", intent);
+      }).finally(() => {
+        if (restorePlayback(suspension)) {
+          playbackClockRef.current = performance.now();
+          lastSyncStartedAtRef.current = performance.now();
+        }
+      });
+    }
+  }, [autoPausePlayback, flushVisible, journalReview, lastSyncStartedAtRef, latestReplayRef, pausePlayback, playPlayback, queueSave, recoverReplay, restorePlayback, suspendPlayback]);
 
   const revealNextBar = useCallback(() => {
     const current = latestReplayRef.current;
@@ -1560,7 +1630,7 @@ export function MarketReplayClient({ dataset, initialJournalFocus = null }: { da
     }
     setRecoveryNotice(null);
     manualStepsRef.current.cancel();
-    pausePlayback("user");
+    pausePlayback();
     await advanceCompletionRef.current;
     if (!(await flushVisible())) return;
     setJournalReview(focus);
@@ -1648,22 +1718,28 @@ export function MarketReplayClient({ dataset, initialJournalFocus = null }: { da
     viewChangingRef.current = true;
     const suspension = suspendPlayback();
     manualStepsRef.current.cancel();
+    let previous: ReplayState | null = null;
     try {
       await advanceCompletionRef.current;
       if (!(await flushVisible())) return;
       const current = latestReplayRef.current;
       if (!current) return;
+      previous = current;
       playbackAccumulatorRef.current = 0;
       playbackClockRef.current = performance.now();
       const next = setDisplayInterval(current, value);
       setReplay(next); setEmaError(null); queueSave(next, true);
       await loadWindow(next.currentSequence, value, next.displaySession, indicatorWarmupCountRef.current);
-      restorePlayback(suspension);
     } catch (error) {
-      recoveryRequiredRef.current = true;
-      pausePlayback("operation-failed");
+      if (previous) {
+        setReplay(previous);
+        queueSave(previous, true);
+      }
       setPaperError(error instanceof Error ? error.message : copy.marketReplay.loadError);
-    } finally { viewChangingRef.current = false; }
+    } finally {
+      viewChangingRef.current = false;
+      restorePlayback(suspension);
+    }
   }
 
   async function changeChartSession(value: DisplaySession) {
@@ -1671,11 +1747,13 @@ export function MarketReplayClient({ dataset, initialJournalFocus = null }: { da
     viewChangingRef.current = true;
     const suspension = suspendPlayback();
     manualStepsRef.current.cancel();
+    let previous: ReplayState | null = null;
     try {
       await advanceCompletionRef.current;
       if (!(await flushVisible())) return;
       const current = latestReplayRef.current;
       if (!current) return;
+      previous = current;
       playbackAccumulatorRef.current = 0;
       playbackClockRef.current = performance.now();
       const next = setDisplaySession(current, value);
@@ -1684,13 +1762,15 @@ export function MarketReplayClient({ dataset, initialJournalFocus = null }: { da
       queueSave(next, true);
       await saveChainRef.current;
       await loadWindow(next.currentSequence, next.displayIntervalSeconds, value, indicatorWarmupCountRef.current);
-      restorePlayback(suspension);
     } catch (error) {
-      recoveryRequiredRef.current = true;
-      pausePlayback("operation-failed");
+      if (previous) {
+        setReplay(previous);
+        queueSave(previous, true);
+      }
       setPaperError(error instanceof Error ? error.message : copy.marketReplay.loadError);
     } finally {
       viewChangingRef.current = false;
+      restorePlayback(suspension);
     }
   }
 
@@ -1722,10 +1802,12 @@ export function MarketReplayClient({ dataset, initialJournalFocus = null }: { da
       setAbrLength(value);
       const current = latestReplayRef.current;
       if (current) await loadWindow(current.currentSequence, current.displayIntervalSeconds, current.displaySession, Math.max(emaWarmupCount, value));
-      restorePlayback(suspension);
     })().catch((error) => {
-      pausePlayback("operation-failed");
+      skipNextIndicatorReloadRef.current = true;
+      setAbrLength(abrLength);
       setAbrError(error instanceof Error ? error.message : copy.marketReplay.loadError);
+    }).finally(() => {
+      restorePlayback(suspension);
     });
     return true;
   }
@@ -1827,19 +1909,17 @@ export function MarketReplayClient({ dataset, initialJournalFocus = null }: { da
     manualStepsRef.current.cancel();
     await advanceCompletionRef.current;
     if (!(await flushVisible())) {
+      const suspension = confirmationSuspensionRef.current;
       confirmationSuspensionRef.current = null;
+      restorePlayback(suspension);
       setConfirmAction(null);
       return;
     }
     windowRequestRef.current += 1;
     if (confirmAction === "paper-clear") {
-      const response = await fetch(`/api/market-datasets/${dataset.id}/paper-session`, { method: "DELETE" });
-      if (!response.ok) {
-        confirmationSuspensionRef.current = null;
-        pausePlayback("operation-failed");
-        setPaperError(copy.paperTrading.requestFailed);
-      }
-      else {
+      try {
+        const response = await fetch(`/api/market-datasets/${dataset.id}/paper-session`, { method: "DELETE" });
+        if (!response.ok) throw new Error(copy.paperTrading.requestFailed);
         commitConfirmedPaperSnapshot(null);
         setTradeAnnotations([]);
         setTradeAnnotationsTruncated(false);
@@ -1847,10 +1927,25 @@ export function MarketReplayClient({ dataset, initialJournalFocus = null }: { da
         const suspension = confirmationSuspensionRef.current;
         confirmationSuspensionRef.current = null;
         restorePlayback(suspension);
+      } catch {
+        setPaperError(copy.paperTrading.requestFailed);
+        try {
+          await reloadPaper();
+          const suspension = confirmationSuspensionRef.current;
+          confirmationSuspensionRef.current = null;
+          restorePlayback(suspension);
+        } catch {
+          autoPausePlayback("operation-failed");
+          const suspension = confirmationSuspensionRef.current;
+          confirmationSuspensionRef.current = null;
+          restorePlayback(suspension);
+        }
       }
     } else {
+      const suspension = confirmationSuspensionRef.current;
       confirmationSuspensionRef.current = null;
-      pausePlayback("user");
+      pausePlayback();
+      restorePlayback(suspension);
       if (saveTimerRef.current) clearTimeout(saveTimerRef.current);
       saveTimerRef.current = null;
       pendingSaveRef.current = null;
@@ -1873,6 +1968,7 @@ export function MarketReplayClient({ dataset, initialJournalFocus = null }: { da
       reset.generation = data.generation;
       reset.syncVersion = data.syncVersion;
       reset.confirmedSequence = data.currentSequence;
+      recoveryRequiredRef.current = false;
       setReplay(reset);
       await loadWindow(reset.currentSequence, reset.displayIntervalSeconds, reset.displaySession, indicatorWarmupCountRef.current);
       setSaveStatus("idle");
@@ -1885,6 +1981,7 @@ export function MarketReplayClient({ dataset, initialJournalFocus = null }: { da
     setPaperBusy(true);
     setPaperError(null);
     const operation = paperMutationChainRef.current.catch(() => undefined).then(async () => {
+      const operationIntent = capturePlaybackIntent();
       const suspension = suspendPlayback();
       manualStepsRef.current.cancel();
       paperMutationActiveRef.current = true;
@@ -1899,18 +1996,22 @@ export function MarketReplayClient({ dataset, initialJournalFocus = null }: { da
           throw new Error(data?.error ?? copy.paperTrading.requestFailed);
         }
         if (data.snapshot !== undefined) commitConfirmedPaperSnapshot(data.snapshot as PaperSessionSnapshot | null);
+        return true;
+      } catch (error) {
+        setPaperError(error instanceof Error ? error.message : copy.paperTrading.requestFailed);
+        try {
+          await reloadPaper();
+        } catch {
+          recoveryRequiredRef.current = true;
+          autoPausePlayback("operation-failed", operationIntent);
+        }
+        return false;
+      } finally {
+        paperMutationActiveRef.current = false;
         if (restorePlayback(suspension)) {
           playbackClockRef.current = performance.now();
           lastSyncStartedAtRef.current = performance.now();
         }
-        return true;
-      } catch (error) {
-        pausePlayback("operation-failed");
-        setPaperError(error instanceof Error ? error.message : copy.paperTrading.requestFailed);
-        if (paperSnapshotRef.current) await reloadPaper().catch(() => undefined);
-        return false;
-      } finally {
-        paperMutationActiveRef.current = false;
       }
     });
     paperMutationChainRef.current = operation.then(() => undefined, () => undefined);
@@ -2183,6 +2284,11 @@ export function MarketReplayClient({ dataset, initialJournalFocus = null }: { da
           </div>
         </div>
         <div className="relative min-h-0 flex-1">
+          {autoPauseEvent ? (
+            <div className="pointer-events-none absolute inset-x-3 top-3 z-[60]">
+              <ReplayAutoPauseNotice event={autoPauseEvent} onDismiss={dismissAutoPause} />
+            </div>
+          ) : null}
           <ReplayChart
             datasetId={dataset.id}
             priceTickSize={dataset.priceTickSize}
