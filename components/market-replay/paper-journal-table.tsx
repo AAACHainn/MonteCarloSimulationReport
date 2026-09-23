@@ -1,7 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useRef, useState, type KeyboardEvent as ReactKeyboardEvent, type PointerEvent as ReactPointerEvent } from "react";
-import { ChevronLeft, ChevronRight, Loader2, Pencil, RotateCcw, Settings2, Trash2 } from "lucide-react";
+import { ChevronLeft, ChevronRight, Download, Loader2, Pencil, RotateCcw, Settings2, Trash2 } from "lucide-react";
 import Link from "next/link";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
@@ -775,6 +775,12 @@ export function PaperJournalTable({
           </Select>
         </div>
         <div className="flex flex-wrap items-center gap-2">
+          <Button asChild variant="outline" size="sm">
+            <a href={`/api/market-datasets/${datasetId}/paper-journal/sessions/${selectedSession.id}/export`} download>
+              <Download className="h-4 w-4" aria-hidden="true" />
+              {copy.paperTrading.exportJournalExcel}
+            </a>
+          </Button>
           <Button type="button" variant="outline" size="sm" onClick={openVisibleColumns}>
             <Settings2 className="h-4 w-4" aria-hidden="true" />
             {copy.paperTrading.setVisibleColumns}

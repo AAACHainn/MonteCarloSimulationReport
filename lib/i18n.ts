@@ -608,6 +608,8 @@ export const dictionaries = {
       journalEntryUpdateInvalid: "交易日志修改内容无效。",
       saveTradeReason: "保存",
       setVisibleColumns: "设置显示列",
+      exportJournalExcel: "导出 Excel",
+      journalExportFailed: "无法导出 Excel，请稍后重试。",
       visibleColumnsTitle: "设置显示列",
       visibleColumnsDescription: "取消勾选后，对应列将在交易日志表格中隐藏。",
       visibleColumnsReset: "恢复默认",
