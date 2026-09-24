@@ -122,8 +122,8 @@ export function calculateRiskSizing(input: RiskSizingInput): RiskSizingOutcome {
 }
 
 export function orderTypeForEntry(side: PaperSide, entryPrice: number, currentPrice: number) {
-  if (side === "BUY") return entryPrice < currentPrice ? "LIMIT" as const : "STOP" as const;
-  return entryPrice > currentPrice ? "LIMIT" as const : "STOP" as const;
+  if (side === "BUY") return entryPrice <= currentPrice ? "LIMIT" as const : "STOP" as const;
+  return entryPrice >= currentPrice ? "LIMIT" as const : "STOP" as const;
 }
 
 export function targetPriceForR(side: PaperSide, entryPrice: number, stopLoss: number, targetR: number) {

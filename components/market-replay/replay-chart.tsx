@@ -1694,7 +1694,12 @@ export function ReplayChart({
     } else setDraftError(copy.paperTrading.draftSubmitFailed);
   }
 
-  const menuBelowCurrent = currentPrice !== null && contextMenu !== null && contextMenu.price < currentPrice;
+  const contextEntryOrderTypes = currentPrice !== null && contextMenu !== null
+    ? {
+      buy: orderTypeForEntry("BUY", contextMenu.price, currentPrice),
+      sell: orderTypeForEntry("SELL", contextMenu.price, currentPrice),
+    }
+    : null;
   const measurementColor = measurement
     ? measurement.stats.priceChange > 0 ? "#2962ff" : measurement.stats.priceChange < 0 ? "#f23645" : "#64748b"
     : "#64748b";
@@ -1886,17 +1891,14 @@ export function ReplayChart({
             </div>
           ) : !latest || currentPrice === null ? (
             <div className="flex gap-2 p-2 text-xs leading-5 text-amber-800"><ShieldAlert className="mt-0.5 h-4 w-4 shrink-0" />{copy.paperTrading.contextNoBar}</div>
-          ) : menuBelowCurrent ? (
+          ) : contextEntryOrderTypes ? (
             <div className="space-y-0.5 pt-1">
-              <button type="button" role="menuitem" data-testid="context-buy-limit" className="flex w-full items-center rounded-md px-2 py-2 text-left text-sm font-medium text-blue-700 hover:bg-blue-50" onClick={() => createDraft("BUY", "LIMIT")}>{copy.paperTrading.buyLimit}</button>
-              <button type="button" role="menuitem" data-testid="context-sell-stop" className="flex w-full items-center rounded-md px-2 py-2 text-left text-sm font-medium text-red-700 hover:bg-red-50" onClick={() => createDraft("SELL", "STOP")}>{copy.paperTrading.sellStop}</button>
+              {contextEntryOrderTypes.buy === "LIMIT" ? <button type="button" role="menuitem" data-testid="context-buy-limit" className="flex w-full items-center rounded-md px-2 py-2 text-left text-sm font-medium text-blue-700 hover:bg-blue-50" onClick={() => createDraft("BUY", "LIMIT")}>{copy.paperTrading.buyLimit}</button> : null}
+              {contextEntryOrderTypes.sell === "LIMIT" ? <button type="button" role="menuitem" data-testid="context-sell-limit" className="flex w-full items-center rounded-md px-2 py-2 text-left text-sm font-medium text-orange-700 hover:bg-orange-50" onClick={() => createDraft("SELL", "LIMIT")}>{copy.paperTrading.sellLimit}</button> : null}
+              {contextEntryOrderTypes.sell === "STOP" ? <button type="button" role="menuitem" data-testid="context-sell-stop" className="flex w-full items-center rounded-md px-2 py-2 text-left text-sm font-medium text-red-700 hover:bg-red-50" onClick={() => createDraft("SELL", "STOP")}>{copy.paperTrading.sellStop}</button> : null}
+              {contextEntryOrderTypes.buy === "STOP" ? <button type="button" role="menuitem" data-testid="context-buy-stop" className="flex w-full items-center rounded-md px-2 py-2 text-left text-sm font-medium text-blue-700 hover:bg-blue-50" onClick={() => createDraft("BUY", "STOP")}>{copy.paperTrading.buyStop}</button> : null}
             </div>
-          ) : (
-            <div className="space-y-0.5 pt-1">
-              <button type="button" role="menuitem" data-testid="context-sell-limit" className="flex w-full items-center rounded-md px-2 py-2 text-left text-sm font-medium text-orange-700 hover:bg-orange-50" onClick={() => createDraft("SELL", "LIMIT")}>{copy.paperTrading.sellLimit}</button>
-              <button type="button" role="menuitem" data-testid="context-buy-stop" className="flex w-full items-center rounded-md px-2 py-2 text-left text-sm font-medium text-blue-700 hover:bg-blue-50" onClick={() => createDraft("BUY", "STOP")}>{copy.paperTrading.buyStop}</button>
-            </div>
-          )}
+          ) : null}
         </div>
       ) : null}
 

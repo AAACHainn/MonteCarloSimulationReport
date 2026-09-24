@@ -68,8 +68,9 @@ describe("paper trading fixed-risk sizing", () => {
 
   it("derives the order type after an entry line crosses current price", () => {
     expect(orderTypeForEntry("BUY", 99, 100)).toBe("LIMIT");
-    expect(orderTypeForEntry("BUY", 100, 100)).toBe("STOP");
+    expect(orderTypeForEntry("BUY", 100, 100)).toBe("LIMIT");
     expect(orderTypeForEntry("SELL", 101, 100)).toBe("LIMIT");
+    expect(orderTypeForEntry("SELL", 100, 100)).toBe("LIMIT");
     expect(orderTypeForEntry("SELL", 99, 100)).toBe("STOP");
   });
 
