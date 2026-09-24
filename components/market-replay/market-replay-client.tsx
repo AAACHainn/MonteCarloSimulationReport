@@ -8,6 +8,7 @@ import * as Popover from "@radix-ui/react-popover";
 import { ReplayChart, type ReplayVisibleSequenceRange } from "@/components/market-replay/replay-chart";
 import { ReplayAutoPauseNotice } from "@/components/market-replay/replay-auto-pause-notice";
 import { IndicatorSettingsDialog } from "@/components/market-replay/indicator-settings-dialog";
+import { QuickIntervalDialog } from "@/components/market-replay/quick-interval-dialog";
 import { ReplayStartDialog } from "@/components/market-replay/replay-start-dialog";
 import { DEFAULT_REPLAY_MAX_VISIBLE_BARS } from "@/lib/market-replay/chart-range";
 import type { CandlestickStyle } from "@/lib/market-replay/candlestick-style";
@@ -248,6 +249,7 @@ export function MarketReplayClient({ dataset, initialJournalFocus = null }: { da
   const [barCountError, setBarCountError] = useState<string | null>(null);
   const [customInterval, setCustomInterval] = useState("");
   const [customIntervalUnit, setCustomIntervalUnit] = useState<"s" | "m" | "h">("m");
+  const [quickIntervalInitialValue, setQuickIntervalInitialValue] = useState<string | null>(null);
   const [repairInterval, setRepairInterval] = useState("");
   const [paperSnapshot, setPaperSnapshot] = useState<PaperSessionSnapshot | null>(null);
   const {
@@ -1701,6 +1703,25 @@ export function MarketReplayClient({ dataset, initialJournalFocus = null }: { da
     return () => window.removeEventListener("keydown", onKeyDown);
   }, [armFibonacciRetracement, armTrendLine, confirmAction, settingsDialog, startDialogOpen, styleDrawingId]);
 
+  useEffect(() => {
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (
+        !/^\d$/.test(event.key) || event.ctrlKey || event.altKey || event.shiftKey || event.metaKey
+        || event.isComposing || quickIntervalInitialValue !== null || !latestReplayRef.current
+        || !dataset.sourceIntervalSeconds || journalReview
+      ) return;
+      const target = event.target as HTMLElement | null;
+      if (
+        target?.closest("input, textarea, select, [contenteditable='true'], [role='dialog'], [role='listbox'], [role='menu'], [role='combobox']")
+        || document.querySelector("[role='dialog']")
+      ) return;
+      event.preventDefault();
+      setQuickIntervalInitialValue(event.key);
+    };
+    window.addEventListener("keydown", onKeyDown);
+    return () => window.removeEventListener("keydown", onKeyDown);
+  }, [dataset.sourceIntervalSeconds, journalReview, latestReplayRef, quickIntervalInitialValue]);
+
   function changeSpeed(value: number) {
     const current = latestReplayRef.current;
     if (!current) return;
@@ -1709,32 +1730,34 @@ export function MarketReplayClient({ dataset, initialJournalFocus = null }: { da
     queueSave(next, true);
   }
 
-  async function changeDisplayInterval(value: number) {
+  async function changeDisplayInterval(value: number): Promise<boolean> {
     if (!latestReplayRef.current || !dataset.sourceIntervalSeconds || !isValidDisplayInterval(dataset.sourceIntervalSeconds, value)) {
-      setEmaError(copy.marketReplay.invalidDisplayInterval); return;
+      setEmaError(copy.marketReplay.invalidDisplayInterval); return false;
     }
-    if (viewChangingRef.current) return;
+    if (viewChangingRef.current) return false;
     viewChangingRef.current = true;
     const suspension = suspendPlayback();
     manualStepsRef.current.cancel();
     let previous: ReplayState | null = null;
     try {
       await advanceCompletionRef.current;
-      if (!(await flushVisible())) return;
+      if (!(await flushVisible())) return false;
       const current = latestReplayRef.current;
-      if (!current) return;
+      if (!current) return false;
       previous = current;
       playbackAccumulatorRef.current = 0;
       playbackClockRef.current = performance.now();
       const next = setDisplayInterval(current, value);
       setReplay(next); setEmaError(null); queueSave(next, true);
       await loadWindow(next.currentSequence, value, next.displaySession, indicatorWarmupCountRef.current);
+      return true;
     } catch (error) {
       if (previous) {
         setReplay(previous);
         queueSave(previous, true);
       }
       setPaperError(error instanceof Error ? error.message : copy.marketReplay.loadError);
+      return false;
     } finally {
       viewChangingRef.current = false;
       restorePlayback(suspension);
@@ -2418,6 +2441,16 @@ export function MarketReplayClient({ dataset, initialJournalFocus = null }: { da
           onFocusJournalEntry={(entry) => void enterJournalReview({ sequence: entry.openedSequence, no: entry.no, globalNo: entry.globalNo })}
         />
       </div>
+
+      {dataset.sourceIntervalSeconds ? (
+        <QuickIntervalDialog
+          open={quickIntervalInitialValue !== null}
+          initialValue={quickIntervalInitialValue ?? ""}
+          sourceIntervalSeconds={dataset.sourceIntervalSeconds}
+          onClose={() => setQuickIntervalInitialValue(null)}
+          onApply={changeDisplayInterval}
+        />
+      ) : null}
 
       <Dialog
         open={settingsDialog === "candlesticks"}

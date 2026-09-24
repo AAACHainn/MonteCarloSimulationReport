@@ -1,5 +1,9 @@
 import { describe, expect, it } from "vitest";
-import { calculateChartMeasurement, measurementDurationParts } from "@/lib/market-replay/chart-measurement";
+import {
+  calculateChartMeasurement,
+  calculateChartMeasurementGeometry,
+  measurementDurationParts,
+} from "@/lib/market-replay/chart-measurement";
 import type { AggregatedMarketBarData } from "@/lib/market-replay/types";
 
 function bar(index: number, timestamp: string, volume: number | null): AggregatedMarketBarData {
@@ -25,6 +29,42 @@ const bars = [
   bar(2, "2026-01-02T09:40:00.000Z", 300),
   bar(3, "2026-01-05T09:30:00.000Z", 400),
 ];
+
+describe("calculateChartMeasurementGeometry", () => {
+  it("places horizontal and vertical dividers at the center of the selected area", () => {
+    expect(calculateChartMeasurementGeometry({
+      startX: 40,
+      startY: 360,
+      endX: 920,
+      endY: 20,
+    })).toEqual({
+      left: 40,
+      top: 20,
+      right: 920,
+      bottom: 360,
+      width: 880,
+      height: 340,
+      middleX: 480,
+      middleY: 190,
+    });
+  });
+
+  it("keeps the center stable when the drag direction is reversed", () => {
+    expect(calculateChartMeasurementGeometry({
+      startX: 920,
+      startY: 20,
+      endX: 40,
+      endY: 360,
+    })).toMatchObject({
+      left: 40,
+      top: 20,
+      right: 920,
+      bottom: 360,
+      middleX: 480,
+      middleY: 190,
+    });
+  });
+});
 
 describe("calculateChartMeasurement", () => {
   it("calculates an upward move, percentage, ticks, bars, elapsed time, and volume", () => {

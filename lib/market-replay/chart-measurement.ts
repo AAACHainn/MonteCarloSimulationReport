@@ -9,6 +9,45 @@ export type ChartMeasurementStats = {
   volume: number | null;
 };
 
+export type ChartMeasurementGeometry = {
+  left: number;
+  top: number;
+  right: number;
+  bottom: number;
+  width: number;
+  height: number;
+  middleX: number;
+  middleY: number;
+};
+
+export function calculateChartMeasurementGeometry({
+  startX,
+  startY,
+  endX,
+  endY,
+}: {
+  startX: number;
+  startY: number;
+  endX: number;
+  endY: number;
+}): ChartMeasurementGeometry {
+  const left = Math.min(startX, endX);
+  const top = Math.min(startY, endY);
+  const right = Math.max(startX, endX);
+  const bottom = Math.max(startY, endY);
+
+  return {
+    left,
+    top,
+    right,
+    bottom,
+    width: right - left,
+    height: bottom - top,
+    middleX: left + (right - left) / 2,
+    middleY: top + (bottom - top) / 2,
+  };
+}
+
 export function calculateChartMeasurement({
   bars,
   startIndex,

@@ -34,6 +34,7 @@ import {
 } from "@/lib/market-replay/candlestick-style";
 import {
   calculateChartMeasurement,
+  calculateChartMeasurementGeometry,
   measurementDurationParts,
   type ChartMeasurementStats,
 } from "@/lib/market-replay/chart-measurement";
@@ -1697,6 +1698,14 @@ export function ReplayChart({
   const measurementColor = measurement
     ? measurement.stats.priceChange > 0 ? "#2962ff" : measurement.stats.priceChange < 0 ? "#f23645" : "#64748b"
     : "#64748b";
+  const measurementGeometry = measurement
+    ? calculateChartMeasurementGeometry({
+      startX: measurement.start.x,
+      startY: measurement.start.y,
+      endX: measurement.end.x,
+      endY: measurement.end.y,
+    })
+    : null;
   const measurementDuration = measurement
     ? copy.marketReplay.measurementDuration(measurementDurationParts(measurement.stats.elapsedMilliseconds))
     : "";
@@ -1763,7 +1772,7 @@ export function ReplayChart({
         </div>
       ) : null}
 
-      {measurement ? (
+      {measurement && measurementGeometry ? (
         <div
           data-testid="chart-measurement"
           className="pointer-events-none absolute left-0 top-0 z-10 overflow-hidden"
@@ -1776,23 +1785,32 @@ export function ReplayChart({
             height={measurement.paneHeight}
             viewBox={`0 0 ${measurement.paneWidth} ${measurement.paneHeight}`}
           >
-            <line x1={measurement.end.x} y1={0} x2={measurement.end.x} y2={measurement.paneHeight} stroke={measurementColor} strokeWidth="1" strokeDasharray="5 5" opacity="0.72" />
-            <line x1={0} y1={measurement.end.y} x2={measurement.paneWidth} y2={measurement.end.y} stroke={measurementColor} strokeWidth="1" strokeDasharray="5 5" opacity="0.72" />
             <rect
-              x={Math.min(measurement.start.x, measurement.end.x)}
-              y={Math.min(measurement.start.y, measurement.end.y)}
-              width={Math.abs(measurement.end.x - measurement.start.x)}
-              height={Math.abs(measurement.end.y - measurement.start.y)}
+              x={measurementGeometry.left}
+              y={measurementGeometry.top}
+              width={measurementGeometry.width}
+              height={measurementGeometry.height}
               fill={measurementColor}
               fillOpacity="0.16"
-              stroke={measurementColor}
-              strokeWidth="1"
-              strokeOpacity="0.72"
             />
-            <line x1={measurement.start.x} y1={measurement.end.y} x2={measurement.end.x} y2={measurement.end.y} stroke={measurementColor} strokeWidth="1.5" />
-            <line x1={measurement.end.x} y1={measurement.start.y} x2={measurement.end.x} y2={measurement.end.y} stroke={measurementColor} strokeWidth="1.5" />
-            <circle cx={measurement.start.x} cy={measurement.start.y} r="2.5" fill="#fff" stroke={measurementColor} strokeWidth="1.5" />
-            <circle cx={measurement.end.x} cy={measurement.end.y} r="2.5" fill="#fff" stroke={measurementColor} strokeWidth="1.5" />
+            <line
+              x1={measurementGeometry.left}
+              y1={measurementGeometry.middleY}
+              x2={measurementGeometry.right}
+              y2={measurementGeometry.middleY}
+              stroke={measurementColor}
+              strokeWidth="1.25"
+              opacity="0.9"
+            />
+            <line
+              x1={measurementGeometry.middleX}
+              y1={measurementGeometry.top}
+              x2={measurementGeometry.middleX}
+              y2={measurementGeometry.bottom}
+              stroke={measurementColor}
+              strokeWidth="1.25"
+              opacity="0.9"
+            />
           </svg>
           <div
             className="absolute min-w-[176px] -translate-x-1/2 rounded-md px-3 py-2 text-center text-xs font-medium leading-5 text-white shadow-lg"
