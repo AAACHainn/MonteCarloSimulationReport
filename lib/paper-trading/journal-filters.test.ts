@@ -12,7 +12,7 @@ import type { ReplayJournalEntryData } from "./types";
 function entry(overrides: Partial<ReplayJournalEntryData> = {}): ReplayJournalEntryData {
   return {
     id: "entry-1", lotId: "lot-1", no: 1, globalNo: 1, journalSessionId: "session-1",
-    setupOptionId: null, setupOption: null, tradeReasons: [], archivedAt: null,
+    setupOptionId: null, setupOption: null, tradeReasons: [], review: "", archivedAt: null,
     direction: "LONG", quantity: 1, openedSequence: 1, openedAt: "2026-01-01T00:00:00.000Z",
     closedSequence: 2, closedAt: "2026-01-01T00:01:00.000Z", entryPrice: 100,
     entryOrderType: "MARKET", exitPrice: 102, initialStopPrice: 99, initialRisk: 1,

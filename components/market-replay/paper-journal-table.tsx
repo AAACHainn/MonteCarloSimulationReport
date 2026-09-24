@@ -13,6 +13,7 @@ import { Label } from "@/components/ui/label";
 import { MultiSelect } from "@/components/ui/multi-select";
 import { MultiOptionFilterPopover, type FilterOption } from "@/components/ui/multi-option-filter-popover";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
+import { Textarea } from "@/components/ui/textarea";
 import { formatNumber, formatPercent } from "@/lib/format";
 import { copy } from "@/lib/i18n";
 import { formatInterval } from "@/lib/market-replay/types";
@@ -86,7 +87,7 @@ type TradeReason = {
 type JournalColumnId =
   | "no" | "date" | "direction" | "setup" | "reason" | "abr" | "initialRisk"
   | "initialRiskAbr" | "actualRisk" | "actualRiskAbr" | "actualInitialRiskRatio"
-  | "gainLoss" | "result" | "abrRr" | "initialRiskRr" | "actualRiskRr";
+  | "gainLoss" | "result" | "abrRr" | "initialRiskRr" | "actualRiskRr" | "review";
 
 const journalColumns: {
   id: JournalColumnId;
@@ -112,6 +113,7 @@ const journalColumns: {
   { id: "abrRr", label: "ABR RR", text: false, defaultWidth: 112, expressionFilterKey: "abrRr" },
   { id: "initialRiskRr", label: "iRisk RR", text: false, defaultWidth: 112, expressionFilterKey: "initialRiskRr" },
   { id: "actualRiskRr", label: "aRisk RR", text: false, defaultWidth: 112, expressionFilterKey: "actualRiskRr" },
+  { id: "review", label: copy.paperTrading.review, text: true, defaultWidth: 288 },
 ];
 const defaultVisibleColumnIds = journalColumns.map((column) => column.id);
 const defaultColumnWidths = Object.fromEntries(
@@ -137,6 +139,14 @@ function ratio(value: number | null) {
 function date(entry: ReplayJournalEntryData) {
   const parts = utcDateParts(entry.openedAt, entry.displayUtcOffsetMinutes);
   return `${parts.year}/${parts.month}/${parts.day}`;
+}
+
+function reviewLength(value: string) {
+  return Array.from(value).length;
+}
+
+function limitReview(value: string) {
+  return Array.from(value).slice(0, 300).join("");
 }
 
 export function PaperJournalTable({
@@ -172,6 +182,11 @@ export function PaperJournalTable({
   const [tradeReasonsLoading, setTradeReasonsLoading] = useState(true);
   const [tradeReasonsError, setTradeReasonsError] = useState<string | null>(null);
   const [savingTradeReasonIds, setSavingTradeReasonIds] = useState<Set<string>>(() => new Set());
+  const [reviewDrafts, setReviewDrafts] = useState<Record<string, string>>({});
+  const [savingReviewIds, setSavingReviewIds] = useState<Set<string>>(() => new Set());
+  const [reviewError, setReviewError] = useState<string | null>(null);
+  const [reviewDialogEntryId, setReviewDialogEntryId] = useState<string | null>(null);
+  const [reviewDialogDraft, setReviewDialogDraft] = useState("");
   const [visibleColumnsOpen, setVisibleColumnsOpen] = useState(false);
   const [visibleColumnIds, setVisibleColumnIds] = useState<JournalColumnId[]>(defaultVisibleColumnIds);
   const [draftVisibleColumnIds, setDraftVisibleColumnIds] = useState<JournalColumnId[]>(defaultVisibleColumnIds);
@@ -193,6 +208,7 @@ export function PaperJournalTable({
   const [hasEntriesWithoutTradeReason, setHasEntriesWithoutTradeReason] = useState(false);
   const appliedFiltersRef = useRef(appliedFilters);
   const loadRequestIdRef = useRef(0);
+  const cancelledInlineReviewIdsRef = useRef(new Set<string>());
   const resizeRef = useRef<
     | {
       kind: "column";
@@ -357,8 +373,11 @@ export function PaperJournalTable({
           const allowed = new Set<JournalColumnId>(defaultVisibleColumnIds);
           const next = parsed.filter((value): value is JournalColumnId => typeof value === "string" && allowed.has(value as JournalColumnId));
           if (next.length > 0) {
-            setVisibleColumnIds(next);
-            setDraftVisibleColumnIds(next);
+            const migrated: JournalColumnId[] = next.includes("review")
+              ? next
+              : [...next, "review" as JournalColumnId];
+            setVisibleColumnIds(migrated);
+            setDraftVisibleColumnIds(migrated);
           }
         }
       } catch {
@@ -557,6 +576,74 @@ export function PaperJournalTable({
     }
   }
 
+  async function updateReview(entry: ReplayJournalEntryData, value: string, announce = false) {
+    const review = limitReview(value);
+    if (reviewLength(value) > 300) {
+      setReviewError(copy.paperTrading.reviewTooLong);
+      return false;
+    }
+    if (review === entry.review) return true;
+    const previousReview = entry.review;
+
+    setReviewError(null);
+    setItems((current) => current.map((item) => item.id === entry.id ? { ...item, review } : item));
+    setSavingReviewIds((current) => new Set(current).add(entry.id));
+    try {
+      const response = await fetch(`/api/market-datasets/${datasetId}/paper-journal/entries/${entry.id}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ review }),
+      });
+      const data = await response.json() as ReplayJournalEntryData & { error?: string };
+      if (!response.ok) throw new Error(data.error ?? copy.paperTrading.reviewUpdateFailed);
+      setItems((current) => current.map((item) => item.id === entry.id ? { ...item, review: data.review } : item));
+      if (announce) setStatus(copy.paperTrading.reviewSaved);
+      return true;
+    } catch {
+      setItems((current) => current.map((item) => item.id === entry.id ? { ...item, review: previousReview } : item));
+      setReviewError(copy.paperTrading.reviewUpdateFailed);
+      return false;
+    } finally {
+      setSavingReviewIds((current) => {
+        const next = new Set(current);
+        next.delete(entry.id);
+        return next;
+      });
+    }
+  }
+
+  function openReviewDialog(entry: ReplayJournalEntryData) {
+    setReviewDialogEntryId(entry.id);
+    setReviewDialogDraft(reviewDrafts[entry.id] ?? entry.review);
+    setReviewError(null);
+  }
+
+  async function saveReviewDialog() {
+    const entry = items.find((item) => item.id === reviewDialogEntryId);
+    if (!entry) return;
+    const saved = await updateReview(entry, reviewDialogDraft, true);
+    if (!saved) return;
+    setReviewDrafts((current) => {
+      const next = { ...current };
+      delete next[entry.id];
+      return next;
+    });
+    setReviewDialogEntryId(null);
+  }
+
+  function finishInlineReview(entry: ReplayJournalEntryData) {
+    if (cancelledInlineReviewIdsRef.current.delete(entry.id)) return;
+    const value = reviewDrafts[entry.id];
+    if (value === undefined) return;
+    void updateReview(entry, value).finally(() => {
+      setReviewDrafts((current) => {
+        const next = { ...current };
+        delete next[entry.id];
+        return next;
+      });
+    });
+  }
+
   function openVisibleColumns() {
     setDraftVisibleColumnIds(visibleColumnIds);
     setVisibleColumnsOpen(true);
@@ -569,7 +656,7 @@ export function PaperJournalTable({
   }
 
   function applyVisibleColumns() {
-    if (draftVisibleColumnIds.length === 0) return;
+    if (!scopedJournalColumns.some((column) => draftVisibleColumnIds.includes(column.id))) return;
     setVisibleColumnIds(draftVisibleColumnIds);
     setVisibleColumnsOpen(false);
   }
@@ -710,8 +797,11 @@ export function PaperJournalTable({
 
   const startRow = totalItems === 0 ? 0 : (page - 1) * pageSize + 1;
   const endRow = Math.min(page * pageSize, totalItems);
+  const scopedJournalColumns = scope === "history"
+    ? journalColumns
+    : journalColumns.filter((column) => column.id !== "review");
   const visibleColumnSet = new Set(visibleColumnIds);
-  const visibleColumns = journalColumns.filter((column) => visibleColumnSet.has(column.id));
+  const visibleColumns = scopedJournalColumns.filter((column) => visibleColumnSet.has(column.id));
   const baseTableWidth = visibleColumns.reduce((total, column) => total + columnWidths[column.id], 0);
   const visibleTableWidth = Math.max(baseTableWidth, tableViewportWidth, tableWidthPreference ?? 0);
   const distributedTableExtraWidth = visibleColumns.length === 0
@@ -915,6 +1005,7 @@ export function PaperJournalTable({
     {status ? <p className="rounded-md border border-emerald-200 bg-emerald-50 px-3 py-2 text-sm text-emerald-700" role="status" aria-live="polite">{status}</p> : null}
     {setupError ? <p className="rounded-md border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-700" role="alert">{setupError}</p> : null}
     {tradeReasonsError ? <p className="rounded-md border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-700" role="alert">{tradeReasonsError}</p> : null}
+    {reviewError && reviewDialogEntryId === null ? <p className="rounded-md border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-700" role="alert">{reviewError}</p> : null}
     <section ref={setTableViewportElement} className="space-y-2">
       <div
         className={`relative rounded-md border bg-white ${resizingTarget ? "select-none" : ""}`}
@@ -1086,6 +1177,45 @@ export function PaperJournalTable({
             {visibleColumnSet.has("abrRr") ? <td className="border-r px-3 py-2 last:border-r-0">{ratio(entry.abrRr)}</td> : null}
             {visibleColumnSet.has("initialRiskRr") ? <td className="border-r px-3 py-2 last:border-r-0">{ratio(entry.initialRiskRr)}</td> : null}
             {visibleColumnSet.has("actualRiskRr") ? <td className="border-r px-3 py-2 last:border-r-0">{ratio(entry.actualRiskRr)}</td> : null}
+            {scope === "history" && visibleColumnSet.has("review") ? <td className="border-r p-1 text-left last:border-r-0">
+              <div className="relative min-w-0">
+                <Input
+                  value={reviewDrafts[entry.id] ?? entry.review}
+                  onFocus={() => setReviewDrafts((current) => current[entry.id] === undefined
+                    ? { ...current, [entry.id]: entry.review }
+                    : current)}
+                  onChange={(event) => setReviewDrafts((current) => ({
+                    ...current,
+                    [entry.id]: limitReview(event.target.value),
+                  }))}
+                  onBlur={() => finishInlineReview(entry)}
+                  onDoubleClick={() => openReviewDialog(entry)}
+                  onKeyDown={(event) => {
+                    if (event.key === "F2") {
+                      event.preventDefault();
+                      openReviewDialog(entry);
+                    } else if (event.key === "Enter") {
+                      event.currentTarget.blur();
+                    } else if (event.key === "Escape") {
+                      cancelledInlineReviewIdsRef.current.add(entry.id);
+                      setReviewDrafts((current) => {
+                        const next = { ...current };
+                        delete next[entry.id];
+                        return next;
+                      });
+                      event.currentTarget.blur();
+                    }
+                  }}
+                  placeholder={copy.paperTrading.reviewPlaceholder}
+                  aria-label={copy.paperTrading.editReview(entry.no)}
+                  aria-busy={savingReviewIds.has(entry.id)}
+                  title={(reviewDrafts[entry.id] ?? entry.review) || copy.paperTrading.reviewEditHint}
+                  disabled={savingReviewIds.has(entry.id)}
+                  className="h-8 min-w-0 truncate border-transparent bg-transparent px-2 pr-8 text-left shadow-none hover:border-slate-300 hover:bg-white focus-visible:bg-white"
+                />
+                {savingReviewIds.has(entry.id) ? <Loader2 className="pointer-events-none absolute right-2 top-2 h-4 w-4 animate-spin text-slate-500" aria-hidden="true" /> : null}
+              </div>
+            </td> : null}
           </tr>)}</tbody>
         </table>
       </div>
@@ -1114,7 +1244,7 @@ export function PaperJournalTable({
     >
       <div className="space-y-4">
         <div className="grid gap-2 sm:grid-cols-2">
-          {journalColumns.map((column) => (
+          {scopedJournalColumns.map((column) => (
             <label key={column.id} className="flex min-h-10 cursor-pointer items-center gap-3 rounded-md border px-3 py-2 text-sm text-slate-800 hover:bg-slate-50">
               <input
                 type="checkbox"
@@ -1126,19 +1256,55 @@ export function PaperJournalTable({
             </label>
           ))}
         </div>
-        {draftVisibleColumnIds.length === 0 ? <p className="text-xs text-red-600" role="alert">{copy.paperTrading.visibleColumnsRequired}</p> : null}
+        {!scopedJournalColumns.some((column) => draftVisibleColumnIds.includes(column.id)) ? <p className="text-xs text-red-600" role="alert">{copy.paperTrading.visibleColumnsRequired}</p> : null}
         <div className="flex flex-wrap justify-between gap-2 border-t pt-4">
           <Button type="button" variant="ghost" onClick={() => setDraftVisibleColumnIds(defaultVisibleColumnIds)}>
             {copy.paperTrading.visibleColumnsReset}
           </Button>
           <div className="flex gap-2">
             <Button type="button" variant="outline" onClick={() => setVisibleColumnsOpen(false)}>{copy.common.cancel}</Button>
-            <Button type="button" onClick={applyVisibleColumns} disabled={draftVisibleColumnIds.length === 0}>
+            <Button type="button" onClick={applyVisibleColumns} disabled={!scopedJournalColumns.some((column) => draftVisibleColumnIds.includes(column.id))}>
               {copy.paperTrading.visibleColumnsSave}
             </Button>
           </div>
         </div>
       </div>
+    </Dialog>
+    <Dialog
+      open={reviewDialogEntryId !== null}
+      title={copy.paperTrading.reviewDialogTitle(items.find((entry) => entry.id === reviewDialogEntryId)?.no ?? 0)}
+      description={copy.paperTrading.reviewDialogDescription}
+      onClose={() => { if (!reviewDialogEntryId || !savingReviewIds.has(reviewDialogEntryId)) setReviewDialogEntryId(null); }}
+      className="max-w-2xl"
+    >
+      <form className="space-y-4" onSubmit={(event) => { event.preventDefault(); void saveReviewDialog(); }}>
+        <div className="space-y-2">
+          <Label htmlFor="replay-journal-review">{copy.paperTrading.review}</Label>
+          <Textarea
+            id="replay-journal-review"
+            value={reviewDialogDraft}
+            onChange={(event) => setReviewDialogDraft(limitReview(event.target.value))}
+            placeholder={copy.paperTrading.reviewPlaceholder}
+            className="min-h-64 resize-y"
+            disabled={reviewDialogEntryId ? savingReviewIds.has(reviewDialogEntryId) : false}
+            aria-describedby="replay-journal-review-count"
+            autoFocus
+          />
+          <div className="flex items-start justify-between gap-3">
+            {reviewError ? <p className="text-xs text-red-600" role="alert">{reviewError}</p> : <span />}
+            <p id="replay-journal-review-count" className="shrink-0 text-xs text-slate-500">
+              {copy.paperTrading.reviewCharacterCount(reviewLength(reviewDialogDraft))}
+            </p>
+          </div>
+        </div>
+        <div className="flex justify-end gap-2 border-t pt-4">
+          <Button type="button" variant="outline" onClick={() => setReviewDialogEntryId(null)} disabled={reviewDialogEntryId ? savingReviewIds.has(reviewDialogEntryId) : false}>{copy.common.cancel}</Button>
+          <Button type="submit" disabled={reviewDialogEntryId ? savingReviewIds.has(reviewDialogEntryId) : true}>
+            {reviewDialogEntryId && savingReviewIds.has(reviewDialogEntryId) ? <Loader2 className="h-4 w-4 animate-spin" aria-hidden="true" /> : null}
+            {copy.paperTrading.saveReview}
+          </Button>
+        </div>
+      </form>
     </Dialog>
     <Dialog
       open={renameOpen}

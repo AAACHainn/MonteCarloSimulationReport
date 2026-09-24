@@ -38,6 +38,7 @@ function record(setupOptionId: string | null, setupName: string | null) {
     entryOrderType: "LIMIT", exitPrice: 102, initialStopPrice: 99, abrValue: 2, abrLength: 8,
     displayIntervalSeconds: 300, displaySession: "ETH", displayUtcOffsetMinutes: 0,
     priceTickSize: 0.25, initialRisk: 1, actualRisk: 1, gainLoss: 2,
+    review: "等待回踩确认后入场",
     setupOptionId, setupOption: setupName ? { name: setupName } : null,
     tradeReasons: [{ id: "reason-1", name: "趋势延续" }],
     journalSession: { archivedAt: new Date("2026-09-02T00:00:00Z") },
@@ -123,6 +124,32 @@ describe("replay journal Setup API", () => {
     const response = await PATCH(request(""), context);
     expect(response.status).toBe(400);
     expect(mocks.entryFindFirst).not.toHaveBeenCalled();
+  });
+
+  it("saves a review with at most 300 characters", async () => {
+    const review = "复".repeat(300);
+    mocks.entryUpdate.mockResolvedValue({ ...record("setup-1", "Opening Range Breakout"), review });
+    const response = await PATCH(new Request("http://localhost/api/entries/entry-1", {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ review }),
+    }), context);
+
+    expect(response.status).toBe(200);
+    expect(mocks.entryUpdate).toHaveBeenCalledWith(expect.objectContaining({ data: { review } }));
+    expect(await response.json()).toMatchObject({ review });
+  });
+
+  it("rejects a review longer than 300 characters", async () => {
+    const response = await PATCH(new Request("http://localhost/api/entries/entry-1", {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ review: "复".repeat(301) }),
+    }), context);
+
+    expect(response.status).toBe(400);
+    expect(mocks.entryFindFirst).not.toHaveBeenCalled();
+    expect(mocks.entryUpdate).not.toHaveBeenCalled();
   });
 
   it("does not update an entry outside the requested dataset", async () => {

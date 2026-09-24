@@ -419,6 +419,7 @@ const replayJournalEntryColumns = [
   ["entryOrderType", "TEXT"],
   ["accountNo", "INTEGER NOT NULL DEFAULT 0"],
   ["setupOptionId", "TEXT REFERENCES \"TradeOption\"(\"id\") ON DELETE SET NULL ON UPDATE CASCADE"],
+  ["review", "TEXT NOT NULL DEFAULT '' CHECK(length(\"review\") <= 300)"],
 ];
 const marketDatasetImportColumns = [
   ["importedBars", "INTEGER NOT NULL DEFAULT 0"],

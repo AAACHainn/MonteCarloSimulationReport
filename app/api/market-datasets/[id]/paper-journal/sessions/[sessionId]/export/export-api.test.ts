@@ -39,6 +39,7 @@ function entry(accountNo: number, setupName: string, reasonName: string) {
     initialRisk: 2,
     actualRisk: 2.5,
     gainLoss: accountNo === 1 ? 4 : -2,
+    review: `${setupName}复盘`,
     setupOptionId: `setup-${accountNo}`,
     setupOption: { name: setupName },
     tradeReasons: [{ id: `reason-${accountNo}`, name: reasonName }],
@@ -69,14 +70,16 @@ describe("replay journal Excel export API", () => {
 
     const workbook = await JSZip.loadAsync(await response.arrayBuffer());
     const sheet = await workbook.file("xl/worksheets/sheet1.xml")!.async("string");
-    expect(sheet).toContain('dimension ref="A1:P3"');
-    expect(sheet).toContain('autoFilter ref="A1:P3"');
+    expect(sheet).toContain('dimension ref="A1:Q3"');
+    expect(sheet).toContain('autoFilter ref="A1:Q3"');
     expect(sheet).toContain("Setup");
     expect(sheet).toContain("交易理由");
     expect(sheet).toContain("突破");
     expect(sheet).toContain("顺势");
     expect(sheet).toContain("回调");
     expect(sheet).toContain("结构");
+    expect(sheet).toContain("复盘");
+    expect(sheet).toContain("突破复盘");
     expect(sheet.match(/<row r=/g)).toHaveLength(3);
   });
 

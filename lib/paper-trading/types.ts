@@ -122,6 +122,7 @@ export type ReplayJournalEntryData = ReplayJournalEntryDraft & {
   setupOptionId: string | null;
   setupOption: { name: string } | null;
   tradeReasons: { id: string; name: string }[];
+  review: string;
   result: "W" | "L" | "BE";
   initialRiskAbr: number | null;
   actualRiskAbr: number | null;

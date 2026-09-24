@@ -45,6 +45,7 @@ export async function PATCH(request: Request, context: RouteContext) {
     ...(parsed.data.tradeReasonIds !== undefined ? {
       tradeReasons: { set: parsed.data.tradeReasonIds.map((reasonId) => ({ id: reasonId })) },
     } : {}),
+    ...(parsed.data.review !== undefined ? { review: parsed.data.review } : {}),
   };
 
   const updated = await prisma.replayJournalEntry.update({

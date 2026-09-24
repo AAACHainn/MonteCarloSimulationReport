@@ -31,6 +31,10 @@ import {
   parseBarCountPreferences,
 } from "@/lib/market-replay/bar-count";
 import {
+  DEFAULT_REPLAY_CHART_VISIBILITY,
+  parseReplayChartVisibility,
+} from "@/lib/market-replay/chart-visibility";
+import {
   ABR_LENGTH_MAX,
   ABR_LENGTH_MIN,
   EMA_LENGTH_MAX,
@@ -48,6 +52,7 @@ const DISPLAY_TIMEZONE_STORAGE_KEY = "market-replay-display-timezone-v1";
 const CANDLESTICK_STYLE_STORAGE_KEY = "market-replay-candlestick-style-v1";
 const TREND_LINE_PREFERENCES_STORAGE_KEY = "market-replay-trend-line-preferences-v1";
 const FIBONACCI_PREFERENCES_STORAGE_KEY = "market-replay-fibonacci-preferences-v1";
+const CHART_VISIBILITY_STORAGE_KEY = "market-replay-chart-visibility-v1";
 
 export const EMA_COLORS = ["#f59e0b", "#2563eb", "#7c3aed", "#0f766e", "#e11d48"];
 export const DEFAULT_EMA_INDICATORS: EmaIndicatorConfig[] = [
@@ -119,6 +124,8 @@ export function useReplayPreferences(dataset: { id: string; startTime: string; t
   const [candleCountdownSettingsLoaded, setCandleCountdownSettingsLoaded] = useState(false);
   const [barCountConfig, setBarCountConfig] = useState(() => ({ ...DEFAULT_BAR_COUNT_CONFIG }));
   const [barCountSettingsLoaded, setBarCountSettingsLoaded] = useState(false);
+  const [chartVisibility, setChartVisibility] = useState(() => ({ ...DEFAULT_REPLAY_CHART_VISIBILITY }));
+  const [chartVisibilityLoaded, setChartVisibilityLoaded] = useState(false);
   const [defaultTrendLineStyle, setDefaultTrendLineStyle] = useState<TrendLineStyle>(DEFAULT_TREND_LINE_STYLE);
   const [trendLineTemplates, setTrendLineTemplates] = useState<TrendLineTemplate[]>([]);
   const [defaultFibonacciStyle, setDefaultFibonacciStyle] = useState<FibonacciRetracementStyle>(() => cloneFibonacciStyle(DEFAULT_FIBONACCI_RETRACEMENT_STYLE));
@@ -173,6 +180,15 @@ export function useReplayPreferences(dataset: { id: string; startTime: string; t
       setBarCountConfig({ ...DEFAULT_BAR_COUNT_CONFIG });
     }
     setBarCountSettingsLoaded(true);
+  }, []);
+
+  useEffect(() => {
+    try {
+      setChartVisibility(parseReplayChartVisibility(window.localStorage.getItem(CHART_VISIBILITY_STORAGE_KEY)));
+    } catch {
+      setChartVisibility({ ...DEFAULT_REPLAY_CHART_VISIBILITY });
+    }
+    setChartVisibilityLoaded(true);
   }, []);
 
   useEffect(() => {
@@ -260,6 +276,15 @@ export function useReplayPreferences(dataset: { id: string; startTime: string; t
   }, [barCountConfig, barCountSettingsLoaded]);
 
   useEffect(() => {
+    if (!chartVisibilityLoaded) return;
+    try {
+      window.localStorage.setItem(CHART_VISIBILITY_STORAGE_KEY, JSON.stringify(chartVisibility));
+    } catch {
+      // Browser storage can be unavailable; visibility still applies to this page session.
+    }
+  }, [chartVisibility, chartVisibilityLoaded]);
+
+  useEffect(() => {
     let preferences = parseTrendLinePreferences(null);
     let fibonacciPreferences = parseFibonacciRetracementPreferences(null);
     try {
@@ -310,6 +335,8 @@ export function useReplayPreferences(dataset: { id: string; startTime: string; t
     setCandleCountdownEnabled,
     barCountConfig,
     setBarCountConfig,
+    chartVisibility,
+    setChartVisibility,
     defaultTrendLineStyle,
     setDefaultTrendLineStyle,
     trendLineTemplates,

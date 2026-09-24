@@ -113,6 +113,7 @@ export function serializeReplayJournalEntry(entry: {
   priceTickSize: number; initialRisk: number; actualRisk: number; gainLoss: number; lotId: string;
   setupOptionId?: string | null; setupOption?: { name: string } | null;
   tradeReasons?: { id: string; name: string }[];
+  review?: string;
   journalSession: { archivedAt: Date | null };
 }): ReplayJournalEntryData {
   const abr = entry.abrValue !== null && entry.abrValue > 0 ? entry.abrValue : null;
@@ -124,6 +125,7 @@ export function serializeReplayJournalEntry(entry: {
     setupOptionId: entry.setupOptionId ?? null,
     setupOption: entry.setupOption ? { name: entry.setupOption.name } : null,
     tradeReasons: entry.tradeReasons?.map((reason) => ({ id: reason.id, name: reason.name })) ?? [],
+    review: entry.review ?? "",
     lotId: entry.lotId, direction: entry.direction as "LONG" | "SHORT", quantity: entry.quantity,
     openedSequence: entry.openedSequence, openedAt: entry.openedAt.toISOString(),
     closedSequence: entry.closedSequence, closedAt: entry.closedAt.toISOString(),

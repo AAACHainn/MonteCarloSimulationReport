@@ -285,8 +285,9 @@ export const replayJournalEntryUpdateSchema = z.object({
     .max(MAX_TRADE_REASONS_PER_ENTRY)
     .refine((values) => new Set(values).size === values.length)
     .optional(),
+  review: z.string().refine((value) => Array.from(value).length <= 300).optional(),
 }).refine(
-  (value) => value.setupOptionId !== undefined || value.tradeReasonIds !== undefined,
+  (value) => value.setupOptionId !== undefined || value.tradeReasonIds !== undefined || value.review !== undefined,
 );
 
 export const replayJournalSessionNameSchema = z.object({

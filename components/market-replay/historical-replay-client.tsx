@@ -5,6 +5,7 @@ import { ListTree, Loader2, Palette, Ruler, Settings2, Trash2, TrendingUp, X } f
 import * as Popover from "@radix-ui/react-popover";
 import { ReplayChart } from "@/components/market-replay/replay-chart";
 import { IndicatorSettingsDialog } from "@/components/market-replay/indicator-settings-dialog";
+import { ChartVisibilityMenu } from "@/components/market-replay/chart-visibility-menu";
 import { useReplayPreferences } from "@/components/market-replay/use-replay-preferences";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { Button } from "@/components/ui/button";
@@ -13,6 +14,7 @@ import { Input } from "@/components/ui/input";
 import { copy } from "@/lib/i18n";
 import { isValidBarCountInterval, isValidBarCountRecentTradingDays } from "@/lib/market-replay/bar-count";
 import type { CandlestickStyle } from "@/lib/market-replay/candlestick-style";
+import type { ReplayChartVisibility } from "@/lib/market-replay/chart-visibility";
 import { resolveDisplaySession } from "@/lib/market-replay/chart-sessions";
 import {
   DRAWING_TYPE_FIB_RETRACEMENT,
@@ -136,10 +138,19 @@ export function HistoricalReplayClient({
     setVolumeVisible,
     barCountConfig,
     setBarCountConfig,
+    chartVisibility,
+    setChartVisibility,
     defaultTrendLineStyle,
     defaultFibonacciStyle,
     displayUtcOffsetMinutes,
   } = useReplayPreferences(dataset);
+  const visibleBarCountConfig = useMemo(() => (
+    chartVisibility.indicators ? barCountConfig : { ...barCountConfig, enabled: false }
+  ), [barCountConfig, chartVisibility.indicators]);
+  const visibleDrawings = useMemo(
+    () => chartVisibility.drawings ? drawings : [],
+    [chartVisibility.drawings, drawings],
+  );
   const indicatorWarmupCount = Math.max(
     abrEnabled ? abrLength : 0,
     emaEnabled ? Math.max(0, ...emaIndicators.filter((indicator) => indicator.visible).map((indicator) => indicator.length)) : 0,
@@ -174,10 +185,21 @@ export function HistoricalReplayClient({
 
   const armDrawing = useCallback((tool: DrawingTool) => {
     setMeasurementArmed(false);
+    setChartVisibility((current) => current.drawings ? current : { ...current, drawings: true });
     setDrawingTool(tool);
     setDrawingToolOpen(false);
     setSelectedDrawingId(null);
-  }, []);
+  }, [setChartVisibility]);
+
+  const changeChartVisibility = useCallback((next: ReplayChartVisibility) => {
+    setChartVisibility(next);
+    if (!next.drawings) {
+      setDrawingTool(null);
+      setDrawingToolOpen(false);
+      setDrawingObjectsOpen(false);
+      setSelectedDrawingId(null);
+    }
+  }, [setChartVisibility]);
 
   const createDrawing = useCallback((type: DrawingTool, geometry: TrendLineGeometry) => {
     const now = new Date().toISOString();
@@ -391,6 +413,7 @@ export function HistoricalReplayClient({
         <Button type="button" variant={measurementArmed ? "secondary" : "ghost"} size="sm" className="h-8" aria-pressed={measurementArmed} aria-label={copy.marketReplay.measureHint} onClick={() => { setDrawingTool(null); setMeasurementArmed((current) => !current); }}>
           <Ruler className="h-4 w-4" />{copy.marketReplay.measure}
         </Button>
+        <ChartVisibilityMenu value={chartVisibility} onChange={changeChartVisibility} />
         <Button type="button" variant={settingsDialog === "candlesticks" ? "secondary" : "ghost"} size="sm" className="h-8" onClick={() => { setCandlestickStyleDraft({ ...candlestickStyle }); setSettingsDialog("candlesticks"); }}>
           <Palette className="h-4 w-4" />{copy.marketReplay.candlestickStyle}
         </Button>
@@ -413,24 +436,25 @@ export function HistoricalReplayClient({
           onDrawingToolChange={setDrawingTool}
           trendLineDraftStyle={defaultTrendLineStyle}
           fibonacciDraftStyle={defaultFibonacciStyle}
-          drawings={drawings}
+          drawings={visibleDrawings}
           selectedDrawingId={selectedDrawingId}
           onSelectedDrawingIdChange={setSelectedDrawingId}
           onCreateDrawing={createDrawing}
           onUpdateDrawing={updateDrawing}
           onDeleteDrawing={deleteDrawing}
           onOpenDrawingStyle={setSelectedDrawingId}
-          emaEnabled={emaEnabled}
+          emaEnabled={chartVisibility.indicators && emaEnabled}
           emaIndicators={emaIndicators}
-          abrEnabled={abrEnabled}
+          abrEnabled={chartVisibility.indicators && abrEnabled}
           abrLength={abrLength}
-          volumeVisible={volumeVisible}
+          volumeVisible={chartVisibility.indicators && volumeVisible}
           displaySession={session.displaySession}
           barCountSession={barCountSession}
-          barCountConfig={barCountConfig}
+          barCountConfig={visibleBarCountConfig}
           paperSnapshot={null}
           tradeAnnotations={annotations}
           tradeAnnotationsTruncated={false}
+          tradingVisualsVisible={chartVisibility.tradeAnnotations}
           focusSequence={focusSequence}
           readOnly
           paperBusy={false}

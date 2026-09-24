@@ -10,6 +10,7 @@ import { ReplayAutoPauseNotice } from "@/components/market-replay/replay-auto-pa
 import { IndicatorSettingsDialog } from "@/components/market-replay/indicator-settings-dialog";
 import { QuickIntervalDialog } from "@/components/market-replay/quick-interval-dialog";
 import { ReplayStartDialog } from "@/components/market-replay/replay-start-dialog";
+import { ChartVisibilityMenu } from "@/components/market-replay/chart-visibility-menu";
 import { DEFAULT_REPLAY_MAX_VISIBLE_BARS } from "@/lib/market-replay/chart-range";
 import type { CandlestickStyle } from "@/lib/market-replay/candlestick-style";
 import { PaperAccountStrip, PaperTradingPanel } from "@/components/market-replay/paper-trading-panel";
@@ -34,6 +35,7 @@ import {
 import { aggregateMarketBars, getAggregationBucket, mergeSourceBarInto } from "@/lib/market-replay/aggregation";
 import { calculateLatestAbr } from "@/lib/market-replay/abr";
 import { isValidBarCountInterval, isValidBarCountRecentTradingDays } from "@/lib/market-replay/bar-count";
+import type { ReplayChartVisibility } from "@/lib/market-replay/chart-visibility";
 import { tradingDayForTimestamp } from "@/lib/market-replay/chunks";
 import { datasetSession } from "@/lib/market-replay/dataset";
 import { resolveDisplaySession } from "@/lib/market-replay/chart-sessions";
@@ -308,6 +310,8 @@ export function MarketReplayClient({ dataset, initialJournalFocus = null }: { da
     setCandleCountdownEnabled,
     barCountConfig,
     setBarCountConfig,
+    chartVisibility,
+    setChartVisibility,
     defaultTrendLineStyle,
     setDefaultTrendLineStyle,
     trendLineTemplates,
@@ -319,6 +323,9 @@ export function MarketReplayClient({ dataset, initialJournalFocus = null }: { da
     displayUtcOffsetMinutes,
     setDisplayUtcOffsetMinutes,
   } = useReplayPreferences(dataset);
+  const visibleBarCountConfig = useMemo(() => (
+    chartVisibility.indicators ? barCountConfig : { ...barCountConfig, enabled: false }
+  ), [barCountConfig, chartVisibility.indicators]);
   const emaWarmupCount = emaEnabled
     ? Math.max(0, ...emaIndicators.filter((indicator) => indicator.visible).map((indicator) => indicator.length))
     : 0;
@@ -421,11 +428,22 @@ export function MarketReplayClient({ dataset, initialJournalFocus = null }: { da
 
   const armDrawing = useCallback((tool: DrawingTool) => {
     setMeasurementArmed(false);
+    setChartVisibility((current) => current.drawings ? current : { ...current, drawings: true });
     setDrawingTool(tool);
     setDrawingToolOpen(false);
     setSelectedDrawingId(null);
     setDrawingError(null);
-  }, []);
+  }, [setChartVisibility]);
+
+  const changeChartVisibility = useCallback((next: ReplayChartVisibility) => {
+    setChartVisibility(next);
+    if (!next.drawings) {
+      setDrawingTool(null);
+      setDrawingToolOpen(false);
+      setDrawingObjectsOpen(false);
+      setSelectedDrawingId(null);
+    }
+  }, [setChartVisibility]);
   const armTrendLine = useCallback(() => armDrawing(DRAWING_TYPE_TREND_LINE), [armDrawing]);
   const armFibonacciRetracement = useCallback(() => armDrawing(DRAWING_TYPE_FIB_RETRACEMENT), [armDrawing]);
 
@@ -577,6 +595,10 @@ export function MarketReplayClient({ dataset, initialJournalFocus = null }: { da
         : drawing)
       : drawings
   ), [drawings, styleDraft, styleDrawingId]);
+  const visibleDrawings = useMemo(
+    () => chartVisibility.drawings ? displayedDrawings : [],
+    [chartVisibility.drawings, displayedDrawings],
+  );
 
   const loadTradeAnnotations = useCallback(async (
     visibleBars: AggregatedMarketBarData[],
@@ -2283,6 +2305,7 @@ export function MarketReplayClient({ dataset, initialJournalFocus = null }: { da
               {copy.marketReplay.measureHint}
             </span>
           </Button>
+          <ChartVisibilityMenu value={chartVisibility} onChange={changeChartVisibility} />
           <Button
             type="button"
             variant={settingsDialog === "candlesticks" ? "secondary" : "ghost"}
@@ -2319,7 +2342,7 @@ export function MarketReplayClient({ dataset, initialJournalFocus = null }: { da
             displayUtcOffsetMinutes={displayUtcOffsetMinutes}
             displayIntervalSeconds={replay.displayIntervalSeconds}
             sourceIntervalSeconds={dataset.sourceIntervalSeconds}
-            candleCountdownEnabled={candleCountdownEnabled}
+            candleCountdownEnabled={chartVisibility.indicators && candleCountdownEnabled}
             playbackActive={replay.status === "playing"}
             currentSourceTimestamp={currentBar?.timestamp ?? null}
             measurementArmed={measurementArmed}
@@ -2329,24 +2352,25 @@ export function MarketReplayClient({ dataset, initialJournalFocus = null }: { da
             onDrawingToolChange={setDrawingTool}
             trendLineDraftStyle={defaultTrendLineStyle}
             fibonacciDraftStyle={defaultFibonacciStyle}
-            drawings={displayedDrawings}
+            drawings={visibleDrawings}
             selectedDrawingId={selectedDrawingId}
             onSelectedDrawingIdChange={setSelectedDrawingId}
             onCreateDrawing={(type, geometry) => void createDrawing(type, geometry)}
             onUpdateDrawing={(id, geometry) => void updateDrawing(id, { geometry })}
             onDeleteDrawing={(id) => void deleteDrawing(id)}
             onOpenDrawingStyle={openDrawingStyle}
-            emaEnabled={emaEnabled}
+            emaEnabled={chartVisibility.indicators && emaEnabled}
             emaIndicators={emaIndicators}
-            abrEnabled={abrEnabled}
+            abrEnabled={chartVisibility.indicators && abrEnabled}
             abrLength={abrLength}
-            volumeVisible={volumeVisible}
+            volumeVisible={chartVisibility.indicators && volumeVisible}
             displaySession={replay.displaySession}
             barCountSession={displayMarketSession}
-            barCountConfig={barCountConfig}
+            barCountConfig={visibleBarCountConfig}
             paperSnapshot={journalReview ? null : paperSnapshot}
             tradeAnnotations={tradeAnnotations}
             tradeAnnotationsTruncated={tradeAnnotationsTruncated}
+            tradingVisualsVisible={chartVisibility.tradeAnnotations}
             focusSequence={journalReview?.sequence ?? null}
             paperBusy={paperBusy}
             paperError={paperError}

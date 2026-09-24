@@ -377,6 +377,7 @@ model ReplayJournalEntry {
   initialRisk              Float
   actualRisk               Float
   gainLoss                 Float
+  review                   String               @default("")
   setupOptionId            String?
   setupOption              TradeOption?         @relation("ReplayJournalSetupOption", fields: [setupOptionId], references: [id])
   tradeReasons             TradeReason[]         @relation("ReplayJournalTradeReasons")

@@ -29,6 +29,7 @@ const columns: ExportColumn[] = [
   { header: "ABR RR", width: 14, style: "ratio", value: (entry) => entry.abrRr },
   { header: "iRisk RR", width: 14, style: "ratio", value: (entry) => entry.initialRiskRr },
   { header: "aRisk RR", width: 14, style: "ratio", value: (entry) => entry.actualRiskRr },
+  { header: copy.paperTrading.review, width: 48, style: "text", value: (entry) => entry.review },
 ];
 
 const styleIndexes = {
