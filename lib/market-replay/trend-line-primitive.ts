@@ -14,7 +14,7 @@ import {
   type TrendLineGeometry,
   type TrendLineStyle,
 } from "@/lib/market-replay/chart-drawings";
-import type { AggregatedMarketBarData } from "@/lib/market-replay/types";
+import type { AggregatedMarketBarData, TradingSessionConfig } from "@/lib/market-replay/types";
 import { formatPriceForTick } from "@/lib/market-replay/price-ticks";
 
 export type TrendLinePoint = { x: number; y: number };
@@ -33,6 +33,8 @@ export type TrendLinePrimitiveSnapshot = {
   draftStyle: TrendLineStyle;
   bars: AggregatedMarketBarData[];
   displayIntervalSeconds: number;
+  sourceIntervalSeconds: number;
+  session: TradingSessionConfig;
   priceTickSize: number;
 };
 export type TrendLineHit = {
@@ -251,6 +253,8 @@ export class TrendLinePrimitive implements ISeriesPrimitive<Time> {
     draftStyle: DEFAULT_DRAFT_STYLE,
     bars: [],
     displayIntervalSeconds: 1,
+    sourceIntervalSeconds: 1,
+    session: { mode: "TWENTY_FOUR_SEVEN", timezone: "UTC", openMinute: null, closeMinute: null, weekdays: [1, 2, 3, 4, 5, 6, 7] },
     priceTickSize: 0.01,
   };
   private projected: ProjectedSnapshot = EMPTY_PROJECTED_SNAPSHOT;
@@ -293,8 +297,16 @@ export class TrendLinePrimitive implements ISeriesPrimitive<Time> {
     const paneWidth = chart.timeScale().width();
     const paneHeight = chart.panes()[0]?.getHeight() ?? 0;
     const projectGeometry = (geometry: TrendLineGeometry) => {
-      const startIndex = logicalIndexForAnchor(geometry.start, this.snapshot.bars, this.snapshot.displayIntervalSeconds);
-      const endIndex = logicalIndexForAnchor(geometry.end, this.snapshot.bars, this.snapshot.displayIntervalSeconds);
+      const projectionOptions = {
+        sourceIntervalSeconds: this.snapshot.sourceIntervalSeconds,
+        session: this.snapshot.session,
+      };
+      const startIndex = logicalIndexForAnchor(
+        geometry.start, this.snapshot.bars, this.snapshot.displayIntervalSeconds, projectionOptions,
+      );
+      const endIndex = logicalIndexForAnchor(
+        geometry.end, this.snapshot.bars, this.snapshot.displayIntervalSeconds, projectionOptions,
+      );
       if (startIndex === null || endIndex === null) return null;
       const startX = chart.timeScale().logicalToCoordinate(startIndex as never);
       const endX = chart.timeScale().logicalToCoordinate(endIndex as never);

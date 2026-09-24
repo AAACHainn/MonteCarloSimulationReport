@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { aggregateMarketBars, aggregateMarketSegments, getAggregationBucket, mergeAggregatedBars, mergeSourceBar } from "./aggregation";
+import { aggregateMarketBars, aggregateMarketSegments, getAdjacentAggregationBucketStart, getAggregationBucket, mergeAggregatedBars, mergeSourceBar } from "./aggregation";
 import type { MarketBarData, TradingSessionConfig } from "./types";
 import { nextEma } from "./ema";
 
@@ -42,6 +42,20 @@ describe("market bar aggregation", () => {
     expect(new Date(bucket!.start).toISOString()).toBe("2026-08-28T07:30:00.000Z");
     expect(new Date(bucket!.end).toISOString()).toBe("2026-08-28T08:00:00.000Z");
     expect(bucket!.expectedCount).toBe(6);
+  });
+
+  it("jumps between overnight-session buckets across the weekend", () => {
+    const session: TradingSessionConfig = {
+      mode: "OVERNIGHT_SESSION",
+      timezone: "America/Chicago",
+      openMinute: 17 * 60,
+      closeMinute: 16 * 60,
+      weekdays: [1, 2, 3, 4, 5],
+    };
+    const fridayFinalHour = Date.parse("2026-06-19T20:00:00.000Z");
+    const mondayOpen = Date.parse("2026-06-21T22:00:00.000Z");
+    expect(getAdjacentAggregationBucketStart(fridayFinalHour, 1, 3_600, session)).toBe(mondayOpen);
+    expect(getAdjacentAggregationBucketStart(mondayOpen, -1, 3_600, session)).toBe(fridayFinalHour);
   });
 
   it("combines a pre-aggregated source block without changing OHLCV or completeness", () => {

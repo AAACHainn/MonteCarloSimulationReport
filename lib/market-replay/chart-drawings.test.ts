@@ -6,9 +6,11 @@ import {
   distanceToSegment,
   fibonacciPriceAtLevel,
   logicalIndexForAnchor,
+  logicalIndexForTimelineAnchor,
   parseFibonacciRetracementPreferences,
   parseTrendLinePreferences,
   snapScreenPointTo45,
+  timelineAnchorForLogicalIndex,
   trendLineCanvasDashArray,
   trendLineDashArray,
 } from "@/lib/market-replay/chart-drawings";
@@ -28,6 +30,14 @@ const bars: AggregatedMarketBarData[] = [0, 1, 2].map((index) => ({
   expectedCount: 5,
   status: "COMPLETE",
 }));
+
+const rthSession = {
+  mode: "DAILY_SESSION" as const,
+  timezone: "America/Chicago",
+  openMinute: 8 * 60 + 30,
+  closeMinute: 15 * 60 + 15,
+  weekdays: [1, 2, 3, 4, 5],
+};
 
 describe("chart drawing geometry", () => {
   it("snaps to horizontal, vertical and diagonal 45 degree directions", () => {
@@ -59,10 +69,79 @@ describe("chart drawing geometry", () => {
     expect(logicalIndexForAnchor(anchor, bars, 300)).toBe(1);
   });
 
+  it("anchors a drawing to the target candle that contains its source bar", () => {
+    const hourly = [{
+      ...bars[0],
+      bucketEnd: new Date(Date.UTC(2026, 0, 1, 10, 0)).toISOString(),
+      firstSequence: 0,
+      lastSequence: 59,
+      sourceCount: 60,
+      expectedCount: 60,
+    }];
+    const anchor = { timestamp: bars[1].timestamp, sourceSequence: 5, price: 100 };
+    expect(logicalIndexForAnchor(anchor, hourly, 3_600)).toBe(0);
+  });
+
+  it("finds drawing anchors inside RTH candles despite overnight sequence gaps", () => {
+    const rthBars = [
+      { ...bars[0], firstSequence: 100, lastSequence: 144, expectedCount: 45 },
+      { ...bars[1], firstSequence: 1_300, lastSequence: 1_359, expectedCount: 60 },
+    ];
+    expect(logicalIndexForAnchor({
+      timestamp: rthBars[0].timestamp,
+      sourceSequence: 105,
+      price: 100,
+    }, rthBars, 3_600)).toBe(0);
+    expect(logicalIndexForAnchor({
+      timestamp: rthBars[1].timestamp,
+      sourceSequence: 1_330,
+      price: 100,
+    }, rthBars, 3_600)).toBe(1);
+  });
+
+  it("round-trips fractional viewport positions through the source timeline", () => {
+    const anchor = timelineAnchorForLogicalIndex(1.5, bars, 300);
+    expect(anchor?.sourceSequence).toBeCloseTo(7.5);
+    expect(anchor && logicalIndexForTimelineAnchor(anchor, bars, 300)).toBeCloseTo(1.5);
+  });
+
   it("interpolates timestamps inside a market gap", () => {
     const gapBars = [bars[0], { ...bars[1], timestamp: new Date(Date.UTC(2026, 0, 1, 10, 0)).toISOString() }];
     const anchor = { timestamp: new Date(Date.UTC(2026, 0, 1, 9, 30)).toISOString(), sourceSequence: null, price: 100 };
     expect(logicalIndexForAnchor(anchor, gapBars, 300)).toBeCloseTo(0.5);
+  });
+
+  it("projects future RTH anchors through the weekend using target-period buckets", () => {
+    const fridayLastFiveMinute: AggregatedMarketBarData = {
+      ...bars[0],
+      timestamp: "2026-06-19T20:10:00.000Z",
+      bucketEnd: "2026-06-19T20:15:00.000Z",
+      firstSequence: 1_000,
+      lastSequence: 1_004,
+      expectedCount: 5,
+      sourceCount: 5,
+    };
+    const anchor = anchorForLogicalIndex({
+      logicalIndex: 36,
+      price: 100,
+      bars: [fridayLastFiveMinute],
+      displayIntervalSeconds: 300,
+      sourceIntervalSeconds: 60,
+      session: rthSession,
+    });
+    expect(anchor.timestamp).toBe("2026-06-22T16:25:00.000Z");
+
+    const fridayLastTwoHour: AggregatedMarketBarData = {
+      ...fridayLastFiveMinute,
+      timestamp: "2026-06-19T19:30:00.000Z",
+      firstSequence: 960,
+      expectedCount: 45,
+      sourceCount: 45,
+    };
+    expect(logicalIndexForAnchor(anchor, [fridayLastTwoHour], 7_200, {
+      sourceIntervalSeconds: 60,
+      session: rthSession,
+    })).toBe(2);
   });
 
   it("validates styles and maps line dash patterns", () => {

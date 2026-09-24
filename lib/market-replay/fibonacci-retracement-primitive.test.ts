@@ -77,6 +77,8 @@ describe("Fibonacci retracement primitive hit testing", () => {
       draftStyle,
       bars,
       displayIntervalSeconds: 300,
+      sourceIntervalSeconds: 60,
+      session: { mode: "TWENTY_FOUR_SEVEN", timezone: "UTC", openMinute: null, closeMinute: null, weekdays: [1, 2, 3, 4, 5, 6, 7] },
       priceTickSize: 0.01,
     });
     primitive.updateAllViews();

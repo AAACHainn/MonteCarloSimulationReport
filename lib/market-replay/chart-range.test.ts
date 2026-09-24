@@ -2,8 +2,27 @@ import { describe, expect, it } from "vitest";
 import {
   defaultReplayLogicalRange,
   rangeAfterNewReplayBar,
+  rangeAfterTimelineChange,
   rangeAfterWindowReplacement,
 } from "./chart-range";
+import type { AggregatedMarketBarData } from "./types";
+
+function aggregatedBars(count: number, minutes: number, sourcePerBar: number): AggregatedMarketBarData[] {
+  return Array.from({ length: count }, (_, index) => ({
+    timestamp: new Date(Date.UTC(2026, 0, 1, 9, index * minutes)).toISOString(),
+    bucketEnd: new Date(Date.UTC(2026, 0, 1, 9, (index + 1) * minutes)).toISOString(),
+    firstSequence: index * sourcePerBar,
+    lastSequence: (index + 1) * sourcePerBar - 1,
+    open: 100,
+    high: 101,
+    low: 99,
+    close: 100,
+    volume: null,
+    sourceCount: sourcePerBar,
+    expectedCount: sourcePerBar,
+    status: "COMPLETE",
+  }));
+}
 
 describe("rangeAfterNewReplayBar", () => {
   it("keeps the viewport fixed when the latest bar is around the middle", () => {
@@ -90,5 +109,49 @@ describe("rangeAfterWindowReplacement", () => {
     const range = { from: 12.25, to: 47.75 };
     const next = rangeAfterWindowReplacement(range, 59, 79);
     expect(next).toEqual({ from: 32.25, to: 67.75 });
+  });
+});
+
+describe("rangeAfterTimelineChange", () => {
+  it("preserves the represented source span for every interval ratio", () => {
+    const fiveMinute = aggregatedBars(120, 5, 5);
+    const hourly = aggregatedBars(10, 60, 60);
+    const mapped = rangeAfterTimelineChange({
+      visibleRange: { from: 12, to: 108 },
+      previousBars: fiveMinute,
+      nextBars: hourly,
+      previousDisplayIntervalSeconds: 300,
+      nextDisplayIntervalSeconds: 3_600,
+    });
+    expect(mapped?.from).toBeCloseTo(1);
+    expect(mapped?.to).toBeCloseTo(9);
+  });
+
+  it("keeps future whitespace proportional when switching to a higher interval", () => {
+    const fiveMinute = aggregatedBars(120, 5, 5);
+    const hourly = aggregatedBars(10, 60, 60);
+    const mapped = rangeAfterTimelineChange({
+      visibleRange: { from: 60, to: 180 },
+      previousBars: fiveMinute,
+      nextBars: hourly,
+      previousDisplayIntervalSeconds: 300,
+      nextDisplayIntervalSeconds: 3_600,
+    });
+    expect(mapped?.from).toBeCloseTo(5);
+    expect(mapped?.to).toBeCloseTo(15);
+  });
+
+  it("preserves left-side whitespace and maps back from high to low intervals", () => {
+    const fiveMinute = aggregatedBars(120, 5, 5);
+    const hourly = aggregatedBars(10, 60, 60);
+    const mapped = rangeAfterTimelineChange({
+      visibleRange: { from: -2, to: 12 },
+      previousBars: hourly,
+      nextBars: fiveMinute,
+      previousDisplayIntervalSeconds: 3_600,
+      nextDisplayIntervalSeconds: 300,
+    });
+    expect(mapped?.from).toBeCloseTo(-24);
+    expect(mapped?.to).toBeCloseTo(144);
   });
 });

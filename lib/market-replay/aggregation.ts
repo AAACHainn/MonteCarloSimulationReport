@@ -95,6 +95,61 @@ export function getAggregationBucket(
   return { start, end, expectedCount: (end - start) / sourceMs };
 }
 
+/** Returns the adjacent chart bucket without walking every closed-market source slot. */
+export function getAdjacentAggregationBucketStart(
+  timestampMs: number,
+  direction: -1 | 1,
+  displaySeconds: number,
+  session: TradingSessionConfig,
+) {
+  const displayMs = displaySeconds * 1_000;
+  if (session.mode === "TWENTY_FOUR_SEVEN") return timestampMs + direction * displayMs;
+  if (session.openMinute === null || session.closeMinute === null) return null;
+
+  const parts = localParts(timestampMs, session.timezone);
+  const localDate = { year: parts.year, month: parts.month, day: parts.day };
+  const baseTradingDate = session.mode === "OVERNIGHT_SESSION"
+    ? shiftCalendarDate(localDate, parts.hour * 60 + parts.minute >= session.openMinute ? 1 : 0)
+    : localDate;
+  const openHour = Math.floor(session.openMinute / 60);
+  const openMinute = session.openMinute % 60;
+  const closeHour = Math.floor(session.closeMinute / 60);
+  const closeMinute = session.closeMinute % 60;
+  for (let step = 0; step <= 14; step += 1) {
+    const tradingDate = shiftCalendarDate(baseTradingDate, direction * step);
+    if (!session.weekdays.includes(tradingDate.weekday)) continue;
+    const startDate = session.mode === "OVERNIGHT_SESSION"
+      ? shiftCalendarDate(tradingDate, -1)
+      : tradingDate;
+    const sessionStart = new TZDate(
+      startDate.year, startDate.month - 1, startDate.day, openHour, openMinute, 0, session.timezone,
+    ).getTime();
+    const sessionEnd = new TZDate(
+      tradingDate.year, tradingDate.month - 1, tradingDate.day, closeHour, closeMinute, 0, session.timezone,
+    ).getTime();
+    if (sessionEnd <= sessionStart) continue;
+
+    let candidate: number;
+    if (direction > 0) {
+      if (timestampMs < sessionStart) candidate = sessionStart;
+      else if (timestampMs < sessionEnd) {
+        candidate = sessionStart + (Math.floor((timestampMs - sessionStart) / displayMs) + 1) * displayMs;
+      } else continue;
+      if (candidate >= sessionEnd || candidate <= timestampMs) continue;
+      return candidate;
+    } else {
+      if (timestampMs > sessionEnd) {
+        candidate = sessionStart + Math.floor((sessionEnd - sessionStart - 1) / displayMs) * displayMs;
+      } else if (timestampMs > sessionStart) {
+        candidate = sessionStart + Math.floor((timestampMs - sessionStart - 1) / displayMs) * displayMs;
+      } else continue;
+      if (candidate < sessionStart || candidate >= timestampMs) continue;
+      return candidate;
+    }
+  }
+  return null;
+}
+
 export function aggregateMarketBars({
   bars,
   sourceSeconds,

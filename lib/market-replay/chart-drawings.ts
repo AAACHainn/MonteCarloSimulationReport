@@ -1,5 +1,9 @@
 import { z } from "zod";
-import type { AggregatedMarketBarData } from "@/lib/market-replay/types";
+import {
+  getAdjacentAggregationBucketStart,
+  getAggregationBucket,
+} from "@/lib/market-replay/aggregation";
+import type { AggregatedMarketBarData, TradingSessionConfig } from "@/lib/market-replay/types";
 
 export const DRAWING_TYPE_TREND_LINE = "TREND_LINE" as const;
 export const DRAWING_TYPE_FIB_RETRACEMENT = "FIB_RETRACEMENT" as const;
@@ -252,39 +256,223 @@ export function anchorForLogicalIndex({
   price,
   bars,
   displayIntervalSeconds,
+  sourceIntervalSeconds,
+  session,
 }: {
   logicalIndex: number;
   price: number;
   bars: AggregatedMarketBarData[];
   displayIntervalSeconds: number;
+  sourceIntervalSeconds?: number;
+  session?: TradingSessionConfig;
 }): DrawingAnchor {
   const index = Math.round(logicalIndex);
   const bar = bars[index];
   if (bar) return { timestamp: bar.timestamp, sourceSequence: bar.firstSequence, price };
   const referenceIndex = index < 0 ? 0 : bars.length - 1;
   const reference = bars[referenceIndex];
+  const projectedTimestamp = reference && sourceIntervalSeconds && session
+    ? aggregationBucketStartAtOffset({
+      timestampMs: new Date(reference.timestamp).getTime(),
+      bucketOffset: index - referenceIndex,
+      displayIntervalSeconds,
+      session,
+    })
+    : null;
   const timestamp = reference
-    ? new Date(new Date(reference.timestamp).getTime() + (index - referenceIndex) * displayIntervalSeconds * 1_000).toISOString()
+    ? new Date(projectedTimestamp ?? (
+      new Date(reference.timestamp).getTime() + (index - referenceIndex) * displayIntervalSeconds * 1_000
+    )).toISOString()
     : new Date(0).toISOString();
   return { timestamp, sourceSequence: null, price };
 }
 
-export function logicalIndexForAnchor(
-  anchor: DrawingAnchor,
+export type ChartTimelineProjectionOptions = {
+  sourceIntervalSeconds: number;
+  session: TradingSessionConfig;
+};
+
+function adjacentAggregationBucketStart({
+  timestampMs,
+  direction,
+  displayIntervalSeconds,
+  session,
+}: {
+  timestampMs: number;
+  direction: -1 | 1;
+  displayIntervalSeconds: number;
+  session: TradingSessionConfig;
+}) {
+  return getAdjacentAggregationBucketStart(timestampMs, direction, displayIntervalSeconds, session);
+}
+
+function aggregationBucketStartAtOffset({
+  timestampMs,
+  bucketOffset,
+  displayIntervalSeconds,
+  session,
+}: {
+  timestampMs: number;
+  bucketOffset: number;
+  displayIntervalSeconds: number;
+  session: TradingSessionConfig;
+}) {
+  let result = timestampMs;
+  const direction: -1 | 1 = bucketOffset < 0 ? -1 : 1;
+  for (let remaining = Math.abs(bucketOffset); remaining > 0; remaining -= 1) {
+    const adjacent = adjacentAggregationBucketStart({
+      timestampMs: result,
+      direction,
+      displayIntervalSeconds,
+      session,
+    });
+    if (adjacent === null) return null;
+    result = adjacent;
+  }
+  return result;
+}
+
+function logicalIndexForSessionTimestamp(
+  target: number,
   bars: AggregatedMarketBarData[],
   displayIntervalSeconds: number,
+  options: ChartTimelineProjectionOptions,
+) {
+  for (let index = 0; index < bars.length; index += 1) {
+    const start = new Date(bars[index].timestamp).getTime();
+    const end = new Date(bars[index].bucketEnd).getTime();
+    if (target >= start && target < end) return index;
+  }
+
+  const firstTime = new Date(bars[0].timestamp).getTime();
+  const lastIndex = bars.length - 1;
+  const lastTime = new Date(bars[lastIndex].timestamp).getTime();
+  if (target > lastTime) {
+    let index = lastIndex;
+    let cursor = lastTime;
+    while (cursor < target && index - lastIndex <= 100_000) {
+      const next = adjacentAggregationBucketStart({
+        timestampMs: cursor,
+        direction: 1,
+        displayIntervalSeconds,
+        session: options.session,
+      });
+      if (next === null) return null;
+      index += 1;
+      if (target < next) return index;
+      const bucket = getAggregationBucket(
+        next,
+        options.sourceIntervalSeconds,
+        displayIntervalSeconds,
+        options.session,
+      );
+      if (bucket && target < bucket.end) return index;
+      cursor = next;
+    }
+    return index;
+  }
+  if (target < firstTime) {
+    let index = 0;
+    let cursor = firstTime;
+    while (cursor > target && -index <= 100_000) {
+      const previous = adjacentAggregationBucketStart({
+        timestampMs: cursor,
+        direction: -1,
+        displayIntervalSeconds,
+        session: options.session,
+      });
+      if (previous === null) return null;
+      index -= 1;
+      const bucket = getAggregationBucket(
+        previous,
+        options.sourceIntervalSeconds,
+        displayIntervalSeconds,
+        options.session,
+      );
+      if (target > previous || (bucket && target >= bucket.start && target < bucket.end)) return index;
+      cursor = previous;
+    }
+    return index;
+  }
+  return null;
+}
+
+export type ChartTimelineAnchor = {
+  timestamp: string;
+  sourceSequence: number | null;
+};
+
+function barSequenceSpan(bars: AggregatedMarketBarData[], index: number) {
+  const bar = bars[index];
+  const next = bars[index + 1];
+  const previous = bars[index - 1];
+  if (next && next.firstSequence > bar.firstSequence) return next.firstSequence - bar.firstSequence;
+  if (previous && bar.firstSequence > previous.firstSequence) return bar.firstSequence - previous.firstSequence;
+  return Math.max(1, bar.expectedCount, bar.lastSequence - bar.firstSequence + 1);
+}
+
+/**
+ * Captures a chart position in the source-data timeline instead of in the current
+ * display interval's logical-index space. Fractional source sequences deliberately
+ * represent positions between candle centres and are never persisted as drawings.
+ */
+export function timelineAnchorForLogicalIndex(
+  logicalIndex: number,
+  bars: AggregatedMarketBarData[],
+  displayIntervalSeconds: number,
+): ChartTimelineAnchor | null {
+  if (!bars.length || !Number.isFinite(logicalIndex)) return null;
+  const leftIndex = Math.floor(logicalIndex);
+  const rightIndex = Math.ceil(logicalIndex);
+  const left = bars[leftIndex];
+  const right = bars[rightIndex];
+  if (left && right) {
+    const ratio = logicalIndex - leftIndex;
+    const leftTime = new Date(left.timestamp).getTime();
+    const rightTime = new Date(right.timestamp).getTime();
+    return {
+      timestamp: new Date(leftTime + (rightTime - leftTime) * ratio).toISOString(),
+      sourceSequence: left.firstSequence + (right.firstSequence - left.firstSequence) * ratio,
+    };
+  }
+
+  const referenceIndex = logicalIndex < 0 ? 0 : bars.length - 1;
+  const reference = bars[referenceIndex];
+  const offset = logicalIndex - referenceIndex;
+  return {
+    timestamp: new Date(
+      new Date(reference.timestamp).getTime() + offset * Math.max(1, displayIntervalSeconds) * 1_000,
+    ).toISOString(),
+    sourceSequence: reference.firstSequence + offset * barSequenceSpan(bars, referenceIndex),
+  };
+}
+
+export function logicalIndexForTimelineAnchor(
+  anchor: ChartTimelineAnchor,
+  bars: AggregatedMarketBarData[],
+  displayIntervalSeconds: number,
+  options?: ChartTimelineProjectionOptions,
 ) {
   if (!bars.length) return null;
-  if (anchor.sourceSequence !== null) {
-    const sequenceIndex = bars.findIndex((bar) => (
-      anchor.sourceSequence! >= bar.firstSequence && anchor.sourceSequence! <= bar.lastSequence
-    ));
-    if (sequenceIndex >= 0) return sequenceIndex;
+  if (anchor.sourceSequence !== null && Number.isFinite(anchor.sourceSequence)) {
+    const target = anchor.sourceSequence;
+    if (target < bars[0].firstSequence) {
+      return (target - bars[0].firstSequence) / barSequenceSpan(bars, 0);
+    }
+    for (let index = 0; index < bars.length; index += 1) {
+      const bar = bars[index];
+      const next = bars[index + 1];
+      if (next && target >= next.firstSequence) continue;
+      return index + (target - bar.firstSequence) / barSequenceSpan(bars, index);
+    }
   }
+
   const target = new Date(anchor.timestamp).getTime();
   if (!Number.isFinite(target)) return null;
-  const exact = bars.findIndex((bar) => new Date(bar.timestamp).getTime() === target);
-  if (exact >= 0) return exact;
+  if (options) {
+    const sessionIndex = logicalIndexForSessionTimestamp(target, bars, displayIntervalSeconds, options);
+    if (sessionIndex !== null) return sessionIndex;
+  }
   const firstTime = new Date(bars[0].timestamp).getTime();
   const lastTime = new Date(bars.at(-1)!.timestamp).getTime();
   const interval = Math.max(1, displayIntervalSeconds * 1_000);
@@ -298,6 +486,21 @@ export function logicalIndexForAnchor(
     return index - 1 + (span > 0 ? (target - left) / span : 0);
   }
   return bars.length - 1;
+}
+
+export function logicalIndexForAnchor(
+  anchor: DrawingAnchor,
+  bars: AggregatedMarketBarData[],
+  displayIntervalSeconds: number,
+  options?: ChartTimelineProjectionOptions,
+) {
+  if (anchor.sourceSequence !== null) {
+    const containingBarIndex = bars.findIndex((bar) => (
+      anchor.sourceSequence! >= bar.firstSequence && anchor.sourceSequence! <= bar.lastSequence
+    ));
+    if (containingBarIndex >= 0) return containingBarIndex;
+  }
+  return logicalIndexForTimelineAnchor(anchor, bars, displayIntervalSeconds, options);
 }
 
 export function snapScreenPointTo45(

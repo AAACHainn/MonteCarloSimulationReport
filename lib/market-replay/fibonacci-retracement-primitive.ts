@@ -15,7 +15,7 @@ import {
   type FibonacciRetracementDrawing,
   type TrendLineGeometry,
 } from "@/lib/market-replay/chart-drawings";
-import type { AggregatedMarketBarData } from "@/lib/market-replay/types";
+import type { AggregatedMarketBarData, TradingSessionConfig } from "@/lib/market-replay/types";
 import { formatPriceForTick } from "@/lib/market-replay/price-ticks";
 
 export type FibonacciPoint = { x: number; y: number };
@@ -49,6 +49,8 @@ export type FibonacciRetracementPrimitiveSnapshot = {
   draftStyle: FibonacciRetracementDrawing["style"];
   bars: AggregatedMarketBarData[];
   displayIntervalSeconds: number;
+  sourceIntervalSeconds: number;
+  session: TradingSessionConfig;
   priceTickSize: number;
 };
 
@@ -162,7 +164,9 @@ export class FibonacciRetracementPrimitive implements ISeriesPrimitive<Time> {
   private snapshot: FibonacciRetracementPrimitiveSnapshot = {
     drawings: [], selectedDrawingId: null, preview: null, draft: null,
     draftStyle: DEFAULT_FIBONACCI_RETRACEMENT_STYLE,
-    bars: [], displayIntervalSeconds: 1, priceTickSize: 0.01,
+    bars: [], displayIntervalSeconds: 1, sourceIntervalSeconds: 1,
+    session: { mode: "TWENTY_FOUR_SEVEN", timezone: "UTC", openMinute: null, closeMinute: null, weekdays: [1, 2, 3, 4, 5, 6, 7] },
+    priceTickSize: 0.01,
   };
   private projected: ProjectedSnapshot = EMPTY_PROJECTED;
   private readonly views = [new FibonacciPaneView(() => this.projected)];
@@ -185,8 +189,16 @@ export class FibonacciRetracementPrimitive implements ISeriesPrimitive<Time> {
     const series = this.series;
     if (!chart || !series) { this.projected = EMPTY_PROJECTED; return; }
     const project = (drawing: FibonacciRetracementDrawing, geometry: TrendLineGeometry, selected: boolean) => {
-      const startIndex = logicalIndexForAnchor(geometry.start, this.snapshot.bars, this.snapshot.displayIntervalSeconds);
-      const endIndex = logicalIndexForAnchor(geometry.end, this.snapshot.bars, this.snapshot.displayIntervalSeconds);
+      const projectionOptions = {
+        sourceIntervalSeconds: this.snapshot.sourceIntervalSeconds,
+        session: this.snapshot.session,
+      };
+      const startIndex = logicalIndexForAnchor(
+        geometry.start, this.snapshot.bars, this.snapshot.displayIntervalSeconds, projectionOptions,
+      );
+      const endIndex = logicalIndexForAnchor(
+        geometry.end, this.snapshot.bars, this.snapshot.displayIntervalSeconds, projectionOptions,
+      );
       if (startIndex === null || endIndex === null) return null;
       const startX = chart.timeScale().logicalToCoordinate(startIndex as never);
       const endX = chart.timeScale().logicalToCoordinate(endIndex as never);

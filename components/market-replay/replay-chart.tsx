@@ -25,6 +25,7 @@ import { copy } from "@/lib/i18n";
 import {
   defaultReplayLogicalRange,
   rangeAfterNewReplayBar,
+  rangeAfterTimelineChange,
   rangeAfterWindowReplacement,
 } from "@/lib/market-replay/chart-range";
 import {
@@ -325,8 +326,14 @@ export function ReplayChart({
   const trendLinePrimitiveRef = useRef<TrendLinePrimitive | null>(null);
   const fibonacciPrimitiveRef = useRef<FibonacciRetracementPrimitive | null>(null);
   const lastDataRef = useRef<AggregatedMarketBarData[]>([]);
+  const lastDataIntervalRef = useRef(displayIntervalSeconds);
+  const lastDataSessionRef = useRef(displaySession);
+  const displaySessionRef = useRef(displaySession);
+  displaySessionRef.current = displaySession;
   const barsRef = useRef(bars);
-  barsRef.current = bars;
+  const drawingSessionRef = useRef(barCountSession);
+  const requestedDrawingSessionRef = useRef(barCountSession);
+  requestedDrawingSessionRef.current = barCountSession;
   const onVisibleSequenceRangeChangeRef = useRef(onVisibleSequenceRangeChange);
   onVisibleSequenceRangeChangeRef.current = onVisibleSequenceRangeChange;
   const tradeAnnotationsRef = useRef(tradeAnnotations);
@@ -351,6 +358,10 @@ export function ReplayChart({
   const onDeleteDrawingRef = useRef(onDeleteDrawing);
   const onOpenDrawingStyleRef = useRef(onOpenDrawingStyle);
   const displayIntervalSecondsRef = useRef(displayIntervalSeconds);
+  const requestedDisplayIntervalSecondsRef = useRef(displayIntervalSeconds);
+  requestedDisplayIntervalSecondsRef.current = displayIntervalSeconds;
+  const sourceIntervalSecondsRef = useRef(sourceIntervalSeconds ?? displayIntervalSeconds);
+  sourceIntervalSecondsRef.current = sourceIntervalSeconds ?? displayIntervalSeconds;
   const [contextMenu, setContextMenu] = useState<ContextMenuState | null>(null);
   const [abrTooltip, setAbrTooltip] = useState<AbrTooltipState | null>(null);
   const [measurement, setMeasurement] = useState<MeasurementState | null>(null);
@@ -392,7 +403,6 @@ export function ReplayChart({
   useEffect(() => { onUpdateDrawingRef.current = onUpdateDrawing; }, [onUpdateDrawing]);
   useEffect(() => { onDeleteDrawingRef.current = onDeleteDrawing; }, [onDeleteDrawing]);
   useEffect(() => { onOpenDrawingStyleRef.current = onOpenDrawingStyle; }, [onOpenDrawingStyle]);
-  useEffect(() => { displayIntervalSecondsRef.current = displayIntervalSeconds; }, [displayIntervalSeconds]);
   useEffect(() => { displayUtcOffsetRef.current = displayUtcOffsetMinutes; }, [displayUtcOffsetMinutes]);
   useEffect(() => { onOrderPriceChangeRef.current = onOrderPriceChange; }, [onOrderPriceChange]);
 
@@ -419,6 +429,8 @@ export function ReplayChart({
       draftStyle: trendLineDraftStyleRef.current,
       bars: barsRef.current,
       displayIntervalSeconds: displayIntervalSecondsRef.current,
+      sourceIntervalSeconds: sourceIntervalSecondsRef.current,
+      session: drawingSessionRef.current,
       priceTickSize: priceTickSizeRef.current,
     });
     fibonacciPrimitiveRef.current?.setDrawings({
@@ -429,6 +441,8 @@ export function ReplayChart({
       draftStyle: fibonacciDraftStyleRef.current,
       bars: barsRef.current,
       displayIntervalSeconds: displayIntervalSecondsRef.current,
+      sourceIntervalSeconds: sourceIntervalSecondsRef.current,
+      session: drawingSessionRef.current,
       priceTickSize: priceTickSizeRef.current,
     });
   }, []);
@@ -691,20 +705,19 @@ export function ReplayChart({
   }, [displayUtcOffsetMinutes]);
 
   useEffect(() => {
-    displayIntervalSecondsRef.current = displayIntervalSeconds;
-    requestAnimationFrame(syncDrawingPrimitive);
-    requestAnimationFrame(syncMeasurementCoordinates);
-  }, [displayIntervalSeconds, syncDrawingPrimitive, syncMeasurementCoordinates]);
-
-  useEffect(() => {
     requestAnimationFrame(syncDrawingPrimitive);
   }, [fibonacciDraftStyle, syncDrawingPrimitive, trendLineDraftStyle]);
 
   useEffect(() => {
     const chart = chartRef.current; const series = candleRef.current;
     if (!chart || !series) return;
+    const nextDisplayIntervalSeconds = requestedDisplayIntervalSecondsRef.current;
+    const nextDisplaySession = displaySessionRef.current;
     const previous = lastDataRef.current;
     const next = bars;
+    barsRef.current = next;
+    displayIntervalSecondsRef.current = nextDisplayIntervalSeconds;
+    drawingSessionRef.current = requestedDrawingSessionRef.current;
     const volumeSeries = volumeRef.current;
     const candleWasAutoScaled = series.priceScale().options().autoScale;
     const volumeWasAutoScaled = volumeSeries?.priceScale().options().autoScale ?? true;
@@ -724,9 +737,22 @@ export function ReplayChart({
       const range = chart.timeScale().getVisibleLogicalRange();
       const previousLastIndex = previous.length - 1;
       const previousLastInNext = next.findIndex((bar) => bar.timestamp === previous.at(-1)?.timestamp);
+      const timelineChanged = lastDataIntervalRef.current !== nextDisplayIntervalSeconds
+        || lastDataSessionRef.current !== nextDisplaySession;
+      const mappedTimelineRange = range && timelineChanged
+        ? rangeAfterTimelineChange({
+          visibleRange: range,
+          previousBars: previous,
+          nextBars: next,
+          previousDisplayIntervalSeconds: lastDataIntervalRef.current,
+          nextDisplayIntervalSeconds,
+        })
+        : null;
       series.setData(next.map(candle));
       volumeSeries?.setData(next.filter((bar) => bar.volume !== null).map(volume));
-      if (range && previousLastInNext >= 0) {
+      if (mappedTimelineRange) {
+        chart.timeScale().setVisibleLogicalRange(mappedTimelineRange);
+      } else if (range && previousLastInNext >= 0) {
         // A rolling server window renumbers logical indices. Preserve zoom and historical panning.
         const advanced = rangeAfterNewReplayBar(range, previousLastIndex, next.length - 1 - previousLastInNext);
         const removed = previousLastIndex - previousLastInNext;
@@ -747,6 +773,8 @@ export function ReplayChart({
       volumeSeries.priceScale().applyOptions({ autoScale: false });
     }
     lastDataRef.current = next;
+    lastDataIntervalRef.current = nextDisplayIntervalSeconds;
+    lastDataSessionRef.current = nextDisplaySession;
     requestAnimationFrame(syncVisibleSequenceRange);
     requestAnimationFrame(syncMeasurementCoordinates);
     requestAnimationFrame(syncDrawingPrimitive);
@@ -921,6 +949,8 @@ export function ReplayChart({
           price,
           bars: currentBars,
           displayIntervalSeconds: displayIntervalSecondsRef.current,
+          sourceIntervalSeconds: sourceIntervalSecondsRef.current,
+          session: drawingSessionRef.current,
         }),
         coordinate: { x: Number(snappedX), y: Number(snappedY) },
       };

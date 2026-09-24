@@ -1,6 +1,11 @@
 export type ReplayLogicalRange = { from: number; to: number };
 
 import { REPLAY_INITIAL_VISIBLE_BARS } from "./types";
+import type { AggregatedMarketBarData } from "./types";
+import {
+  logicalIndexForTimelineAnchor,
+  timelineAnchorForLogicalIndex,
+} from "./chart-drawings";
 
 /** Maximum number of candles in the default viewport, not the loaded history limit. */
 export const DEFAULT_REPLAY_MAX_VISIBLE_BARS = REPLAY_INITIAL_VISIBLE_BARS;
@@ -45,4 +50,34 @@ export function rangeAfterWindowReplacement(
     from: visibleRange.from + shift,
     to: visibleRange.to + shift,
   };
+}
+
+export function rangeAfterTimelineChange({
+  visibleRange,
+  previousBars,
+  nextBars,
+  previousDisplayIntervalSeconds,
+  nextDisplayIntervalSeconds,
+}: {
+  visibleRange: ReplayLogicalRange;
+  previousBars: AggregatedMarketBarData[];
+  nextBars: AggregatedMarketBarData[];
+  previousDisplayIntervalSeconds: number;
+  nextDisplayIntervalSeconds: number;
+}): ReplayLogicalRange | null {
+  const fromAnchor = timelineAnchorForLogicalIndex(
+    visibleRange.from,
+    previousBars,
+    previousDisplayIntervalSeconds,
+  );
+  const toAnchor = timelineAnchorForLogicalIndex(
+    visibleRange.to,
+    previousBars,
+    previousDisplayIntervalSeconds,
+  );
+  if (!fromAnchor || !toAnchor) return null;
+  const from = logicalIndexForTimelineAnchor(fromAnchor, nextBars, nextDisplayIntervalSeconds);
+  const to = logicalIndexForTimelineAnchor(toAnchor, nextBars, nextDisplayIntervalSeconds);
+  if (from === null || to === null || !Number.isFinite(from) || !Number.isFinite(to) || to <= from) return null;
+  return { from, to };
 }
