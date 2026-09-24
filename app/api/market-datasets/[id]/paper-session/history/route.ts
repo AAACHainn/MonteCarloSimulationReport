@@ -24,9 +24,24 @@ export async function GET(request: Request, context: RouteContext) {
     return NextResponse.json({ items: trades.slice(0, take).map(serializePaperTrade), nextCursor });
   }
   if (type === "equity") {
-    const points = await prisma.paperEquityPoint.findMany({ where: { sessionId: session.id }, orderBy: { sequence: "asc" } });
+    const closedTrades = await prisma.paperTrade.findMany({
+      where: { sessionId: session.id, status: "CLOSED" },
+      orderBy: [{ closedSequence: "asc" }, { closedAt: "asc" }, { id: "asc" }],
+      select: { grossPnl: true, fees: true },
+    });
+    if (!closedTrades.length) return NextResponse.json({ items: [] });
+    let equity = session.initialCapital;
+    const points = [
+      { tradeNumber: 0, equity },
+      ...closedTrades.map((trade, index) => {
+        equity += trade.grossPnl - trade.fees;
+        return { tradeNumber: index + 1, equity };
+      }),
+    ];
     const stride = Math.max(1, Math.ceil(points.length / 2_000));
-    return NextResponse.json({ items: points.filter((_point, index) => index % stride === 0 || index === points.length - 1) });
+    return NextResponse.json({
+      items: points.filter((_point, index) => index % stride === 0 || index === points.length - 1),
+    });
   }
   const fills = await prisma.paperFill.findMany({ where: { sessionId: session.id }, orderBy: [{ sequence: "desc" }, { createdAt: "desc" }, { id: "desc" }], take: take + 1, ...(cursor ? { cursor: { id: cursor }, skip: 1 } : {}) });
   const nextCursor = fills.length > take ? fills[take - 1]?.id ?? null : null;

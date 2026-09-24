@@ -358,7 +358,7 @@ function Stats({ snapshot }: { snapshot: PaperSessionSnapshot }) {
 }
 
 function EquityCurve({ datasetId }: { datasetId: string }) {
-  const [points, setPoints] = useState<Array<{ sequence: number; equity: number }>>([]);
+  const [points, setPoints] = useState<Array<{ tradeNumber: number; equity: number }>>([]);
   useEffect(() => {
     let cancelled = false;
     fetch(`/api/market-datasets/${datasetId}/paper-session/history?type=equity`)
@@ -368,5 +368,5 @@ function EquityCurve({ datasetId }: { datasetId: string }) {
     return () => { cancelled = true; };
   }, [datasetId]);
   if (!points.length) return null;
-  return <div className="h-64 rounded-md border p-3"><ResponsiveContainer width="100%" height="100%"><LineChart data={points}><XAxis dataKey="sequence" tick={{ fontSize: 11 }} /><YAxis domain={["auto", "auto"]} tick={{ fontSize: 11 }} width={70} /><Tooltip /><Line type="monotone" dataKey="equity" stroke="#2563eb" strokeWidth={2} dot={false} isAnimationActive={false} /></LineChart></ResponsiveContainer></div>;
+  return <div className="h-64 rounded-md border p-3"><ResponsiveContainer width="100%" height="100%"><LineChart data={points} margin={{ bottom: 14 }}><XAxis dataKey="tradeNumber" type="number" domain={[0, "dataMax"]} allowDecimals={false} tick={{ fontSize: 11 }} label={{ value: copy.paperTrading.equityCurveXAxis, position: "insideBottom", offset: -8 }} /><YAxis domain={["auto", "auto"]} tick={{ fontSize: 11 }} width={70} /><Tooltip labelFormatter={(value) => Number(value) === 0 ? copy.paperTrading.equityCurveInitial : copy.paperTrading.equityCurveTrade(Number(value))} formatter={(value) => [number(Number(value)), copy.paperTrading.equity]} /><Line type="monotone" dataKey="equity" name={copy.paperTrading.equity} stroke="#2563eb" strokeWidth={2} dot={false} isAnimationActive={false} /></LineChart></ResponsiveContainer></div>;
 }
