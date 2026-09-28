@@ -148,9 +148,14 @@ export const fibonacciRetracementStyleSchema = z.object({
   lineStyle: z.enum(TREND_LINE_STYLES),
   levels: z.array(fibonacciLevelSchema).min(1).max(10),
 }).strict().refine(
-  (style) => new Set(style.levels.map((level) => level.value)).size === style.levels.length,
-  { message: "Fibonacci levels must be unique", path: ["levels"] },
+  (style) => !hasDuplicateEnabledFibonacciLevels(style),
+  { message: "Enabled Fibonacci levels must be unique", path: ["levels"] },
 );
+
+export function hasDuplicateEnabledFibonacciLevels(style: Pick<FibonacciRetracementStyle, "levels">) {
+  const enabledValues = style.levels.filter((level) => level.enabled).map((level) => level.value);
+  return new Set(enabledValues).size !== enabledValues.length;
+}
 
 export const trendLinePreferencesSchema = z.object({
   defaultStyle: trendLineStyleSchema,

@@ -106,6 +106,7 @@ import {
   DRAWING_TYPE_FIB_RETRACEMENT,
   DRAWING_TYPE_TREND_LINE,
   drawingStyleMatchesType,
+  hasDuplicateEnabledFibonacciLevels,
   type DrawingTool,
   type FibonacciRetracementStyle,
   type FibonacciRetracementTemplate,
@@ -287,6 +288,7 @@ export function MarketReplayClient({ dataset, initialJournalFocus = null }: { da
   const [drawingObjectsOpen, setDrawingObjectsOpen] = useState(false);
   const [styleDrawingId, setStyleDrawingId] = useState<string | null>(null);
   const [styleDraft, setStyleDraft] = useState<MarketDrawingStyle | null>(null);
+  const [styleDraftError, setStyleDraftError] = useState<string | null>(null);
   const [selectedTemplateId, setSelectedTemplateId] = useState("");
   const [templateDialogOpen, setTemplateDialogOpen] = useState(false);
   const [templateName, setTemplateName] = useState("");
@@ -544,6 +546,7 @@ export function MarketReplayClient({ dataset, initialJournalFocus = null }: { da
     setStyleDraft(drawing.type === DRAWING_TYPE_TREND_LINE
       ? { ...drawing.style }
       : cloneFibonacciStyle(drawing.style));
+    setStyleDraftError(null);
     setSelectedTemplateId("");
   }, [drawings]);
 
@@ -2595,13 +2598,15 @@ export function MarketReplayClient({ dataset, initialJournalFocus = null }: { da
         onClose={() => {
           setStyleDrawingId(null);
           setStyleDraft(null);
+          setStyleDraftError(null);
           setSelectedTemplateId("");
         }}
       >
         {styleDraft && (() => {
           const styleDrawing = drawings.find((drawing) => drawing.id === styleDrawingId);
-          if (!styleDrawing || !drawingStyleMatchesType(styleDrawing.type, styleDraft)) return null;
+          if (!styleDrawing) return null;
           const isFibonacci = styleDrawing.type === DRAWING_TYPE_FIB_RETRACEMENT;
+          if (isFibonacci ? !("levels" in styleDraft) : !("color" in styleDraft)) return null;
           const templates = isFibonacci ? fibonacciTemplates : trendLineTemplates;
           return (
           <div className="space-y-5">
@@ -2615,6 +2620,7 @@ export function MarketReplayClient({ dataset, initialJournalFocus = null }: { da
                     const template = templates.find((item) => item.id === value);
                     if (!template) return;
                     setSelectedTemplateId(value);
+                    setStyleDraftError(null);
                     setStyleDraft(isFibonacci
                       ? cloneFibonacciStyle(template.style as FibonacciRetracementStyle)
                       : { ...template.style as TrendLineStyle });
@@ -2741,10 +2747,13 @@ export function MarketReplayClient({ dataset, initialJournalFocus = null }: { da
                         type="checkbox"
                         checked={level.enabled}
                         aria-label={copy.marketReplay.fibonacciLevelToggle(level.value)}
-                        onChange={(event) => setStyleDraft((current) => current && "levels" in current ? {
-                          ...current,
-                          levels: current.levels.map((item, itemIndex) => itemIndex === index ? { ...item, enabled: event.target.checked } : item),
-                        } : current)}
+                        onChange={(event) => {
+                          setStyleDraftError(null);
+                          setStyleDraft((current) => current && "levels" in current ? {
+                            ...current,
+                            levels: current.levels.map((item, itemIndex) => itemIndex === index ? { ...item, enabled: event.target.checked } : item),
+                          } : current);
+                        }}
                         className="h-4 w-4 shrink-0 rounded border-slate-300"
                       />
                       <Input
@@ -2757,6 +2766,7 @@ export function MarketReplayClient({ dataset, initialJournalFocus = null }: { da
                         onChange={(event) => {
                           const value = Number(event.target.value);
                           if (!Number.isFinite(value) || value < -10 || value > 10) return;
+                          setStyleDraftError(null);
                           setStyleDraft((current) => current && "levels" in current ? {
                             ...current,
                             levels: current.levels.map((item, itemIndex) => itemIndex === index ? { ...item, value } : item),
@@ -2779,6 +2789,7 @@ export function MarketReplayClient({ dataset, initialJournalFocus = null }: { da
                 </div>
               </div>
             ) : null}
+            {styleDraftError ? <p role="alert" className="text-sm text-red-600">{styleDraftError}</p> : null}
             <p className="text-xs text-slate-500">{isFibonacci ? copy.marketReplay.nextFibonacciStyleHint : copy.marketReplay.nextTrendLineStyleHint}</p>
             <div className="flex items-center justify-between gap-3 border-t pt-4">
               <Button type="button" variant="outline" onClick={() => {
@@ -2789,12 +2800,18 @@ export function MarketReplayClient({ dataset, initialJournalFocus = null }: { da
                 <Button type="button" variant="outline" onClick={() => {
                   setStyleDrawingId(null);
                   setStyleDraft(null);
+                  setStyleDraftError(null);
                   setSelectedTemplateId("");
                 }}>{copy.marketReplay.drawingCancel}</Button>
                 <Button type="button" onClick={() => {
                   if (!styleDrawingId) return;
                   const id = styleDrawingId;
                   const drawing = drawings.find((item) => item.id === id);
+                  if (drawing?.type === DRAWING_TYPE_FIB_RETRACEMENT && "levels" in styleDraft
+                    && hasDuplicateEnabledFibonacciLevels(styleDraft)) {
+                    setStyleDraftError(copy.marketReplay.fibonacciDuplicateEnabledLevels);
+                    return;
+                  }
                   if (!drawing || !drawingStyleMatchesType(drawing.type, styleDraft)) return;
                   const style = drawing.type === DRAWING_TYPE_FIB_RETRACEMENT
                     ? cloneFibonacciStyle(styleDraft as FibonacciRetracementStyle)
@@ -2807,6 +2824,7 @@ export function MarketReplayClient({ dataset, initialJournalFocus = null }: { da
                   void updateDrawing(id, { style });
                   setStyleDrawingId(null);
                   setStyleDraft(null);
+                  setStyleDraftError(null);
                   setSelectedTemplateId("");
                 }}>{copy.marketReplay.drawingConfirm}</Button>
               </div>

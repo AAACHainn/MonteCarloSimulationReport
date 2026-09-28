@@ -303,6 +303,7 @@ export const dictionaries = {
       fibonacciLevelToggle: (value: number) => `${value} 层级`,
       fibonacciLevelValue: (index: number) => `第 ${index} 个回撤层级值`,
       fibonacciLevelColor: (value: number) => `${value} 层级颜色`,
+      fibonacciDuplicateEnabledLevels: "已勾选的回撤层级不能包含相同数值，请修改后再确认。",
       lineColor: "线条颜色",
       lineOpacity: "透明度",
       lineWidth: "线宽",

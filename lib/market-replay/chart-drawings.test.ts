@@ -187,6 +187,13 @@ describe("chart drawing geometry", () => {
       ...candidate,
       style: { ...candidate.style, levels: candidate.style.levels.map((level, index) => index === 1 ? { ...level, value: 0 } : level) },
     }).success).toBe(false);
+    expect(createMarketDrawingSchema.safeParse({
+      ...candidate,
+      style: {
+        ...candidate.style,
+        levels: candidate.style.levels.map((level, index) => index === 8 ? { ...level, value: 0 } : level),
+      },
+    }).success).toBe(true);
   });
 
   it("loads valid template preferences and falls back from invalid storage", () => {
