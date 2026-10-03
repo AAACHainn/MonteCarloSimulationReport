@@ -2,6 +2,18 @@
 @tailwind components;
 @tailwind utilities;
 
+/* A transformed page would otherwise contain the fixed immersive workspace. */
+.market-replay-page:has([data-web-fullscreen="true"]) {
+  position: static;
+  width: 100%;
+  height: auto;
+  transform: none;
+}
+
+.market-replay-page:has([data-web-fullscreen="true"]) > :first-child {
+  display: none;
+}
+
 @layer base {
   :root {
     --background: 210 20% 98%;

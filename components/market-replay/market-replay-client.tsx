@@ -216,6 +216,7 @@ function formatDatasetTime(value: string, timezone: string) {
 type JournalFocus = { sequence: number; no: number; globalNo: number };
 
 export function MarketReplayClient({ dataset, initialJournalFocus = null }: { dataset: MarketDatasetSummary; initialJournalFocus?: JournalFocus | null }) {
+  const [webFullscreen, setWebFullscreen] = useState(false);
   const [bars, setBars] = useState<AggregatedMarketBarData[]>([]);
   const [warmupBars, setWarmupBars] = useState<AggregatedMarketBarData[]>([]);
   const [currentSourceBar, setCurrentSourceBar] = useState<MarketBarData | null>(null);
@@ -293,6 +294,30 @@ export function MarketReplayClient({ dataset, initialJournalFocus = null }: { da
   const [templateDialogOpen, setTemplateDialogOpen] = useState(false);
   const [templateName, setTemplateName] = useState("");
   const [pendingDrawingIds, setPendingDrawingIds] = useState<Set<string>>(() => new Set());
+  useEffect(() => {
+    if (!webFullscreen) return;
+    // Lock the root independently of dialogs, which lock body scrolling.
+    const previousOverflow = document.documentElement.style.overflow;
+    document.documentElement.style.overflow = "hidden";
+    return () => { document.documentElement.style.overflow = previousOverflow; };
+  }, [webFullscreen]);
+
+  useEffect(() => {
+    if (!webFullscreen) return;
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (
+        event.key !== "Escape" || event.defaultPrevented || event.isComposing
+        || drawingTool || selectedDrawingId || measurementArmed || draftActive
+        || document.querySelector("[role='dialog'], [role='alertdialog'], [role='menu'], [role='listbox'], [data-context-menu], [data-radix-popper-content-wrapper]")
+      ) return;
+      event.preventDefault();
+      setWebFullscreen(false);
+    };
+    // Check overlays before their Escape handlers remove them from the DOM.
+    window.addEventListener("keydown", onKeyDown, true);
+    return () => window.removeEventListener("keydown", onKeyDown, true);
+  }, [draftActive, drawingTool, measurementArmed, selectedDrawingId, webFullscreen]);
+
   const {
     candlestickStyle,
     setCandlestickStyle,
@@ -2191,8 +2216,14 @@ export function MarketReplayClient({ dataset, initialJournalFocus = null }: { da
 
   return (
     <>
-      <div className="flex h-full min-h-0 flex-col overflow-hidden rounded-lg border bg-white shadow-sm">
-        <div className="flex h-12 shrink-0 items-center gap-2 border-b px-3">
+      <div
+        data-web-fullscreen={webFullscreen}
+        aria-label={dataset.name}
+        className={webFullscreen
+          ? "fixed inset-0 z-40 flex h-dvh min-h-0 flex-col overflow-hidden bg-white"
+          : "flex h-full min-h-0 flex-col overflow-hidden rounded-lg border bg-white shadow-sm"}
+      >
+        <div className="flex h-12 shrink-0 items-center gap-2 overflow-x-auto border-b px-3 [&>*]:shrink-0">
           <Label htmlFor="display-interval" className="whitespace-nowrap text-xs text-slate-500">{copy.marketReplay.displayInterval}</Label>
           <Select disabled={Boolean(journalReview)} value={String(replay.displayIntervalSeconds)} onValueChange={(value) => void changeDisplayInterval(Number(value))}>
             <SelectTrigger id="display-interval" className="h-8 w-24"><SelectValue /></SelectTrigger>
@@ -2462,6 +2493,8 @@ export function MarketReplayClient({ dataset, initialJournalFocus = null }: { da
           revealedCount={revealedCount}
           replayCount={replayCount}
           statusText={statusText}
+          webFullscreen={webFullscreen}
+          onToggleWebFullscreen={() => setWebFullscreen((current) => !current)}
           onToggle={togglePlayback}
           onNext={revealNextBar}
           onSpeedChange={changeSpeed}

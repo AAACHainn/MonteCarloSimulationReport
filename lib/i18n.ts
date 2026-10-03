@@ -104,6 +104,9 @@ export const dictionaries = {
       },
     },
     marketReplay: {
+      enterWebFullscreen: "网页全屏",
+      exitWebFullscreen: "退出网页全屏",
+      webFullscreenExitHint: "退出网页全屏（Esc）",
       eyebrow: "历史行情训练",
       title: "K 线回放",
       subtitle: "导入本地 OHLCV 行情，从指定时间开始逐根回放，并自动保存最近进度。",
