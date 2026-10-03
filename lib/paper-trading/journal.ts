@@ -58,23 +58,30 @@ export function calculateReplayJournalSummary(
 }
 
 export function calculateReplayJournalTrainingStats(
-  entries: ReadonlyArray<{ gainLoss: number; priceTickSize: number }>,
+  entries: ReadonlyArray<{ gainLoss: number; priceTickSize: number; quantity: number }>,
 ) {
   const summary = calculateReplayJournalSummary(entries);
   let cumulativePoints = 0;
+  let cumulativePnl = 0;
+  let totalWinningPnl = 0;
+  let totalLosingPnl = 0;
   let winStreak = 0;
   let lossStreak = 0;
   let maxConsecutiveWins = 0;
   let maxConsecutiveLosses = 0;
   const points = [{ tradeNumber: 0, cumulativePoints: 0 }];
+  const pnlCurve = [{ tradeNumber: 0, cumulativePnl: 0 }];
 
   for (const [index, entry] of entries.entries()) {
     const result = replayJournalResult(entry.gainLoss, entry.priceTickSize);
+    const pnl = entry.gainLoss * entry.quantity;
     if (result === "W") {
+      totalWinningPnl += pnl;
       winStreak += 1;
       lossStreak = 0;
       maxConsecutiveWins = Math.max(maxConsecutiveWins, winStreak);
     } else if (result === "L") {
+      totalLosingPnl += pnl;
       lossStreak += 1;
       winStreak = 0;
       maxConsecutiveLosses = Math.max(maxConsecutiveLosses, lossStreak);
@@ -84,11 +91,16 @@ export function calculateReplayJournalTrainingStats(
     }
     cumulativePoints += entry.gainLoss;
     points.push({ tradeNumber: index + 1, cumulativePoints });
+    cumulativePnl += pnl;
+    pnlCurve.push({ tradeNumber: index + 1, cumulativePnl });
   }
 
   const stride = Math.max(1, Math.ceil(points.length / 2_000));
   return {
     ...summary,
+    averageWin: summary.winningTradeCount ? totalWinningPnl / summary.winningTradeCount : 0,
+    averageLoss: summary.losingTradeCount ? totalLosingPnl / summary.losingTradeCount : 0,
+    pnlCurve: pnlCurve.filter((_point, index) => index % stride === 0 || index === pnlCurve.length - 1),
     averageWinPoints: summary.winningTradeCount ? summary.totalProfitPoints / summary.winningTradeCount : 0,
     averageLossPoints: summary.losingTradeCount ? -summary.totalLossPoints / summary.losingTradeCount : 0,
     maxConsecutiveWins,

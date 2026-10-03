@@ -36,11 +36,11 @@ function ids() {
 describe("paper replay journal", () => {
   it("counts every FIFO close pairing, including partial exits and breakeven entries", () => {
     const stats = calculateReplayJournalTrainingStats([
-      { gainLoss: 4, priceTickSize: 0.25 },
-      { gainLoss: 2, priceTickSize: 0.25 },
-      { gainLoss: 0, priceTickSize: 0.25 },
-      { gainLoss: -3, priceTickSize: 0.25 },
-      { gainLoss: -1, priceTickSize: 0.25 },
+      { gainLoss: 4, priceTickSize: 0.25, quantity: 1 },
+      { gainLoss: 2, priceTickSize: 0.25, quantity: 1 },
+      { gainLoss: 0, priceTickSize: 0.25, quantity: 1 },
+      { gainLoss: -3, priceTickSize: 0.25, quantity: 1 },
+      { gainLoss: -1, priceTickSize: 0.25, quantity: 1 },
     ]);
     expect(stats).toMatchObject({
       tradeCount: 5, winningTradeCount: 2, losingTradeCount: 2, breakEvenTradeCount: 1,
@@ -48,6 +48,32 @@ describe("paper replay journal", () => {
       maxConsecutiveWins: 2, maxConsecutiveLosses: 2,
     });
     expect(stats.points.at(-1)).toEqual({ tradeNumber: 5, cumulativePoints: 2 });
+  });
+  it("weights monetary statistics by each FIFO pairing quantity without changing point-based metrics", () => {
+    const stats = calculateReplayJournalTrainingStats([
+      { gainLoss: 4, priceTickSize: 0.25, quantity: 5 },
+      { gainLoss: 2, priceTickSize: 0.25, quantity: 2 },
+      { gainLoss: 0, priceTickSize: 0.25, quantity: 100 },
+      { gainLoss: -3, priceTickSize: 0.25, quantity: 0.5 },
+      { gainLoss: -1, priceTickSize: 0.25, quantity: 10 },
+    ]);
+    expect(stats).toMatchObject({
+      averageWin: 12, averageLoss: -5.75,
+      tradeCount: 5, winRate: 40, actualProfitLossRatio: 1.5,
+      maxConsecutiveWins: 2, maxConsecutiveLosses: 2,
+      averageWinPoints: 3, averageLossPoints: -2,
+    });
+    expect(stats.pnlCurve).toEqual([
+      { tradeNumber: 0, cumulativePnl: 0 },
+      { tradeNumber: 1, cumulativePnl: 20 },
+      { tradeNumber: 2, cumulativePnl: 24 },
+      { tradeNumber: 3, cumulativePnl: 24 },
+      { tradeNumber: 4, cumulativePnl: 22.5 },
+      { tradeNumber: 5, cumulativePnl: 12.5 },
+    ]);
+    expect(calculateReplayJournalTrainingStats([])).toMatchObject({
+      averageWin: 0, averageLoss: 0, pnlCurve: [{ tradeNumber: 0, cumulativePnl: 0 }],
+    });
   });
   it("calculates full-session win rate, profit/loss points, and actual profit-loss ratio", () => {
     const summary = calculateReplayJournalSummary([

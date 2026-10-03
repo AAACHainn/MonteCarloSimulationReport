@@ -31,16 +31,16 @@ beforeEach(() => {
 describe("paper training equity history", () => {
   it("uses FIFO journal entries for training statistics and the curve", async () => {
     mocks.journalFindMany.mockResolvedValue([
-      { gainLoss: 9, priceTickSize: 0.25 },
-      { gainLoss: -3.75, priceTickSize: 0.25 },
-      { gainLoss: 8.25, priceTickSize: 0.25 },
+      { gainLoss: 9, priceTickSize: 0.25, quantity: 2 },
+      { gainLoss: -3.75, priceTickSize: 0.25, quantity: 4 },
+      { gainLoss: 8.25, priceTickSize: 0.25, quantity: 0.5 },
     ]);
     const response = await GET(new Request("http://localhost/api/history?type=journal-stats"), context);
 
     expect(mocks.journalFindMany).toHaveBeenCalledWith({
       where: { journalSessionId: "journal-1" },
       orderBy: [{ accountNo: "asc" }, { id: "asc" }],
-      select: { gainLoss: true, priceTickSize: true },
+      select: { gainLoss: true, priceTickSize: true, quantity: true },
     });
     expect(mocks.tradeFindMany).not.toHaveBeenCalled();
     const stats = await response.json();
@@ -52,6 +52,14 @@ describe("paper training equity history", () => {
       totalProfitPoints: 17.25,
       totalLossPoints: 3.75,
       actualProfitLossRatio: 4.6,
+      averageWin: 11.0625,
+      averageLoss: -15,
+      pnlCurve: [
+        { tradeNumber: 0, cumulativePnl: 0 },
+        { tradeNumber: 1, cumulativePnl: 18 },
+        { tradeNumber: 2, cumulativePnl: 3 },
+        { tradeNumber: 3, cumulativePnl: 7.125 },
+      ],
       averageWinPoints: 8.625,
       averageLossPoints: -3.75,
       maxConsecutiveWins: 1,

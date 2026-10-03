@@ -18,7 +18,7 @@ export async function GET(request: Request, context: RouteContext) {
     const entries = session.journalSessionId ? await prisma.replayJournalEntry.findMany({
       where: { journalSessionId: session.journalSessionId },
       orderBy: [{ accountNo: "asc" }, { id: "asc" }],
-      select: { gainLoss: true, priceTickSize: true },
+      select: { gainLoss: true, priceTickSize: true, quantity: true },
     }) : [];
     return NextResponse.json(calculateReplayJournalTrainingStats(entries));
   }

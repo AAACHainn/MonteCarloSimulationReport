@@ -11,6 +11,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { Line, LineChart, ResponsiveContainer, Tooltip, XAxis, YAxis } from "recharts";
 import { PaperJournalTable } from "@/components/market-replay/paper-journal-table";
 import { copy } from "@/lib/i18n";
+import { formatNumber } from "@/lib/format";
 import { snapPriceToTick } from "@/lib/market-replay/price-ticks";
 import type { MarketBarData } from "@/lib/market-replay/types";
 import type { PaperOrderData, PaperOrderType, PaperSessionSnapshot, PaperSide, ReplayJournalEntryData } from "@/lib/paper-trading/types";
@@ -356,11 +357,11 @@ type JournalTrainingStats = {
   winRate: number;
   totalProfitPoints: number;
   actualProfitLossRatio: number | null;
-  averageWinPoints: number;
-  averageLossPoints: number;
+  averageWin: number;
+  averageLoss: number;
   maxConsecutiveWins: number;
   maxConsecutiveLosses: number;
-  points: Array<{ tradeNumber: number; cumulativePoints: number }>;
+  pnlCurve: Array<{ tradeNumber: number; cumulativePnl: number }>;
 };
 
 function Stats({ snapshot }: { snapshot: PaperSessionSnapshot }) {
@@ -385,15 +386,16 @@ function Stats({ snapshot }: { snapshot: PaperSessionSnapshot }) {
     [copy.paperTrading.tradeCount, stats.tradeCount],
     [copy.paperTrading.winRate, `${number(stats.winRate)}%`],
     [copy.paperTrading.profitFactor, stats.actualProfitLossRatio === null ? stats.totalProfitPoints > 0 ? "∞" : copy.common.dash : number(stats.actualProfitLossRatio)],
-    [copy.paperTrading.averageWin, `${number(stats.averageWinPoints)} ${copy.paperTrading.pointsUnit}`],
-    [copy.paperTrading.averageLoss, `${number(stats.averageLossPoints)} ${copy.paperTrading.pointsUnit}`],
+    [copy.paperTrading.averageWin, `${formatNumber(stats.averageWin)} ${snapshot.session.currency}`],
+    [copy.paperTrading.averageLoss, `${formatNumber(stats.averageLoss)} ${snapshot.session.currency}`],
     [copy.paperTrading.maxWins, stats.maxConsecutiveWins],
     [copy.paperTrading.maxLosses, stats.maxConsecutiveLosses],
     [copy.paperTrading.totalSlippage, `${number(snapshot.stats.totalSlippage)} ${snapshot.session.currency}`],
   ];
-  return <div className="space-y-4"><p className="text-xs text-slate-600">{copy.paperTrading.journalStatsBasis}</p><div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">{values.map(([label, value]) => <div key={String(label)} className="rounded-md border bg-slate-50 p-3"><p className="text-xs text-slate-500">{label}</p><p className="mt-1 font-medium tabular-nums text-slate-950">{value}</p></div>)}</div>{stats.tradeCount ? <JournalPointsCurve points={stats.points} /> : <p className="text-sm text-slate-600">{copy.paperTrading.journalStatsEmpty}</p>}</div>;
+  return <div className="space-y-4"><p className="text-xs text-slate-600">{copy.paperTrading.journalStatsBasis}</p><div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">{values.map(([label, value]) => <div key={String(label)} className="rounded-md border bg-slate-50 p-3"><p className="text-xs text-slate-500">{label}</p><p className="mt-1 font-medium tabular-nums text-slate-950">{value}</p></div>)}</div>{stats.tradeCount ? <JournalPnlCurve points={stats.pnlCurve} currency={snapshot.session.currency} /> : <p className="text-sm text-slate-600">{copy.paperTrading.journalStatsEmpty}</p>}</div>;
 }
 
-function JournalPointsCurve({ points }: { points: JournalTrainingStats["points"] }) {
-  return <div className="flex h-64 flex-col rounded-md border p-3"><p className="text-xs text-slate-600">{copy.paperTrading.cumulativePoints}</p><div className="min-h-0 flex-1"><ResponsiveContainer width="100%" height="100%"><LineChart data={points} margin={{ bottom: 14 }}><XAxis dataKey="tradeNumber" type="number" domain={[0, "dataMax"]} allowDecimals={false} tick={{ fontSize: 11 }} label={{ value: copy.paperTrading.equityCurveXAxis, position: "insideBottom", offset: -8 }} /><YAxis domain={["auto", "auto"]} tick={{ fontSize: 11 }} width={70} /><Tooltip labelFormatter={(value) => Number(value) === 0 ? copy.paperTrading.equityCurveInitial : copy.paperTrading.equityCurveTrade(Number(value))} formatter={(value) => [number(Number(value)), copy.paperTrading.cumulativePoints]} /><Line type="monotone" dataKey="cumulativePoints" name={copy.paperTrading.cumulativePoints} stroke="#2563eb" strokeWidth={2} dot={false} isAnimationActive={false} /></LineChart></ResponsiveContainer></div></div>;
+function JournalPnlCurve({ points, currency }: { points: JournalTrainingStats["pnlCurve"]; currency: string }) {
+  const label = `${copy.paperTrading.cumulativePnl}（${currency}）`;
+  return <div className="flex h-64 flex-col rounded-md border p-3"><p className="text-xs text-slate-600">{label}</p><div className="min-h-0 flex-1"><ResponsiveContainer width="100%" height="100%"><LineChart data={points} margin={{ bottom: 14 }}><XAxis dataKey="tradeNumber" type="number" domain={[0, "dataMax"]} allowDecimals={false} tick={{ fontSize: 11 }} label={{ value: copy.paperTrading.equityCurveXAxis, position: "insideBottom", offset: -8 }} /><YAxis domain={["auto", "auto"]} tick={{ fontSize: 11 }} width={70} /><Tooltip labelFormatter={(value) => Number(value) === 0 ? copy.paperTrading.equityCurveInitial : copy.paperTrading.equityCurveTrade(Number(value))} formatter={(value) => [`${formatNumber(Number(value))} ${currency}`, copy.paperTrading.cumulativePnl]} /><Line type="monotone" dataKey="cumulativePnl" name={label} stroke="#2563eb" strokeWidth={2} dot={false} isAnimationActive={false} /></LineChart></ResponsiveContainer></div></div>;
 }
