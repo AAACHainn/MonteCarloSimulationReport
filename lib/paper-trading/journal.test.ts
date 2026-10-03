@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { advancePaperTrading } from "./engine";
-import { calculateReplayJournalSummary, closeLotsFifo, serializeReplayJournalEntry } from "./journal";
+import { calculateReplayJournalSummary, calculateReplayJournalTrainingStats, closeLotsFifo, serializeReplayJournalEntry } from "./journal";
 import type { PaperJournalContext, PaperOrderData, PaperPositionLotData, PaperSessionState } from "./types";
 
 const context: PaperJournalContext = {
@@ -34,6 +34,21 @@ function ids() {
 }
 
 describe("paper replay journal", () => {
+  it("counts every FIFO close pairing, including partial exits and breakeven entries", () => {
+    const stats = calculateReplayJournalTrainingStats([
+      { gainLoss: 4, priceTickSize: 0.25 },
+      { gainLoss: 2, priceTickSize: 0.25 },
+      { gainLoss: 0, priceTickSize: 0.25 },
+      { gainLoss: -3, priceTickSize: 0.25 },
+      { gainLoss: -1, priceTickSize: 0.25 },
+    ]);
+    expect(stats).toMatchObject({
+      tradeCount: 5, winningTradeCount: 2, losingTradeCount: 2, breakEvenTradeCount: 1,
+      winRate: 40, averageWinPoints: 3, averageLossPoints: -2,
+      maxConsecutiveWins: 2, maxConsecutiveLosses: 2,
+    });
+    expect(stats.points.at(-1)).toEqual({ tradeNumber: 5, cumulativePoints: 2 });
+  });
   it("calculates full-session win rate, profit/loss points, and actual profit-loss ratio", () => {
     const summary = calculateReplayJournalSummary([
       { gainLoss: 9.9, priceTickSize: 0.01 },

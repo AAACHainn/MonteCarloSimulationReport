@@ -16,7 +16,7 @@ import type {
 import { summarizeClosedTrades, type IncrementalTradeStats } from "./trade-stats";
 
 export type SessionRecord = {
-  id: string; datasetId: string; initialCapital: number; currency: string;
+  id: string; datasetId: string; journalSessionId: string | null; initialCapital: number; currency: string;
   commissionBps: number; slippageBps: number; lastProcessedSequence: number;
   netQuantity: number; averageEntryPrice: number | null; realizedPnl: number;
   totalFees: number; totalSlippage: number; peakEquity: number; maxDrawdown: number; version: number;
@@ -122,7 +122,7 @@ export async function getPaperSessionSnapshot(datasetId: string, db: Prisma.Tran
   const storedSession = await db.paperTradingSession.findUnique({ where: { datasetId } });
   if (!storedSession) return null;
   const session = await ensurePaperTradeStats(storedSession as SessionRecord, db);
-  const [activeOrders, recentOrders, recentFills, recentTrades, openLots, currentBar] = await Promise.all([
+  const [activeOrders, recentOrders, recentFills, recentTrades, openLots, currentBar, journalEntryCount] = await Promise.all([
     db.paperOrder.findMany({ where: { sessionId: session.id, status: "PENDING" }, orderBy: [{ createdSequence: "asc" }, { createdAt: "asc" }] }),
     db.paperOrder.findMany({ where: { sessionId: session.id, status: { not: "PENDING" } }, orderBy: { updatedAt: "desc" }, take: 30 }),
     db.paperFill.findMany({ where: { sessionId: session.id }, orderBy: [{ sequence: "desc" }, { createdAt: "desc" }], take: 50 }),
@@ -131,6 +131,9 @@ export async function getPaperSessionSnapshot(datasetId: string, db: Prisma.Tran
     session.lastProcessedSequence >= 0
       ? db.marketBar.findUnique({ where: { datasetId_sequence: { datasetId, sequence: session.lastProcessedSequence } } })
       : Promise.resolve(null),
+    session.journalSessionId
+      ? db.replayJournalEntry.count({ where: { journalSessionId: session.journalSessionId } })
+      : Promise.resolve(0),
   ]);
   const recentOrderIds = new Set(recentOrders.map((order) => order.id));
   const recentParentSequences = new Set(recentOrders
@@ -159,6 +162,7 @@ export async function getPaperSessionSnapshot(datasetId: string, db: Prisma.Tran
   const stats: PaperTradingStats = {
     balance, equity, unrealizedPnl, netPnl: equity - session.initialCapital,
     tradeCount: session.closedTradeCount,
+    journalEntryCount,
     winRate: session.closedTradeCount ? session.winningTradeCount / session.closedTradeCount : 0,
     profitFactor: session.grossLosingPnl > 0
       ? session.grossWinningPnl / session.grossLosingPnl

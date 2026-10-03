@@ -178,6 +178,7 @@ export type PaperTradingStats = {
   unrealizedPnl: number;
   netPnl: number;
   tradeCount: number;
+  journalEntryCount: number;
   winRate: number;
   profitFactor: number | null;
   averageWin: number;

@@ -351,22 +351,49 @@ function FillHistory({ snapshot }: { snapshot: PaperSessionSnapshot }) {
   return <div className="overflow-x-auto"><table className="w-full text-left text-sm"><thead><tr className="border-b text-xs text-slate-500"><th className="p-2">{copy.paperTrading.time}</th><th className="p-2">{copy.paperTrading.side}</th><th className="p-2">{copy.paperTrading.quantity}</th><th className="p-2">{copy.paperTrading.price}</th><th className="p-2">{copy.paperTrading.reason}</th><th className="p-2">{copy.paperTrading.pnl}</th></tr></thead><tbody>{snapshot.recentFills.map((fill) => <tr key={fill.id} className="border-b"><td className="p-2">{new Date(fill.timestamp).toLocaleString("zh-CN")}</td><td className="p-2">{fill.side === "BUY" ? copy.paperTrading.buy : copy.paperTrading.sell}</td><td className="p-2">{number(fill.quantity, 8)}</td><td className="p-2">{number(fill.price, 8)}</td><td className="p-2">{fillReasonLabel(fill.reason)}</td><td className="p-2">{number(fill.realizedPnl)}</td></tr>)}</tbody></table></div>;
 }
 
-function Stats({ snapshot }: { snapshot: PaperSessionSnapshot }) {
-  const stats = snapshot.stats;
-  const values = [[copy.paperTrading.tradeCount, stats.tradeCount], [copy.paperTrading.winRate, `${number(stats.winRate * 100)}%`], [copy.paperTrading.profitFactor, stats.profitFactor == null ? "∞" : number(stats.profitFactor)], [copy.paperTrading.averageWin, number(stats.averageWin)], [copy.paperTrading.averageLoss, number(stats.averageLoss)], [copy.paperTrading.maxWins, stats.maxConsecutiveWins], [copy.paperTrading.maxLosses, stats.maxConsecutiveLosses], [copy.paperTrading.totalSlippage, number(stats.totalSlippage)]];
-  return <div className="space-y-4"><div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">{values.map(([label, value]) => <div key={String(label)} className="rounded-md border bg-slate-50 p-3"><p className="text-xs text-slate-500">{label}</p><p className="mt-1 font-medium text-slate-950">{value}</p></div>)}</div><EquityCurve datasetId={snapshot.session.datasetId} /></div>;
-}
+type JournalTrainingStats = {
+  tradeCount: number;
+  winRate: number;
+  totalProfitPoints: number;
+  actualProfitLossRatio: number | null;
+  averageWinPoints: number;
+  averageLossPoints: number;
+  maxConsecutiveWins: number;
+  maxConsecutiveLosses: number;
+  points: Array<{ tradeNumber: number; cumulativePoints: number }>;
+};
 
-function EquityCurve({ datasetId }: { datasetId: string }) {
-  const [points, setPoints] = useState<Array<{ tradeNumber: number; equity: number }>>([]);
+function Stats({ snapshot }: { snapshot: PaperSessionSnapshot }) {
+  const [stats, setStats] = useState<JournalTrainingStats | null>(null);
+  const [error, setError] = useState(false);
   useEffect(() => {
     let cancelled = false;
-    fetch(`/api/market-datasets/${datasetId}/paper-session/history?type=equity`)
-      .then((response) => response.json())
-      .then((data) => { if (!cancelled) setPoints(data.items ?? []); })
-      .catch(() => undefined);
+    setStats(null);
+    setError(false);
+    fetch(`/api/market-datasets/${snapshot.session.datasetId}/paper-session/history?type=journal-stats`, { cache: "no-store" })
+      .then((response) => {
+        if (!response.ok) throw new Error("journal-stats");
+        return response.json() as Promise<JournalTrainingStats>;
+      })
+      .then((data) => { if (!cancelled) setStats(data); })
+      .catch(() => { if (!cancelled) setError(true); });
     return () => { cancelled = true; };
-  }, [datasetId]);
-  if (!points.length) return null;
-  return <div className="h-64 rounded-md border p-3"><ResponsiveContainer width="100%" height="100%"><LineChart data={points} margin={{ bottom: 14 }}><XAxis dataKey="tradeNumber" type="number" domain={[0, "dataMax"]} allowDecimals={false} tick={{ fontSize: 11 }} label={{ value: copy.paperTrading.equityCurveXAxis, position: "insideBottom", offset: -8 }} /><YAxis domain={["auto", "auto"]} tick={{ fontSize: 11 }} width={70} /><Tooltip labelFormatter={(value) => Number(value) === 0 ? copy.paperTrading.equityCurveInitial : copy.paperTrading.equityCurveTrade(Number(value))} formatter={(value) => [number(Number(value)), copy.paperTrading.equity]} /><Line type="monotone" dataKey="equity" name={copy.paperTrading.equity} stroke="#2563eb" strokeWidth={2} dot={false} isAnimationActive={false} /></LineChart></ResponsiveContainer></div>;
+  }, [snapshot.session.datasetId, snapshot.session.id, snapshot.stats.journalEntryCount]);
+  if (error) return <p role="alert" className="text-sm text-red-700">{copy.paperTrading.journalStatsError}</p>;
+  if (!stats) return <p role="status" className="text-sm text-slate-600">{copy.paperTrading.journalStatsLoading}</p>;
+  const values = [
+    [copy.paperTrading.tradeCount, stats.tradeCount],
+    [copy.paperTrading.winRate, `${number(stats.winRate)}%`],
+    [copy.paperTrading.profitFactor, stats.actualProfitLossRatio === null ? stats.totalProfitPoints > 0 ? "∞" : copy.common.dash : number(stats.actualProfitLossRatio)],
+    [copy.paperTrading.averageWin, `${number(stats.averageWinPoints)} ${copy.paperTrading.pointsUnit}`],
+    [copy.paperTrading.averageLoss, `${number(stats.averageLossPoints)} ${copy.paperTrading.pointsUnit}`],
+    [copy.paperTrading.maxWins, stats.maxConsecutiveWins],
+    [copy.paperTrading.maxLosses, stats.maxConsecutiveLosses],
+    [copy.paperTrading.totalSlippage, `${number(snapshot.stats.totalSlippage)} ${snapshot.session.currency}`],
+  ];
+  return <div className="space-y-4"><p className="text-xs text-slate-600">{copy.paperTrading.journalStatsBasis}</p><div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">{values.map(([label, value]) => <div key={String(label)} className="rounded-md border bg-slate-50 p-3"><p className="text-xs text-slate-500">{label}</p><p className="mt-1 font-medium tabular-nums text-slate-950">{value}</p></div>)}</div>{stats.tradeCount ? <JournalPointsCurve points={stats.points} /> : <p className="text-sm text-slate-600">{copy.paperTrading.journalStatsEmpty}</p>}</div>;
+}
+
+function JournalPointsCurve({ points }: { points: JournalTrainingStats["points"] }) {
+  return <div className="flex h-64 flex-col rounded-md border p-3"><p className="text-xs text-slate-600">{copy.paperTrading.cumulativePoints}</p><div className="min-h-0 flex-1"><ResponsiveContainer width="100%" height="100%"><LineChart data={points} margin={{ bottom: 14 }}><XAxis dataKey="tradeNumber" type="number" domain={[0, "dataMax"]} allowDecimals={false} tick={{ fontSize: 11 }} label={{ value: copy.paperTrading.equityCurveXAxis, position: "insideBottom", offset: -8 }} /><YAxis domain={["auto", "auto"]} tick={{ fontSize: 11 }} width={70} /><Tooltip labelFormatter={(value) => Number(value) === 0 ? copy.paperTrading.equityCurveInitial : copy.paperTrading.equityCurveTrade(Number(value))} formatter={(value) => [number(Number(value)), copy.paperTrading.cumulativePoints]} /><Line type="monotone" dataKey="cumulativePoints" name={copy.paperTrading.cumulativePoints} stroke="#2563eb" strokeWidth={2} dot={false} isAnimationActive={false} /></LineChart></ResponsiveContainer></div></div>;
 }

@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import { prisma } from "@/lib/db";
 import { copy } from "@/lib/i18n";
 import { serializePaperFill, serializePaperOrder, serializePaperTrade } from "@/lib/paper-trading/serialize";
+import { calculateReplayJournalTrainingStats } from "@/lib/paper-trading/journal";
 
 type RouteContext = { params: Promise<{ id: string }> };
 
@@ -13,6 +14,14 @@ export async function GET(request: Request, context: RouteContext) {
   const type = url.searchParams.get("type") ?? "fills";
   const take = Math.min(100, Math.max(1, Number(url.searchParams.get("take") ?? 50)));
   const cursor = url.searchParams.get("cursor");
+  if (type === "journal-stats") {
+    const entries = session.journalSessionId ? await prisma.replayJournalEntry.findMany({
+      where: { journalSessionId: session.journalSessionId },
+      orderBy: [{ accountNo: "asc" }, { id: "asc" }],
+      select: { gainLoss: true, priceTickSize: true },
+    }) : [];
+    return NextResponse.json(calculateReplayJournalTrainingStats(entries));
+  }
   if (type === "orders") {
     const orders = await prisma.paperOrder.findMany({ where: { sessionId: session.id }, orderBy: [{ createdAt: "desc" }, { id: "desc" }], take: take + 1, ...(cursor ? { cursor: { id: cursor }, skip: 1 } : {}) });
     const nextCursor = orders.length > take ? orders[take - 1]?.id ?? null : null;

@@ -57,6 +57,46 @@ export function calculateReplayJournalSummary(
   };
 }
 
+export function calculateReplayJournalTrainingStats(
+  entries: ReadonlyArray<{ gainLoss: number; priceTickSize: number }>,
+) {
+  const summary = calculateReplayJournalSummary(entries);
+  let cumulativePoints = 0;
+  let winStreak = 0;
+  let lossStreak = 0;
+  let maxConsecutiveWins = 0;
+  let maxConsecutiveLosses = 0;
+  const points = [{ tradeNumber: 0, cumulativePoints: 0 }];
+
+  for (const [index, entry] of entries.entries()) {
+    const result = replayJournalResult(entry.gainLoss, entry.priceTickSize);
+    if (result === "W") {
+      winStreak += 1;
+      lossStreak = 0;
+      maxConsecutiveWins = Math.max(maxConsecutiveWins, winStreak);
+    } else if (result === "L") {
+      lossStreak += 1;
+      winStreak = 0;
+      maxConsecutiveLosses = Math.max(maxConsecutiveLosses, lossStreak);
+    } else {
+      winStreak = 0;
+      lossStreak = 0;
+    }
+    cumulativePoints += entry.gainLoss;
+    points.push({ tradeNumber: index + 1, cumulativePoints });
+  }
+
+  const stride = Math.max(1, Math.ceil(points.length / 2_000));
+  return {
+    ...summary,
+    averageWinPoints: summary.winningTradeCount ? summary.totalProfitPoints / summary.winningTradeCount : 0,
+    averageLossPoints: summary.losingTradeCount ? -summary.totalLossPoints / summary.losingTradeCount : 0,
+    maxConsecutiveWins,
+    maxConsecutiveLosses,
+    points: points.filter((_point, index) => index % stride === 0 || index === points.length - 1),
+  };
+}
+
 export function updateLotAdverseRisk(lots: PaperPositionLotData[], price: number) {
   for (const lot of lots) {
     const adverse = lot.side === "LONG" ? lot.entryPrice - price : price - lot.entryPrice;
