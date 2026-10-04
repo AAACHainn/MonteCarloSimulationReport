@@ -331,6 +331,8 @@ export function MarketReplayClient({ dataset, initialJournalFocus = null }: { da
     abrLength,
     setAbrLength,
     abrSettingsLoaded,
+    gridVisible,
+    setGridVisible,
     volumeVisible,
     setVolumeVisible,
     candleCountdownEnabled,
@@ -2398,6 +2400,8 @@ export function MarketReplayClient({ dataset, initialJournalFocus = null }: { da
             abrEnabled={chartVisibility.indicators && abrEnabled}
             abrLength={abrLength}
             volumeVisible={chartVisibility.indicators && volumeVisible}
+            gridVisible={gridVisible}
+            onToggleGrid={() => setGridVisible((current) => !current)}
             displaySession={replay.displaySession}
             barCountSession={displayMarketSession}
             barCountConfig={visibleBarCountConfig}

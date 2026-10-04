@@ -5,7 +5,7 @@ import {
   type MouseEvent as ReactMouseEvent,
   type PointerEvent as ReactPointerEvent,
 } from "react";
-import { GripHorizontal, Link2, Loader2, LogOut, RotateCcw, ShieldAlert, X } from "lucide-react";
+import { Grid2X2, GripHorizontal, Link2, Loader2, LogOut, RotateCcw, ShieldAlert, X } from "lucide-react";
 import {
   CandlestickSeries, ColorType, createChart, CrosshairMode,
   HistogramSeries, type IChartApi, type IPriceLine, type ISeriesApi,
@@ -254,7 +254,7 @@ function bracketPriceLineTitle(reference: PriceRReference | null, price: number,
 
 export function ReplayChart({
   datasetId, priceTickSize, bars, warmupBars, displayUtcOffsetMinutes, displayIntervalSeconds, measurementArmed,
-  candlestickStyle,
+  candlestickStyle, gridVisible = true, onToggleGrid,
   onMeasurementArmedChange, drawingTool, onDrawingToolChange, trendLineDraftStyle, fibonacciDraftStyle, drawings, selectedDrawingId,
   onSelectedDrawingIdChange, onCreateDrawing, onUpdateDrawing, onDeleteDrawing,
   onOpenDrawingStyle, emaEnabled, emaIndicators, abrEnabled, abrLength, volumeVisible,
@@ -295,6 +295,8 @@ export function ReplayChart({
   abrEnabled: boolean;
   abrLength: number;
   volumeVisible: boolean;
+  gridVisible?: boolean;
+  onToggleGrid?: () => void;
   displaySession: DisplaySession;
   barCountSession: TradingSessionConfig;
   barCountConfig: BarCountIndicatorConfig;
@@ -367,6 +369,8 @@ export function ReplayChart({
   requestedDisplayIntervalSecondsRef.current = displayIntervalSeconds;
   const sourceIntervalSecondsRef = useRef(sourceIntervalSeconds ?? displayIntervalSeconds);
   sourceIntervalSecondsRef.current = sourceIntervalSeconds ?? displayIntervalSeconds;
+  const gridVisibleRef = useRef(gridVisible);
+  gridVisibleRef.current = gridVisible;
   const [contextMenu, setContextMenu] = useState<ContextMenuState | null>(null);
   const [abrTooltip, setAbrTooltip] = useState<AbrTooltipState | null>(null);
   const [measurement, setMeasurement] = useState<MeasurementState | null>(null);
@@ -600,7 +604,7 @@ export function ReplayChart({
     const chart = createChart(container, {
       width: container.clientWidth, height: container.clientHeight,
       layout: { background: { type: ColorType.Solid, color: "#fff" }, textColor: "#475569", attributionLogo: true, panes: { separatorColor: "#e2e8f0", separatorHoverColor: "#cbd5e1" } },
-      grid: { vertLines: { color: "#f1f5f9" }, horzLines: { color: "#f1f5f9" } },
+      grid: { vertLines: { color: "#f1f5f9", visible: gridVisibleRef.current }, horzLines: { color: "#f1f5f9", visible: gridVisibleRef.current } },
       crosshair: { mode: CrosshairMode.Normal },
       localization: { locale: "zh-CN", timeFormatter: (time: Time) => typeof time === "number" ? formatUtcDateTime(time * 1_000, displayUtcOffsetRef.current) : String(time) },
       timeScale: {
@@ -669,6 +673,12 @@ export function ReplayChart({
       priceLines.clear(); lineTargets.clear(); lastDataRef.current = [];
     };
   }, [priceTickSize, syncDrawingPrimitive, syncLineActionCoordinates, syncMeasurementCoordinates, syncVisibleSequenceRange]);
+
+  useEffect(() => {
+    chartRef.current?.applyOptions({
+      grid: { vertLines: { visible: gridVisible }, horzLines: { visible: gridVisible } },
+    });
+  }, [gridVisible]);
 
   useEffect(() => {
     const chart = chartRef.current;
@@ -1621,7 +1631,7 @@ export function ReplayChart({
     const fallback = currentPrice ?? 0;
     setContextMenu({
       x: Math.max(8, Math.min(event.clientX - root.left, root.width - 228)),
-      y: Math.max(8, Math.min(event.clientY - root.top, root.height - 220)),
+      y: Math.max(8, Math.min(event.clientY - root.top, root.height - 264)),
       price: Number.isFinite(price) && price > 0 ? price : fallback,
     });
   }
@@ -1887,12 +1897,24 @@ export function ReplayChart({
       {!draft && paperSnapshot && latest ? <div className="pointer-events-none absolute bottom-3 left-3 rounded-md border border-slate-200 bg-white/90 px-2 py-1 text-[11px] text-slate-500 shadow-sm backdrop-blur">{copy.paperTrading.rightClickHint}</div> : null}
 
       {contextMenu ? (
-        <div data-context-menu role="menu" className="absolute z-40 w-[220px] overflow-hidden rounded-lg border border-slate-200 bg-white p-1.5 shadow-xl" style={{ left: contextMenu.x, top: contextMenu.y }}>
+        <div data-context-menu role="menu" className="absolute z-40 max-h-[calc(100%-1rem)] w-[220px] max-w-[calc(100%-1rem)] overflow-y-auto rounded-lg border border-slate-200 bg-white p-1.5 shadow-xl" style={{ left: contextMenu.x, top: contextMenu.y }}>
           <div className="mb-1 border-b pb-1">
             <button type="button" role="menuitem" data-testid="context-reset-chart-view" className="flex w-full items-center gap-2 rounded-md px-2 py-2 text-left text-sm font-medium text-slate-700 hover:bg-slate-100 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-600" onClick={resetChartView}>
               <RotateCcw className="h-4 w-4" />
               {copy.marketReplay.resetChartView}
             </button>
+            {onToggleGrid ? (
+              <Button
+                type="button"
+                role="menuitem"
+                variant="ghost"
+                className="w-full justify-start px-2 text-left font-medium text-slate-700"
+                onClick={() => { onToggleGrid(); setContextMenu(null); }}
+              >
+                <Grid2X2 className="h-4 w-4" aria-hidden="true" />
+                {gridVisible ? copy.marketReplay.hideBackgroundGrid : copy.marketReplay.showBackgroundGrid}
+              </Button>
+            ) : null}
           </div>
           <div className="border-b px-2 py-1.5">
             <p className="text-[10px] font-medium uppercase tracking-wide text-slate-400">{copy.paperTrading.contextPrice}</p>

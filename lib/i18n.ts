@@ -260,6 +260,8 @@ export const dictionaries = {
       noVolume: "此数据集没有成交量数据。",
       chartAriaLabel: "K 线回放图表",
       resetChartView: "重置图表视图",
+      hideBackgroundGrid: "隐藏背景网格",
+      showBackgroundGrid: "显示背景网格",
       candlestickStyle: "K 线样式",
       candlestickSettings: "K 线样式设置",
       candlestickSettingsDescription: "分别设置阳线和阴线的主体、边框与影线样式。",

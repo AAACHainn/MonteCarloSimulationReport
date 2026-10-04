@@ -45,6 +45,7 @@ import {
 
 const EMA_SETTINGS_STORAGE_KEY = "market-replay-ema-settings-v1";
 const ABR_SETTINGS_STORAGE_KEY = "market-replay-abr-settings-v1";
+const GRID_VISIBILITY_STORAGE_KEY = "market-replay-grid-visibility-v1";
 const VOLUME_VISIBILITY_STORAGE_KEY = "market-replay-volume-visibility-v1";
 const CANDLE_COUNTDOWN_VISIBILITY_STORAGE_KEY = "market-replay-candle-countdown-visibility-v1";
 const BAR_COUNT_SETTINGS_STORAGE_KEY = "market-replay-bar-count-settings-v1";
@@ -118,6 +119,8 @@ export function useReplayPreferences(dataset: { id: string; startTime: string; t
   const [abrEnabled, setAbrEnabled] = useState(false);
   const [abrLength, setAbrLength] = useState(8);
   const [abrSettingsLoaded, setAbrSettingsLoaded] = useState(false);
+  const [gridVisible, setGridVisible] = useState(true);
+  const [gridVisibilityLoaded, setGridVisibilityLoaded] = useState(false);
   const [volumeVisible, setVolumeVisible] = useState(true);
   const [volumeVisibilityLoaded, setVolumeVisibilityLoaded] = useState(false);
   const [candleCountdownEnabled, setCandleCountdownEnabled] = useState(false);
@@ -152,6 +155,15 @@ export function useReplayPreferences(dataset: { id: string; startTime: string; t
       setAbrLength(stored.length);
     }
     setAbrSettingsLoaded(true);
+  }, []);
+
+  useEffect(() => {
+    try {
+      setGridVisible(window.localStorage.getItem(GRID_VISIBILITY_STORAGE_KEY) !== "false");
+    } catch {
+      setGridVisible(true);
+    }
+    setGridVisibilityLoaded(true);
   }, []);
 
   useEffect(() => {
@@ -249,6 +261,15 @@ export function useReplayPreferences(dataset: { id: string; startTime: string; t
   }, [abrEnabled, abrLength, abrSettingsLoaded]);
 
   useEffect(() => {
+    if (!gridVisibilityLoaded) return;
+    try {
+      window.localStorage.setItem(GRID_VISIBILITY_STORAGE_KEY, String(gridVisible));
+    } catch {
+      // Browser storage can be unavailable; the grid setting still applies to this page session.
+    }
+  }, [gridVisibilityLoaded, gridVisible]);
+
+  useEffect(() => {
     if (!volumeVisibilityLoaded) return;
     try {
       window.localStorage.setItem(VOLUME_VISIBILITY_STORAGE_KEY, String(volumeVisible));
@@ -329,6 +350,8 @@ export function useReplayPreferences(dataset: { id: string; startTime: string; t
     abrLength,
     setAbrLength,
     abrSettingsLoaded,
+    gridVisible,
+    setGridVisible,
     volumeVisible,
     setVolumeVisible,
     candleCountdownEnabled,

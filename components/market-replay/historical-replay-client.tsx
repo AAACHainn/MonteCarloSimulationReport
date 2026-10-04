@@ -134,6 +134,7 @@ export function HistoricalReplayClient({
     setAbrEnabled,
     abrLength,
     setAbrLength,
+    gridVisible,
     volumeVisible,
     setVolumeVisible,
     barCountConfig,
@@ -448,6 +449,7 @@ export function HistoricalReplayClient({
           abrEnabled={chartVisibility.indicators && abrEnabled}
           abrLength={abrLength}
           volumeVisible={chartVisibility.indicators && volumeVisible}
+          gridVisible={gridVisible}
           displaySession={session.displaySession}
           barCountSession={barCountSession}
           barCountConfig={visibleBarCountConfig}
