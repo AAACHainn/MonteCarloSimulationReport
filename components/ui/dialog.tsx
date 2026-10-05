@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, type ReactNode } from "react";
+import { useEffect, useId, useRef, type ReactNode } from "react";
 import { X } from "lucide-react";
 import { cn } from "@/lib/utils";
 
@@ -15,14 +15,35 @@ type DialogProps = {
 };
 
 export function Dialog({ open, title, description, children, className, contentClassName, onClose }: DialogProps) {
+  const titleId = useId();
+  const descriptionId = useId();
+  const panelRef = useRef<HTMLElement>(null);
+  const onCloseRef = useRef(onClose);
+  onCloseRef.current = onClose;
   useEffect(() => {
     if (!open) return;
+    const previousFocus = document.activeElement as HTMLElement | null;
+    const panel = panelRef.current;
+    const focusable = () => [...(panel?.querySelectorAll<HTMLElement>('button:not([disabled]), input:not([disabled]), select:not([disabled]), textarea:not([disabled]), a[href], [tabindex="0"]') ?? [])]
+      .filter((element) => element.getClientRects().length > 0);
+    const timer = window.setTimeout(() => (focusable().find((element) => element.tagName === "INPUT") ?? focusable()[0] ?? panel)?.focus(), 0);
     const onKeyDown = (event: KeyboardEvent) => {
-      if (event.key === "Escape") onClose();
+      if (event.key === "Escape") onCloseRef.current();
+      if (event.key === "Tab") {
+        const elements = focusable();
+        const first = elements[0]; const last = elements.at(-1);
+        if (!first) { event.preventDefault(); panel?.focus(); }
+        else if (event.shiftKey && (document.activeElement === first || !panel?.contains(document.activeElement))) { event.preventDefault(); last?.focus(); }
+        else if (!event.shiftKey && (document.activeElement === last || !panel?.contains(document.activeElement))) { event.preventDefault(); first.focus(); }
+      }
     };
     document.addEventListener("keydown", onKeyDown);
-    return () => document.removeEventListener("keydown", onKeyDown);
-  }, [onClose, open]);
+    return () => {
+      window.clearTimeout(timer);
+      document.removeEventListener("keydown", onKeyDown);
+      if (previousFocus?.isConnected) previousFocus.focus();
+    };
+  }, [open]);
 
   useEffect(() => {
     if (!open) return;
@@ -36,19 +57,21 @@ export function Dialog({ open, title, description, children, className, contentC
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/35 p-4 backdrop-blur-sm" onMouseDown={onClose}>
       <section
+        ref={panelRef}
+        tabIndex={-1}
         role="dialog"
         aria-modal="true"
-        aria-labelledby="app-dialog-title"
-        aria-describedby={description ? "app-dialog-description" : undefined}
+        aria-labelledby={titleId}
+        aria-describedby={description ? descriptionId : undefined}
         className={cn("flex max-h-[calc(100dvh-2rem)] w-full max-w-2xl flex-col overflow-hidden rounded-lg border bg-white shadow-2xl", className)}
         onMouseDown={(event) => event.stopPropagation()}
       >
         <header className="flex shrink-0 items-start gap-3 border-b px-5 py-4">
           <div className="min-w-0 flex-1">
-            <h2 id="app-dialog-title" className="text-lg font-semibold text-slate-950">{title}</h2>
-            {description ? <p id="app-dialog-description" className="mt-1 text-sm text-slate-600">{description}</p> : null}
+            <h2 id={titleId} className="text-lg font-semibold text-slate-950">{title}</h2>
+            {description ? <p id={descriptionId} className="mt-1 text-sm text-slate-600">{description}</p> : null}
           </div>
-          <button type="button" onClick={onClose} className="rounded-md p-1.5 text-slate-500 hover:bg-slate-100 hover:text-slate-900" aria-label="关闭">
+          <button type="button" onClick={onClose} className="rounded-md p-1.5 text-slate-500 hover:bg-slate-100 hover:text-slate-900 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring" aria-label="关闭">
             <X className="h-4 w-4" />
           </button>
         </header>

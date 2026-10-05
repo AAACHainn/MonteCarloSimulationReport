@@ -1,5 +1,5 @@
 export const IMPORT_STAGES = [
-  "WAITING_UPLOAD", "UPLOADING", "CLEANING", "ANALYZING", "IMPORTING", "FINALIZING", "COMPLETED",
+  "WAITING_UPLOAD", "UPLOADING", "CLEANING", "ANALYZING", "IMPORTING", "AWAITING_CONFIRMATION", "FINALIZING", "COMPLETED",
 ] as const;
 
 export type MarketImportStage = typeof IMPORT_STAGES[number];
@@ -19,6 +19,7 @@ const stageBands: Partial<Record<MarketImportStage, readonly [number, number]>> 
   CLEANING: [10, 10],
   ANALYZING: [10, 35],
   IMPORTING: [35, 99],
+  AWAITING_CONFIRMATION: [99, 99],
   FINALIZING: [99, 99],
   COMPLETED: [100, 100],
 };
@@ -41,7 +42,7 @@ export function calculateImportProgress(input: ImportProgressInput, now = Date.n
   const progressPercent = Math.round((start + (end - start) * fraction) * 10) / 10;
   const startedAt = input.stageStartedAt ? new Date(input.stageStartedAt).getTime() : Number.NaN;
   const elapsedSeconds = Number.isFinite(startedAt) ? Math.max(0, (now - startedAt) / 1_000) : 0;
-  const canEstimate = total > 0 && processed > 0 && fraction >= 0.01 && elapsedSeconds >= 5;
+  const canEstimate = input.status !== "AWAITING_CONFIRMATION" && total > 0 && processed > 0 && fraction >= 0.01 && elapsedSeconds >= 5;
   const remaining = canEstimate
     ? Math.max(0, Math.ceil((total - processed) / (processed / elapsedSeconds)))
     : null;

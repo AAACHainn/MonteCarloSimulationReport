@@ -13,6 +13,11 @@ describe("calculateImportProgress", () => {
     expect(calculateImportProgress({ status: "PROCESSING", stage, stageProcessedBytes: processed, stageTotalBytes: total, stageStartedAt: new Date(now - 10_000) }, now).progressPercent).toBe(expected);
   });
 
+  it("keeps gap confirmation at 99% without estimating the user's response time", () => {
+    expect(calculateImportProgress({ status: "AWAITING_CONFIRMATION", stage: "AWAITING_CONFIRMATION", stageProcessedBytes: 100, stageTotalBytes: 100, stageStartedAt: new Date(now - 60_000) }, now))
+      .toEqual({ progressPercent: 99, estimatedRemainingSeconds: null, etaScope: null });
+  });
+
   it("returns 100% for completed jobs", () => {
     expect(calculateImportProgress({ status: "COMPLETED", stage: "COMPLETED", stageProcessedBytes: 0, stageTotalBytes: 0, stageStartedAt: null }, now)).toEqual({ progressPercent: 100, estimatedRemainingSeconds: 0, etaScope: null });
   });

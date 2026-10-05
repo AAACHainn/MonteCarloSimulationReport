@@ -1,9 +1,16 @@
 import { Loader2 } from "lucide-react";
 import { copy } from "@/lib/i18n";
+import { cn } from "@/lib/utils";
+import type { AppendPreview } from "@/lib/market-replay/append-import-types";
 
 export type ImportIssue = { row: number; reason: string };
 export type ImportJob = {
   id: string;
+  mode?: "CREATE" | "APPEND";
+  targetDatasetId?: string | null;
+  targetName?: string | null;
+  timezone?: string | null;
+  appendPreview?: AppendPreview | null;
   fileName: string;
   status: string;
   stage: string;
@@ -63,7 +70,7 @@ export function MarketImportProgress({ job, uploadPercent, children }: {
       : copy.marketReplay.importStageEta(duration(job.estimatedRemainingSeconds));
 
   return (
-    <div className="space-y-2 rounded-lg border border-blue-200 bg-blue-50 p-3" role="status" aria-live="polite">
+    <div className={cn("space-y-2 rounded-lg border border-blue-200 bg-blue-50 p-3", job.status === "AWAITING_CONFIRMATION" && "border-amber-200 bg-amber-50")} role="status" aria-live="polite">
       <div className="flex flex-wrap items-center justify-between gap-2">
         <div className="flex min-w-0 items-center gap-2 text-sm font-medium text-blue-950">
           {active ? <Loader2 className="h-4 w-4 shrink-0 animate-spin" /> : null}
@@ -81,6 +88,7 @@ export function MarketImportProgress({ job, uploadPercent, children }: {
       >
         <div className="h-full rounded-full bg-blue-600 transition-[width] duration-300" style={{ width: `${progress}%` }} />
       </div>
+      {job.targetName ? <p className="text-xs text-slate-700">{copy.marketReplay.appendJobTarget(job.targetName)}</p> : null}
       <div className="grid gap-1 text-xs text-slate-700 sm:grid-cols-2">
         <div>{copy.marketReplay.importStageLabel}：<strong>{stateLabel}</strong></div>
         <div>{eta}</div>
@@ -88,16 +96,17 @@ export function MarketImportProgress({ job, uploadPercent, children }: {
           <div>{copy.marketReplay.importBytes(bytes(job.stageProcessedBytes), bytes(job.stageTotalBytes))}</div>
         ) : null}
         {job.stage === "ANALYZING" ? <div>{copy.marketReplay.importScannedRows(job.processedRows)}</div> : null}
-        {["IMPORTING", "FINALIZING", "COMPLETED"].includes(job.stage) ? (
+        {["IMPORTING", "AWAITING_CONFIRMATION", "FINALIZING", "COMPLETED"].includes(job.stage) ? (
           <>
             <div>{copy.marketReplay.importProcessedRows(job.processedRows, job.totalRows)}</div>
-            <div>{copy.marketReplay.importedBarsCount(job.importedBars)}</div>
+            <div>{job.mode === "APPEND" && job.status !== "COMPLETED" ? copy.marketReplay.appendPendingBars(job.importedBars) : copy.marketReplay.importedBarsCount(job.importedBars)}</div>
           </>
         ) : null}
         {job.peakWorkerRssBytes > 0 ? <div>{copy.marketReplay.importPeakMemory(bytes(job.peakWorkerRssBytes))}</div> : null}
         <div>{copy.marketReplay.importLastUpdated(new Date(job.updatedAt).toLocaleTimeString("zh-CN", { hour12: false }))}</div>
       </div>
-      {children ? <div className="flex justify-end gap-2">{children}</div> : null}
+      {job.appendPreview ? <p className="text-xs text-slate-700">{copy.marketReplay.appendSkipped(job.appendPreview.overlappingRows, job.appendPreview.duplicateRows)}</p> : null}
+      {children ? <div className="flex flex-wrap justify-end gap-2">{children}</div> : null}
     </div>
   );
 }

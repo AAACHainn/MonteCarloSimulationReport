@@ -6,19 +6,26 @@ import { startMarketImportWorker } from "@/lib/market-replay/import-worker";
 export const runtime = "nodejs";
 export const maxDuration = 3_600;
 type RouteContext = { params: Promise<{ jobId: string }> };
-export async function POST(_request: Request, context: RouteContext) {
+export async function POST(request: Request, context: RouteContext) {
   const { jobId } = await context.params;
   try {
     const job = await prisma.marketDatasetImport.findUnique({ where: { id: jobId } });
-    if (!job?.storedPath || !["UPLOADED", "FAILED", "INTERRUPTED"].includes(job.status)) {
+    const input = await request.json().catch(() => null) as { confirmGaps?: boolean } | null;
+    const confirming = job?.status === "AWAITING_CONFIRMATION";
+    if (!job?.storedPath || (!confirming && !["UPLOADED", "FAILED", "INTERRUPTED"].includes(job.status))) {
       return NextResponse.json({ error: copy.marketReplay.importAlreadyRunning }, { status: 409 });
     }
+    if (confirming && input?.confirmGaps !== true) {
+      return NextResponse.json({ error: copy.marketReplay.appendGapDescription }, { status: 409 });
+    }
+    const metadata = confirming ? { ...JSON.parse(job.metadata), confirmed: true } : null;
     const claimed = await prisma.marketDatasetImport.updateMany({
-      where: { id: jobId, status: { in: ["UPLOADED", "FAILED", "INTERRUPTED"] } },
+      where: { id: jobId, status: { in: confirming ? ["AWAITING_CONFIRMATION"] : ["UPLOADED", "FAILED", "INTERRUPTED"] } },
       data: {
-        status: "QUEUED", stage: job.datasetId ? "CLEANING" : "ANALYZING",
-        stageProcessedBytes: 0, stageTotalBytes: job.compressedBytes, stageStartedAt: new Date(),
-        processedRows: 0, importedBars: 0, totalRows: 0, totalErrors: 0, errors: "[]", workerPid: null,
+        status: "QUEUED", stage: confirming ? "FINALIZING" : job.datasetId ? "CLEANING" : "ANALYZING",
+        stageTotalBytes: job.compressedBytes, stageStartedAt: new Date(),
+        ...(confirming ? { metadata: JSON.stringify(metadata) } : { stageProcessedBytes: 0, processedRows: 0, importedBars: 0, totalRows: 0 }),
+        totalErrors: 0, errors: "[]", workerPid: null,
       },
     });
     if (claimed.count !== 1) return NextResponse.json({ error: copy.marketReplay.importAlreadyRunning }, { status: 409 });

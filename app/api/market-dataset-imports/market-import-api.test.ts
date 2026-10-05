@@ -5,10 +5,13 @@ const mocks = vi.hoisted(() => ({
   findMany: vi.fn(),
   updateMany: vi.fn(),
   startWorker: vi.fn(),
+  findDataset: vi.fn(),
+  createJob: vi.fn(),
 }));
 
 vi.mock("@/lib/db", () => ({
-  prisma: { marketDatasetImport: {
+  prisma: { marketDataset: { findUnique: mocks.findDataset }, marketDatasetImport: {
+    create: mocks.createJob,
     findUnique: mocks.findUnique,
     findMany: mocks.findMany,
     updateMany: mocks.updateMany,
@@ -16,7 +19,7 @@ vi.mock("@/lib/db", () => ({
 }));
 vi.mock("@/lib/market-replay/import-worker", () => ({ startMarketImportWorker: mocks.startWorker }));
 
-import { GET as listImports } from "./route";
+import { GET as listImports, POST as createImport } from "./route";
 import { POST as startImport } from "./[jobId]/process/route";
 
 const job = {
@@ -59,5 +62,37 @@ describe("market import background API", () => {
       where: expect.objectContaining({ status: { in: ["QUEUED", "PROCESSING"] } }),
       data: { status: "INTERRUPTED", workerPid: null },
     }));
+  });
+});
+
+const appendTarget = { id: "target", name: "MGC", status: "READY", symbol: "MGC", timeframe: "1m", timezone: "UTC",
+  sourceIntervalSeconds: 60, priceTickSize: 0.1, sessionMode: "TWENTY_FOUR_SEVEN", sessionOpenMinute: null,
+  sessionCloseMinute: null, tradingWeekdays: "1,2,3,4,5,6,7" };
+describe("append import API", () => {
+  beforeEach(() => {
+    vi.clearAllMocks(); mocks.findDataset.mockResolvedValue(appendTarget);
+    mocks.updateMany.mockResolvedValue({ count: 1 }); mocks.startWorker.mockReturnValue(4321);
+  });
+  it.each([{ symbol: "ES", sourceIntervalSeconds: 60 }, { symbol: "MGC", sourceIntervalSeconds: 300 }])("rejects declared metadata mismatch before creating a job (%o)", async (fields) => {
+    const response = await createImport(new Request("http://localhost/imports", { method: "POST", headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ mode: "APPEND", targetDatasetId: "target", fileName: "new.csv", ...fields }) }));
+    expect(response.status).toBe(400); expect(mocks.createJob).not.toHaveBeenCalled();
+  });
+  it("requires explicit gap confirmation and atomically retains the validated preview", async () => {
+    mocks.findUnique.mockResolvedValue({ ...job, status: "AWAITING_CONFIRMATION", datasetId: "staging", metadata: JSON.stringify({ mode: "APPEND", targetDatasetId: "target", preview: { gapCount: 2 } }) });
+    const noConfirmation = await startImport(new Request("http://localhost/process", { method: "POST" }), context);
+    expect(noConfirmation.status).toBe(409); expect(mocks.startWorker).not.toHaveBeenCalled();
+    const yes = await startImport(new Request("http://localhost/process", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ confirmGaps: true }) }), context);
+    expect(yes.status).toBe(202);
+    const claim = mocks.updateMany.mock.calls[0][0];
+    expect(claim.where.status.in).toEqual(["AWAITING_CONFIRMATION"]);
+    expect(JSON.parse(claim.data.metadata)).toMatchObject({ confirmed: true, preview: { gapCount: 2 } });
+    expect(claim.data.importedBars).toBeUndefined();
+  });
+  it("rejects a lost confirmation claim without launching another worker", async () => {
+    mocks.findUnique.mockResolvedValue({ ...job, status: "AWAITING_CONFIRMATION", metadata: "{}" });
+    mocks.updateMany.mockResolvedValue({ count: 0 });
+    const response = await startImport(new Request("http://localhost/process", { method: "POST", body: JSON.stringify({ confirmGaps: true }) }), context);
+    expect(response.status).toBe(409); expect(mocks.startWorker).not.toHaveBeenCalled();
   });
 });

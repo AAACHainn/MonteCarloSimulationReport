@@ -57,6 +57,7 @@ export function MarketDatasetDashboard({ datasets }: { datasets: MarketDatasetSu
   const [isPending, startTransition] = useTransition();
   const [isImporting, setIsImporting] = useState(false);
   const [message, setMessage] = useState<string | null>(null);
+  const [messageIsError, setMessageIsError] = useState(false);
   const [issues, setIssues] = useState<ImportIssue[]>([]);
   const [totalIssues, setTotalIssues] = useState(0);
   const [deleteDataset, setDeleteDataset] = useState<MarketDatasetSummary | null>(null);
@@ -71,6 +72,9 @@ export function MarketDatasetDashboard({ datasets }: { datasets: MarketDatasetSu
   const [settingsSourceInterval, setSettingsSourceInterval] = useState("");
   const [settingsError, setSettingsError] = useState<string | null>(null);
   const [isSavingSettings, setIsSavingSettings] = useState(false);
+  const [appendDataset, setAppendDataset] = useState<MarketDatasetSummary | null>(null);
+  const [gapJobId, setGapJobId] = useState<string | null>(null);
+  const gapJob = importJobs.find((job) => job.id === gapJobId && job.status === "AWAITING_CONFIRMATION");
 
   async function refreshImportJobs() {
     const response = await fetch("/api/market-dataset-imports");
@@ -84,6 +88,8 @@ export function MarketDatasetDashboard({ datasets }: { datasets: MarketDatasetSu
     void refreshImportJobs().then((jobs) => {
       const active = jobs.find((job) => ["QUEUED", "PROCESSING"].includes(job.status)
         || (job.status === "CREATED" && job.stage === "UPLOADING"));
+      const waiting = jobs.find((job) => job.status === "AWAITING_CONFIRMATION");
+      if (waiting && !active) setGapJobId(waiting.id);
       if (active) {
         setActiveJobId(active.id);
         setIsImporting(true);
@@ -105,15 +111,22 @@ export function MarketDatasetDashboard({ datasets }: { datasets: MarketDatasetSu
       }
       setImportJobs((current) => [job, ...current.filter((item) => item.id !== job.id)]);
       if (job.stage !== "UPLOADING") setUploadPercent(null);
-      if (["COMPLETED", "FAILED", "INTERRUPTED"].includes(job.status)) {
+      if (["COMPLETED", "FAILED", "INTERRUPTED", "AWAITING_CONFIRMATION"].includes(job.status)) {
         setIsImporting(false);
         setActiveJobId(null);
-        if (job.status === "COMPLETED") {
-          setMessage(copy.marketReplay.imported(job.importedBars, Math.max(0, job.totalRows - job.importedBars)));
+        if (job.status === "AWAITING_CONFIRMATION") {
+          setAppendDataset(null);
+          setGapJobId(job.id);
+        } else if (job.status === "COMPLETED") {
+          setMessageIsError(false);
+          setMessage(job.mode === "APPEND" && job.appendPreview
+            ? copy.marketReplay.appendCompleted(job.importedBars, job.appendPreview.overlappingRows, job.appendPreview.duplicateRows)
+            : copy.marketReplay.imported(job.importedBars, Math.max(0, job.totalRows - job.importedBars)));
           importFormRef.current?.reset();
           if (fileRef.current) fileRef.current.value = "";
           startTransition(() => router.refresh());
         } else {
+          setMessageIsError(true);
           setMessage(job.errors[0]?.reason ?? copy.marketReplay.importError);
           setIssues(job.errors);
           setTotalIssues(job.totalErrors);
@@ -156,45 +169,75 @@ export function MarketDatasetDashboard({ datasets }: { datasets: MarketDatasetSu
       tradingWeekdays: sessionMode === "DAILY_SESSION" ? formData.getAll("tradingWeekdays").map(Number) : [1,2,3,4,5,6,7],
       fileName: file.name,
     };
-    const created = await fetch("/api/market-dataset-imports", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(metadata) });
-    const data = await created.json().catch(() => null);
-    if (!created.ok) {
-      setIsImporting(false); setMessage(data?.error ?? copy.marketReplay.importError); return;
-    }
-    setImportJobs((current) => [data as ImportJob, ...current.filter((job) => job.id !== data.id)]);
-    setActiveJobId(data.id);
-    setUploadPercent(0);
-    const uploaded = await uploadImportFile(data.id, file, setUploadPercent);
-    if (!uploaded.ok) {
-      setActiveJobId(null); setUploadPercent(null); setIsImporting(false);
-      setMessage(uploaded.data?.error ?? copy.marketReplay.importError);
-      await refreshImportJobs();
-      return;
-    }
-    setUploadPercent(100);
-    const response = await fetch(`/api/market-dataset-imports/${data.id}/process`, { method: "POST" });
-    const result = await response.json().catch(() => null);
-    if (!response.ok) {
-      setMessage(result?.error ?? copy.marketReplay.importError);
-      setIsImporting(false); setActiveJobId(null);
-      await refreshImportJobs();
+    await startImport(file, metadata);
+  }
+
+  async function startImport(file: File, metadata: Record<string, unknown>) {
+    setIsImporting(true); setMessage(null); setIssues([]); setTotalIssues(0);
+    setMessageIsError(true);
+    try {
+      const created = await fetch("/api/market-dataset-imports", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(metadata) });
+      const data = await created.json().catch(() => null);
+      if (!created.ok) {
+        setIsImporting(false); setMessage(data?.error ?? copy.marketReplay.importError); return false;
+      }
+      setImportJobs((current) => [data as ImportJob, ...current.filter((job) => job.id !== data.id)]);
+      setActiveJobId(data.id);
+      setUploadPercent(0);
+      const uploaded = await uploadImportFile(data.id, file, setUploadPercent);
+      if (!uploaded.ok) {
+        setActiveJobId(null); setUploadPercent(null); setIsImporting(false);
+        setMessage(uploaded.data?.error ?? copy.marketReplay.importError);
+        await refreshImportJobs();
+        return;
+      }
+      setUploadPercent(100);
+      const response = await fetch(`/api/market-dataset-imports/${data.id}/process`, { method: "POST" });
+      const result = await response.json().catch(() => null);
+      if (!response.ok) {
+        setMessage(result?.error ?? copy.marketReplay.importError);
+        setIsImporting(false); setActiveJobId(null);
+        await refreshImportJobs();
+      }
+      return response.ok;
+    } catch {
+      setIsImporting(false); setActiveJobId(null); setUploadPercent(null);
+      setMessage(copy.marketReplay.importError);
+      return false;
     }
   }
 
-  async function retryImport(job: ImportJob) {
+  async function appendData(event: React.FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    if (!appendDataset) return;
+    const form = new FormData(event.currentTarget);
+    const file = form.get("file");
+    if (!(file instanceof File) || !file.size) return;
+    const accepted = await startImport(file, { mode: "APPEND", targetDatasetId: appendDataset.id,
+      symbol: form.get("symbol"), sourceIntervalSeconds: Number(form.get("sourceIntervalSeconds")), fileName: file.name });
+    if (accepted) setAppendDataset(null);
+  }
+
+  async function retryImport(job: ImportJob, confirmGaps = false) {
     setIsImporting(true); setMessage(null); setIssues([]); setTotalIssues(0);
-    const response = await fetch(`/api/market-dataset-imports/${job.id}/process`, { method: "POST" });
-    const data = await response.json().catch(() => null);
-    if (!response.ok) {
+    setMessageIsError(true);
+    const response = await fetch("/api/market-dataset-imports/" + job.id + "/process", {
+      method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ confirmGaps }),
+    }).catch(() => null);
+    const data = await response?.json().catch(() => null);
+    if (!response?.ok) {
       setIsImporting(false); setMessage(data?.error ?? copy.marketReplay.importError);
       return;
     }
+    setGapJobId(null);
     setActiveJobId(job.id);
     await refreshImportJobs();
   }
 
   async function cancelImport(jobId: string) {
-    await fetch(`/api/market-dataset-imports/${jobId}`, { method: "DELETE" });
+    const response = await fetch("/api/market-dataset-imports/" + jobId, { method: "DELETE" }).catch(() => null);
+    if (!response?.ok) { setMessage(copy.marketReplay.importError); return; }
+    setGapJobId(null);
     await refreshImportJobs();
   }
 
@@ -230,6 +273,7 @@ export function MarketDatasetDashboard({ datasets }: { datasets: MarketDatasetSu
       return;
     }
     setSettingsDataset(null);
+    setMessageIsError(false);
     setMessage(copy.marketReplay.marketSettingsSaved);
     startTransition(() => router.refresh());
   }
@@ -300,7 +344,7 @@ export function MarketDatasetDashboard({ datasets }: { datasets: MarketDatasetSu
                 <Input ref={fileRef} id="market-file" name="file" type="file" accept=".csv,.csv.gz,text/csv,application/gzip" required />
               </div>
               {message ? (
-                <Alert className={issues.length ? "border-red-200 bg-red-50" : "border-emerald-200 bg-emerald-50"}>
+                <Alert role={messageIsError || issues.length ? "alert" : "status"} aria-live="polite" className={messageIsError || issues.length ? "border-red-200 bg-red-50" : "border-emerald-200 bg-emerald-50"}>
                   <AlertTitle>{message}</AlertTitle>
                   {issues.length ? (
                     <AlertDescription className="mt-2 space-y-1">
@@ -312,6 +356,7 @@ export function MarketDatasetDashboard({ datasets }: { datasets: MarketDatasetSu
               ) : null}
               {importJobs.length ? <div className="space-y-2">{importJobs.map((job) => (
                 <MarketImportProgress key={job.id} job={job} uploadPercent={job.id === activeJobId ? uploadPercent : null}>
+                  {job.status === "AWAITING_CONFIRMATION" ? <Button type="button" size="sm" variant="outline" disabled={isImporting} onClick={() => { setMessage(null); setGapJobId(job.id); }}>{copy.marketReplay.appendReviewGaps}</Button> : null}
                   {["FAILED", "INTERRUPTED", "UPLOADED"].includes(job.status) ? <Button type="button" size="sm" variant="outline" disabled={isImporting} onClick={() => void retryImport(job)}>{copy.marketReplay.retryImport}</Button> : null}
                   {!["QUEUED", "PROCESSING"].includes(job.status) && !(job.status === "CREATED" && job.stage === "UPLOADING") ? <Button type="button" size="sm" variant="ghost" onClick={() => void cancelImport(job.id)}>{copy.marketReplay.cancelImport}</Button> : null}
                 </MarketImportProgress>
@@ -351,6 +396,11 @@ export function MarketDatasetDashboard({ datasets }: { datasets: MarketDatasetSu
                     </div>
                   </div>
                   <div className="flex flex-wrap justify-end gap-2">
+                    <Button type="button" variant="outline" size="sm" className="min-h-10 sm:min-h-0" disabled={isImporting || isPending} onClick={() => {
+                      setMessage(null); setIssues([]); setMessageIsError(true);
+                      if (!dataset.sourceIntervalSeconds) { setMessage(copy.marketReplay.appendIntervalRequired); return; }
+                      setAppendDataset(dataset);
+                    }}><Upload className="h-4 w-4" />{copy.marketReplay.append}</Button>
                     <Button type="button" variant="outline" size="sm" onClick={() => {
                       setSettingsDataset(dataset);
                       setSettingsSourceInterval(String(dataset.sourceIntervalSeconds ?? ""));
@@ -372,6 +422,35 @@ export function MarketDatasetDashboard({ datasets }: { datasets: MarketDatasetSu
           </div>
         </section>
       </div>
+      <Dialog open={Boolean(appendDataset)} title={copy.marketReplay.appendTitle} description={copy.marketReplay.appendDescription}
+        onClose={() => { if (!isImporting) setAppendDataset(null); }}>
+        {appendDataset ? <form className="space-y-4" onSubmit={appendData} aria-busy={isImporting}>
+          <dl className="space-y-2 rounded-lg border bg-slate-50 p-3 text-sm">
+            <div><dt className="text-xs text-slate-500">{copy.marketReplay.appendTarget}</dt><dd className="font-medium">{appendDataset.name} · {appendDataset.symbol} · {appendDataset.timeframe}</dd></div>
+            <div><dt className="text-xs text-slate-500">{copy.marketReplay.appendEndTime} · {appendDataset.timezone}</dt><dd className="tabular-nums">{formatDatasetTime(appendDataset.endTime, appendDataset.timezone)}</dd></div>
+          </dl>
+          <div className="grid gap-4 sm:grid-cols-2">
+            <div className="space-y-2"><Label htmlFor="append-symbol">{copy.marketReplay.appendFileSymbol}</Label><Input id="append-symbol" name="symbol" defaultValue={appendDataset.symbol} required maxLength={80} disabled={isImporting} aria-describedby="append-metadata-hint" /></div>
+            <div className="space-y-2"><Label htmlFor="append-interval">{copy.marketReplay.appendFileInterval}</Label><Input id="append-interval" name="sourceIntervalSeconds" type="number" defaultValue={appendDataset.sourceIntervalSeconds ?? ""} required min={1} max={86400} step={1} disabled={isImporting} aria-describedby="append-metadata-hint" /></div>
+          </div>
+          <p id="append-metadata-hint" className="text-xs text-slate-500">{copy.marketReplay.appendMetadataHint}</p>
+          <div className="space-y-2"><Label htmlFor="append-file">{copy.marketReplay.csvFile}</Label><Input id="append-file" name="file" type="file" accept=".csv,.csv.gz,text/csv,application/gzip" required disabled={isImporting} /></div>
+          {message ? <Alert className="border-red-200 bg-red-50" role="alert"><AlertDescription>{message}</AlertDescription></Alert> : null}
+          {activeJobId ? importJobs.filter((job) => job.id === activeJobId).map((job) => <MarketImportProgress key={job.id} job={job} uploadPercent={uploadPercent} />) : null}
+          <div className="flex justify-end gap-2 border-t pt-4"><Button type="button" variant="outline" disabled={isImporting} onClick={() => setAppendDataset(null)}>{copy.paperTrading.cancel}</Button><Button type="submit" disabled={isImporting}>{isImporting ? <Loader2 className="h-4 w-4 animate-spin" /> : <Upload className="h-4 w-4" />}{isImporting ? copy.marketReplay.importing : copy.marketReplay.append}</Button></div>
+        </form> : null}
+      </Dialog>
+      <Dialog open={Boolean(gapJob)} title={copy.marketReplay.appendGapTitle} description={copy.marketReplay.appendGapDescription}
+        onClose={() => { if (!isImporting) setGapJobId(null); }}>
+        {gapJob?.appendPreview ? <div className="space-y-4">
+          <p className="text-sm font-medium">{copy.marketReplay.appendJobTarget(gapJob.targetName ?? "")}</p>
+          <Alert className="border-amber-200 bg-amber-50 text-amber-800"><AlertTitle>{copy.marketReplay.appendGapSummary(gapJob.appendPreview.gapCount, gapJob.appendPreview.missingBars)}</AlertTitle><AlertDescription className="mt-2">{copy.marketReplay.appendPendingBars(gapJob.importedBars)}</AlertDescription></Alert>
+          <ul className="space-y-2 text-sm tabular-nums">{gapJob.appendPreview.gaps.map((gap) => <li key={gap.after} className="rounded-md border bg-slate-50 p-3">{copy.marketReplay.appendGapRange(formatDatasetTime(gap.after, gapJob.timezone ?? "UTC"), formatDatasetTime(gap.before, gapJob.timezone ?? "UTC"), gap.missingBars)}</li>)}</ul>
+          <p className="text-xs text-slate-500">{gapJob.timezone}{gapJob.appendPreview.gapCount > 10 ? " · " + copy.marketReplay.appendGapMore : ""}</p>
+          {message ? <Alert className="border-red-200 bg-red-50" role="alert"><AlertDescription>{message}</AlertDescription></Alert> : null}
+          <div className="flex flex-wrap justify-end gap-2 border-t pt-4"><Button type="button" variant="outline" disabled={isImporting} onClick={() => void cancelImport(gapJob.id)}>{copy.marketReplay.cancelImport}</Button><Button type="button" disabled={isImporting} onClick={() => void retryImport(gapJob, true)}>{isImporting ? <Loader2 className="h-4 w-4 animate-spin" /> : null}{copy.marketReplay.appendConfirmGaps}</Button></div>
+        </div> : null}
+      </Dialog>
       <Dialog
         open={Boolean(settingsDataset)}
         title={copy.marketReplay.editMarketSettingsTitle}
