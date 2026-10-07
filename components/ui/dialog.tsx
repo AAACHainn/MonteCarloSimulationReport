@@ -1,8 +1,12 @@
 "use client";
 
-import { useEffect, useId, useRef, type ReactNode } from "react";
+import { useEffect, useId, useRef, useState, type ReactNode } from "react";
+import { createPortal } from "react-dom";
 import { X } from "lucide-react";
 import { cn } from "@/lib/utils";
+
+const dialogStack: string[] = [];
+let bodyOverflowBeforeDialogs = "";
 
 type DialogProps = {
   open: boolean;
@@ -15,19 +19,30 @@ type DialogProps = {
 };
 
 export function Dialog({ open, title, description, children, className, contentClassName, onClose }: DialogProps) {
+  const [mounted, setMounted] = useState(false);
+  useEffect(() => setMounted(true), []);
   const titleId = useId();
   const descriptionId = useId();
   const panelRef = useRef<HTMLElement>(null);
   const onCloseRef = useRef(onClose);
   onCloseRef.current = onClose;
   useEffect(() => {
-    if (!open) return;
+    if (!open || !mounted) return;
+    if (dialogStack.length === 0) {
+      bodyOverflowBeforeDialogs = document.body.style.overflow;
+      document.body.style.overflow = "hidden";
+    }
+    dialogStack.push(titleId);
+    const isTopDialog = () => dialogStack.at(-1) === titleId;
     const previousFocus = document.activeElement as HTMLElement | null;
     const panel = panelRef.current;
     const focusable = () => [...(panel?.querySelectorAll<HTMLElement>('button:not([disabled]), input:not([disabled]), select:not([disabled]), textarea:not([disabled]), a[href], [tabindex="0"]') ?? [])]
       .filter((element) => element.getClientRects().length > 0);
-    const timer = window.setTimeout(() => (focusable().find((element) => element.tagName === "INPUT") ?? focusable()[0] ?? panel)?.focus(), 0);
+    const timer = window.setTimeout(() => {
+      if (isTopDialog()) (focusable().find((element) => element.tagName === "INPUT") ?? focusable()[0] ?? panel)?.focus();
+    }, 0);
     const onKeyDown = (event: KeyboardEvent) => {
+      if (!isTopDialog()) return;
       if (event.key === "Escape") onCloseRef.current();
       if (event.key === "Tab") {
         const elements = focusable();
@@ -41,20 +56,17 @@ export function Dialog({ open, title, description, children, className, contentC
     return () => {
       window.clearTimeout(timer);
       document.removeEventListener("keydown", onKeyDown);
-      if (previousFocus?.isConnected) previousFocus.focus();
+      const wasTopDialog = isTopDialog();
+      const index = dialogStack.lastIndexOf(titleId);
+      if (index >= 0) dialogStack.splice(index, 1);
+      if (dialogStack.length === 0) document.body.style.overflow = bodyOverflowBeforeDialogs;
+      if (wasTopDialog && previousFocus?.isConnected) previousFocus.focus();
     };
-  }, [open]);
+  }, [open, titleId, mounted]);
 
-  useEffect(() => {
-    if (!open) return;
-    const previousOverflow = document.body.style.overflow;
-    document.body.style.overflow = "hidden";
-    return () => { document.body.style.overflow = previousOverflow; };
-  }, [open]);
+  if (!open || !mounted) return null;
 
-  if (!open) return null;
-
-  return (
+  return createPortal(
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/35 p-4 backdrop-blur-sm" onMouseDown={onClose}>
       <section
         ref={panelRef}
@@ -77,6 +89,7 @@ export function Dialog({ open, title, description, children, className, contentC
         </header>
         <div className={cn("min-h-0 flex-1 overflow-y-auto p-5", contentClassName)}>{children}</div>
       </section>
-    </div>
+    </div>,
+    document.body,
   );
 }

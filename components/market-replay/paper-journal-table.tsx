@@ -13,7 +13,8 @@ import { Label } from "@/components/ui/label";
 import { MultiSelect } from "@/components/ui/multi-select";
 import { MultiOptionFilterPopover, type FilterOption } from "@/components/ui/multi-option-filter-popover";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
-import { Textarea } from "@/components/ui/textarea";
+import { ReviewEditorDialog } from "@/components/market-replay/review-editor-dialog";
+import { limitReview, reviewLength } from "@/lib/paper-trading/review-templates";
 import { formatNumber, formatPercent } from "@/lib/format";
 import { copy } from "@/lib/i18n";
 import { formatInterval } from "@/lib/market-replay/types";
@@ -139,14 +140,6 @@ function ratio(value: number | null) {
 function date(entry: ReplayJournalEntryData) {
   const parts = utcDateParts(entry.openedAt, entry.displayUtcOffsetMinutes);
   return `${parts.year}/${parts.month}/${parts.day}`;
-}
-
-function reviewLength(value: string) {
-  return Array.from(value).length;
-}
-
-function limitReview(value: string) {
-  return Array.from(value).slice(0, 300).join("");
 }
 
 export function PaperJournalTable({
@@ -1270,42 +1263,16 @@ export function PaperJournalTable({
         </div>
       </div>
     </Dialog>
-    <Dialog
+    <ReviewEditorDialog
       open={reviewDialogEntryId !== null}
-      title={copy.paperTrading.reviewDialogTitle(items.find((entry) => entry.id === reviewDialogEntryId)?.no ?? 0)}
-      description={copy.paperTrading.reviewDialogDescription}
-      onClose={() => { if (!reviewDialogEntryId || !savingReviewIds.has(reviewDialogEntryId)) setReviewDialogEntryId(null); }}
-      className="max-w-2xl"
-    >
-      <form className="space-y-4" onSubmit={(event) => { event.preventDefault(); void saveReviewDialog(); }}>
-        <div className="space-y-2">
-          <Label htmlFor="replay-journal-review">{copy.paperTrading.review}</Label>
-          <Textarea
-            id="replay-journal-review"
-            value={reviewDialogDraft}
-            onChange={(event) => setReviewDialogDraft(limitReview(event.target.value))}
-            placeholder={copy.paperTrading.reviewPlaceholder}
-            className="min-h-64 resize-y"
-            disabled={reviewDialogEntryId ? savingReviewIds.has(reviewDialogEntryId) : false}
-            aria-describedby="replay-journal-review-count"
-            autoFocus
-          />
-          <div className="flex items-start justify-between gap-3">
-            {reviewError ? <p className="text-xs text-red-600" role="alert">{reviewError}</p> : <span />}
-            <p id="replay-journal-review-count" className="shrink-0 text-xs text-slate-500">
-              {copy.paperTrading.reviewCharacterCount(reviewLength(reviewDialogDraft))}
-            </p>
-          </div>
-        </div>
-        <div className="flex justify-end gap-2 border-t pt-4">
-          <Button type="button" variant="outline" onClick={() => setReviewDialogEntryId(null)} disabled={reviewDialogEntryId ? savingReviewIds.has(reviewDialogEntryId) : false}>{copy.common.cancel}</Button>
-          <Button type="submit" disabled={reviewDialogEntryId ? savingReviewIds.has(reviewDialogEntryId) : true}>
-            {reviewDialogEntryId && savingReviewIds.has(reviewDialogEntryId) ? <Loader2 className="h-4 w-4 animate-spin" aria-hidden="true" /> : null}
-            {copy.paperTrading.saveReview}
-          </Button>
-        </div>
-      </form>
-    </Dialog>
+      no={items.find((entry) => entry.id === reviewDialogEntryId)?.no ?? 0}
+      value={reviewDialogDraft}
+      onChange={setReviewDialogDraft}
+      onSave={() => void saveReviewDialog()}
+      onClose={() => setReviewDialogEntryId(null)}
+      saving={reviewDialogEntryId ? savingReviewIds.has(reviewDialogEntryId) : false}
+      error={reviewError}
+    />
     <Dialog
       open={renameOpen}
       title={copy.paperTrading.renameJournalSessionTitle}

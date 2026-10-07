@@ -351,6 +351,17 @@ model PaperPositionLot {
   @@index([sessionId, openedSequence])
 }
 
+model ReplayReviewTemplate {
+  id             String   @id @default(cuid())
+  name           String
+  normalizedName String   @unique
+  content        String
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
+
+  @@index([name])
+}
+
 model ReplayJournalEntry {
   id                       String               @id
   journalSessionId         String

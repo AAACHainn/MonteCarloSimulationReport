@@ -30,6 +30,7 @@ describe("SQLite initialization compatibility", () => {
       await legacyClient.$executeRawUnsafe(
         `ALTER TABLE "ReplayProgress" ADD COLUMN "intervalMs" INTEGER NOT NULL DEFAULT 1000`,
       );
+      await legacyClient.replayReviewTemplate.create({ data: { id: "review-template-1", name: "复盘模板", normalizedName: "复盘模板", content: "入场依据：\n执行情况：" } });
       await legacyClient.$disconnect();
 
       initialize();
@@ -37,6 +38,7 @@ describe("SQLite initialization compatibility", () => {
       const columns = await repairedClient.$queryRawUnsafe<Array<{ name: string }>>(
         `PRAGMA table_info("ReplayProgress")`,
       );
+      expect(await repairedClient.replayReviewTemplate.findUniqueOrThrow({ where: { id: "review-template-1" } })).toMatchObject({ name: "复盘模板", content: "入场依据：\n执行情况：" });
       const progress = await repairedClient.replayProgress.findUniqueOrThrow({
         where: { datasetId: "legacy-dataset" },
       });

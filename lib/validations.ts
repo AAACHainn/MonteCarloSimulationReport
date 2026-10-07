@@ -20,6 +20,22 @@ import {
   normalizeTradeReasonName,
 } from "./paper-trading/trade-reasons";
 
+import {
+  MAX_REVIEW_LENGTH,
+  MAX_REVIEW_TEMPLATE_NAME_LENGTH,
+  normalizeReviewTemplateName,
+  reviewLength,
+} from "./paper-trading/review-templates";
+
+export const reviewTemplateSchema = z.object({
+  name: z.string().transform(normalizeReviewTemplateName)
+    .refine((value) => value.length > 0, copy.paperTrading.reviewTemplateNameRequired)
+    .refine((value) => reviewLength(value) <= MAX_REVIEW_TEMPLATE_NAME_LENGTH, copy.paperTrading.reviewTemplateNameTooLong),
+  content: z.string()
+    .refine((value) => value.trim().length > 0, copy.paperTrading.reviewTemplateContentRequired)
+    .refine((value) => reviewLength(value) <= MAX_REVIEW_LENGTH, copy.paperTrading.reviewTooLong),
+});
+
 const displaySessionSchema = z.enum(["ETH", "RTH"]);
 
 export const SIMULATION_WORK_LIMIT = 50_000_000;

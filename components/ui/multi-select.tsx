@@ -94,12 +94,12 @@ export function MultiSelect({
           sideOffset={6}
           align="start"
           collisionPadding={12}
-          className="z-[200] w-72 max-w-[calc(100vw-2rem)] rounded-md border bg-white p-2 text-slate-950 shadow-lg"
+          className="z-[200] flex max-h-[var(--radix-popover-content-available-height)] w-[28rem] max-w-[calc(100vw-2rem)] flex-col overflow-hidden rounded-md border bg-white p-2 text-slate-950 shadow-lg"
         >
           {options.length === 0 ? (
             <p className="px-2 py-4 text-center text-sm text-slate-500">{emptyMessage}</p>
           ) : (
-            <div className="max-h-64 space-y-0.5 overflow-y-auto overscroll-contain p-0.5">
+            <div className="min-h-0 space-y-0.5 overflow-y-auto overscroll-contain p-0.5">
               {options.map((option) => {
                 const selected = draftSet.has(option.value);
                 return (
@@ -108,7 +108,7 @@ export function MultiSelect({
                     type="button"
                     role="checkbox"
                     aria-checked={selected}
-                    className="flex w-full items-center gap-2 rounded-sm px-2 py-2 text-left text-sm outline-none hover:bg-slate-100 focus-visible:ring-2 focus-visible:ring-ring"
+                    className="flex min-h-10 w-full items-center gap-2 rounded-sm px-2 py-2 text-left text-sm outline-none hover:bg-slate-100 focus-visible:ring-2 focus-visible:ring-ring sm:min-h-8 sm:py-1.5"
                     onClick={() => toggle(option.value)}
                     disabled={saving}
                   >
@@ -124,7 +124,7 @@ export function MultiSelect({
               })}
             </div>
           )}
-          <div className="mt-2 flex justify-end gap-2 border-t pt-2">
+          <div className="mt-2 flex shrink-0 justify-end gap-2 border-t pt-2">
             <Button type="button" size="sm" variant="outline" onClick={() => changeOpen(false)} disabled={saving}>
               {cancelLabel}
             </Button>
