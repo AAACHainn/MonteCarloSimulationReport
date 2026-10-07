@@ -20,7 +20,6 @@ type PrimitiveSnapshot = {
 };
 
 type ProjectedCountdown = {
-  anchorX: number;
   left: number;
   top: number;
   width: number;
@@ -64,24 +63,12 @@ class CandleCountdownPaneRenderer implements IPrimitivePaneRenderer {
     target.useMediaCoordinateSpace(({ context }) => {
       const countdown = this.countdown();
       if (!countdown) return;
-      const right = countdown.left + countdown.width;
       const centerY = countdown.top + LABEL_HEIGHT / 2;
-      const labelIsRight = countdown.left > countdown.anchorX;
 
       context.save();
       context.font = "600 11px ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace";
       context.textAlign = "center";
       context.textBaseline = "middle";
-      context.strokeStyle = "#93c5fd";
-      context.fillStyle = "rgba(255,255,255,0.94)";
-      context.lineWidth = 1;
-      context.beginPath();
-      context.moveTo(countdown.anchorX, centerY);
-      context.lineTo(labelIsRight ? countdown.left : right, centerY);
-      context.stroke();
-      context.beginPath();
-      context.roundRect(countdown.left, countdown.top, countdown.width, LABEL_HEIGHT, 4);
-      context.fill();
       context.fillStyle = "#1d4ed8";
       context.fillText(countdown.text, countdown.left + countdown.width / 2, centerY + 0.5);
       context.restore();
@@ -165,7 +152,6 @@ export class CandleCountdownPrimitive implements ISeriesPrimitive<Time> {
       ? preferredLeft
       : Math.max(4, anchorX - LABEL_GAP - labelWidth);
     this.projected = {
-      anchorX,
       left,
       top: Math.max(4, Math.min(anchorY - LABEL_HEIGHT / 2, paneHeight - LABEL_HEIGHT - 4)),
       width: labelWidth,
