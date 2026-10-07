@@ -748,7 +748,7 @@ export function ReplayChart({
       for (const bar of next.slice(Math.max(0, previous.length - 1))) {
         series.update(candle(bar)); if (bar.volume !== null) volumeSeries?.update(volume(bar));
       }
-      if (range && next.length > previous.length) {
+      if (range && next.length > previous.length && !readOnly) {
         chart.timeScale().setVisibleLogicalRange(rangeAfterNewReplayBar(range, previousLastIndex, next.length - previous.length));
       }
     } else {
@@ -772,7 +772,7 @@ export function ReplayChart({
         chart.timeScale().setVisibleLogicalRange(mappedTimelineRange);
       } else if (range && previousLastInNext >= 0) {
         // A rolling server window renumbers logical indices. Preserve zoom and historical panning.
-        const advanced = rangeAfterNewReplayBar(range, previousLastIndex, next.length - 1 - previousLastInNext);
+        const advanced = readOnly ? range : rangeAfterNewReplayBar(range, previousLastIndex, next.length - 1 - previousLastInNext);
         const removed = previousLastIndex - previousLastInNext;
         chart.timeScale().setVisibleLogicalRange({ from: advanced.from - removed, to: advanced.to - removed });
       } else if (next.length > 0) {
@@ -796,7 +796,7 @@ export function ReplayChart({
     requestAnimationFrame(syncVisibleSequenceRange);
     requestAnimationFrame(syncMeasurementCoordinates);
     requestAnimationFrame(syncDrawingPrimitive);
-  }, [bars, syncDrawingPrimitive, syncMeasurementCoordinates, syncVisibleSequenceRange]);
+  }, [bars, readOnly, syncDrawingPrimitive, syncMeasurementCoordinates, syncVisibleSequenceRange]);
 
   useEffect(() => {
     if (focusSequence === null) return;

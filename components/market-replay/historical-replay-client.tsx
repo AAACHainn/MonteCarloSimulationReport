@@ -3,7 +3,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { ListTree, Loader2, Palette, Ruler, Settings2, Trash2, TrendingUp, X } from "lucide-react";
 import * as Popover from "@radix-ui/react-popover";
-import { ReplayChart } from "@/components/market-replay/replay-chart";
+import { ReplayChart, type ReplayVisibleSequenceRange } from "@/components/market-replay/replay-chart";
 import { IndicatorSettingsDialog } from "@/components/market-replay/indicator-settings-dialog";
 import { ChartVisibilityMenu } from "@/components/market-replay/chart-visibility-menu";
 import { useReplayPreferences } from "@/components/market-replay/use-replay-preferences";
@@ -24,6 +24,7 @@ import {
   type MarketDrawing,
   type TrendLineGeometry,
 } from "@/lib/market-replay/chart-drawings";
+import { mergeHistoricalBars } from "@/lib/market-replay/historical-window";
 import { datasetSession } from "@/lib/market-replay/dataset";
 import type {
   AggregatedMarketBarData,
@@ -107,6 +108,7 @@ export function HistoricalReplayClient({
   focusSequence: number;
 }) {
   const [bars, setBars] = useState<AggregatedMarketBarData[]>([]);
+  const [chartFocusSequence, setChartFocusSequence] = useState<number | null>(focusSequence);
   const [warmupBars, setWarmupBars] = useState<AggregatedMarketBarData[]>([]);
   const [annotations, setAnnotations] = useState<ReplayTradeAnnotationData[]>([]);
   const [loading, setLoading] = useState(true);
@@ -123,6 +125,11 @@ export function HistoricalReplayClient({
   const [indicatorError, setIndicatorError] = useState<string | null>(null);
   const annotationAbortRef = useRef<AbortController | null>(null);
   const initialLoadCompletedRef = useRef(false);
+  const windowAbortRef = useRef<AbortController | null>(null);
+  const windowBusyRef = useRef(false);
+  const exhaustedEdgesRef = useRef({ left: false, right: false });
+  const [windowLoading, setWindowLoading] = useState(false);
+  const [windowError, setWindowError] = useState<string | null>(null);
   const {
     candlestickStyle,
     setCandlestickStyle,
@@ -156,6 +163,61 @@ export function HistoricalReplayClient({
     abrEnabled ? abrLength : 0,
     emaEnabled ? Math.max(0, ...emaIndicators.filter((indicator) => indicator.visible).map((indicator) => indicator.length)) : 0,
   );
+  const extendHistoryWindow = useCallback(async (range: ReplayVisibleSequenceRange) => {
+    if (windowBusyRef.current || !bars.length) return;
+    const first = bars[0];
+    const last = bars[bars.length - 1];
+    const nearRight = bars.findIndex((bar) => bar.lastSequence >= range.toSequence) >= bars.length - 100;
+    const direction = range.barsBefore < 100 && !exhaustedEdgesRef.current.left && first.firstSequence > session.startSequence
+      ? "left" : nearRight && !exhaustedEdgesRef.current.right && last.lastSequence < session.endSequence ? "right" : null;
+    if (!direction) return;
+    const controller = new AbortController();
+    windowAbortRef.current = controller;
+    windowBusyRef.current = true;
+    setWindowLoading(true);
+    setWindowError(null);
+    const params = new URLSearchParams({
+      displayIntervalSeconds: String(session.displayIntervalSeconds),
+      displaySession: session.displaySession,
+      endSequence: String(direction === "left" ? first.lastSequence : session.endSequence),
+      visibleCount: String(VISIBLE_BAR_COUNT),
+      warmupCount: String(Math.min(EMA_LENGTH_MAX, indicatorWarmupCount)),
+    });
+    if (direction === "right") params.set("focusSequence", String(last.lastSequence + 1));
+    try {
+      const readWindow = async () => {
+        const response = await fetch(`/api/market-datasets/${dataset.id}/bars/window?${params}`, { signal: controller.signal });
+        const payload = await response.json() as WindowPayload & { error?: string };
+        if (!response.ok) throw new Error(payload.error);
+        return payload;
+      };
+      let data = await readWindow();
+      // Session-filtered charts can have long overnight/weekend gaps in source sequences.
+      let searchDistance = VISIBLE_BAR_COUNT;
+      while (direction === "right" && !data.visibleBars.some((bar) => bar.lastSequence > last.lastSequence)
+        && Number(params.get("focusSequence")) < session.endSequence) {
+        params.set("focusSequence", String(Math.min(session.endSequence, last.lastSequence + searchDistance)));
+        searchDistance *= 2;
+        data = await readWindow();
+      }
+      if (controller.signal.aborted) return;
+      if (direction === "left" && !data.visibleBars.some((bar) => bar.firstSequence < first.firstSequence)) exhaustedEdgesRef.current.left = true;
+      if (direction === "right" && !data.visibleBars.some((bar) => bar.lastSequence > last.lastSequence)) exhaustedEdgesRef.current.right = true;
+      // Additional history must preserve the user's viewport rather than repeat initial positioning.
+      setChartFocusSequence(null);
+      setBars((current) => mergeHistoricalBars(current, data.visibleBars));
+      if (direction === "left") setWarmupBars(data.warmupBars);
+    } catch (cause) {
+      if (!controller.signal.aborted) setWindowError(cause instanceof Error && cause.message
+        ? cause.message : copy.paperTrading.historicalReplayLoadFailed);
+    } finally {
+      if (!controller.signal.aborted) {
+        windowBusyRef.current = false;
+        setWindowLoading(false);
+      }
+    }
+  }, [bars, dataset.id, indicatorWarmupCount, session.displayIntervalSeconds, session.displaySession, session.endSequence, session.startSequence]);
+
   const barCountSession = useMemo(
     () => resolveDisplaySession(dataset, session.displaySession) ?? datasetSession(dataset),
     [dataset, session.displaySession],
@@ -259,6 +321,11 @@ export function HistoricalReplayClient({
   }, [dataset.id, session.id]);
 
   useEffect(() => {
+    windowAbortRef.current?.abort();
+    windowBusyRef.current = false;
+    exhaustedEdgesRef.current = { left: false, right: false };
+    setWindowLoading(false);
+    setWindowError(null);
     const controller = new AbortController();
     const params = new URLSearchParams({
       displayIntervalSeconds: String(session.displayIntervalSeconds),
@@ -276,6 +343,8 @@ export function HistoricalReplayClient({
         });
         const data = await response.json() as WindowPayload & { error?: string };
         if (!response.ok) throw new Error(data.error);
+        if (controller.signal.aborted) return;
+        setChartFocusSequence(focusSequence);
         setBars(data.visibleBars);
         setWarmupBars(data.warmupBars);
         const annotationsLoaded = await loadAnnotations(session.startSequence, session.endSequence);
@@ -299,6 +368,7 @@ export function HistoricalReplayClient({
 
   useEffect(() => () => {
     annotationAbortRef.current?.abort();
+    windowAbortRef.current?.abort();
   }, []);
 
   useEffect(() => {
@@ -422,7 +492,9 @@ export function HistoricalReplayClient({
           <Settings2 className="h-4 w-4" />{copy.marketReplay.indicators}
         </Button>
       </div>
-      <div className="relative min-h-0 flex-1">
+      <div className="relative min-h-0 flex-1" aria-busy={windowLoading}>
+        {windowLoading ? <div className="absolute left-3 top-3 z-50 flex items-center gap-2 rounded-md border bg-white px-3 py-2 text-xs text-slate-600" role="status"><Loader2 className="h-4 w-4 animate-spin" aria-hidden="true" />{copy.marketReplay.loading}</div> : null}
+        {windowError ? <Alert className="absolute left-3 top-3 z-50 w-auto border-red-200 bg-red-50" role="alert"><AlertTitle>{copy.common.error}</AlertTitle><AlertDescription>{windowError}</AlertDescription></Alert> : null}
         <ReplayChart
           datasetId={dataset.id}
           priceTickSize={dataset.priceTickSize}
@@ -457,7 +529,8 @@ export function HistoricalReplayClient({
           tradeAnnotations={annotations}
           tradeAnnotationsTruncated={false}
           tradingVisualsVisible={chartVisibility.tradeAnnotations}
-          focusSequence={focusSequence}
+          focusSequence={chartFocusSequence}
+          onVisibleSequenceRangeChange={extendHistoryWindow}
           readOnly
           paperBusy={false}
           paperError={null}
