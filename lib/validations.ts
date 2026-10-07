@@ -36,6 +36,8 @@ export const reviewTemplateSchema = z.object({
     .refine((value) => reviewLength(value) <= MAX_REVIEW_LENGTH, copy.paperTrading.reviewTooLong),
 });
 
+export const reviewTemplateRenameSchema = reviewTemplateSchema.pick({ name: true }).strict();
+
 const displaySessionSchema = z.enum(["ETH", "RTH"]);
 
 export const SIMULATION_WORK_LIMIT = 50_000_000;

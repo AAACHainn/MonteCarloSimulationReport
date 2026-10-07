@@ -1,8 +1,9 @@
 "use client";
 
 import { useCallback, useEffect, useRef, useState } from "react";
-import { Loader2 } from "lucide-react";
+import { Loader2, Pencil, Trash2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
+import { ConfirmDialog } from "@/components/ui/confirm-dialog";
 import { Dialog } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -10,7 +11,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { Textarea } from "@/components/ui/textarea";
 import { copy } from "@/lib/i18n";
 import { limitReview, reviewLength, type ReviewTemplate } from "@/lib/paper-trading/review-templates";
-import { reviewTemplateSchema } from "@/lib/validations";
+import { reviewTemplateRenameSchema, reviewTemplateSchema } from "@/lib/validations";
 
 export function ReviewEditorDialog({ open, no, value, saving, error, onChange, onSave, onClose }: {
   open: boolean;
@@ -32,6 +33,12 @@ export function ReviewEditorDialog({ open, no, value, saving, error, onChange, o
   const [templateSaving, setTemplateSaving] = useState(false);
   const [templateError, setTemplateError] = useState<string | null>(null);
   const [status, setStatus] = useState<string | null>(null);
+  const [renamingTemplate, setRenamingTemplate] = useState<ReviewTemplate | null>(null);
+  const [deletingTemplate, setDeletingTemplate] = useState<ReviewTemplate | null>(null);
+  const [templateDeleting, setTemplateDeleting] = useState(false);
+  const [deleteError, setDeleteError] = useState<string | null>(null);
+  const selectedTemplate = templates.find((item) => item.id === selectedTemplateId);
+  const managementBusy = saving || templateSaving || templateDeleting;
 
   const loadTemplates = useCallback(async () => {
     templatesAbortRef.current?.abort();
@@ -44,7 +51,11 @@ export function ReviewEditorDialog({ open, no, value, saving, error, onChange, o
       const response = await fetch("/api/replay-review-templates", { signal });
       const data: unknown = await response.json();
       if (!response.ok || !Array.isArray(data)) throw new Error(copy.paperTrading.reviewTemplatesLoadFailed);
-      if (!signal.aborted) setTemplates(data as ReviewTemplate[]);
+      if (!signal.aborted) {
+        const items = data as ReviewTemplate[];
+        setTemplates(items);
+        setSelectedTemplateId((current) => items.some((item) => item.id === current) ? current : "");
+      }
     } catch {
       if (!signal.aborted) setTemplatesError(copy.paperTrading.reviewTemplatesLoadFailed);
     } finally {
@@ -57,6 +68,9 @@ export function ReviewEditorDialog({ open, no, value, saving, error, onChange, o
     setSelectedTemplateId("");
     setStatus(null);
     setNameOpen(false);
+    setRenamingTemplate(null);
+    setDeletingTemplate(null);
+    setDeleteError(null);
     void loadTemplates();
     return () => templatesAbortRef.current?.abort();
   }, [open, no, loadTemplates]);
@@ -70,14 +84,48 @@ export function ReviewEditorDialog({ open, no, value, saving, error, onChange, o
   }
 
   function openNameDialog() {
+    setRenamingTemplate(null);
     setName("");
     setTemplateError(null);
     setNameOpen(true);
   }
 
+  function openRenameDialog() {
+    if (!selectedTemplate || managementBusy) return;
+    setRenamingTemplate(selectedTemplate);
+    setName(selectedTemplate.name);
+    setTemplateError(null);
+    setNameOpen(true);
+  }
+
+  async function deleteTemplate() {
+    if (!deletingTemplate || templateDeleting) return;
+    setTemplateDeleting(true);
+    setDeleteError(null);
+    try {
+      const response = await fetch(`/api/replay-review-templates/${deletingTemplate.id}`, { method: "DELETE" });
+      const data = await response.json() as { error?: string };
+      if (!response.ok && response.status !== 404) throw new Error(data.error ?? copy.paperTrading.reviewTemplateDeleteFailed);
+      templatesAbortRef.current?.abort();
+      setTemplatesLoading(false);
+      setTemplatesError(null);
+      setTemplates((current) => current.filter((item) => item.id !== deletingTemplate.id));
+      setSelectedTemplateId((current) => current === deletingTemplate.id ? "" : current);
+      setDeletingTemplate(null);
+      setStatus(copy.paperTrading.reviewTemplateDeleted);
+    } catch (cause) {
+      setDeleteError(cause instanceof Error ? cause.message : copy.paperTrading.reviewTemplateDeleteFailed);
+      setDeletingTemplate(null);
+    } finally {
+      setTemplateDeleting(false);
+    }
+  }
+
   async function saveTemplate() {
     if (templateSaving) return;
-    const parsed = reviewTemplateSchema.safeParse({ name, content: value });
+    const parsed = renamingTemplate
+      ? reviewTemplateRenameSchema.safeParse({ name })
+      : reviewTemplateSchema.safeParse({ name, content: value });
     if (!parsed.success) {
       setTemplateError(parsed.error.issues[0]?.message ?? copy.paperTrading.reviewTemplateSaveFailed);
       return;
@@ -85,17 +133,17 @@ export function ReviewEditorDialog({ open, no, value, saving, error, onChange, o
     setTemplateSaving(true);
     setTemplateError(null);
     try {
-      const response = await fetch("/api/replay-review-templates", {
-        method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(parsed.data),
+      const response = await fetch(renamingTemplate ? `/api/replay-review-templates/${renamingTemplate.id}` : "/api/replay-review-templates", {
+        method: renamingTemplate ? "PATCH" : "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(parsed.data),
       });
       const data = await response.json() as ReviewTemplate & { error?: string };
-      if (!response.ok) throw new Error(data.error ?? copy.paperTrading.reviewTemplateSaveFailed);
+      if (!response.ok) throw new Error(data.error ?? (renamingTemplate ? copy.paperTrading.reviewTemplateRenameFailed : copy.paperTrading.reviewTemplateSaveFailed));
       templatesAbortRef.current?.abort();
       setTemplatesLoading(false);
       setTemplatesError(null);
       setTemplates((current) => [...current.filter((item) => item.id !== data.id), data].sort((a, b) => a.name.localeCompare(b.name, "zh-CN")));
       setSelectedTemplateId(data.id);
-      setStatus(copy.paperTrading.reviewTemplateSaved);
+      setStatus(renamingTemplate ? copy.paperTrading.reviewTemplateRenamed : copy.paperTrading.reviewTemplateSaved);
       setNameOpen(false);
     } catch (cause) {
       setTemplateError(cause instanceof Error ? cause.message : copy.paperTrading.reviewTemplateSaveFailed);
@@ -106,10 +154,12 @@ export function ReviewEditorDialog({ open, no, value, saving, error, onChange, o
 
   return <>
     <Dialog open={open} title={copy.paperTrading.reviewDialogTitle(no)} description={copy.paperTrading.reviewDialogDescription}
-      onClose={() => { if (!saving && !nameOpen) onClose(); }}>
-      <form className="space-y-4" onSubmit={(event) => { event.preventDefault(); if (!saving && !nameOpen) onSave(); }}>
+      onClose={() => { if (!managementBusy && !nameOpen && !deletingTemplate) onClose(); }}>
+      <form className="space-y-4" onSubmit={(event) => { event.preventDefault(); if (!managementBusy && !nameOpen && !deletingTemplate) onSave(); }}>
         <div className="space-y-2">
           <Label htmlFor="replay-review-template">{copy.paperTrading.reviewTemplate}</Label>
+          <div className="flex flex-col gap-2 sm:flex-row">
+            <div className="min-w-0 flex-1">
           <Select value={selectedTemplateId} onValueChange={chooseTemplate} disabled={saving || templatesLoading || templates.length === 0}>
             <SelectTrigger id="replay-review-template" className="min-w-0 overflow-hidden text-left [&>span:first-child]:min-w-0 [&>span:first-child]:flex-1 [&>span:first-child]:truncate" aria-busy={templatesLoading} aria-describedby="replay-review-template-hint">
               <SelectValue placeholder={templatesLoading ? copy.paperTrading.reviewTemplatesLoading : copy.paperTrading.chooseReviewTemplate} />
@@ -118,6 +168,13 @@ export function ReviewEditorDialog({ open, no, value, saving, error, onChange, o
               {templates.map((template) => <SelectItem key={template.id} value={template.id} className="whitespace-normal break-words">{template.name}</SelectItem>)}
             </SelectContent>
           </Select>
+            </div>
+            <div className="flex shrink-0 justify-end gap-2">
+              <Button type="button" variant="outline" onClick={openRenameDialog} disabled={!selectedTemplate || managementBusy || templatesLoading}><Pencil className="h-4 w-4" aria-hidden="true" />{copy.paperTrading.renameReviewTemplate}</Button>
+              <Button type="button" variant="destructive" onClick={() => { if (selectedTemplate) { setDeleteError(null); setDeletingTemplate(selectedTemplate); } }} disabled={!selectedTemplate || managementBusy || templatesLoading}><Trash2 className="h-4 w-4" aria-hidden="true" />{copy.paperTrading.deleteReviewTemplate}</Button>
+            </div>
+          </div>
+          {deleteError ? <p className="text-xs text-red-600" role="alert">{deleteError}</p> : null}
           <p id="replay-review-template-hint" className="text-xs text-slate-500">{!templatesLoading && !templatesError && templates.length === 0 ? copy.paperTrading.noReviewTemplates : copy.paperTrading.reviewTemplateHint}</p>
           {templatesError ? <div className="flex flex-wrap items-center gap-2"><p className="text-xs text-red-600" role="alert">{templatesError}</p><Button type="button" variant="ghost" size="sm" onClick={() => void loadTemplates()} disabled={templatesLoading}>{copy.paperTrading.retryReviewTemplates}</Button></div> : null}
         </div>
@@ -138,7 +195,7 @@ export function ReviewEditorDialog({ open, no, value, saving, error, onChange, o
         </div>
       </form>
     </Dialog>
-    <Dialog open={open && nameOpen} title={copy.paperTrading.reviewTemplateDialogTitle} description={copy.paperTrading.reviewTemplateDialogDescription}
+    <Dialog open={open && nameOpen} title={renamingTemplate ? copy.paperTrading.renameReviewTemplateTitle : copy.paperTrading.reviewTemplateDialogTitle} description={renamingTemplate ? copy.paperTrading.renameReviewTemplateDescription : copy.paperTrading.reviewTemplateDialogDescription}
       className="max-w-md" onClose={() => { if (!templateSaving) setNameOpen(false); }}>
       <form className="space-y-4" onSubmit={(event) => { event.preventDefault(); void saveTemplate(); }} aria-busy={templateSaving}>
         <div className="space-y-2">
@@ -149,9 +206,18 @@ export function ReviewEditorDialog({ open, no, value, saving, error, onChange, o
         </div>
         <div className="flex justify-end gap-2 border-t pt-4">
           <Button type="button" variant="outline" onClick={() => setNameOpen(false)} disabled={templateSaving}>{copy.common.cancel}</Button>
-          <Button type="submit" disabled={templateSaving || !name.trim()}>{templateSaving ? <Loader2 className="h-4 w-4 animate-spin" aria-hidden="true" /> : null}{copy.paperTrading.saveReviewTemplate}</Button>
+          <Button type="submit" disabled={templateSaving || !name.trim()}>{templateSaving ? <Loader2 className="h-4 w-4 animate-spin" aria-hidden="true" /> : null}{renamingTemplate ? copy.paperTrading.saveReviewTemplateName : copy.paperTrading.saveReviewTemplate}</Button>
         </div>
       </form>
     </Dialog>
+    <ConfirmDialog
+      open={open && deletingTemplate !== null}
+      title={copy.paperTrading.deleteReviewTemplateTitle}
+      description={copy.paperTrading.deleteReviewTemplateConfirm(deletingTemplate?.name ?? "")}
+      confirmLabel={copy.paperTrading.deleteReviewTemplate}
+      isLoading={templateDeleting}
+      onCancel={() => { if (!templateDeleting) setDeletingTemplate(null); }}
+      onConfirm={() => void deleteTemplate()}
+    />
   </>;
 }
