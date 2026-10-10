@@ -261,7 +261,7 @@ export function ReplayChart({
   onOpenDrawingStyle, emaEnabled, emaIndicators, abrEnabled, abrLength, volumeVisible,
   displaySession, barCountSession, barCountConfig, paperSnapshot,
   tradeAnnotations, tradeAnnotationsTruncated, focusSequence = null,
-  tradingVisualsVisible = true,
+  tradeAnnotationsVisible = true,
   candleCountdownEnabled = false, playbackActive = false, currentSourceTimestamp = null, sourceIntervalSeconds,
   readOnly = false,
   paperBusy, paperError, onSubmitOrder, onOrderPriceChange,
@@ -304,7 +304,7 @@ export function ReplayChart({
   paperSnapshot: PaperSessionSnapshot | null;
   tradeAnnotations: ReplayTradeAnnotationData[];
   tradeAnnotationsTruncated: boolean;
-  tradingVisualsVisible?: boolean;
+  tradeAnnotationsVisible?: boolean;
   focusSequence?: number | null;
   readOnly?: boolean;
   paperBusy: boolean;
@@ -344,8 +344,8 @@ export function ReplayChart({
   onVisibleSequenceRangeChangeRef.current = onVisibleSequenceRangeChange;
   const tradeAnnotationsRef = useRef(tradeAnnotations);
   tradeAnnotationsRef.current = tradeAnnotations;
-  const tradingVisualsVisibleRef = useRef(tradingVisualsVisible);
-  tradingVisualsVisibleRef.current = tradingVisualsVisible;
+  const tradeAnnotationsVisibleRef = useRef(tradeAnnotationsVisible);
+  tradeAnnotationsVisibleRef.current = tradeAnnotationsVisible;
   const candlestickStyleRef = useRef(candlestickStyle);
   candlestickStyleRef.current = candlestickStyle;
   const priceTickSizeRef = useRef(priceTickSize);
@@ -634,7 +634,7 @@ export function ReplayChart({
     candles.attachPrimitive(barCountPrimitive);
     candles.attachPrimitive(candleCountdownPrimitive);
     tradeAnnotationPrimitive.setData({
-      entries: tradingVisualsVisibleRef.current ? tradeAnnotationsRef.current : [],
+      entries: tradeAnnotationsVisibleRef.current ? tradeAnnotationsRef.current : [],
       bars: barsRef.current,
     });
     const observer = new ResizeObserver(([entry]) => {
@@ -809,10 +809,10 @@ export function ReplayChart({
 
   useEffect(() => {
     tradeAnnotationPrimitiveRef.current?.setData({
-      entries: tradingVisualsVisible ? tradeAnnotations : [],
+      entries: tradeAnnotationsVisible ? tradeAnnotations : [],
       bars,
     });
-  }, [bars, tradeAnnotations, tradingVisualsVisible]);
+  }, [bars, tradeAnnotations, tradeAnnotationsVisible]);
 
   useEffect(() => {
     barCountPrimitiveRef.current?.setData({
@@ -860,10 +860,7 @@ export function ReplayChart({
     priceLinesRef.current.clear();
     lineTargetsRef.current.clear();
     const nextLineActions: LineAction[] = [];
-    if (!tradingVisualsVisible) {
-      setLineActions((current) => current.length === 0 ? current : []);
-      return;
-    }
+    // Live order and position lines stay usable when historical annotations are hidden.
     const addLine = (target: LineTarget | null, price: number, color: string, title: string, solid = false) => {
       const key = target?.key ?? `static:${title}`;
       priceLinesRef.current.set(key, series.createPriceLine({ price, color, lineWidth: 1, lineStyle: solid ? 0 : 2, axisLabelVisible: true, title }));
@@ -907,7 +904,7 @@ export function ReplayChart({
       addLine({ key: "draft:tp", price: draft.takeProfit, kind: "draft", field: "takeProfit" }, draft.takeProfit, "rgba(22,163,74,0.5)", bracketPriceLineTitle(reference, draft.takeProfit, priceTickSize), true);
     }
     setLineActions((current) => sameLineActions(current, nextLineActions) ? current : nextLineActions);
-  }, [draft, draftSizing, paperSnapshot, priceTickSize, tradingVisualsVisible]);
+  }, [draft, draftSizing, paperSnapshot, priceTickSize]);
 
   const moveDraftLine = useCallback((current: DraftOrder, field: LineTarget["field"], price: number): DraftOrder => {
     price = snapPriceToTick(price, priceTickSize);
@@ -1770,7 +1767,7 @@ export function ReplayChart({
         data-bar-count={bars.length}
       />
 
-      {tradingVisualsVisible && tradeAnnotationsTruncated ? (
+      {tradeAnnotationsVisible && tradeAnnotationsTruncated ? (
         <div className="pointer-events-none absolute right-3 top-3 z-20 rounded-md bg-amber-50/95 px-2 py-1 text-[11px] text-amber-800 shadow-sm backdrop-blur">
           {copy.paperTrading.tradeAnnotationLimit(100)}
         </div>

@@ -529,7 +529,7 @@ export function HistoricalReplayClient({
           paperSnapshot={null}
           tradeAnnotations={annotations}
           tradeAnnotationsTruncated={false}
-          tradingVisualsVisible={chartVisibility.tradeAnnotations}
+          tradeAnnotationsVisible={chartVisibility.tradeAnnotations}
           focusSequence={chartFocusSequence}
           onVisibleSequenceRangeChange={extendHistoryWindow}
           readOnly
