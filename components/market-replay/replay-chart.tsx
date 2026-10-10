@@ -74,6 +74,7 @@ import {
 } from "@/lib/paper-trading/line-r-multiple";
 import type { PaperSessionSnapshot, PaperSide, ReplayTradeAnnotationData } from "@/lib/paper-trading/types";
 import { useReplayChartEma } from "./use-replay-chart-ema";
+import { isReplayDrawingDeleteShortcut, isReplayShortcutInputTarget } from "@/lib/market-replay/keyboard-shortcuts";
 
 type DraftOrder = {
   side: PaperSide;
@@ -1157,8 +1158,7 @@ export function ReplayChart({
       onOpenDrawingStyleRef.current(id);
     };
     const key = (event: KeyboardEvent) => {
-      const target = event.target as HTMLElement | null;
-      if (target?.closest("input,textarea,select,[contenteditable='true'],[role='dialog']")) return;
+      if (event.defaultPrevented || event.isComposing || isReplayShortcutInputTarget(event.target)) return;
       if (event.key === "Escape" && dragging) {
         stopEvent(event);
         cancelDrag();
@@ -1176,7 +1176,7 @@ export function ReplayChart({
         onSelectedDrawingIdChangeRef.current(null);
         return;
       }
-      if (event.key === "Delete" && selectedDrawingIdRef.current) {
+      if (isReplayDrawingDeleteShortcut(event) && selectedDrawingIdRef.current) {
         stopEvent(event);
         onDeleteDrawingRef.current(selectedDrawingIdRef.current);
       }

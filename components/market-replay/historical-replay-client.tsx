@@ -7,6 +7,8 @@ import { ReplayChart, type ReplayVisibleSequenceRange } from "@/components/marke
 import { IndicatorSettingsDialog } from "@/components/market-replay/indicator-settings-dialog";
 import { ChartVisibilityMenu } from "@/components/market-replay/chart-visibility-menu";
 import { useReplayPreferences } from "@/components/market-replay/use-replay-preferences";
+import { useReplayShortcuts } from "@/components/market-replay/use-replay-shortcuts";
+import { isReplayShortcutInputTarget, replayDrawingShortcutKey } from "@/lib/market-replay/keyboard-shortcuts";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { Button } from "@/components/ui/button";
 import { Dialog } from "@/components/ui/dialog";
@@ -107,6 +109,7 @@ export function HistoricalReplayClient({
   session: HistoricalReplaySession;
   focusSequence: number;
 }) {
+  const shortcuts = useReplayShortcuts();
   const [bars, setBars] = useState<AggregatedMarketBarData[]>([]);
   const [chartFocusSequence, setChartFocusSequence] = useState<number | null>(focusSequence);
   const [warmupBars, setWarmupBars] = useState<AggregatedMarketBarData[]>([]);
@@ -373,10 +376,8 @@ export function HistoricalReplayClient({
 
   useEffect(() => {
     const onKeyDown = (event: KeyboardEvent) => {
-      const key = event.key.toLowerCase();
-      if (!event.altKey || event.ctrlKey || event.shiftKey || event.metaKey || (key !== "t" && key !== "f")) return;
-      const target = event.target as HTMLElement | null;
-      if (settingsDialog || target?.closest("input, textarea, [contenteditable='true']")) return;
+      const key = replayDrawingShortcutKey(event);
+      if (!key || settingsDialog || isReplayShortcutInputTarget(event.target)) return;
       event.preventDefault();
       armDrawing(key === "t" ? DRAWING_TYPE_TREND_LINE : DRAWING_TYPE_FIB_RETRACEMENT);
     };
@@ -468,17 +469,17 @@ export function HistoricalReplayClient({
             </Button>
           </Popover.Trigger>
           <Popover.Portal>
-            <Popover.Content side="bottom" align="start" sideOffset={6} collisionPadding={8} className="z-[80] w-60 rounded-lg border border-slate-200 bg-white p-1.5 shadow-xl">
-              <button type="button" className="flex w-full items-center gap-3 rounded-md px-3 py-2 text-left text-sm text-slate-700 hover:bg-slate-100 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-600" onClick={() => armDrawing(DRAWING_TYPE_TREND_LINE)}>
-                <TrendingUp className="h-4 w-4 text-slate-600" /><span className="font-medium">{copy.marketReplay.trendLine}</span><kbd className="ml-auto font-mono text-[11px] text-slate-400">{copy.marketReplay.trendLineShortcut}</kbd>
+            <Popover.Content side="bottom" align="start" sideOffset={6} collisionPadding={8} className="z-[80] w-64 rounded-lg border border-slate-200 bg-white p-1.5 shadow-xl">
+              <button type="button" aria-keyshortcuts="Alt+t" className="flex w-full items-center gap-3 rounded-md px-3 py-2 text-left text-sm text-slate-700 hover:bg-slate-100 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-600" onClick={() => armDrawing(DRAWING_TYPE_TREND_LINE)}>
+                <TrendingUp className="h-4 w-4 text-slate-600" /><span className="font-medium">{copy.marketReplay.trendLine}</span><kbd className="ml-auto whitespace-nowrap font-mono text-[11px] text-slate-400">{shortcuts.trendLine}</kbd>
               </button>
-              <button type="button" className="flex w-full items-center gap-3 rounded-md px-3 py-2 text-left text-sm text-slate-700 hover:bg-slate-100 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-600" onClick={() => armDrawing(DRAWING_TYPE_FIB_RETRACEMENT)}>
-                <span className="flex h-4 w-4 items-center justify-center font-mono text-[10px] font-bold text-slate-600">Fib</span><span className="font-medium">{copy.marketReplay.fibonacciRetracement}</span><kbd className="ml-auto font-mono text-[11px] text-slate-400">{copy.marketReplay.fibonacciRetracementShortcut}</kbd>
+              <button type="button" aria-keyshortcuts="Alt+f" className="flex w-full items-center gap-3 rounded-md px-3 py-2 text-left text-sm text-slate-700 hover:bg-slate-100 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-600" onClick={() => armDrawing(DRAWING_TYPE_FIB_RETRACEMENT)}>
+                <span className="flex h-4 w-4 items-center justify-center font-mono text-[10px] font-bold text-slate-600">Fib</span><span className="font-medium">{copy.marketReplay.fibonacciRetracement}</span><kbd className="ml-auto whitespace-nowrap font-mono text-[11px] text-slate-400">{shortcuts.fibonacciRetracement}</kbd>
               </button>
             </Popover.Content>
           </Popover.Portal>
         </Popover.Root>
-        <Button type="button" variant={drawingObjectsOpen ? "secondary" : "ghost"} size="sm" className="h-8" aria-pressed={drawingObjectsOpen} title={copy.marketReplay.drawingObjectsHint} onClick={() => setDrawingObjectsOpen((current) => !current)}>
+        <Button type="button" variant={drawingObjectsOpen ? "secondary" : "ghost"} size="sm" className="h-8" aria-pressed={drawingObjectsOpen} title={`${copy.marketReplay.drawingObjectsHint}\n${copy.marketReplay.drawingDeleteShortcutHint(shortcuts.deleteDrawing)}`} onClick={() => setDrawingObjectsOpen((current) => !current)}>
           <ListTree className="h-4 w-4" />{copy.marketReplay.drawingObjects}
         </Button>
         <Button type="button" variant={measurementArmed ? "secondary" : "ghost"} size="sm" className="h-8" aria-pressed={measurementArmed} aria-label={copy.marketReplay.measureHint} onClick={() => { setDrawingTool(null); setMeasurementArmed((current) => !current); }}>
