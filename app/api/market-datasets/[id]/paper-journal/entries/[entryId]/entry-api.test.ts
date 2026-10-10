@@ -126,8 +126,8 @@ describe("replay journal Setup API", () => {
     expect(mocks.entryFindFirst).not.toHaveBeenCalled();
   });
 
-  it("saves a review with at most 300 characters", async () => {
-    const review = "复".repeat(300);
+  it.each(["复", "😀"])("saves a review with 2000 Unicode characters (%s)", async (character) => {
+    const review = character.repeat(2000);
     mocks.entryUpdate.mockResolvedValue({ ...record("setup-1", "Opening Range Breakout"), review });
     const response = await PATCH(new Request("http://localhost/api/entries/entry-1", {
       method: "PATCH",
@@ -140,11 +140,11 @@ describe("replay journal Setup API", () => {
     expect(await response.json()).toMatchObject({ review });
   });
 
-  it("rejects a review longer than 300 characters", async () => {
+  it.each(["复", "😀"])("rejects a review longer than 2000 Unicode characters (%s)", async (character) => {
     const response = await PATCH(new Request("http://localhost/api/entries/entry-1", {
       method: "PATCH",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ review: "复".repeat(301) }),
+      body: JSON.stringify({ review: character.repeat(2001) }),
     }), context);
 
     expect(response.status).toBe(400);

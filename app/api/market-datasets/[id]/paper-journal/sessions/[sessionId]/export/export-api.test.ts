@@ -83,6 +83,18 @@ describe("replay journal Excel export API", () => {
     expect(sheet.match(/<row r=/g)).toHaveLength(3);
   });
 
+  it("exports a complete 2000-character multiline review", async () => {
+    const review = "复盘\n😀".repeat(500);
+    mocks.findFirst.mockResolvedValue({
+      id: "session-1", name: "复盘练习", archivedAt: null,
+      entries: [{ ...entry(1, "突破", "顺势"), review }],
+    });
+    const response = await GET(new Request("http://localhost/api"), context);
+    const workbook = await JSZip.loadAsync(await response.arrayBuffer());
+    const sheet = await workbook.file("xl/worksheets/sheet1.xml")!.async("string");
+    expect(sheet).toContain(review);
+  });
+
   it("returns 404 when the session does not belong to the dataset", async () => {
     mocks.findFirst.mockResolvedValue(null);
     const response = await GET(new Request("http://localhost/api"), context);

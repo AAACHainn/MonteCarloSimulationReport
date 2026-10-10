@@ -21,13 +21,13 @@ describe("shared replay review templates", () => {
     expect(response.status).toBe(201);
     expect(mocks.create).toHaveBeenCalledWith({ data: { name: "Review", normalizedName: "review", content: template.content }, select: { id: true, name: true, content: true } });
   });
-  it.each([{ name: " ", content: "复盘" }, { name: "模板", content: " \n " }, { name: "长".repeat(51), content: "复盘" }, { name: "模板", content: "字".repeat(301) }])("rejects invalid names and contents without writing to the database", async (body) => {
+  it.each([{ name: " ", content: "复盘" }, { name: "模板", content: " \n " }, { name: "长".repeat(51), content: "复盘" }, { name: "模板", content: "字".repeat(2001) }])("rejects invalid names and contents without writing to the database", async (body) => {
     expect((await POST(request(body))).status).toBe(400);
     expect(mocks.create).not.toHaveBeenCalled();
   });
   it("counts Unicode code points consistently with the review editor", async () => {
-    expect((await POST(request({ name: "模板", content: "😀".repeat(300) }))).status).toBe(201);
-    expect((await POST(request({ name: "模板", content: "😀".repeat(301) }))).status).toBe(400);
+    expect((await POST(request({ name: "模板", content: "😀".repeat(2000) }))).status).toBe(201);
+    expect((await POST(request({ name: "模板", content: "😀".repeat(2001) }))).status).toBe(400);
   });
   it("rejects malformed JSON", async () => {
     const response = await POST(new Request("http://localhost/api/replay-review-templates", { method: "POST", body: "{" }));

@@ -429,7 +429,7 @@ const replayJournalEntryColumns = [
   ["entryOrderType", "TEXT"],
   ["accountNo", "INTEGER NOT NULL DEFAULT 0"],
   ["setupOptionId", "TEXT REFERENCES \"TradeOption\"(\"id\") ON DELETE SET NULL ON UPDATE CASCADE"],
-  ["review", "TEXT NOT NULL DEFAULT '' CHECK(length(\"review\") <= 300)"],
+  ["review", "TEXT NOT NULL DEFAULT '' CHECK(length(\"review\") <= 2000)"],
 ];
 const marketDatasetImportColumns = [
   ["importedBars", "INTEGER NOT NULL DEFAULT 0"],
@@ -536,6 +536,19 @@ try {
         }
       }
     }
+  }
+
+  const [journalEntryTable] = await prisma.$queryRawUnsafe(
+    `SELECT "sql" FROM "sqlite_master" WHERE "type" = 'table' AND "name" = 'ReplayJournalEntry'`,
+  );
+  if (/CHECK\s*\(\s*length\s*\(\s*"review"\s*\)\s*<=\s*300\s*\)/i.test(journalEntryTable.sql)) {
+    // Replace only the review column in one transaction, preserving entries and their relations.
+    await prisma.$transaction([
+      prisma.$executeRawUnsafe(`ALTER TABLE "ReplayJournalEntry" ADD COLUMN "review_expanded" TEXT NOT NULL DEFAULT '' CHECK(length("review_expanded") <= 2000)`),
+      prisma.$executeRawUnsafe(`UPDATE "ReplayJournalEntry" SET "review_expanded" = "review"`),
+      prisma.$executeRawUnsafe(`ALTER TABLE "ReplayJournalEntry" DROP COLUMN "review"`),
+      prisma.$executeRawUnsafe(`ALTER TABLE "ReplayJournalEntry" RENAME COLUMN "review_expanded" TO "review"`),
+    ]);
   }
 
   await prisma.$executeRawUnsafe(`

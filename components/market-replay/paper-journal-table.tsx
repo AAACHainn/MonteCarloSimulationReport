@@ -14,7 +14,7 @@ import { MultiSelect } from "@/components/ui/multi-select";
 import { MultiOptionFilterPopover, type FilterOption } from "@/components/ui/multi-option-filter-popover";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { ReviewEditorDialog } from "@/components/market-replay/review-editor-dialog";
-import { limitReview, reviewLength } from "@/lib/paper-trading/review-templates";
+import { MAX_REVIEW_LENGTH, limitReview, reviewLength } from "@/lib/paper-trading/review-templates";
 import { formatNumber, formatPercent } from "@/lib/format";
 import { copy } from "@/lib/i18n";
 import { formatInterval } from "@/lib/market-replay/types";
@@ -571,7 +571,7 @@ export function PaperJournalTable({
 
   async function updateReview(entry: ReplayJournalEntryData, value: string, announce = false) {
     const review = limitReview(value);
-    if (reviewLength(value) > 300) {
+    if (reviewLength(value) > MAX_REVIEW_LENGTH) {
       setReviewError(copy.paperTrading.reviewTooLong);
       return false;
     }

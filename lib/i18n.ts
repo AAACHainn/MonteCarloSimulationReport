@@ -1,4 +1,6 @@
-﻿export const defaultLocale = "zh-CN" as const;
+﻿import { MAX_REVIEW_LENGTH } from "./paper-trading/review-templates";
+
+export const defaultLocale = "zh-CN" as const;
 export const supportedLocales = ["zh-CN", "en-US"] as const;
 
 export type SupportedLocale = (typeof supportedLocales)[number];
@@ -679,9 +681,9 @@ export const dictionaries = {
       reviewEditHint: "可直接编辑；双击或按 F2 打开大编辑框。",
       editReview: (no: number) => `编辑 No ${no} 的复盘`,
       reviewDialogTitle: (no: number) => `编辑 No ${no} 的复盘`,
-      reviewDialogDescription: "最多输入 300 个字符，保存后同步到交易日志和 Excel 导出。",
-      reviewCharacterCount: (count: number) => `${count}/300`,
-      reviewTooLong: "复盘内容不能超过 300 个字符。",
+      reviewDialogDescription: `最多输入 ${MAX_REVIEW_LENGTH} 个字符，保存后同步到交易日志和 Excel 导出。`,
+      reviewCharacterCount: (count: number) => `${count}/${MAX_REVIEW_LENGTH}`,
+      reviewTooLong: `复盘内容不能超过 ${MAX_REVIEW_LENGTH} 个字符。`,
       reviewUpdateFailed: "无法保存复盘内容，已恢复原值。",
       reviewSaved: "复盘内容已保存。",
       saveReview: "保存复盘",
