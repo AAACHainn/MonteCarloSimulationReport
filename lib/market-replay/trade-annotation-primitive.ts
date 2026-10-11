@@ -209,9 +209,9 @@ class ReplayTradeAnnotationPaneRenderer implements IPrimitivePaneRenderer {
         context.lineTo(lineEndX, annotation.y);
         if (Math.abs(labelY - annotation.y) > 0.5) context.lineTo(labelX - 1, labelY);
         context.stroke();
-        // Print-sized labels need a white surface over same-color candles.
+        // Print-sized labels use a half-opacity white background.
         if (this.scale > 1) {
-          context.fillStyle = "rgba(255,255,255,.96)";
+          context.fillStyle = "rgba(255,255,255,.5)";
           context.fillRect(labelRect.left - gap / 2, labelRect.top, labelWidth + gap, labelHeight);
           context.fillStyle = annotation.color;
         }

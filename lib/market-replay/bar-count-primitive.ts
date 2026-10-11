@@ -74,7 +74,7 @@ class BarCountPaneRenderer implements IPrimitivePaneRenderer {
         if (this.scale > 1) {
           const width = context.measureText(label.text).width + 4 * this.scale;
           const height = LABEL_HEIGHT * this.scale;
-          context.fillStyle = "rgba(255, 255, 255, 0.96)";
+          context.fillStyle = "rgba(255, 255, 255, 0.5)";
           context.fillRect(label.x - width / 2, label.y - height / 2, width, height);
         }
         context.fillStyle = label.color;
