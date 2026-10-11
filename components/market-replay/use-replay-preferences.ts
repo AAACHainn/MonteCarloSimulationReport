@@ -372,3 +372,20 @@ export function useReplayPreferences(dataset: { id: string; startTime: string; t
     setDisplayUtcOffsetMinutes,
   };
 }
+
+
+// Read-only capture for export; does not mount hooks or write chart preferences.
+export function capturePdfChartPreferences(dataset: { id: string; startTime: string; timezone: string }): import("@/lib/paper-trading/pdf-types").PdfChartPreferences {
+  const get = (key: string) => { try { return window.localStorage.getItem(key); } catch { return null; } };
+  const ema = loadEmaSettings();
+  const visibility = parseReplayChartVisibility(get(CHART_VISIBILITY_STORAGE_KEY));
+  const offset = Number(get(`${DISPLAY_TIMEZONE_STORAGE_KEY}:${dataset.id}`) ?? Number.NaN);
+  return {
+    candlestickStyle: parseCandlestickStyle(get(CANDLESTICK_STYLE_STORAGE_KEY)),
+    emaEnabled: Boolean(ema?.enabled) && visibility.indicators,
+    emaIndicators: ema?.indicators ?? DEFAULT_EMA_INDICATORS.map((i) => ({ ...i })),
+    gridVisible: get(GRID_VISIBILITY_STORAGE_KEY) !== "false",
+    volumeVisible: get(VOLUME_VISIBILITY_STORAGE_KEY) !== "false",
+    displayUtcOffsetMinutes: isSupportedUtcOffsetMinutes(offset) ? offset : utcOffsetMinutesForTimezone(dataset.startTime, dataset.timezone),
+  };
+}

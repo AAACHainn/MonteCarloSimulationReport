@@ -13,6 +13,8 @@ import { Label } from "@/components/ui/label";
 import { MultiSelect } from "@/components/ui/multi-select";
 import { MultiOptionFilterPopover, type FilterOption } from "@/components/ui/multi-option-filter-popover";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
+import { PdfExportButton } from "@/components/market-replay/pdf-export-button";
+import { CheckboxField } from "@/components/ui/checkbox-field";
 import { ReviewEditorDialog } from "@/components/market-replay/review-editor-dialog";
 import { MAX_REVIEW_LENGTH, limitReview, reviewLength } from "@/lib/paper-trading/review-templates";
 import { formatNumber, formatPercent } from "@/lib/format";
@@ -41,6 +43,7 @@ import {
   type ReplayJournalFilters,
   type ReplayJournalOptionFilterKey,
 } from "@/lib/paper-trading/journal-filters";
+import { journalColumns, type JournalColumnId } from "@/lib/paper-trading/journal-columns";
 import type { ReplayJournalEntryData, ReplayJournalSummary } from "@/lib/paper-trading/types";
 
 type JournalSessionSummary = {
@@ -85,37 +88,6 @@ type TradeReason = {
   name: string;
 };
 
-type JournalColumnId =
-  | "no" | "date" | "direction" | "setup" | "reason" | "abr" | "initialRisk"
-  | "initialRiskAbr" | "actualRisk" | "actualRiskAbr" | "actualInitialRiskRatio"
-  | "gainLoss" | "result" | "abrRr" | "initialRiskRr" | "actualRiskRr" | "review";
-
-const journalColumns: {
-  id: JournalColumnId;
-  label: string;
-  text: boolean;
-  defaultWidth: number;
-  expressionFilterKey?: ReplayJournalExpressionFilterKey;
-  optionFilterKey?: ReplayJournalOptionFilterKey;
-}[] = [
-  { id: "no", label: "No", text: false, defaultWidth: 72 },
-  { id: "date", label: "Date", text: false, defaultWidth: 120 },
-  { id: "direction", label: "Direction", text: false, defaultWidth: 112, optionFilterKey: "directions" },
-  { id: "setup", label: copy.paperTrading.setup, text: true, defaultWidth: 208, optionFilterKey: "setupOptionIds" },
-  { id: "reason", label: copy.paperTrading.tradeReason, text: true, defaultWidth: 256, optionFilterKey: "tradeReasonIds" },
-  { id: "abr", label: "ABR", text: false, defaultWidth: 104 },
-  { id: "initialRisk", label: "iRisk", text: false, defaultWidth: 104 },
-  { id: "initialRiskAbr", label: "iRisk / ABR", text: false, defaultWidth: 128, expressionFilterKey: "initialRiskAbr" },
-  { id: "actualRisk", label: "aRisk", text: false, defaultWidth: 104 },
-  { id: "actualRiskAbr", label: "aRisk / ABR", text: false, defaultWidth: 128, expressionFilterKey: "actualRiskAbr" },
-  { id: "actualInitialRiskRatio", label: "aRisk / iRisk", text: false, defaultWidth: 128, expressionFilterKey: "actualInitialRiskRatio" },
-  { id: "gainLoss", label: "Gain / Loss", text: false, defaultWidth: 128 },
-  { id: "result", label: "Result", text: false, defaultWidth: 104, optionFilterKey: "results" },
-  { id: "abrRr", label: "ABR RR", text: false, defaultWidth: 112, expressionFilterKey: "abrRr" },
-  { id: "initialRiskRr", label: "iRisk RR", text: false, defaultWidth: 112, expressionFilterKey: "initialRiskRr" },
-  { id: "actualRiskRr", label: "aRisk RR", text: false, defaultWidth: 112, expressionFilterKey: "actualRiskRr" },
-  { id: "review", label: copy.paperTrading.review, text: true, defaultWidth: 288 },
-];
 const defaultVisibleColumnIds = journalColumns.map((column) => column.id);
 const defaultColumnWidths = Object.fromEntries(
   journalColumns.map((column) => [column.id, column.defaultWidth]),
@@ -864,6 +836,7 @@ export function PaperJournalTable({
               {copy.paperTrading.exportJournalExcel}
             </a>
           </Button>
+          <PdfExportButton datasetId={datasetId} sessionId={selectedSession.id} filters={appliedFilters} loading={loading} count={totalItems} />
           <Button type="button" variant="outline" size="sm" onClick={openVisibleColumns}>
             <Settings2 className="h-4 w-4" aria-hidden="true" />
             {copy.paperTrading.setVisibleColumns}
@@ -1238,15 +1211,9 @@ export function PaperJournalTable({
       <div className="space-y-4">
         <div className="grid gap-2 sm:grid-cols-2">
           {scopedJournalColumns.map((column) => (
-            <label key={column.id} className="flex min-h-10 cursor-pointer items-center gap-3 rounded-md border px-3 py-2 text-sm text-slate-800 hover:bg-slate-50">
-              <input
-                type="checkbox"
-                className="h-4 w-4 rounded border-slate-300 accent-blue-600 focus-visible:ring-2 focus-visible:ring-ring"
-                checked={draftVisibleColumnIds.includes(column.id)}
-                onChange={() => toggleDraftColumn(column.id)}
-              />
-              <span>{column.label}</span>
-            </label>
+            <CheckboxField key={column.id} checked={draftVisibleColumnIds.includes(column.id)} onChange={() => toggleDraftColumn(column.id)}>
+              {column.label}
+            </CheckboxField>
           ))}
         </div>
         {!scopedJournalColumns.some((column) => draftVisibleColumnIds.includes(column.id)) ? <p className="text-xs text-red-600" role="alert">{copy.paperTrading.visibleColumnsRequired}</p> : null}

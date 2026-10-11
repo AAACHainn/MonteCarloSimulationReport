@@ -143,17 +143,17 @@ function rectanglesOverlap(
     && first.top < second.bottom && first.bottom > second.top;
 }
 
-function laneOffsets() {
+function laneOffsets(height = LABEL_HEIGHT, gap = LABEL_LANE_GAP) {
   const offsets = [0];
   for (let step = 1; step <= MAX_LABEL_OFFSET_STEPS; step += 1) {
-    const offset = step * (LABEL_HEIGHT + LABEL_LANE_GAP);
+    const offset = step * (height + gap);
     offsets.push(-offset, offset);
   }
   return offsets;
 }
 
 class ReplayTradeAnnotationPaneRenderer implements IPrimitivePaneRenderer {
-  constructor(private readonly snapshot: () => ProjectedSnapshot) {}
+  constructor(private readonly snapshot: () => ProjectedSnapshot, private readonly scale = 1) {}
 
   draw(target: Parameters<IPrimitivePaneRenderer["draw"]>[0]): void {
     target.useMediaCoordinateSpace(({ context }) => {
@@ -161,34 +161,38 @@ class ReplayTradeAnnotationPaneRenderer implements IPrimitivePaneRenderer {
       if (!snapshot.annotations.length) return;
       const placed: Array<{ left: number; right: number; top: number; bottom: number }> = [];
       context.save();
-      context.font = "600 12px ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace";
+      const labelHeight = LABEL_HEIGHT * this.scale;
+      const gap = LABEL_GAP * this.scale;
+      const lineLength = REPLAY_TRADE_ANNOTATION_LINE_LENGTH * this.scale;
+      context.font = `600 ${12 * this.scale}px ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace`;
       context.textAlign = "left";
       context.textBaseline = "middle";
       context.lineWidth = 1;
       context.setLineDash([3, 3]);
 
       for (const annotation of snapshot.annotations) {
-        const lineEndX = annotation.x + REPLAY_TRADE_ANNOTATION_LINE_LENGTH;
-        const labelX = lineEndX + LABEL_GAP;
         const labelWidth = Math.ceil(context.measureText(annotation.label).width);
-        const clampedDesiredY = Math.max(LABEL_HEIGHT / 2, Math.min(annotation.y, snapshot.paneHeight - LABEL_HEIGHT / 2));
+        const flip = annotation.x + lineLength + gap + labelWidth > snapshot.paneWidth;
+        const lineEndX = annotation.x + (flip ? -lineLength : lineLength);
+        const labelX = flip ? Math.max(0, lineEndX - gap - labelWidth) : lineEndX + gap;
+        const clampedDesiredY = Math.max(labelHeight / 2, Math.min(annotation.y, snapshot.paneHeight - labelHeight / 2));
         let labelY = clampedDesiredY;
         let labelRect = {
           left: labelX,
           right: labelX + labelWidth,
-          top: labelY - LABEL_HEIGHT / 2,
-          bottom: labelY + LABEL_HEIGHT / 2,
+          top: labelY - labelHeight / 2,
+          bottom: labelY + labelHeight / 2,
         };
-        for (const offset of laneOffsets()) {
+        for (const offset of laneOffsets(labelHeight, LABEL_LANE_GAP * this.scale)) {
           const candidateY = Math.max(
-            LABEL_HEIGHT / 2,
-            Math.min(clampedDesiredY + offset, snapshot.paneHeight - LABEL_HEIGHT / 2),
+            labelHeight / 2,
+            Math.min(clampedDesiredY + offset, snapshot.paneHeight - labelHeight / 2),
           );
           const candidate = {
             left: labelX,
             right: labelX + labelWidth,
-            top: candidateY - LABEL_HEIGHT / 2,
-            bottom: candidateY + LABEL_HEIGHT / 2,
+            top: candidateY - labelHeight / 2,
+            bottom: candidateY + labelHeight / 2,
           };
           if (!placed.some((rectangle) => rectanglesOverlap(rectangle, candidate))) {
             labelY = candidateY;
@@ -205,6 +209,12 @@ class ReplayTradeAnnotationPaneRenderer implements IPrimitivePaneRenderer {
         context.lineTo(lineEndX, annotation.y);
         if (Math.abs(labelY - annotation.y) > 0.5) context.lineTo(labelX - 1, labelY);
         context.stroke();
+        // Print-sized labels need a white surface over same-color candles.
+        if (this.scale > 1) {
+          context.fillStyle = "rgba(255,255,255,.96)";
+          context.fillRect(labelRect.left - gap / 2, labelRect.top, labelWidth + gap, labelHeight);
+          context.fillStyle = annotation.color;
+        }
         context.fillText(annotation.label, labelX, labelY);
       }
       context.restore();
@@ -215,8 +225,8 @@ class ReplayTradeAnnotationPaneRenderer implements IPrimitivePaneRenderer {
 class ReplayTradeAnnotationPaneView implements IPrimitivePaneView {
   private readonly paneRenderer: ReplayTradeAnnotationPaneRenderer;
 
-  constructor(snapshot: () => ProjectedSnapshot) {
-    this.paneRenderer = new ReplayTradeAnnotationPaneRenderer(snapshot);
+  constructor(snapshot: () => ProjectedSnapshot, scale = 1) {
+    this.paneRenderer = new ReplayTradeAnnotationPaneRenderer(snapshot, scale);
   }
 
   zOrder() {
@@ -234,7 +244,11 @@ export class ReplayTradeAnnotationPrimitive implements ISeriesPrimitive<Time> {
   private requestUpdate: (() => void) | null = null;
   private snapshot: PrimitiveSnapshot = { entries: [], bars: [] };
   private projected: ProjectedSnapshot = EMPTY_PROJECTED_SNAPSHOT;
-  private readonly views = [new ReplayTradeAnnotationPaneView(() => this.projected)];
+  private readonly views: ReplayTradeAnnotationPaneView[];
+
+  constructor(scale = 1) {
+    this.views = [new ReplayTradeAnnotationPaneView(() => this.projected, scale)];
+  }
 
   attached(param: SeriesAttachedParameter<Time>) {
     this.chart = param.chart;

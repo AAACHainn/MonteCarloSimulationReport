@@ -25,3 +25,5 @@ storage/
 prisma/dev.db*
 .DS_Store
 Thumbs.db
+
+/tmp/

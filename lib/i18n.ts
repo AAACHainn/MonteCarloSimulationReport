@@ -1,4 +1,4 @@
-﻿import { MAX_REVIEW_LENGTH } from "./paper-trading/review-templates";
+import { MAX_REVIEW_LENGTH } from "./paper-trading/review-templates";
 
 export const defaultLocale = "zh-CN" as const;
 export const supportedLocales = ["zh-CN", "en-US"] as const;
@@ -728,6 +728,40 @@ export const dictionaries = {
       saveTradeReason: "保存",
       setVisibleColumns: "设置显示列",
       exportJournalExcel: "导出 Excel",
+      journalFields: {
+        no: "No", date: "Date", direction: "Direction", abr: "ABR", initialRisk: "iRisk",
+        initialRiskAbr: "iRisk / ABR", actualRisk: "aRisk", actualRiskAbr: "aRisk / ABR",
+        actualInitialRiskRatio: "aRisk / iRisk", gainLoss: "Gain / Loss", result: "Result",
+        abrRr: "ABR RR", initialRiskRr: "iRisk RR", actualRiskRr: "aRisk RR",
+      },
+      pdf: {
+        export: "导出 PDF", title: "导出回放交易 PDF", description: "导出当前筛选结果的全部平仓记录，不受分页和表格显示列影响。",
+        period: "统一截图周期", session: "截图交易时段", customSeconds: "自定义周期（秒）",
+        context: "截图最多 200 根 K 线，默认包含开仓前 50 根及平仓后 20 根行情。每卷最多 50 张截图。",
+        preferenceHint: "沿用本浏览器的 K 线、EMA、量能、网格和时区设置，不包含手绘线。",
+        unicodeHint: "字体未覆盖的字符以 [U+码点] 显示，保留其编码及后续文字。",
+        includeDetails: "包含交易明细", fieldHint: "明细字段独立于表格显示列；No 固定保留。", all: "全选", clear: "清空", reset: "恢复默认",
+        start: "开始导出", cancel: "取消导出", retry: "重试当前卷", dismiss: "关闭导出状态",
+        loading: "正在读取交易快照…", planning: "正在规划截图…", generating: "正在生成 PDF…",
+        planned: (count: number) => `已规划 ${count} 张截图`,
+        progress: (current: number, total: number, volume: number, volumes: number) => `第 ${volume}/${volumes} 卷 · 截图 ${current}/${total}`,
+        ready: (volume: number, volumes: number) => `第 ${volume}/${volumes} 卷已生成，请下载。`,
+        downloadContinue: "下载并继续", download: "下载 PDF", complete: "全部分卷已生成并已触发下载。",
+        paused: "标签页在后台，截图已暂停；返回此页后自动继续。", active: "已有 PDF 导出任务，请先完成或取消。",
+        empty: "当前筛选结果没有可导出的平仓记录。", failed: "PDF 导出失败，请重试。", fontFailed: "无法加载 PDF 中文字体，请重试。",
+        versionConflict: "行情数据已变化，请关闭当前任务并重新导出。", invalidWindow: "导出窗口参数无效。", missingBars: "交易对应的行情缺失，无法生成完整截图。",
+        outsideSession: (numbers: string) => `交易 ${numbers} 的开仓或平仓不在所选时段内，请切换 ETH/RTH 或调整表格筛选。`,
+        snapshot: "快照时间", filters: "筛选条件", noFilters: "无筛选", counts: (total: number, selected: number) => `会话共 ${total} 条 · 本次导出 ${selected} 条`,
+        reportTitle: "回放交易复盘报告", details: "交易明细", detailsOff: "本报告未包含交易明细。",
+        settings: "截图设置", historicalSettings: "交易原始设置", trades: "交易", entry: "开仓", exit: "平仓", quantity: "数量",
+        original: (period: string, session: string) => `原始周期 ${period} · ${session}`,
+        chartCaption: (index: number, count: number) => `截图 ${index}/${count}`,
+        volume: (index: number, count: number) => `第 ${index}/${count} 卷`, page: (index: number, count: number) => `第 ${index}/${count} 页`,
+        contextCounts: (before: number, after: number) => `上下文：开仓前 ${before} 根 · 平仓后 ${after} 根`,
+        continuation: (index: number, count: number) => `持仓续图 ${index}/${count}`,
+        incomplete: "图中包含形成或不完整 K 线，未补齐缺失数据。", chartLegend: "自动标记：进出场、初始风险 iRisk、实际风险 aRisk。",
+        closedNo: (no: number) => `交易 #${no}`, snapshotHint: "事后复盘图，包含平仓后行情；历史 ABR、风险、RR 和盈亏未按截图周期重算。",
+      },
       journalExportFailed: "无法导出 Excel，请稍后重试。",
       visibleColumnsTitle: "设置显示列",
       visibleColumnsDescription: "取消勾选后，对应列将在交易日志表格中隐藏。",

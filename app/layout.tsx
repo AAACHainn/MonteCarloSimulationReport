@@ -1,4 +1,5 @@
 import type { Metadata } from "next";
+import { PdfExportProvider } from "@/components/market-replay/pdf-export-provider";
 import { AppHeader } from "@/components/app-header";
 import { copy, defaultLocale } from "@/lib/i18n";
 import "./globals.css";
@@ -12,10 +13,10 @@ export default function RootLayout({ children }: Readonly<{ children: React.Reac
   return (
     <html lang={defaultLocale} suppressHydrationWarning>
       <body>
-        <div className="min-h-screen">
+        <PdfExportProvider><div className="min-h-screen">
           <AppHeader />
           <main className="mx-auto max-w-7xl px-6 py-8">{children}</main>
-        </div>
+        </div></PdfExportProvider>
       </body>
     </html>
   );

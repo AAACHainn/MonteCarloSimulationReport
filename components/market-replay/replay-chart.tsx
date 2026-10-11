@@ -1,5 +1,7 @@
 "use client";
 
+import { formatChartTick, chartCandleData as candle, chartVolumeData as volume } from "@/lib/market-replay/chart-data";
+
 import {
   useCallback, useEffect, useMemo, useRef, useState,
   type MouseEvent as ReactMouseEvent,
@@ -9,7 +11,7 @@ import { Grid2X2, GripHorizontal, Link2, Loader2, LogOut, RotateCcw, ShieldAlert
 import {
   CandlestickSeries, ColorType, createChart, CrosshairMode,
   HistogramSeries, type IChartApi, type IPriceLine, type ISeriesApi,
-  type Time, TickMarkType, type UTCTimestamp,
+  type Time, TickMarkType,
 } from "lightweight-charts";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -53,7 +55,7 @@ import {
 } from "@/lib/market-replay/chart-drawings";
 import { TrendLinePrimitive } from "@/lib/market-replay/trend-line-primitive";
 import { FibonacciRetracementPrimitive } from "@/lib/market-replay/fibonacci-retracement-primitive";
-import { formatUtcDateTime, utcDateParts } from "@/lib/market-replay/display-timezone";
+import { formatUtcDateTime } from "@/lib/market-replay/display-timezone";
 import { formatPriceForTick, priceDecimalsForTick, snapPriceToTick } from "@/lib/market-replay/price-ticks";
 import { ReplayTradeAnnotationPrimitive } from "@/lib/market-replay/trade-annotation-primitive";
 import { BarCountPrimitive } from "@/lib/market-replay/bar-count-primitive";
@@ -159,35 +161,6 @@ function sameLineActions(current: LineAction[], next: LineAction[]) {
       && action.kind === candidate.kind
       && action.orderId === candidate.orderId;
   });
-}
-
-function chartTime(timestamp: string) {
-  return Math.floor(new Date(timestamp).getTime() / 1_000) as UTCTimestamp;
-}
-
-function formatChartTick(time: Time, tickMarkType: TickMarkType, offsetMinutes: number) {
-  if (typeof time !== "number") return String(time);
-  const parts = utcDateParts(time * 1_000, offsetMinutes);
-  if (tickMarkType === TickMarkType.Year) return parts.year;
-  if (tickMarkType === TickMarkType.Month) return `${parts.year}/${parts.month}`;
-  if (tickMarkType === TickMarkType.DayOfMonth) return `${parts.month}/${parts.day}`;
-  if (tickMarkType === TickMarkType.TimeWithSeconds) return `${parts.hour}:${parts.minute}:${parts.second}`;
-  return `${parts.hour}:${parts.minute}`;
-}
-
-function candle(bar: AggregatedMarketBarData) {
-  const incomplete = bar.status === "INCOMPLETE";
-  return {
-    time: chartTime(bar.timestamp), open: bar.open, high: bar.high, low: bar.low, close: bar.close,
-    ...(incomplete ? { borderColor: "#f59e0b", wickColor: "#f59e0b" } : {}),
-  };
-}
-
-function volume(bar: AggregatedMarketBarData) {
-  return {
-    time: chartTime(bar.timestamp), value: bar.volume ?? 0,
-    color: bar.status === "INCOMPLETE" ? "rgba(245,158,11,.5)" : bar.close >= bar.open ? "rgba(22,163,74,.45)" : "rgba(220,38,38,.45)",
-  };
 }
 
 function abrValueAt(
@@ -703,7 +676,7 @@ export function ReplayChart({
       lastValueVisible: false,
     });
     volumeRef.current = volumes;
-    volumes.setData(barsRef.current.filter((bar) => bar.volume !== null).map(volume));
+    volumes.setData(barsRef.current.filter((bar) => bar.volume !== null).map((bar) => volume(bar)));
   }, [hasVolume, volumeVisible]);
 
   useEffect(() => {
@@ -768,7 +741,7 @@ export function ReplayChart({
         })
         : null;
       series.setData(next.map(candle));
-      volumeSeries?.setData(next.filter((bar) => bar.volume !== null).map(volume));
+      volumeSeries?.setData(next.filter((bar) => bar.volume !== null).map((bar) => volume(bar)));
       if (mappedTimelineRange) {
         chart.timeScale().setVisibleLogicalRange(mappedTimelineRange);
       } else if (range && previousLastInNext >= 0) {
