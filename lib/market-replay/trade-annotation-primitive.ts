@@ -22,7 +22,7 @@ export const REPLAY_TRADE_ANNOTATION_COLORS = [
 
 export const REPLAY_TRADE_ANNOTATION_LINE_LENGTH = 20;
 const LABEL_GAP = 4;
-const LABEL_HEIGHT = 12;
+const LABEL_HEIGHT = 14;
 const LABEL_LANE_GAP = 2;
 const MAX_LABEL_OFFSET_STEPS = 24;
 
@@ -161,7 +161,7 @@ class ReplayTradeAnnotationPaneRenderer implements IPrimitivePaneRenderer {
       if (!snapshot.annotations.length) return;
       const placed: Array<{ left: number; right: number; top: number; bottom: number }> = [];
       context.save();
-      context.font = "600 10px ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace";
+      context.font = "600 12px ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace";
       context.textAlign = "left";
       context.textBaseline = "middle";
       context.lineWidth = 1;
