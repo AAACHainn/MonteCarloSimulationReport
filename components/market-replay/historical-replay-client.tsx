@@ -6,6 +6,7 @@ import * as Popover from "@radix-ui/react-popover";
 import { ReplayChart, type ReplayVisibleSequenceRange } from "@/components/market-replay/replay-chart";
 import { IndicatorSettingsDialog } from "@/components/market-replay/indicator-settings-dialog";
 import { ChartVisibilityMenu } from "@/components/market-replay/chart-visibility-menu";
+import { DisplayIntervalControls } from "@/components/market-replay/display-interval-controls";
 import { useReplayPreferences } from "@/components/market-replay/use-replay-preferences";
 import { useReplayShortcuts } from "@/components/market-replay/use-replay-shortcuts";
 import { isReplayShortcutInputTarget, replayDrawingShortcutKey } from "@/lib/market-replay/keyboard-shortcuts";
@@ -26,7 +27,7 @@ import {
   type MarketDrawing,
   type TrendLineGeometry,
 } from "@/lib/market-replay/chart-drawings";
-import { mergeHistoricalBars } from "@/lib/market-replay/historical-window";
+import { historicalWindowFocusSequence, mergeHistoricalBars } from "@/lib/market-replay/historical-window";
 import { datasetSession } from "@/lib/market-replay/dataset";
 import type {
   AggregatedMarketBarData,
@@ -43,6 +44,7 @@ import {
   EMA_LENGTH_MAX,
   EMA_LENGTH_MIN,
   MAX_EMA_INDICATORS,
+  isValidDisplayInterval,
 } from "@/lib/market-replay/types";
 import type { ReplayTradeAnnotationData } from "@/lib/paper-trading/types";
 
@@ -110,6 +112,11 @@ export function HistoricalReplayClient({
   focusSequence: number;
 }) {
   const shortcuts = useReplayShortcuts();
+  const [displayIntervalSeconds, setDisplayIntervalSeconds] = useState(session.displayIntervalSeconds);
+  const requestedIntervalRef = useRef(session.displayIntervalSeconds);
+  const displayedIntervalRef = useRef(session.displayIntervalSeconds);
+  const mainWindowAbortRef = useRef<AbortController | null>(null);
+  const visibleRangeRef = useRef<ReplayVisibleSequenceRange | null>(null);
   const [bars, setBars] = useState<AggregatedMarketBarData[]>([]);
   const [chartFocusSequence, setChartFocusSequence] = useState<number | null>(focusSequence);
   const [warmupBars, setWarmupBars] = useState<AggregatedMarketBarData[]>([]);
@@ -180,7 +187,7 @@ export function HistoricalReplayClient({
     setWindowLoading(true);
     setWindowError(null);
     const params = new URLSearchParams({
-      displayIntervalSeconds: String(session.displayIntervalSeconds),
+      displayIntervalSeconds: String(displayIntervalSeconds),
       displaySession: session.displaySession,
       endSequence: String(direction === "left" ? first.lastSequence : session.endSequence),
       visibleCount: String(VISIBLE_BAR_COUNT),
@@ -219,7 +226,12 @@ export function HistoricalReplayClient({
         setWindowLoading(false);
       }
     }
-  }, [bars, dataset.id, indicatorWarmupCount, session.displayIntervalSeconds, session.displaySession, session.endSequence, session.startSequence]);
+  }, [bars, dataset.id, displayIntervalSeconds, indicatorWarmupCount, session.displaySession, session.endSequence, session.startSequence]);
+
+  const handleVisibleSequenceRange = useCallback((range: ReplayVisibleSequenceRange) => {
+    visibleRangeRef.current = range;
+    void extendHistoryWindow(range);
+  }, [extendHistoryWindow]);
 
   const barCountSession = useMemo(
     () => resolveDisplaySession(dataset, session.displaySession) ?? datasetSession(dataset),
@@ -311,6 +323,7 @@ export function HistoricalReplayClient({
       );
       const data = await response.json() as AnnotationPayload & { error?: string };
       if (!response.ok) throw new Error(data.error);
+      if (controller.signal.aborted) return false;
       setAnnotations(data.items);
       return true;
     } catch (cause) {
@@ -323,51 +336,77 @@ export function HistoricalReplayClient({
     }
   }, [dataset.id, session.id]);
 
-  useEffect(() => {
+  const loadHistoryWindow = useCallback(async (seconds: number, targetSequence: number) => {
+    mainWindowAbortRef.current?.abort();
     windowAbortRef.current?.abort();
-    windowBusyRef.current = false;
-    exhaustedEdgesRef.current = { left: false, right: false };
-    setWindowLoading(false);
-    setWindowError(null);
+    windowBusyRef.current = true;
     const controller = new AbortController();
+    mainWindowAbortRef.current = controller;
+    const initial = !initialLoadCompletedRef.current;
+    if (initial) setLoading(true);
+    else setWindowLoading(true);
+    setWindowError(null);
     const params = new URLSearchParams({
-      displayIntervalSeconds: String(session.displayIntervalSeconds),
+      displayIntervalSeconds: String(seconds),
       displaySession: session.displaySession,
       endSequence: String(session.endSequence),
-      focusSequence: String(focusSequence),
+      focusSequence: String(targetSequence),
       visibleCount: String(VISIBLE_BAR_COUNT),
       warmupCount: String(Math.min(EMA_LENGTH_MAX, indicatorWarmupCount)),
     });
-    void (async () => {
-      if (!initialLoadCompletedRef.current) setLoading(true);
-      try {
-        const response = await fetch(`/api/market-datasets/${dataset.id}/bars/window?${params}`, {
-          signal: controller.signal,
-        });
-        const data = await response.json() as WindowPayload & { error?: string };
-        if (!response.ok) throw new Error(data.error);
-        if (controller.signal.aborted) return;
-        setChartFocusSequence(focusSequence);
-        setBars(data.visibleBars);
-        setWarmupBars(data.warmupBars);
-        const annotationsLoaded = await loadAnnotations(session.startSequence, session.endSequence);
-        if (!annotationsLoaded) return;
-        setError(null);
-      } catch (cause) {
-        if (!controller.signal.aborted) {
-          setError(cause instanceof Error && cause.message
-            ? cause.message
-            : copy.paperTrading.historicalReplayLoadFailed);
-        }
-      } finally {
-        if (!controller.signal.aborted) {
-          initialLoadCompletedRef.current = true;
-          setLoading(false);
-        }
+    try {
+      const response = await fetch(`/api/market-datasets/${dataset.id}/bars/window?${params}`, { signal: controller.signal });
+      const data = await response.json() as WindowPayload & { error?: string };
+      if (!response.ok) throw new Error(data.error);
+      if (controller.signal.aborted) return false;
+      // Commit the new period and its bars together; old requests must never mix timelines.
+      exhaustedEdgesRef.current = { left: false, right: false };
+      setChartFocusSequence(initial ? targetSequence : null);
+      displayedIntervalRef.current = seconds;
+      setDisplayIntervalSeconds(seconds);
+      setBars(data.visibleBars);
+      setWarmupBars(data.warmupBars);
+      return true;
+    } catch (cause) {
+      if (!controller.signal.aborted) {
+        const message = cause instanceof Error && cause.message ? cause.message : copy.paperTrading.historicalReplayLoadFailed;
+        if (initial) setError(message);
+        else setWindowError(message);
+        requestedIntervalRef.current = displayedIntervalRef.current;
       }
-    })();
-    return () => controller.abort();
-  }, [dataset.id, focusSequence, indicatorWarmupCount, loadAnnotations, session.displayIntervalSeconds, session.displaySession, session.endSequence, session.startSequence]);
+      return false;
+    } finally {
+      if (mainWindowAbortRef.current === controller) {
+        mainWindowAbortRef.current = null;
+        windowBusyRef.current = false;
+        initialLoadCompletedRef.current = true;
+        setLoading(false);
+        setWindowLoading(false);
+      }
+    }
+  }, [dataset.id, indicatorWarmupCount, session.displaySession, session.endSequence]);
+
+  const changeDisplayInterval = useCallback(async (seconds: number) => {
+    if (!dataset.sourceIntervalSeconds || !isValidDisplayInterval(dataset.sourceIntervalSeconds, seconds)) {
+      setWindowError(copy.marketReplay.invalidDisplayInterval);
+      return false;
+    }
+    if (seconds === displayIntervalSeconds && mainWindowAbortRef.current === null) return true;
+    requestedIntervalRef.current = seconds;
+    const target = historicalWindowFocusSequence(visibleRangeRef.current, focusSequence, session.startSequence, session.endSequence);
+    return loadHistoryWindow(seconds, target);
+  }, [dataset.sourceIntervalSeconds, displayIntervalSeconds, focusSequence, loadHistoryWindow, session.endSequence, session.startSequence]);
+
+  useEffect(() => {
+    const target = historicalWindowFocusSequence(visibleRangeRef.current, focusSequence, session.startSequence, session.endSequence);
+    void loadHistoryWindow(requestedIntervalRef.current, target);
+    return () => mainWindowAbortRef.current?.abort();
+  }, [focusSequence, loadHistoryWindow, session.endSequence, session.startSequence]);
+
+  useEffect(() => {
+    void loadAnnotations(session.startSequence, session.endSequence);
+    return () => annotationAbortRef.current?.abort();
+  }, [loadAnnotations, session.endSequence, session.startSequence]);
 
   useEffect(() => () => {
     annotationAbortRef.current?.abort();
@@ -461,7 +500,13 @@ export function HistoricalReplayClient({
 
   return <>
     <div className="flex h-full min-h-0 flex-col">
-      <div className="flex h-12 shrink-0 items-center gap-1 overflow-x-auto border-b px-3">
+      <div className="flex h-12 shrink-0 items-center gap-2 overflow-x-auto border-b px-3 [&>*]:shrink-0">
+        <DisplayIntervalControls
+          value={displayIntervalSeconds}
+          sourceIntervalSeconds={dataset.sourceIntervalSeconds}
+          disabled={windowLoading}
+          onChange={changeDisplayInterval}
+        />
         <Popover.Root open={drawingToolOpen} onOpenChange={setDrawingToolOpen}>
           <Popover.Trigger asChild>
             <Button type="button" variant={drawingTool ? "secondary" : "ghost"} size="sm" className="h-8" aria-pressed={Boolean(drawingTool)} aria-label={copy.marketReplay.drawingToolsHint}>
@@ -502,7 +547,8 @@ export function HistoricalReplayClient({
           bars={bars}
           warmupBars={warmupBars}
           displayUtcOffsetMinutes={displayUtcOffsetMinutes}
-          displayIntervalSeconds={session.displayIntervalSeconds}
+          displayIntervalSeconds={displayIntervalSeconds}
+          sourceIntervalSeconds={dataset.sourceIntervalSeconds ?? undefined}
           measurementArmed={measurementArmed}
           candlestickStyle={candlestickStyleDraft ?? candlestickStyle}
           onMeasurementArmedChange={setMeasurementArmed}
@@ -531,7 +577,7 @@ export function HistoricalReplayClient({
           tradeAnnotationsTruncated={false}
           tradeAnnotationsVisible={chartVisibility.tradeAnnotations}
           focusSequence={chartFocusSequence}
-          onVisibleSequenceRangeChange={extendHistoryWindow}
+          onVisibleSequenceRangeChange={handleVisibleSequenceRange}
           readOnly
           paperBusy={false}
           paperError={null}

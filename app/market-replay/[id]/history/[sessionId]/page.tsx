@@ -104,6 +104,7 @@ export default async function HistoricalReplayPage({
     </div>
     <div className="min-h-0 flex-1 overflow-hidden rounded-lg border bg-white shadow-sm">
       <HistoricalReplayClient
+        key={`${session.id}:${entry.accountNo}`}
         dataset={serializeMarketDataset(dataset)}
         session={{
           id: session.id,

@@ -8,7 +8,7 @@ import * as Popover from "@radix-ui/react-popover";
 import { ReplayChart, type ReplayVisibleSequenceRange } from "@/components/market-replay/replay-chart";
 import { ReplayAutoPauseNotice } from "@/components/market-replay/replay-auto-pause-notice";
 import { IndicatorSettingsDialog } from "@/components/market-replay/indicator-settings-dialog";
-import { QuickIntervalDialog } from "@/components/market-replay/quick-interval-dialog";
+import { DisplayIntervalControls } from "@/components/market-replay/display-interval-controls";
 import { ReplayStartDialog } from "@/components/market-replay/replay-start-dialog";
 import { ChartVisibilityMenu } from "@/components/market-replay/chart-visibility-menu";
 import { DEFAULT_REPLAY_MAX_VISIBLE_BARS } from "@/lib/market-replay/chart-range";
@@ -63,7 +63,6 @@ import {
   REPLAY_HISTORY_COMPACT_TO,
   REPLAY_HISTORY_PREFETCH_THRESHOLD,
   REPLAY_HISTORY_RAW_SOURCE_BUDGET,
-  formatInterval,
   isValidDisplayInterval,
   type AggregatedMarketBarData,
   type DisplaySession,
@@ -145,7 +144,6 @@ type TradeAnnotationsPayload = {
   truncated: boolean;
 };
 
-const DISPLAY_INTERVAL_PRESETS = [1, 5, 10, 15, 30, 60, 120, 180, 300, 600, 900, 1_800, 2_700, 3_600, 7_200, 14_400, 21_600, 43_200, 86_400];
 const REPLAY_SYNC_BATCH_SIZE = 100;
 const REPLAY_SYNC_HARD_CAP = 200;
 let localDrawingSequence = 0;
@@ -254,9 +252,6 @@ export function MarketReplayClient({ dataset, initialJournalFocus = null }: { da
   const [emaError, setEmaError] = useState<string | null>(null);
   const [abrError, setAbrError] = useState<string | null>(null);
   const [barCountError, setBarCountError] = useState<string | null>(null);
-  const [customInterval, setCustomInterval] = useState("");
-  const [customIntervalUnit, setCustomIntervalUnit] = useState<"s" | "m" | "h">("m");
-  const [quickIntervalInitialValue, setQuickIntervalInitialValue] = useState<string | null>(null);
   const [repairInterval, setRepairInterval] = useState("");
   const [paperSnapshot, setPaperSnapshot] = useState<PaperSessionSnapshot | null>(null);
   const {
@@ -1755,25 +1750,6 @@ export function MarketReplayClient({ dataset, initialJournalFocus = null }: { da
     return () => window.removeEventListener("keydown", onKeyDown);
   }, [armFibonacciRetracement, armTrendLine, confirmAction, settingsDialog, startDialogOpen, styleDrawingId]);
 
-  useEffect(() => {
-    const onKeyDown = (event: KeyboardEvent) => {
-      if (
-        !/^\d$/.test(event.key) || event.ctrlKey || event.altKey || event.shiftKey || event.metaKey
-        || event.isComposing || quickIntervalInitialValue !== null || !latestReplayRef.current
-        || !dataset.sourceIntervalSeconds || journalReview
-      ) return;
-      const target = event.target as HTMLElement | null;
-      if (
-        target?.closest("input, textarea, select, [contenteditable='true'], [role='dialog'], [role='listbox'], [role='menu'], [role='combobox']")
-        || document.querySelector("[role='dialog']")
-      ) return;
-      event.preventDefault();
-      setQuickIntervalInitialValue(event.key);
-    };
-    window.addEventListener("keydown", onKeyDown);
-    return () => window.removeEventListener("keydown", onKeyDown);
-  }, [dataset.sourceIntervalSeconds, journalReview, latestReplayRef, quickIntervalInitialValue]);
-
   function changeSpeed(value: number) {
     const current = latestReplayRef.current;
     if (!current) return;
@@ -2226,14 +2202,12 @@ export function MarketReplayClient({ dataset, initialJournalFocus = null }: { da
           : "flex h-full min-h-0 flex-col overflow-hidden rounded-lg border bg-white shadow-sm"}
       >
         <div className="flex h-12 shrink-0 items-center gap-2 overflow-x-auto border-b px-3 [&>*]:shrink-0">
-          <Label htmlFor="display-interval" className="whitespace-nowrap text-xs text-slate-500">{copy.marketReplay.displayInterval}</Label>
-          <Select disabled={Boolean(journalReview)} value={String(replay.displayIntervalSeconds)} onValueChange={(value) => void changeDisplayInterval(Number(value))}>
-            <SelectTrigger id="display-interval" className="h-8 w-24"><SelectValue /></SelectTrigger>
-            <SelectContent>
-              {DISPLAY_INTERVAL_PRESETS.filter((value) => dataset.sourceIntervalSeconds && isValidDisplayInterval(dataset.sourceIntervalSeconds, value)).map((value) => <SelectItem key={value} value={String(value)}>{formatInterval(value)}</SelectItem>)}
-              {!DISPLAY_INTERVAL_PRESETS.includes(replay.displayIntervalSeconds) ? <SelectItem value={String(replay.displayIntervalSeconds)}>{formatInterval(replay.displayIntervalSeconds)}</SelectItem> : null}
-            </SelectContent>
-          </Select>
+          <DisplayIntervalControls
+            value={replay.displayIntervalSeconds}
+            sourceIntervalSeconds={dataset.sourceIntervalSeconds}
+            disabled={Boolean(journalReview)}
+            onChange={changeDisplayInterval}
+          />
           {dataset.availableDisplaySessions.length > 1 ? (
             <>
               <Label htmlFor="display-session" className="whitespace-nowrap text-xs text-slate-500">{copy.marketReplay.displaySession}</Label>
@@ -2246,17 +2220,6 @@ export function MarketReplayClient({ dataset, initialJournalFocus = null }: { da
               </Select>
             </>
           ) : null}
-          <div className="hidden items-center gap-1 2xl:flex">
-            <Input aria-label={copy.marketReplay.customInterval} type="number" min="1" value={customInterval} onChange={(event) => setCustomInterval(event.target.value)} className="h-8 w-16" placeholder="9" />
-            <Select value={customIntervalUnit} onValueChange={(value) => setCustomIntervalUnit(value as "s" | "m" | "h")}>
-              <SelectTrigger className="h-8 w-20" aria-label={copy.marketReplay.intervalUnit}><SelectValue /></SelectTrigger>
-              <SelectContent><SelectItem value="s">{copy.marketReplay.intervalSeconds}</SelectItem><SelectItem value="m">{copy.marketReplay.intervalMinutes}</SelectItem><SelectItem value="h">{copy.marketReplay.intervalHours}</SelectItem></SelectContent>
-            </Select>
-            <Button type="button" variant="outline" size="sm" className="h-8" onClick={() => {
-              const multiplier = customIntervalUnit === "s" ? 1 : customIntervalUnit === "m" ? 60 : 3_600;
-              void changeDisplayInterval(Number(customInterval) * multiplier);
-            }}>{copy.marketReplay.customInterval}</Button>
-          </div>
           <Label htmlFor="display-timezone" className="whitespace-nowrap text-xs text-slate-500">{copy.marketReplay.displayTimezone}</Label>
           <Select value={String(displayUtcOffsetMinutes)} onValueChange={(value) => setDisplayUtcOffsetMinutes(Number(value))}>
             <SelectTrigger id="display-timezone" className="h-8 w-28" title={copy.marketReplay.displayTimezoneHint}><SelectValue /></SelectTrigger>
@@ -2507,16 +2470,6 @@ export function MarketReplayClient({ dataset, initialJournalFocus = null }: { da
           onFocusJournalEntry={(entry) => void enterJournalReview({ sequence: entry.openedSequence, no: entry.no, globalNo: entry.globalNo })}
         />
       </div>
-
-      {dataset.sourceIntervalSeconds ? (
-        <QuickIntervalDialog
-          open={quickIntervalInitialValue !== null}
-          initialValue={quickIntervalInitialValue ?? ""}
-          sourceIntervalSeconds={dataset.sourceIntervalSeconds}
-          onClose={() => setQuickIntervalInitialValue(null)}
-          onApply={changeDisplayInterval}
-        />
-      ) : null}
 
       <Dialog
         open={settingsDialog === "candlesticks"}

@@ -9,3 +9,14 @@ export function mergeHistoricalBars(current: AggregatedMarketBarData[], incoming
   }
   return [...merged.values()].sort((a, b) => a.firstSequence - b.firstSequence);
 }
+
+/** Preserve the source sequence at the center of the inspected history. */
+export function historicalWindowFocusSequence(
+  range: { fromSequence: number; toSequence: number } | null,
+  fallback: number,
+  startSequence: number,
+  endSequence: number,
+) {
+  const center = range === null ? fallback : Math.floor(range.fromSequence + (range.toSequence - range.fromSequence) / 2);
+  return Math.max(startSequence, Math.min(endSequence, center));
+}

@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { mergeHistoricalBars } from "./historical-window";
+import { historicalWindowFocusSequence, mergeHistoricalBars } from "./historical-window";
 import type { AggregatedMarketBarData } from "./types";
 
 function bar(sequence: number, count = 5): AggregatedMarketBarData {
@@ -22,5 +22,18 @@ describe("historical chart window extension", () => {
   });
   it("preserves source gaps instead of inventing candles", () => {
     expect(mergeHistoricalBars([bar(100)], [bar(0)]).map((item) => item.firstSequence)).toEqual([0, 100]);
+  });
+});
+
+describe("historical period changes", () => {
+  it("uses the inspected source sequence rather than restarting at the first trade", () => {
+    expect(historicalWindowFocusSequence({ fromSequence: 800, toSequence: 1000 }, 100, 100, 2000)).toBe(900);
+  });
+  it("keeps the selected trade as the initial focus", () => {
+    expect(historicalWindowFocusSequence(null, 500, 100, 2000)).toBe(500);
+  });
+  it("clamps blank chart margins to the historical session boundaries", () => {
+    expect(historicalWindowFocusSequence({ fromSequence: 0, toSequence: 10 }, 100, 100, 2000)).toBe(100);
+    expect(historicalWindowFocusSequence({ fromSequence: 2500, toSequence: 3000 }, 100, 100, 2000)).toBe(2000);
   });
 });
