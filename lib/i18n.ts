@@ -736,9 +736,9 @@ export const dictionaries = {
       },
       pdf: {
         export: "导出 PDF", title: "导出回放交易 PDF", description: "导出当前筛选结果的全部平仓记录，不受分页和表格显示列影响。",
-        period: "统一截图周期", session: "截图交易时段", customSeconds: "自定义周期（秒）",
+        period: "统一截图周期", session: "截图交易时段",
         context: "截图最多 200 根 K 线，默认包含开仓前 50 根及平仓后 20 根行情。每卷最多 50 张截图。",
-        preferenceHint: "沿用本浏览器的 K 线、EMA、量能、网格和时区设置，不包含手绘线。",
+        preferenceHint: "沿用本浏览器的 K 线、EMA、量能、网格和时区设置，不包含手绘线。RTH 且周期不超过 1H 时，Bar Count 沿用回放的开关、间隔、最近交易日数和颜色。",
         unicodeHint: "字体未覆盖的字符以 [U+码点] 显示，保留其编码及后续文字。",
         includeDetails: "包含交易明细", fieldHint: "明细字段独立于表格显示列；No 固定保留。", all: "全选", clear: "清空", reset: "恢复默认",
         start: "开始导出", cancel: "取消导出", retry: "重试当前卷", dismiss: "关闭导出状态",

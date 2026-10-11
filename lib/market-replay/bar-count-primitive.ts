@@ -32,6 +32,7 @@ type PrimitiveSnapshot = {
 };
 
 type ProjectedLabel = {
+  kind: BarCountLabel["kind"];
   x: number;
   y: number;
   text: string;
@@ -59,17 +60,23 @@ function firstLabelAtOrAfter(labels: BarCountLabel[], index: number) {
 }
 
 class BarCountPaneRenderer implements IPrimitivePaneRenderer {
-  constructor(private readonly labels: () => ProjectedLabel[]) {}
+  constructor(private readonly labels: () => ProjectedLabel[], private readonly scale: number) {}
 
   draw(target: Parameters<IPrimitivePaneRenderer["draw"]>[0]) {
     target.useMediaCoordinateSpace(({ context }) => {
       const labels = this.labels();
       if (!labels.length) return;
       context.save();
-      context.font = "600 10px ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace";
+      context.font = `600 ${10 * this.scale}px ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace`;
       context.textAlign = "center";
       context.textBaseline = "middle";
       for (const label of labels) {
+        if (this.scale > 1) {
+          const width = context.measureText(label.text).width + 4 * this.scale;
+          const height = LABEL_HEIGHT * this.scale;
+          context.fillStyle = "rgba(255, 255, 255, 0.96)";
+          context.fillRect(label.x - width / 2, label.y - height / 2, width, height);
+        }
         context.fillStyle = label.color;
         context.fillText(label.text, label.x, label.y);
       }
@@ -81,8 +88,8 @@ class BarCountPaneRenderer implements IPrimitivePaneRenderer {
 class BarCountPaneView implements IPrimitivePaneView {
   private readonly paneRenderer: BarCountPaneRenderer;
 
-  constructor(labels: () => ProjectedLabel[]) {
-    this.paneRenderer = new BarCountPaneRenderer(labels);
+  constructor(labels: () => ProjectedLabel[], scale: number) {
+    this.paneRenderer = new BarCountPaneRenderer(labels, scale);
   }
 
   zOrder() { return "top" as const; }
@@ -98,7 +105,11 @@ export class BarCountPrimitive implements ISeriesPrimitive<Time> {
   private labels: BarCountLabel[] = [];
   private windowStartIndex = 0;
   private labelCacheState: LabelCacheState | null = null;
-  private readonly views = [new BarCountPaneView(() => this.projected)];
+  private readonly views: BarCountPaneView[];
+
+  constructor(private readonly scale = 1) {
+    this.views = [new BarCountPaneView(() => this.projected, scale)];
+  }
 
   attached(param: SeriesAttachedParameter<Time>) {
     this.chart = param.chart;
@@ -209,14 +220,27 @@ export class BarCountPrimitive implements ISeriesPrimitive<Time> {
       if (x === null || lowY === null) continue;
       const numericX = Number(x);
       if (numericX < 0 || numericX > paneWidth) continue;
-      if (label.kind === "REGULAR" && numericX - lastX < MIN_LABEL_SPACING) continue;
+      const text = String(label.number);
+      const spacing = () => this.scale > 1 && projected.length
+        ? (projected.at(-1)!.text.length + text.length) * 10 * this.scale * 0.31 + 4 * this.scale
+        : MIN_LABEL_SPACING * this.scale;
+      if (label.kind === "REGULAR" && numericX - lastX < spacing()) continue;
+      // Keep special labels legible at PDF size by dropping a crowded ordinary predecessor.
+      if (this.scale > 1 && label.kind !== "REGULAR") {
+        while (projected.at(-1)?.kind === "REGULAR" && numericX - lastX < spacing()) {
+          projected.pop();
+          lastX = projected.at(-1)?.x ?? -Infinity;
+        }
+      }
+      const halfWidth = text.length * 10 * this.scale * 0.31 + 2 * this.scale;
       projected.push({
-        x: numericX,
-        y: Math.max(LABEL_HEIGHT / 2, Math.min(Number(lowY) + LABEL_OFFSET, paneHeight - LABEL_HEIGHT / 2)),
-        text: String(label.number),
+        kind: label.kind,
+        x: this.scale > 1 ? Math.max(halfWidth, Math.min(numericX, paneWidth - halfWidth)) : numericX,
+        y: Math.max(LABEL_HEIGHT * this.scale / 2, Math.min(Number(lowY) + LABEL_OFFSET * this.scale, paneHeight - LABEL_HEIGHT * this.scale / 2)),
+        text,
         color: label.color,
       });
-      lastX = numericX;
+      lastX = this.scale > 1 ? projected.at(-1)!.x : numericX;
     }
     this.projected = projected;
   }

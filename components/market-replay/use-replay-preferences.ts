@@ -380,7 +380,9 @@ export function capturePdfChartPreferences(dataset: { id: string; startTime: str
   const ema = loadEmaSettings();
   const visibility = parseReplayChartVisibility(get(CHART_VISIBILITY_STORAGE_KEY));
   const offset = Number(get(`${DISPLAY_TIMEZONE_STORAGE_KEY}:${dataset.id}`) ?? Number.NaN);
+  const barCountConfig = parseBarCountPreferences(get(BAR_COUNT_SETTINGS_STORAGE_KEY));
   return {
+    barCountConfig: { ...barCountConfig, enabled: barCountConfig.enabled && visibility.indicators },
     candlestickStyle: parseCandlestickStyle(get(CANDLESTICK_STYLE_STORAGE_KEY)),
     emaEnabled: Boolean(ema?.enabled) && visibility.indicators,
     emaIndicators: ema?.indicators ?? DEFAULT_EMA_INDICATORS.map((i) => ({ ...i })),

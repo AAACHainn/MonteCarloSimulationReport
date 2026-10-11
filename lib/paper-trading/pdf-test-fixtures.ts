@@ -3,6 +3,7 @@ import { calculateReplayJournalSummary } from "./journal";
 import type { ReplayJournalEntryData } from "./types";
 import type { PdfSnapshot, PdfChartPreferences } from "./pdf-types";
 import type { AggregatedMarketBarData } from "@/lib/market-replay/types";
+import { DEFAULT_BAR_COUNT_CONFIG } from "@/lib/market-replay/bar-count";
 import { DEFAULT_CANDLESTICK_STYLE } from "@/lib/market-replay/candlestick-style";
 
 export function pdfEntry(no: number, openedSequence: number, closedSequence: number, overrides: Partial<ReplayJournalEntryData> = {}): ReplayJournalEntryData {
@@ -25,4 +26,4 @@ export function pdfSnapshot(entries = [pdfEntry(1, 70, 80)]): PdfSnapshot {
     dataset: { id: "dataset-qa", name: "ES", description: null, symbol: "ES", timeframe: "1m", timezone: "America/Chicago", status: "READY", dataVersion: 1, sourceIntervalSeconds: 60, priceTickSize: 0.25, sessionMode: "TWENTY_FOUR_SEVEN", sessionOpenMinute: null, sessionCloseMinute: null, tradingWeekdays: [1,2,3,4,5,6,7], availableDisplaySessions: ["ETH", "RTH"], barCount: 1000, startTime: pdfBars(1)[0].timestamp, endTime: pdfBars(1000).at(-1)!.timestamp, createdAt: "2026-09-08T00:00:00.000Z", progress: null },
     entries, summary: calculateReplayJournalSummary(entries), filters: createEmptyReplayJournalFilters(), filterDescription: "无筛选" };
 }
-export const pdfPreferences: PdfChartPreferences = { candlestickStyle: DEFAULT_CANDLESTICK_STYLE, emaEnabled: true, emaIndicators: [{ id: "ema-20", length: 20, color: "#f59e0b", lineWidth: 1, lineStyle: "SOLID", visible: true }], gridVisible: true, volumeVisible: true, displayUtcOffsetMinutes: 480 };
+export const pdfPreferences: PdfChartPreferences = { barCountConfig: { ...DEFAULT_BAR_COUNT_CONFIG }, candlestickStyle: DEFAULT_CANDLESTICK_STYLE, emaEnabled: true, emaIndicators: [{ id: "ema-20", length: 20, color: "#f59e0b", lineWidth: 1, lineStyle: "SOLID", visible: true }], gridVisible: true, volumeVisible: true, displayUtcOffsetMinutes: 480 };

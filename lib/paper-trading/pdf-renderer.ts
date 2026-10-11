@@ -4,9 +4,11 @@ import { calculateEmaSeries } from "@/lib/market-replay/ema";
 import { emaSeriesStyleOptions } from "@/lib/market-replay/ema-style";
 import { ReplayTradeAnnotationPrimitive, buildReplayTradePriceAnnotations } from "@/lib/market-replay/trade-annotation-primitive";
 import { formatChartTick, chartCandleData, chartVolumeData } from "@/lib/market-replay/chart-data";
+import { BarCountPrimitive } from "@/lib/market-replay/bar-count-primitive";
+import type { TradingSessionConfig } from "@/lib/market-replay/types";
 import { priceDecimalsForTick } from "@/lib/market-replay/price-ticks";
 import { copy } from "@/lib/i18n";
-import type { PdfChartPreferences, PdfChartPage, PdfWindow } from "./pdf-types";
+import type { PdfChartPreferences, PdfChartPage, PdfOptions, PdfWindow } from "./pdf-types";
 import type { ReplayJournalEntryData, ReplayTradeAnnotationData } from "./types";
 
 function aborted() { return new DOMException("Aborted", "AbortError"); }
@@ -30,7 +32,12 @@ async function frame(signal: AbortSignal) {
   });
 }
 const chartTime = (timestamp: string) => Math.floor(new Date(timestamp).getTime() / 1000) as UTCTimestamp;
-export function createPdfChartRenderer(container: HTMLElement, preferences: PdfChartPreferences, tick: number) {
+export function createPdfChartRenderer(
+  container: HTMLElement,
+  preferences: PdfChartPreferences,
+  tick: number,
+  display: Pick<PdfOptions, "displaySession" | "displayIntervalSeconds"> & { session: TradingSessionConfig },
+) {
   const chart = createChart(container, {
     width: 2400, height: 1200, autoSize: false,
     layout: { background: { type: ColorType.Solid, color: "#ffffff" }, textColor: "#475569", fontSize: 28, attributionLogo: true },
@@ -47,6 +54,8 @@ export function createPdfChartRenderer(container: HTMLElement, preferences: PdfC
     priceFormat: { type: "price", minMove: tick, precision: priceDecimalsForTick(tick) },
     autoscaleInfoProvider: () => ({ priceRange: { minValue: priceMin, maxValue: priceMax } }),
   });
+  const barCount = new BarCountPrimitive(28 / 10);
+  candles.attachPrimitive(barCount);
   const primitive = new ReplayTradeAnnotationPrimitive(28 / 12);
   candles.attachPrimitive(primitive);
   const volume = preferences.volumeVisible ? chart.addSeries(HistogramSeries, { priceScaleId: "", priceFormat: { type: "volume" }, priceLineVisible: false, lastValueVisible: false }) : null;
@@ -77,6 +86,7 @@ export function createPdfChartRenderer(container: HTMLElement, preferences: PdfC
       if (priceMax <= priceMin) { priceMin -= tick; priceMax += tick; }
       candles.setData(bars.map(chartCandleData));
       volume?.setData(bars.filter((b) => b.volume !== null).map((b) => chartVolumeData(b, preferences.candlestickStyle.upColor + "55", preferences.candlestickStyle.downColor + "55")));
+      barCount.setData({ bars, ...display, config: preferences.barCountConfig });
       primitive.setData({ bars, entries: annotations });
       chart.timeScale().setVisibleLogicalRange({ from: -0.5, to: bars.length + Math.max(3, Math.ceil(bars.length * 0.04)) });
       chart.priceScale("right").applyOptions({ autoScale: true });

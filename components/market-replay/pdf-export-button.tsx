@@ -4,7 +4,6 @@ import { Download, Loader2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Dialog } from "@/components/ui/dialog";
 import { CheckboxField } from "@/components/ui/checkbox-field";
-import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { copy } from "@/lib/i18n";
@@ -78,11 +77,6 @@ export function PdfExportButton({ datasetId, sessionId, filters, loading, count 
                 <SelectContent>{snapshot.dataset.availableDisplaySessions.map((s) => <SelectItem key={s} value={s}>{s}</SelectItem>)}</SelectContent>
               </Select>
             </div> : null}
-            <div className="space-y-2">
-              <Label htmlFor="pdf-custom-period">{t.customSeconds}</Label>
-              <Input id="pdf-custom-period" type="number" min={snapshot.dataset.sourceIntervalSeconds ?? 1} max={86400} step={snapshot.dataset.sourceIntervalSeconds ?? 1} value={options.displayIntervalSeconds} onChange={(e) => setOptions((o) => ({ ...o, displayIntervalSeconds: Number(e.target.value) }))} aria-describedby={!valid ? "pdf-period-error" : undefined} />
-              {!valid ? <p id="pdf-period-error" className="text-xs text-red-600">{copy.marketReplay.invalidDisplayInterval}</p> : null}
-            </div>
           </div>
           <p className="text-xs text-slate-500">{t.context}</p><p className="text-xs text-slate-500">{t.preferenceHint}</p>
           <CheckboxField checked={options.includeDetails} onChange={(value) => setOptions((o) => ({ ...o, includeDetails: value }))}>{t.includeDetails}</CheckboxField>
