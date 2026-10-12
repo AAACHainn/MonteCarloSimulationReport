@@ -6,6 +6,7 @@ import { useDialogLifecycle } from "@/components/ui/use-dialog-lifecycle";
 import { AlertTriangle, Loader2, X } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { copy } from "@/lib/i18n";
+import { cn } from "@/lib/utils";
 
 type ConfirmDialogProps = {
   open: boolean;
@@ -13,6 +14,8 @@ type ConfirmDialogProps = {
   description: string;
   confirmLabel?: string;
   cancelLabel?: string;
+  confirmVariant?: "default" | "destructive";
+  secondaryAction?: { label: string; onClick: () => void; variant?: "outline" | "destructive" };
   isLoading?: boolean;
   onCancel: () => void;
   onConfirm: () => void;
@@ -24,6 +27,8 @@ export function ConfirmDialog({
   description,
   confirmLabel = copy.common.confirm,
   cancelLabel = copy.common.cancel,
+  confirmVariant = "destructive",
+  secondaryAction,
   isLoading = false,
   onCancel,
   onConfirm,
@@ -48,8 +53,8 @@ export function ConfirmDialog({
         className="flex max-h-[calc(100dvh-2rem)] w-full max-w-md flex-col overflow-hidden rounded-lg border border-slate-200 bg-white shadow-2xl"
       >
         <div className="flex min-h-0 items-start gap-3 overflow-y-auto border-b px-5 py-4">
-          <div className="mt-0.5 flex h-9 w-9 shrink-0 items-center justify-center rounded-md bg-red-50 text-red-700">
-            <AlertTriangle className="h-5 w-5" />
+          <div className={cn("mt-0.5 flex h-9 w-9 shrink-0 items-center justify-center rounded-md", confirmVariant === "destructive" ? "bg-red-50 text-red-700" : "bg-amber-50 text-amber-800")}>
+            <AlertTriangle className="h-5 w-5" aria-hidden="true" />
           </div>
           <div className="min-w-0 flex-1">
             <h2 id={titleId} className="text-base font-semibold text-slate-950">
@@ -69,11 +74,14 @@ export function ConfirmDialog({
             <X className="h-4 w-4" />
           </button>
         </div>
-        <div className="flex shrink-0 justify-end gap-2 bg-slate-50 px-5 py-4">
+        <div className="flex shrink-0 flex-wrap justify-end gap-2 bg-slate-50 px-5 py-4">
           <Button type="button" variant="outline" onClick={onCancel} disabled={isLoading}>
             {cancelLabel}
           </Button>
-          <Button type="button" variant="destructive" onClick={onConfirm} disabled={isLoading}>
+          {secondaryAction ? <Button type="button" variant={secondaryAction.variant ?? "outline"} onClick={secondaryAction.onClick} disabled={isLoading}>
+            {secondaryAction.label}
+          </Button> : null}
+          <Button type="button" variant={confirmVariant} onClick={onConfirm} disabled={isLoading}>
             {isLoading ? <Loader2 className="h-4 w-4 animate-spin" aria-hidden="true" /> : null}
             {confirmLabel}
           </Button>

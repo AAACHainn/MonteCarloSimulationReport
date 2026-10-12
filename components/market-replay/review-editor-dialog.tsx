@@ -13,10 +13,11 @@ import { copy } from "@/lib/i18n";
 import { limitReview, reviewLength, type ReviewTemplate } from "@/lib/paper-trading/review-templates";
 import { reviewTemplateRenameSchema, reviewTemplateSchema } from "@/lib/validations";
 
-export function ReviewEditorDialog({ open, no, value, saving, error, onChange, onSave, onClose }: {
+export function ReviewEditorDialog({ open, no, value, initialValue, saving, error, onChange, onSave, onClose }: {
   open: boolean;
   no: number;
   value: string;
+  initialValue: string;
   saving: boolean;
   error: string | null;
   onChange: (value: string) => void;
@@ -37,6 +38,7 @@ export function ReviewEditorDialog({ open, no, value, saving, error, onChange, o
   const [deletingTemplate, setDeletingTemplate] = useState<ReviewTemplate | null>(null);
   const [templateDeleting, setTemplateDeleting] = useState(false);
   const [deleteError, setDeleteError] = useState<string | null>(null);
+  const [closeConfirmationOpen, setCloseConfirmationOpen] = useState(false);
   const selectedTemplate = templates.find((item) => item.id === selectedTemplateId);
   const managementBusy = saving || templateSaving || templateDeleting;
 
@@ -71,9 +73,29 @@ export function ReviewEditorDialog({ open, no, value, saving, error, onChange, o
     setRenamingTemplate(null);
     setDeletingTemplate(null);
     setDeleteError(null);
+    setCloseConfirmationOpen(false);
     void loadTemplates();
     return () => templatesAbortRef.current?.abort();
   }, [open, no, loadTemplates]);
+
+  function requestClose() {
+    if (managementBusy || nameOpen || deletingTemplate || closeConfirmationOpen) return;
+    if (value === initialValue) onClose();
+    else setCloseConfirmationOpen(true);
+  }
+
+  function saveAndClose() {
+    if (managementBusy) return;
+    setCloseConfirmationOpen(false);
+    // The parent closes the editor only after saving succeeds; errors leave the draft editable.
+    onSave();
+  }
+
+  function discardAndClose() {
+    if (managementBusy) return;
+    setCloseConfirmationOpen(false);
+    onClose();
+  }
 
   function chooseTemplate(id: string) {
     const template = templates.find((item) => item.id === id);
@@ -155,8 +177,8 @@ export function ReviewEditorDialog({ open, no, value, saving, error, onChange, o
   return <>
     <Dialog open={open} title={copy.paperTrading.reviewDialogTitle(no)} description={copy.paperTrading.reviewDialogDescription}
       resizable widthStorageKey="replay-review-dialog-width-v1" heightStorageKey="replay-review-dialog-height-v1"
-      onClose={() => { if (!managementBusy && !nameOpen && !deletingTemplate) onClose(); }}>
-      <form className="flex min-h-full flex-col gap-4" onSubmit={(event) => { event.preventDefault(); if (!managementBusy && !nameOpen && !deletingTemplate) onSave(); }}>
+      onClose={requestClose}>
+      <form className="flex min-h-full flex-col gap-4" onSubmit={(event) => { event.preventDefault(); if (!managementBusy && !nameOpen && !deletingTemplate && !closeConfirmationOpen) onSave(); }}>
         <div className="shrink-0 space-y-2">
           <Label htmlFor="replay-review-template">{copy.paperTrading.reviewTemplate}</Label>
           <div className="flex flex-col gap-2 sm:flex-row">
@@ -191,7 +213,7 @@ export function ReviewEditorDialog({ open, no, value, saving, error, onChange, o
         {status ? <p className="text-xs text-emerald-700" role="status" aria-live="polite">{status}</p> : null}
         <div className="flex shrink-0 flex-wrap justify-end gap-2 border-t pt-4">
           <Button type="button" variant="outline" onClick={openNameDialog} disabled={saving || !value.trim()}>{copy.paperTrading.saveReviewTemplate}</Button>
-          <Button type="button" variant="outline" onClick={onClose} disabled={saving}>{copy.common.cancel}</Button>
+          <Button type="button" variant="outline" onClick={requestClose} disabled={managementBusy}>{copy.common.cancel}</Button>
           <Button type="submit" disabled={saving}>{saving ? <Loader2 className="h-4 w-4 animate-spin" aria-hidden="true" /> : null}{copy.paperTrading.saveReview}</Button>
         </div>
       </form>
@@ -219,6 +241,18 @@ export function ReviewEditorDialog({ open, no, value, saving, error, onChange, o
       isLoading={templateDeleting}
       onCancel={() => { if (!templateDeleting) setDeletingTemplate(null); }}
       onConfirm={() => void deleteTemplate()}
+    />
+    <ConfirmDialog
+      open={open && closeConfirmationOpen}
+      title={copy.paperTrading.reviewUnsavedTitle(no)}
+      description={copy.paperTrading.reviewUnsavedDescription}
+      confirmLabel={copy.paperTrading.saveReviewAndClose}
+      confirmVariant="default"
+      cancelLabel={copy.paperTrading.continueReviewEditing}
+      secondaryAction={{ label: copy.paperTrading.discardReviewAndClose, variant: "destructive", onClick: discardAndClose }}
+      isLoading={managementBusy}
+      onCancel={() => { if (!managementBusy) setCloseConfirmationOpen(false); }}
+      onConfirm={saveAndClose}
     />
   </>;
 }

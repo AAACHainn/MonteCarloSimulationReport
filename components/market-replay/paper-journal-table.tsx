@@ -154,6 +154,7 @@ export function PaperJournalTable({
   const [reviewError, setReviewError] = useState<string | null>(null);
   const [reviewDialogEntryId, setReviewDialogEntryId] = useState<string | null>(null);
   const [reviewDialogDraft, setReviewDialogDraft] = useState("");
+  const [reviewDialogInitialValue, setReviewDialogInitialValue] = useState("");
   const [visibleColumnsOpen, setVisibleColumnsOpen] = useState(false);
   const [visibleColumnIds, setVisibleColumnIds] = useState<JournalColumnId[]>(defaultVisibleColumnIds);
   const [draftVisibleColumnIds, setDraftVisibleColumnIds] = useState<JournalColumnId[]>(defaultVisibleColumnIds);
@@ -591,8 +592,10 @@ export function PaperJournalTable({
   }
 
   function openReviewDialog(entry: ReplayJournalEntryData) {
+    const initialValue = reviewDrafts[entry.id] ?? entry.review;
     setReviewDialogEntryId(entry.id);
-    setReviewDialogDraft(reviewDrafts[entry.id] ?? entry.review);
+    setReviewDialogDraft(initialValue);
+    setReviewDialogInitialValue(initialValue);
     setReviewError(null);
   }
 
@@ -1237,6 +1240,7 @@ export function PaperJournalTable({
       open={reviewDialogEntryId !== null}
       no={items.find((entry) => entry.id === reviewDialogEntryId)?.no ?? 0}
       value={reviewDialogDraft}
+      initialValue={reviewDialogInitialValue}
       onChange={setReviewDialogDraft}
       onSave={() => void saveReviewDialog()}
       onClose={() => setReviewDialogEntryId(null)}
