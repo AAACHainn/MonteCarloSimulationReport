@@ -13,6 +13,7 @@ import { Label } from "@/components/ui/label";
 import { MultiSelect } from "@/components/ui/multi-select";
 import { MultiOptionFilterPopover, type FilterOption } from "@/components/ui/multi-option-filter-popover";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
+import { SearchableSelect } from "@/components/ui/searchable-select";
 import { PdfExportButton } from "@/components/market-replay/pdf-export-button";
 import { CheckboxField } from "@/components/ui/checkbox-field";
 import { ReviewEditorDialog } from "@/components/market-replay/review-editor-dialog";
@@ -1084,39 +1085,24 @@ export function PaperJournalTable({
             {visibleColumnSet.has("direction") ? <td className="border-r px-3 py-2 last:border-r-0">{entry.direction === "LONG" ? copy.paperTrading.long : copy.paperTrading.short}</td> : null}
             {visibleColumnSet.has("setup") ? <td className="border-r p-1 text-left last:border-r-0">
               <div className="min-w-0 max-w-full">
-                <Select
+                <SearchableSelect
                   value={entry.setupOptionId ?? noSetupValue}
                   onValueChange={(value) => void updateSetup(entry, value)}
                   disabled={setupOptionsLoading || savingSetupIds.has(entry.id)}
-                >
-                  <SelectTrigger
-                    className="h-8 min-w-0 max-w-full overflow-hidden border-transparent bg-transparent px-2 text-left shadow-none hover:border-slate-300 hover:bg-white data-[state=open]:border-blue-300 data-[state=open]:bg-white"
-                    aria-label={copy.paperTrading.editSetup(entry.no)}
-                    aria-busy={savingSetupIds.has(entry.id)}
-                    title={entry.setupOption?.name ?? undefined}
-                  >
-                    <SelectValue className="min-w-0 flex-1 overflow-hidden">
-                      <span className="flex min-w-0 max-w-full items-center gap-1.5">
-                        {savingSetupIds.has(entry.id) ? <Loader2 className="h-3.5 w-3.5 shrink-0 animate-spin" aria-hidden="true" /> : null}
-                        <span className="block min-w-0 flex-1 truncate">{entry.setupOption?.name ?? copy.paperTrading.chooseSetup}</span>
-                      </span>
-                    </SelectValue>
-                  </SelectTrigger>
-                  <SelectContent
-                    position="popper"
-                    className="max-w-[min(28rem,calc(100vw-2rem))]"
-                  >
-                    <SelectItem value={noSetupValue}>{copy.paperTrading.clearSetup}</SelectItem>
-                    {setupOptions.map((option) => <SelectItem
-                      key={option.id}
-                      value={option.id}
-                      disabled={!option.active && option.id !== entry.setupOptionId}
-                      className="whitespace-normal break-words"
-                    >
-                      {option.name}
-                    </SelectItem>)}
-                  </SelectContent>
-                </Select>
+                  busy={savingSetupIds.has(entry.id)}
+                  placeholder={copy.paperTrading.chooseSetup}
+                  selectedLabel={entry.setupOption?.name ?? copy.paperTrading.chooseSetup}
+                  searchPlaceholder={copy.paperTrading.searchSetup}
+                  ariaLabel={copy.paperTrading.editSetup(entry.no)}
+                  className="h-8 min-w-0 max-w-full overflow-hidden border-transparent bg-transparent px-2 text-left shadow-none hover:border-slate-300 hover:bg-white data-[state=open]:border-blue-300 data-[state=open]:bg-white"
+                  options={[
+                    { value: noSetupValue, label: copy.paperTrading.clearSetup },
+                    ...setupOptions.map((option) => ({
+                      value: option.id, label: option.name,
+                      disabled: !option.active && option.id !== entry.setupOptionId,
+                    })),
+                  ]}
+                />
               </div>
             </td> : null}
             {visibleColumnSet.has("reason") ? <td className="border-r p-1 text-left last:border-r-0">
@@ -1125,6 +1111,8 @@ export function PaperJournalTable({
                 options={tradeReasonOptions.map((reason) => ({ value: reason.id, label: reason.name }))}
                 onCommit={(values) => updateTradeReasons(entry, values)}
                 placeholder={copy.paperTrading.chooseTradeReason}
+                searchable
+                searchPlaceholder={copy.paperTrading.searchTradeReason}
                 emptyMessage={copy.paperTrading.noTradeReasonOptions}
                 ariaLabel={copy.paperTrading.editTradeReason(entry.no)}
                 saveLabel={copy.paperTrading.saveTradeReason}

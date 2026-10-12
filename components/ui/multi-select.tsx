@@ -4,6 +4,8 @@ import * as PopoverPrimitive from "@radix-ui/react-popover";
 import { Check, ChevronDown, Loader2 } from "lucide-react";
 import { useMemo, useState } from "react";
 import { Button } from "@/components/ui/button";
+import { filterSelectOptions, OptionSearch } from "@/components/ui/option-search";
+import { copy } from "@/lib/i18n";
 import { cn } from "@/lib/utils";
 
 export type MultiSelectOption = {
@@ -20,6 +22,8 @@ export function MultiSelect({
   ariaLabel,
   saveLabel,
   cancelLabel,
+  searchable = false,
+  searchPlaceholder = copy.common.searchOptions,
   disabled = false,
   className,
 }: {
@@ -31,12 +35,16 @@ export function MultiSelect({
   ariaLabel: string;
   saveLabel: string;
   cancelLabel: string;
+  searchable?: boolean;
+  searchPlaceholder?: string;
   disabled?: boolean;
   className?: string;
 }) {
   const [open, setOpen] = useState(false);
   const [draft, setDraft] = useState(value);
   const [saving, setSaving] = useState(false);
+  const [query, setQuery] = useState("");
+  const filteredOptions = useMemo(() => filterSelectOptions(options, query), [options, query]);
   const selectedLabels = useMemo(() => {
     const selected = new Set(value);
     return options.filter((option) => selected.has(option.value)).map((option) => option.label);
@@ -47,6 +55,7 @@ export function MultiSelect({
   function changeOpen(nextOpen: boolean) {
     if (saving) return;
     if (nextOpen) setDraft(value);
+    setQuery("");
     setOpen(nextOpen);
   }
 
@@ -96,11 +105,16 @@ export function MultiSelect({
           collisionPadding={12}
           className="z-[200] flex max-h-[var(--radix-popover-content-available-height)] w-[28rem] max-w-[calc(100vw-2rem)] flex-col overflow-hidden rounded-md border bg-white p-2 text-slate-950 shadow-lg"
         >
+          {searchable ? <div className="mb-2 shrink-0 border-b pb-2">
+            <OptionSearch value={query} onChange={setQuery} placeholder={searchPlaceholder} disabled={saving} />
+          </div> : null}
           {options.length === 0 ? (
             <p className="px-2 py-4 text-center text-sm text-slate-500">{emptyMessage}</p>
+          ) : filteredOptions.length === 0 ? (
+            <p className="px-2 py-4 text-center text-sm text-slate-500" role="status" aria-live="polite">{copy.common.noSearchResults}</p>
           ) : (
-            <div className="min-h-0 space-y-0.5 overflow-y-auto overscroll-contain p-0.5">
-              {options.map((option) => {
+            <div key={query} className="min-h-0 space-y-0.5 overflow-y-auto overscroll-contain p-0.5">
+              {filteredOptions.map((option) => {
                 const selected = draftSet.has(option.value);
                 return (
                   <button
