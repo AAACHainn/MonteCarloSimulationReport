@@ -1,4 +1,5 @@
 import { MAX_REVIEW_LENGTH } from "./paper-trading/review-templates";
+import { MIN_JOURNAL_TABLE_LEFT_GAP } from "./market-replay/journal-column-widths";
 
 export const defaultLocale = "zh-CN" as const;
 export const supportedLocales = ["zh-CN", "en-US"] as const;
@@ -789,7 +790,7 @@ export const dictionaries = {
       resizeJournalColumn: (column: string) => `调整 ${column} 列宽`,
       resizeJournalColumnHint: "拖拽调整列宽，或使用左右方向键微调。",
       resizeJournalTableStart: "从左侧调整表格整体宽度",
-      resizeJournalTableStartHint: "拖拽最左侧外边框调整表格整体宽度；向左拖动可向左扩展。",
+      resizeJournalTableStartHint: `拖拽最左侧外边框调整表格整体宽度；距屏幕左侧至少保留 ${MIN_JOURNAL_TABLE_LEFT_GAP} px。`,
       resizeJournalTableEnd: "从右侧调整表格整体宽度",
       resizeJournalTableEndHint: "拖拽最右侧外边框调整表格整体宽度；向右拖动可向右扩展。",
       totalProfitPoints: "总盈利点数",
@@ -1260,6 +1261,10 @@ export const dictionaries = {
       searchOptions: "搜索选项…",
       clearSearch: "清空搜索",
       noSearchResults: "没有匹配的选项。",
+      resizeDialogEdge: (edge: string) => `调整窗口${edge}`,
+      resizeDialogHint: "拖拽边框调整窗口大小，也可使用方向键微调。",
+      moveDialogHint: "按住窗口头部拖动移动，也可聚焦头部后使用方向键微调。",
+      dialogResizeEdges: { n: "上边框", ne: "右上角", e: "右边框", se: "右下角", s: "下边框", sw: "左下角", w: "左边框", nw: "左上角" },
       dash: "-",
       error: "加载失败",
       confirm: "确认",

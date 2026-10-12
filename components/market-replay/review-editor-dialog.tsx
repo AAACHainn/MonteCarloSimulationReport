@@ -154,9 +154,10 @@ export function ReviewEditorDialog({ open, no, value, saving, error, onChange, o
 
   return <>
     <Dialog open={open} title={copy.paperTrading.reviewDialogTitle(no)} description={copy.paperTrading.reviewDialogDescription}
+      resizable widthStorageKey="replay-review-dialog-width-v1" heightStorageKey="replay-review-dialog-height-v1"
       onClose={() => { if (!managementBusy && !nameOpen && !deletingTemplate) onClose(); }}>
-      <form className="space-y-4" onSubmit={(event) => { event.preventDefault(); if (!managementBusy && !nameOpen && !deletingTemplate) onSave(); }}>
-        <div className="space-y-2">
+      <form className="flex min-h-full flex-col gap-4" onSubmit={(event) => { event.preventDefault(); if (!managementBusy && !nameOpen && !deletingTemplate) onSave(); }}>
+        <div className="shrink-0 space-y-2">
           <Label htmlFor="replay-review-template">{copy.paperTrading.reviewTemplate}</Label>
           <div className="flex flex-col gap-2 sm:flex-row">
             <div className="min-w-0 flex-1">
@@ -178,17 +179,17 @@ export function ReviewEditorDialog({ open, no, value, saving, error, onChange, o
           <p id="replay-review-template-hint" className="text-xs text-slate-500">{!templatesLoading && !templatesError && templates.length === 0 ? copy.paperTrading.noReviewTemplates : copy.paperTrading.reviewTemplateHint}</p>
           {templatesError ? <div className="flex flex-wrap items-center gap-2"><p className="text-xs text-red-600" role="alert">{templatesError}</p><Button type="button" variant="ghost" size="sm" onClick={() => void loadTemplates()} disabled={templatesLoading}>{copy.paperTrading.retryReviewTemplates}</Button></div> : null}
         </div>
-        <div className="space-y-2">
+        <div className="flex flex-1 flex-col gap-2">
           <Label htmlFor="replay-journal-review">{copy.paperTrading.review}</Label>
           <Textarea id="replay-journal-review" value={value} onChange={(event) => { onChange(limitReview(event.target.value)); setStatus(null); }}
-            placeholder={copy.paperTrading.reviewPlaceholder} className="min-h-64 resize-y" disabled={saving} aria-describedby="replay-journal-review-count replay-journal-review-error" autoFocus />
+            placeholder={copy.paperTrading.reviewPlaceholder} className="min-h-64 flex-1 resize-none" disabled={saving} aria-describedby="replay-journal-review-count replay-journal-review-error" autoFocus />
           <div className="flex items-start justify-between gap-3">
             {error ? <p id="replay-journal-review-error" className="text-xs text-red-600" role="alert">{error}</p> : <span />}
             <p id="replay-journal-review-count" className="shrink-0 text-xs text-slate-500">{copy.paperTrading.reviewCharacterCount(reviewLength(value))}</p>
           </div>
         </div>
         {status ? <p className="text-xs text-emerald-700" role="status" aria-live="polite">{status}</p> : null}
-        <div className="flex flex-wrap justify-end gap-2 border-t pt-4">
+        <div className="flex shrink-0 flex-wrap justify-end gap-2 border-t pt-4">
           <Button type="button" variant="outline" onClick={openNameDialog} disabled={saving || !value.trim()}>{copy.paperTrading.saveReviewTemplate}</Button>
           <Button type="button" variant="outline" onClick={onClose} disabled={saving}>{copy.common.cancel}</Button>
           <Button type="submit" disabled={saving}>{saving ? <Loader2 className="h-4 w-4 animate-spin" aria-hidden="true" /> : null}{copy.paperTrading.saveReview}</Button>

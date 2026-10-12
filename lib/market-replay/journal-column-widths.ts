@@ -1,5 +1,6 @@
 export const MIN_JOURNAL_COLUMN_WIDTH = 64;
 export const MAX_JOURNAL_COLUMN_WIDTH = 640;
+export const MIN_JOURNAL_TABLE_LEFT_GAP = 10;
 
 export function clampJournalColumnWidth(width: number) {
   return Math.min(MAX_JOURNAL_COLUMN_WIDTH, Math.max(MIN_JOURNAL_COLUMN_WIDTH, Math.round(width)));
@@ -11,6 +12,11 @@ export function normalizeJournalTableWidth(width: number) {
 
 export function normalizeJournalTableOffset(offset: number) {
   return Math.round(offset);
+}
+
+// Use the container's document position so horizontal scrolling still reveals the table's right side.
+export function minimumJournalTableLeftOffset(containerLeft: number) {
+  return Math.ceil(MIN_JOURNAL_TABLE_LEFT_GAP - containerLeft);
 }
 
 export function parseStoredJournalTableWidth(storedValue: string | null) {
@@ -30,20 +36,23 @@ export function resizeJournalTableFromStartEdge({
   startOffset,
   pointerDelta,
   minimumWidth,
+  minimumOffset = Number.NEGATIVE_INFINITY,
 }: {
   startWidth: number;
   startOffset: number;
   pointerDelta: number;
   minimumWidth: number;
+  minimumOffset?: number;
 }) {
+  const rightEdge = startOffset + startWidth;
   const width = Math.max(
     normalizeJournalTableWidth(minimumWidth),
-    normalizeJournalTableWidth(startWidth - pointerDelta),
+    Math.min(normalizeJournalTableWidth(startWidth - pointerDelta), rightEdge - minimumOffset),
   );
 
   return {
     width,
-    offset: normalizeJournalTableOffset(startOffset + startWidth - width),
+    offset: Math.max(minimumOffset, normalizeJournalTableOffset(rightEdge - width)),
   };
 }
 

@@ -26,6 +26,7 @@ import {
   MAX_JOURNAL_COLUMN_WIDTH,
   MIN_JOURNAL_COLUMN_WIDTH,
   clampJournalColumnWidth,
+  minimumJournalTableLeftOffset,
   normalizeJournalTableWidth,
   parseStoredJournalColumnWidths,
   parseStoredJournalTableOffset,
@@ -163,6 +164,7 @@ export function PaperJournalTable({
   const [tableLeftOffset, setTableLeftOffset] = useState(0);
   const [tableViewportElement, setTableViewportElement] = useState<HTMLElement | null>(null);
   const [tableViewportWidth, setTableViewportWidth] = useState(0);
+  const [tableMinimumLeftOffset, setTableMinimumLeftOffset] = useState(0);
   const [resizingTarget, setResizingTarget] = useState<JournalColumnId | "table-start" | "table-end" | null>(null);
   const [summary, setSummary] = useState<ReplayJournalSummary | null>(null);
   const [filterDrafts, setFilterDrafts] = useState<ReplayJournalFilters>(createEmptyReplayJournalFilters);
@@ -385,11 +387,21 @@ export function PaperJournalTable({
 
   useEffect(() => {
     if (!tableViewportElement) return;
-    const updateWidth = () => setTableViewportWidth(tableViewportElement.clientWidth);
-    updateWidth();
-    const observer = new ResizeObserver(updateWidth);
+    const updateLayout = () => {
+      const containerLeft = tableViewportElement.getBoundingClientRect().left + window.scrollX;
+      const minimumOffset = minimumJournalTableLeftOffset(containerLeft);
+      setTableViewportWidth(tableViewportElement.clientWidth);
+      setTableMinimumLeftOffset(minimumOffset);
+      setTableLeftOffset((current) => Math.max(current, minimumOffset));
+    };
+    updateLayout();
+    const observer = new ResizeObserver(updateLayout);
     observer.observe(tableViewportElement);
-    return () => observer.disconnect();
+    window.addEventListener("resize", updateLayout);
+    return () => {
+      observer.disconnect();
+      window.removeEventListener("resize", updateLayout);
+    };
   }, [tableViewportElement]);
 
   const selectedSession = useMemo(
@@ -662,7 +674,7 @@ export function PaperJournalTable({
       pointerId: event.pointerId,
       startX: event.clientX,
       startTableWidth: visibleTableWidth,
-      startTableOffset: tableLeftOffset,
+      startTableOffset: visibleTableLeftOffset,
       minimumWidth: Math.max(baseTableWidth, tableViewportWidth),
     };
     setResizingTarget(edge === "start" ? "table-start" : "table-end");
@@ -679,6 +691,7 @@ export function PaperJournalTable({
           startOffset: resize.startTableOffset,
           pointerDelta,
           minimumWidth: resize.minimumWidth,
+          minimumOffset: tableMinimumLeftOffset,
         });
         setTableWidthPreference(next.width);
         setTableLeftOffset(next.offset);
@@ -742,9 +755,10 @@ export function PaperJournalTable({
     if (edge === "start") {
       const next = resizeJournalTableFromStartEdge({
         startWidth: visibleTableWidth,
-        startOffset: tableLeftOffset,
+        startOffset: visibleTableLeftOffset,
         pointerDelta,
         minimumWidth,
+        minimumOffset: tableMinimumLeftOffset,
       });
       setTableWidthPreference(next.width);
       setTableLeftOffset(next.offset);
@@ -770,6 +784,7 @@ export function PaperJournalTable({
   const visibleColumns = scopedJournalColumns.filter((column) => visibleColumnSet.has(column.id));
   const baseTableWidth = visibleColumns.reduce((total, column) => total + columnWidths[column.id], 0);
   const visibleTableWidth = Math.max(baseTableWidth, tableViewportWidth, tableWidthPreference ?? 0);
+  const visibleTableLeftOffset = Math.max(tableLeftOffset, tableMinimumLeftOffset);
   const distributedTableExtraWidth = visibleColumns.length === 0
     ? 0
     : (visibleTableWidth - baseTableWidth) / visibleColumns.length;
@@ -976,14 +991,14 @@ export function PaperJournalTable({
     <section ref={setTableViewportElement} className="space-y-2">
       <div
         className={`relative rounded-md border bg-white ${resizingTarget ? "select-none" : ""}`}
-        style={{ width: visibleTableWidth, minWidth: visibleTableWidth, marginLeft: tableLeftOffset }}
+        style={{ width: visibleTableWidth, minWidth: visibleTableWidth, marginLeft: visibleTableLeftOffset }}
       >
         <div
           role="separator"
           aria-orientation="vertical"
           aria-label={copy.paperTrading.resizeJournalTableStart}
           aria-valuemin={Math.max(baseTableWidth, tableViewportWidth)}
-          aria-valuemax={Number.MAX_SAFE_INTEGER}
+          aria-valuemax={visibleTableWidth + visibleTableLeftOffset - tableMinimumLeftOffset}
           aria-valuenow={Math.round(visibleTableWidth)}
           tabIndex={0}
           title={copy.paperTrading.resizeJournalTableStartHint}
