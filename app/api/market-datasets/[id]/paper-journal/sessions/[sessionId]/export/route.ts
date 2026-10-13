@@ -1,3 +1,4 @@
+import { withReplaySessionRoute, journalScopeWhere, entryProjectionWhere, getReplayScope } from '@/lib/replay-sessions/scope';
 import { NextResponse } from "next/server";
 import { prisma } from "@/lib/db";
 import { copy } from "@/lib/i18n";
@@ -6,15 +7,16 @@ import { serializeReplayJournalEntry } from "@/lib/paper-trading/journal";
 
 type RouteContext = { params: Promise<{ id: string; sessionId: string }> };
 
-export async function GET(_request: Request, context: RouteContext) {
+async function handleGET(_request: Request, context: RouteContext) {
   const { id, sessionId } = await context.params;
   const session = await prisma.replayJournalSession.findFirst({
-    where: { id: sessionId, datasetId: id },
+    where: { id: sessionId, datasetId: id, ...journalScopeWhere() },
     select: {
       id: true,
       name: true,
       archivedAt: true,
       entries: {
+        where: entryProjectionWhere(),
         include: {
           setupOption: { select: { name: true } },
           tradeReasons: { select: { id: true, name: true }, orderBy: { name: "asc" } },
@@ -30,7 +32,10 @@ export async function GET(_request: Request, context: RouteContext) {
       ...entry,
       journalSession: { archivedAt: session.archivedAt },
     }));
-    const workbook = await createReplayJournalExcel(entries);
+    const scope = getReplayScope();
+    const projection = scope ? await prisma.replayProjection.findUniqueOrThrow({ where: { id: scope.projectionId } }) : null;
+    const caption = scope ? `${session.name} · ${scope.mode === "TRAINING" ? copy.replaySessions.training : copy.replaySessions.liveReplay} · ${copy.replaySessions.versionLabel(projection!.generation, projection!.status === "CURRENT")} · ${copy.replaySessions.source}` : undefined;
+    const workbook = await createReplayJournalExcel(entries, caption);
     const filename = replayJournalExcelFilename(session.name, session.id);
     const encodedFilename = encodeURIComponent(filename).replace(/[!'()*]/g, (character) => (
       `%${character.charCodeAt(0).toString(16).toUpperCase()}`
@@ -46,3 +51,5 @@ export async function GET(_request: Request, context: RouteContext) {
     return NextResponse.json({ error: copy.paperTrading.journalExportFailed }, { status: 500 });
   }
 }
+
+export const GET = withReplaySessionRoute(handleGET, { write: false, annotation: false });

@@ -1,3 +1,4 @@
+import { withReplaySessionRoute, journalScopeWhere, getReplayScope } from '@/lib/replay-sessions/scope';
 import { NextResponse } from "next/server";
 import { prisma } from "@/lib/db";
 import { copy } from "@/lib/i18n";
@@ -6,7 +7,7 @@ import { replayJournalEntryUpdateSchema } from "@/lib/validations";
 
 type RouteContext = { params: Promise<{ id: string; entryId: string }> };
 
-export async function PATCH(request: Request, context: RouteContext) {
+async function handlePATCH(request: Request, context: RouteContext) {
   const { id, entryId } = await context.params;
   const parsed = replayJournalEntryUpdateSchema.safeParse(await request.json());
   if (!parsed.success) {
@@ -14,8 +15,8 @@ export async function PATCH(request: Request, context: RouteContext) {
   }
 
   const entry = await prisma.replayJournalEntry.findFirst({
-    where: { id: entryId, journalSession: { datasetId: id } },
-    select: { id: true },
+    where: { id: entryId, journalSession: { datasetId: id, ...journalScopeWhere() } },
+    select: { id: true, logicalKey: true, journalSessionId: true },
   });
   if (!entry) {
     return NextResponse.json({ error: copy.paperTrading.journalNotFound }, { status: 404 });
@@ -48,28 +49,30 @@ export async function PATCH(request: Request, context: RouteContext) {
     ...(parsed.data.review !== undefined ? { review: parsed.data.review } : {}),
   };
 
-  const updated = await prisma.replayJournalEntry.update({
-    where: { id: entry.id },
-    data,
-    include: {
+  const include = {
       journalSession: { select: { archivedAt: true } },
       setupOption: { select: { name: true } },
       tradeReasons: { select: { id: true, name: true }, orderBy: { name: "asc" } },
-    },
+    } as const;
+  const updated = await prisma.$transaction(async (tx) => {
+    const versions = entry.logicalKey ? await tx.replayJournalEntry.findMany({
+      where: { journalSessionId: entry.journalSessionId, logicalKey: entry.logicalKey }, select: { id: true },
+    }) : [{ id: entry.id }];
+    for (const version of versions) await tx.replayJournalEntry.update({ where: { id: version.id }, data });
+    return tx.replayJournalEntry.findUniqueOrThrow({ where: { id: entry.id }, include });
   });
   return NextResponse.json(serializeReplayJournalEntry(updated));
 }
 
-export async function DELETE(_request: Request, context: RouteContext) {
-  const { id, entryId } = await context.params;
-  const entry = await prisma.replayJournalEntry.findFirst({
-    where: { id: entryId, journalSession: { datasetId: id } },
-    include: { journalSession: { select: { archivedAt: true } } },
-  });
-  if (!entry) return NextResponse.json({ error: copy.paperTrading.journalNotFound }, { status: 404 });
-  if (!entry.journalSession.archivedAt) {
-    return NextResponse.json({ error: copy.paperTrading.journalActiveDeleteBlocked }, { status: 409 });
-  }
-  await prisma.replayJournalEntry.delete({ where: { id: entryId } });
-  return NextResponse.json({ ok: true });
+async function handleDELETE(_request: Request, context: RouteContext) {
+  await context.params;
+  const training = getReplayScope()!.mode === "TRAINING";
+  return NextResponse.json({
+    error: training ? copy.replaySessions.modeBlocked : copy.replaySessions.deleteNeedsCorrection,
+    code: training ? "MODE_NOT_ALLOWED" : "CORRECTION_REQUIRED",
+  }, { status: training ? 403 : 409 });
 }
+
+export const PATCH = withReplaySessionRoute(handlePATCH, { write: true, annotation: true });
+
+export const DELETE = withReplaySessionRoute(handleDELETE, { write: true, annotation: true });

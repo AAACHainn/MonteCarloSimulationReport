@@ -1,4 +1,4 @@
-import type { Prisma } from "@prisma/client";
+import { progressWhere, accountWhere, assertReplayWritable, markReplayMutation, getReplayScope } from '@/lib/replay-sessions/scope';
 import { prisma } from "@/lib/db";
 import { copy } from "@/lib/i18n";
 import { serializeSourceBar } from "@/lib/market-replay/dataset";
@@ -11,16 +11,18 @@ import {
   serializePaperOrder,
   serializePaperPositionLot,
   serializePaperSession,
-  tradeStatsFromSession,
   type SessionRecord,
 } from "@/lib/paper-trading/serialize";
 import type { PaperEquityPointData, PaperFillData, PaperJournalContext, PaperOrderData, ReplayJournalEntryDraft } from "@/lib/paper-trading/types";
-import { derivePaperTradeTransitions } from "@/lib/paper-trading/reducers";
+import { persistDerivedBatch } from "@/lib/replay-sessions/persistence";
+import { saveReplayCheckpoint, REPLAY_CHECKPOINT_STRIDE } from "@/lib/replay-sessions/checkpoint";
+import { persistContextRuns } from "@/lib/replay-sessions/context-storage";
+import { validContextRuns } from "@/lib/replay-sessions/context-runs";
 import { paperStateFingerprint } from "@/lib/paper-trading/speculative";
 import type { PaperReplayDelta, ReplaySyncReceipt, ReplaySyncRequest } from "@/lib/market-replay/client-sync";
 import type { PaperSessionState } from "@/lib/paper-trading/types";
-import { recordClosedTrade, type IncrementalTradeStats } from "@/lib/paper-trading/trade-stats";
-import { ensureReplayJournalSession, persistPaperJournalState } from "@/lib/paper-trading/journal-storage";
+
+
 import { marketVersionMatches } from "./history-version";
 
 export type ReplaySyncInput = {
@@ -47,69 +49,6 @@ export type ReplaySyncSuccess = {
 export type ReplaySyncOutcome =
   | { status: 200; error: null; response: ReplaySyncSuccess }
   | { status: 400 | 404 | 409; error: string; code?: string; response?: never };
-
-function orderCreateData(sessionId: string, order: PaperOrderData) {
-  return {
-    id: order.id, sessionId, side: order.side, type: order.type, status: order.status,
-    quantity: order.quantity, riskAmount: order.riskAmount, price: order.price,
-    stopLoss: order.stopLoss, takeProfit: order.takeProfit, reduceOnly: order.reduceOnly,
-    isProtective: order.isProtective, ocoGroupId: order.ocoGroupId,
-    createdSequence: order.createdSequence, activeFromSequence: order.activeFromSequence,
-    filledSequence: order.filledSequence, filledAt: order.filledAt ? new Date(order.filledAt) : null,
-    filledPrice: order.filledPrice, cancelReason: order.cancelReason,
-  };
-}
-
-async function persistTrades(
-  tx: Prisma.TransactionClient,
-  sessionId: string,
-  orders: PaperOrderData[],
-  fills: PaperFillData[],
-  initialStats: IncrementalTradeStats,
-) {
-  let stats = initialStats;
-  let activeTrade = fills.length
-    ? await tx.paperTrade.findFirst({ where: { sessionId, status: "OPEN" } })
-    : null;
-  for (const transition of derivePaperTradeTransitions(orders, fills)) {
-    const fill = transition.fill;
-    if (transition.kind === "ENTRY") {
-      activeTrade = await tx.paperTrade.create({
-        data: { sessionId, side: fill.netQuantityAfter > 0 ? "LONG" : "SHORT", openedSequence: fill.sequence, openedAt: new Date(fill.timestamp), fees: fill.fee, plannedRisk: transition.plannedRisk },
-      });
-    } else if (transition.kind === "ADD" && activeTrade) {
-      activeTrade = await tx.paperTrade.update({
-        where: { id: activeTrade.id },
-        data: { fees: { increment: fill.fee }, plannedRisk: transition.plannedRisk == null ? undefined : { increment: transition.plannedRisk } },
-      });
-    } else if (transition.kind === "REDUCE" && activeTrade) {
-      activeTrade = await tx.paperTrade.update({
-        where: { id: activeTrade.id },
-        data: { grossPnl: { increment: fill.realizedPnl }, fees: { increment: fill.fee } },
-      });
-    } else if ((transition.kind === "CLOSE" || transition.kind === "STOP_LOSS" || transition.kind === "TAKE_PROFIT") && activeTrade) {
-      const closed = await tx.paperTrade.update({
-        where: { id: activeTrade.id },
-        data: { status: "CLOSED", grossPnl: { increment: fill.realizedPnl }, fees: { increment: fill.fee }, closedSequence: fill.sequence, closedAt: new Date(fill.timestamp) },
-      });
-      stats = recordClosedTrade(stats, closed.grossPnl - closed.fees);
-      activeTrade = null;
-    } else if (transition.kind === "REVERSE") {
-      const closingFee = transition.closingFee;
-      if (activeTrade) {
-        const closed = await tx.paperTrade.update({
-          where: { id: activeTrade.id },
-          data: { status: "CLOSED", grossPnl: { increment: fill.realizedPnl }, fees: { increment: closingFee }, closedSequence: fill.sequence, closedAt: new Date(fill.timestamp) },
-        });
-        stats = recordClosedTrade(stats, closed.grossPnl - closed.fees);
-      }
-      activeTrade = await tx.paperTrade.create({
-        data: { sessionId, side: fill.netQuantityAfter > 0 ? "LONG" : "SHORT", openedSequence: fill.sequence, openedAt: new Date(fill.timestamp), fees: fill.fee - closingFee, plannedRisk: transition.plannedRisk },
-      });
-    }
-  }
-  return stats;
-}
 
 const ACCOUNTING_EPSILON = 1e-8;
 
@@ -144,6 +83,7 @@ function validateFillAccounting(start: PaperSessionState, delta: PaperReplayDelt
   let realized = start.realizedPnl;
   let fees = start.totalFees;
   let slippage = start.totalSlippage;
+  let cycleKey = start.activeCycleKey ?? null;
   let previousSequence = delta.state.lastProcessedSequence - (delta.state.version - start.version);
   for (const fill of delta.fills) {
     if (fill.sequence < previousSequence || fill.sequence > delta.state.lastProcessedSequence) return false;
@@ -152,6 +92,9 @@ function validateFillAccounting(start: PaperSessionState, delta: PaperReplayDelt
     const oldSign = Math.sign(quantity);
     const signedSign = Math.sign(signed);
     const nextQuantity = Math.abs(quantity + signed) <= 1e-12 ? 0 : quantity + signed;
+    const fillCycle = oldSign === 0 ? fill.id : cycleKey ?? `legacy-cycle:${start.id}`;
+    if (fill.cycleKey !== undefined && fill.cycleKey !== fillCycle) return false;
+    cycleKey = nextQuantity === 0 ? null : fillCycle;
     const closedQuantity = oldSign !== 0 && oldSign !== signedSign ? Math.min(Math.abs(quantity), fill.quantity) : 0;
     const openedQuantity = oldSign === 0 || oldSign === signedSign
       ? fill.quantity
@@ -180,6 +123,7 @@ function validateFillAccounting(start: PaperSessionState, delta: PaperReplayDelt
     slippage += fill.slippageCost;
   }
   return closeEnough(delta.state.netQuantity, quantity)
+    && (delta.state.activeCycleKey === undefined || delta.state.activeCycleKey === cycleKey)
     && closeEnough(delta.state.averageEntryPrice, average)
     && closeEnough(delta.state.realizedPnl, realized)
     && closeEnough(delta.state.totalFees, fees)
@@ -258,10 +202,11 @@ export async function persistClientReplayBatch(
   input: ReplaySyncRequest,
 ): Promise<{ status: 200; error: null; response: ReplaySyncReceipt } | { status: 400 | 404 | 409; error: string; code?: string }> {
   return prisma.$transaction(async (tx) => {
+    await assertReplayWritable(tx);
     const [dataset, progress, sessionRecord] = await Promise.all([
       tx.marketDataset.findUnique({ where: { id: datasetId } }),
-      tx.replayProgress.findUnique({ where: { datasetId } }),
-      tx.paperTradingSession.findUnique({ where: { datasetId } }),
+      tx.replayProgress.findFirst({ where: progressWhere(datasetId) }),
+      tx.paperTradingSession.findFirst({ where: accountWhere(datasetId) }),
     ]);
     if (!dataset || !progress) return { status: 404, error: copy.marketReplay.datasetNotFound } as const;
     if (progress.lastSyncRequestId === input.requestId && progress.lastSyncResponse) {
@@ -287,54 +232,22 @@ export async function persistClientReplayBatch(
       }
       const statsSession = await ensurePaperTradeStats(sessionRecord as SessionRecord, tx);
       const session = serializePaperSession(statsSession);
-      const currentOrders = (await tx.paperOrder.findMany({ where: { sessionId: session.id, status: "PENDING" } }))
+      const currentOrders = (await tx.paperOrder.findMany({ where: { sessionId: sessionRecord.id, status: "PENDING" } }))
         .map(serializePaperOrder);
       if (!validateClientPaperDelta(datasetId, progress.generation, progress.currentSequence,
         input.targetSequence, session, currentOrders, input.paperDelta)) {
         return { status: 400, error: copy.marketReplay.syncMismatch } as const;
       }
       const delta = input.paperDelta;
-      await tx.paperTradingSession.update({
-        where: { id: session.id },
-        data: {
-          lastProcessedSequence: delta.state.lastProcessedSequence, netQuantity: delta.state.netQuantity,
-          averageEntryPrice: delta.state.averageEntryPrice, realizedPnl: delta.state.realizedPnl,
-          totalFees: delta.state.totalFees, totalSlippage: delta.state.totalSlippage,
-          peakEquity: delta.state.peakEquity, maxDrawdown: delta.state.maxDrawdown, version: delta.state.version,
-        },
+      if (getReplayScope() && !validContextRuns(delta.contextRuns ?? [], progress.currentSequence + 1, input.targetSequence, progress.generation)) {
+        return { status: 400, error: copy.marketReplay.syncMismatch } as const;
+      }
+      await persistDerivedBatch(tx, { ...sessionRecord, ...statsSession }, progress.generation, {
+        state: delta.state, orders: delta.orderChanges, fills: delta.fills, lots: delta.openLots,
+        entries: delta.journalEntries, equityPoints: delta.equityPoints,
       });
-      for (const order of delta.orderChanges) {
-        await tx.paperOrder.upsert({
-          where: { id: order.id }, create: orderCreateData(session.id, order),
-          update: {
-            status: order.status, quantity: order.quantity, riskAmount: order.riskAmount, price: order.price,
-            stopLoss: order.stopLoss, takeProfit: order.takeProfit, activeFromSequence: order.activeFromSequence,
-            filledSequence: order.filledSequence, filledAt: order.filledAt ? new Date(order.filledAt) : null,
-            filledPrice: order.filledPrice, cancelReason: order.cancelReason,
-          },
-        });
-      }
-      if (delta.fills.length) {
-        await tx.paperFill.createMany({
-          data: delta.fills.map((fill) => ({ ...fill, sessionId: session.id, timestamp: new Date(fill.timestamp) })),
-        });
-      }
-      const tradeStats = await persistTrades(
-        tx, session.id, delta.orderChanges, delta.fills, tradeStatsFromSession(statsSession),
-      );
-      await tx.paperTradingSession.update({
-        where: { id: session.id },
-        data: { ...tradeStats, tradeStatsVersion: 1 },
-      });
-      const journalSessionId = await ensureReplayJournalSession(tx, sessionRecord, progress.generation);
-      await persistPaperJournalState(
-        tx, datasetId, session.id, journalSessionId, delta.openLots, delta.journalEntries,
-      );
-      if (delta.equityPoints.length) {
-        await tx.paperEquityPoint.createMany({
-          data: delta.equityPoints.map((point) => ({ ...point, sessionId: session.id, timestamp: new Date(point.timestamp) })),
-        });
-      }
+      await persistContextRuns(tx, delta.contextRuns ?? []);
+      await saveReplayCheckpoint(tx, input.targetSequence);
       paperVersion = delta.state.version;
       fingerprint = delta.fingerprint;
     } else if (input.expectedPaperVersion !== null || input.paperDelta !== null) {
@@ -346,12 +259,13 @@ export async function persistClientReplayBatch(
       syncVersion: progress.syncVersion + 1, dataVersion: dataset.dataVersion, historyVersion: dataset.historyVersion, paperVersion, fingerprint,
     };
     await tx.replayProgress.update({
-      where: { datasetId },
+      where: { id: progress.id },
       data: {
         currentSequence: input.targetSequence, syncVersion: response.syncVersion,
         lastSyncRequestId: input.requestId, lastSyncResponse: JSON.stringify(response),
       },
     });
+    await markReplayMutation(tx, input.targetSequence);
     return { status: 200, error: null, response } as const;
   }, { timeout: 120_000 });
 }
@@ -362,10 +276,11 @@ export async function syncReplayToTarget(
   maximumSourceBars = MAX_REPLAY_SYNC_SOURCE_BARS,
 ): Promise<ReplaySyncOutcome> {
   const outcome = await prisma.$transaction(async (tx) => {
+    await assertReplayWritable(tx);
     const [dataset, progress, session] = await Promise.all([
       tx.marketDataset.findUnique({ where: { id: datasetId } }),
-      tx.replayProgress.findUnique({ where: { datasetId } }),
-      tx.paperTradingSession.findUnique({ where: { datasetId } }),
+      tx.replayProgress.findFirst({ where: progressWhere(datasetId) }),
+      tx.paperTradingSession.findFirst({ where: accountWhere(datasetId) }),
     ]);
     if (!dataset || !progress) return { status: 404, error: copy.marketReplay.datasetNotFound } as const;
     if (progress.lastSyncRequestId === input.requestId && progress.lastSyncResponse) {
@@ -400,79 +315,33 @@ export async function syncReplayToTarget(
         return { status: 409, error: copy.paperTrading.conflict } as const;
       }
       const statsSession = await ensurePaperTradeStats(session as SessionRecord, tx);
+      let account = { ...session, ...statsSession };
       let state = serializePaperSession(statsSession);
       let orders = (await tx.paperOrder.findMany({
-        where: { sessionId: session.id, status: "PENDING" },
-        orderBy: [{ createdSequence: "asc" }, { id: "asc" }],
+        where: { sessionId: account.id, status: "PENDING" }, orderBy: [{ createdSequence: "asc" }, { id: "asc" }],
       })).map(serializePaperOrder);
-      let lots = (await tx.paperPositionLot.findMany({
-        where: { sessionId: session.id }, orderBy: [{ openedSequence: "asc" }, { createdAt: "asc" }],
-      })).map(serializePaperPositionLot);
-      const journalEntries: ReplayJournalEntryDraft[] = [];
-      const originalOrders = new Map(orders.map((order) => [order.id, JSON.stringify(order)]));
-      const equityPoints: PaperEquityPointData[] = [];
-      for (const dbBar of dbBars) {
-        const bar = serializeSourceBar(dbBar);
-        const result = advancePaperTrading({
-          state,
-          orders,
-          bar,
-          makeId: createDeterministicEventIdFactory(session.id, progress.generation, bar.sequence),
-          lots,
-          journalContext: input.journalContext,
-        });
-        state = result.state;
-        orders = result.orders;
-        lots = result.lots;
-        journalEntries.push(...result.journalEntries);
-        fills.push(...result.fills);
-        const shouldSample = result.fills.length > 0
-          || dbBar.sequence === dataset.barCount - 1
-          || dbBar.sequence % session.equitySampleStride === 0;
-        if (shouldSample) equityPoints.push(result.equityPoint);
-      }
-      await tx.paperTradingSession.update({
-        where: { id: session.id },
-        data: {
-          lastProcessedSequence: state.lastProcessedSequence, netQuantity: state.netQuantity,
-          averageEntryPrice: state.averageEntryPrice, realizedPnl: state.realizedPnl,
-          totalFees: state.totalFees, totalSlippage: state.totalSlippage,
-          peakEquity: state.peakEquity, maxDrawdown: state.maxDrawdown, version: state.version,
-        },
-      });
-      const journalSessionId = await ensureReplayJournalSession(tx, session, progress.generation);
-      await persistPaperJournalState(tx, datasetId, session.id, journalSessionId, lots, journalEntries);
-      for (const order of orders) {
-        if (originalOrders.get(order.id) === JSON.stringify(order)) continue;
-        await tx.paperOrder.upsert({
-          where: { id: order.id },
-          create: orderCreateData(session.id, order),
-          update: {
-            status: order.status, quantity: order.quantity, riskAmount: order.riskAmount, price: order.price,
-            stopLoss: order.stopLoss, takeProfit: order.takeProfit, activeFromSequence: order.activeFromSequence,
-            filledSequence: order.filledSequence, filledAt: order.filledAt ? new Date(order.filledAt) : null,
-            filledPrice: order.filledPrice, cancelReason: order.cancelReason,
-          },
-        });
-      }
-      if (fills.length) {
-        await tx.paperFill.createMany({
-          data: fills.map((fill) => ({ ...fill, sessionId: session.id, timestamp: new Date(fill.timestamp) })),
-        });
-      }
-      const tradeStats = await persistTrades(
-        tx, session.id, orders, fills, tradeStatsFromSession(statsSession),
-      );
-      await tx.paperTradingSession.update({
-        where: { id: session.id },
-        data: { ...tradeStats, tradeStatsVersion: 1 },
-      });
-      for (let index = 0; index < equityPoints.length; index += 1_000) {
-        await tx.paperEquityPoint.createMany({
-          data: equityPoints.slice(index, index + 1_000).map((point) => ({
-            ...point, sessionId: session.id, timestamp: new Date(point.timestamp),
-          })),
-        });
+      let lots = (await tx.paperPositionLot.findMany({ where: { sessionId: account.id } })).map(serializePaperPositionLot);
+      for (let offset = 0; offset < dbBars.length; offset += REPLAY_CHECKPOINT_STRIDE) {
+        const bars = dbBars.slice(offset, offset + REPLAY_CHECKPOINT_STRIDE);
+        const changed = new Map<string, PaperOrderData>();
+        const originals = new Map(orders.map((order) => [order.id, JSON.stringify(order)]));
+        const chunkFills: PaperFillData[] = [];
+        const entries: ReplayJournalEntryDraft[] = [];
+        const equityPoints: PaperEquityPointData[] = [];
+        for (const dbBar of bars) {
+          const bar = serializeSourceBar(dbBar);
+          const result = advancePaperTrading({ state, orders, lots, bar,
+            makeId: createDeterministicEventIdFactory(state.id, progress.generation, bar.sequence), journalContext: input.journalContext });
+          state = result.state; lots = result.lots;
+          for (const order of result.orders) if (originals.get(order.id) !== JSON.stringify(order)) changed.set(order.id, order);
+          orders = result.orders.filter((order) => order.status === "PENDING");
+          chunkFills.push(...result.fills); entries.push(...result.journalEntries);
+          if (result.fills.length || bar.sequence === dataset.barCount - 1 || bar.sequence % account.equitySampleStride === 0) equityPoints.push(result.equityPoint);
+        }
+        account = await persistDerivedBatch(tx, account, progress.generation, { state, orders: [...changed.values()], fills: chunkFills, lots, entries, equityPoints });
+        fills.push(...chunkFills);
+        await persistContextRuns(tx, [{ fromSequence: bars[0].sequence, toSequence: state.lastProcessedSequence, generation: progress.generation, context: input.journalContext ?? null }]);
+        await saveReplayCheckpoint(tx, state.lastProcessedSequence);
       }
     } else if (input.expectedPaperVersion !== null) {
       return { status: 409, error: copy.paperTrading.conflict } as const;
@@ -480,7 +349,7 @@ export async function syncReplayToTarget(
 
     const syncVersion = progress.syncVersion + 1;
     await tx.replayProgress.update({
-      where: { datasetId },
+      where: { id: progress.id },
       data: { currentSequence: input.targetSequence, syncVersion, lastSyncRequestId: input.requestId },
     });
     const response: ReplaySyncSuccess = {
@@ -493,9 +362,10 @@ export async function syncReplayToTarget(
       snapshot: await getPaperSessionSnapshot(datasetId, tx),
     };
     await tx.replayProgress.update({
-      where: { datasetId },
+      where: { id: progress.id },
       data: { lastSyncResponse: JSON.stringify(response) },
     });
+    await markReplayMutation(tx, input.targetSequence);
     return { status: 200, error: null, response } as const;
   }, { timeout: 120_000 });
   return outcome;

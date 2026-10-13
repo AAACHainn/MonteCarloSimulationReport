@@ -1,4 +1,5 @@
 "use client";
+import { useReplayFetch, useReplaySession } from "./replay-session-context";
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { ListTree, Loader2, Palette, Ruler, Settings2, Trash2, TrendingUp, X } from "lucide-react";
@@ -111,6 +112,8 @@ export function HistoricalReplayClient({
   session: HistoricalReplaySession;
   focusSequence: number;
 }) {
+  const fetch = useReplayFetch();
+  const replaySession = useReplaySession();
   const shortcuts = useReplayShortcuts();
   const [displayIntervalSeconds, setDisplayIntervalSeconds] = useState(session.displayIntervalSeconds);
   const requestedIntervalRef = useRef(session.displayIntervalSeconds);
@@ -226,7 +229,7 @@ export function HistoricalReplayClient({
         setWindowLoading(false);
       }
     }
-  }, [bars, dataset.id, displayIntervalSeconds, indicatorWarmupCount, session.displaySession, session.endSequence, session.startSequence]);
+  }, [bars, dataset.id, displayIntervalSeconds, indicatorWarmupCount, session.displaySession, session.endSequence, session.startSequence, fetch]);
 
   const handleVisibleSequenceRange = useCallback((range: ReplayVisibleSequenceRange) => {
     visibleRangeRef.current = range;
@@ -239,6 +242,21 @@ export function HistoricalReplayClient({
   );
 
   useEffect(() => {
+    const controller = new AbortController();
+    if (replaySession) {
+      void fetch(`/api/market-datasets/${dataset.id}/drawings`, { signal: controller.signal }).then(async (response) => {
+        const data = await response.json();
+        if (!response.ok) throw new Error(data.error ?? copy.marketReplay.invalidDrawing);
+        const local = parseStoredDrawings(window.localStorage.getItem(historicalDrawingStorageKey(dataset.id, session.id)), dataset.id);
+        const merged = new Map<string, MarketDrawing>(data.drawings.map((drawing: MarketDrawing) => [drawing.id, drawing]));
+        for (const drawing of local) merged.set(drawing.id, drawing);
+        setDrawings([...merged.values()]);
+        setDrawingsLoaded(true);
+      }).catch((error) => {
+        if (!controller.signal.aborted) { setError(error instanceof Error ? error.message : copy.marketReplay.invalidDrawing); setDrawingsLoaded(true); }
+      });
+      return () => controller.abort();
+    }
     try {
       setDrawings(parseStoredDrawings(
         window.localStorage.getItem(historicalDrawingStorageKey(dataset.id, session.id)),
@@ -247,7 +265,7 @@ export function HistoricalReplayClient({
     } finally {
       setDrawingsLoaded(true);
     }
-  }, [dataset.id, session.id]);
+  }, [dataset.id, session.id, fetch, replaySession]);
 
   useEffect(() => {
     if (!drawingsLoaded) return;
@@ -334,7 +352,7 @@ export function HistoricalReplayClient({
       }
       return false;
     }
-  }, [dataset.id, session.id]);
+  }, [dataset.id, session.id, fetch]);
 
   const loadHistoryWindow = useCallback(async (seconds: number, targetSequence: number) => {
     mainWindowAbortRef.current?.abort();
@@ -384,7 +402,7 @@ export function HistoricalReplayClient({
         setWindowLoading(false);
       }
     }
-  }, [dataset.id, indicatorWarmupCount, session.displaySession, session.endSequence]);
+  }, [dataset.id, indicatorWarmupCount, session.displaySession, session.endSequence, fetch]);
 
   const changeDisplayInterval = useCallback(async (seconds: number) => {
     if (!dataset.sourceIntervalSeconds || !isValidDisplayInterval(dataset.sourceIntervalSeconds, seconds)) {

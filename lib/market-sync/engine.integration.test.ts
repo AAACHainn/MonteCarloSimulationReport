@@ -50,7 +50,7 @@ describe("persistent incremental market synchronization", () => {
     const run = await enqueueSync(id); expect((await enqueueSync(id, "SCHEDULED")).id).toBe(run.id);
     await executeSyncRun(run.id, new AbortController().signal, provider());
     expect(await prisma.marketDataset.findUnique({ where: { id } })).toMatchObject({ barCount: 4, dataVersion: 2, historyVersion: 1 });
-    expect((await prisma.replayProgress.findUnique({ where: { datasetId: id } }))?.currentSequence).toBe(0);
+    expect((await prisma.replayProgress.findFirst({ where: { datasetId: id } }))?.currentSequence).toBe(0);
     expect((await prisma.marketDatasetSyncConfig.findUnique({ where: { datasetId: id } }))?.checkedThrough).toEqual(new Date(base + 240000));
     const next = await enqueueSync(id); const noData = provider(); const fetchBars = vi.spyOn(noData, "bars");
     await executeSyncRun(next.id, new AbortController().signal, noData); expect(fetchBars).not.toHaveBeenCalled();

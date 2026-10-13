@@ -1,3 +1,5 @@
+import { withReplaySessionRoute } from '@/lib/replay-sessions/scope';
+import { accountWhere, entryProjectionWhere } from '@/lib/replay-sessions/scope';
 import { NextResponse } from "next/server";
 import { prisma } from "@/lib/db";
 import { copy } from "@/lib/i18n";
@@ -6,9 +8,9 @@ import { calculateReplayJournalTrainingStats } from "@/lib/paper-trading/journal
 
 type RouteContext = { params: Promise<{ id: string }> };
 
-export async function GET(request: Request, context: RouteContext) {
+async function handleGET(request: Request, context: RouteContext) {
   const { id } = await context.params;
-  const session = await prisma.paperTradingSession.findUnique({ where: { datasetId: id } });
+  const session = await prisma.paperTradingSession.findFirst({ where: accountWhere(id) });
   if (!session) return NextResponse.json({ error: copy.paperTrading.sessionNotFound }, { status: 404 });
   const url = new URL(request.url);
   const type = url.searchParams.get("type") ?? "fills";
@@ -16,7 +18,7 @@ export async function GET(request: Request, context: RouteContext) {
   const cursor = url.searchParams.get("cursor");
   if (type === "journal-stats") {
     const entries = session.journalSessionId ? await prisma.replayJournalEntry.findMany({
-      where: { journalSessionId: session.journalSessionId },
+      where: { journalSessionId: session.journalSessionId, ...entryProjectionWhere() },
       orderBy: [{ accountNo: "asc" }, { id: "asc" }],
       select: { gainLoss: true, priceTickSize: true, quantity: true },
     }) : [];
@@ -56,3 +58,5 @@ export async function GET(request: Request, context: RouteContext) {
   const nextCursor = fills.length > take ? fills[take - 1]?.id ?? null : null;
   return NextResponse.json({ items: fills.slice(0, take).map(serializePaperFill), nextCursor });
 }
+
+export const GET = withReplaySessionRoute(handleGET, { write: false, annotation: false });

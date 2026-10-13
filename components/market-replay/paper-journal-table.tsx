@@ -1,4 +1,6 @@
 "use client";
+import { useDeleteReplayCycle } from "./replay-correction-context";
+import { useReplayFetch, useReplaySession, useReplaySessionUrl } from "./replay-session-context";
 
 import { useCallback, useEffect, useMemo, useRef, useState, type KeyboardEvent as ReactKeyboardEvent, type PointerEvent as ReactPointerEvent } from "react";
 import { ChevronLeft, ChevronRight, Download, Loader2, Pencil, RotateCcw, Settings2, Trash2 } from "lucide-react";
@@ -125,6 +127,11 @@ export function PaperJournalTable({
   scope: "current" | "history";
   onFocus?: (entry: ReplayJournalEntryData) => void;
 }) {
+  const fetch = useReplayFetch();
+  const replaySession = useReplaySession();
+  const correction = useDeleteReplayCycle();
+  const canDeleteCycle = Boolean(correction && replaySession?.mode === "LIVE_REPLAY" && replaySession.status === "ACTIVE");
+  const scopedUrl = useReplaySessionUrl();
   const [items, setItems] = useState<ReplayJournalEntryData[]>([]);
   const [sessions, setSessions] = useState<JournalSessionSummary[]>([]);
   const [selectedSessionId, setSelectedSessionId] = useState<string | null>(null);
@@ -252,7 +259,7 @@ export function PaperJournalTable({
     } finally {
       if (requestId === loadRequestIdRef.current) setLoading(false);
     }
-  }, [datasetId, scope]);
+  }, [datasetId, scope, fetch]);
 
   useEffect(() => { void load(); }, [load]);
 
@@ -309,7 +316,7 @@ export function PaperJournalTable({
     }
     void loadSetupOptions();
     return () => { cancelled = true; };
-  }, []);
+  }, [fetch]);
 
   useEffect(() => {
     let cancelled = false;
@@ -331,7 +338,7 @@ export function PaperJournalTable({
     }
     void loadTradeReasons();
     return () => { cancelled = true; };
-  }, []);
+  }, [fetch]);
 
   useEffect(() => {
     const stored = window.localStorage.getItem(columnPreferenceKey);
@@ -785,7 +792,8 @@ export function PaperJournalTable({
     : journalColumns.filter((column) => column.id !== "review");
   const visibleColumnSet = new Set(visibleColumnIds);
   const visibleColumns = scopedJournalColumns.filter((column) => visibleColumnSet.has(column.id));
-  const baseTableWidth = visibleColumns.reduce((total, column) => total + columnWidths[column.id], 0);
+  const correctionColumnWidth = canDeleteCycle ? 80 : 0;
+  const baseTableWidth = visibleColumns.reduce((total, column) => total + columnWidths[column.id], correctionColumnWidth);
   const visibleTableWidth = Math.max(baseTableWidth, tableViewportWidth, tableWidthPreference ?? 0);
   const visibleTableLeftOffset = Math.max(tableLeftOffset, tableMinimumLeftOffset);
   const distributedTableExtraWidth = visibleColumns.length === 0
@@ -796,7 +804,7 @@ export function PaperJournalTable({
     accumulatedTableWidth += columnWidths[column.id] + distributedTableExtraWidth;
     return {
       column,
-      position: accumulatedTableWidth,
+      position: accumulatedTableWidth + (index === visibleColumns.length - 1 ? correctionColumnWidth : 0),
       isTableEdge: index === visibleColumns.length - 1,
     };
   });
@@ -850,7 +858,7 @@ export function PaperJournalTable({
         </div>
         <div className="flex flex-wrap items-center gap-2">
           <Button asChild variant="outline" size="sm">
-            <a href={`/api/market-datasets/${datasetId}/paper-journal/sessions/${selectedSession.id}/export`} download>
+            <a href={scopedUrl(`/api/market-datasets/${datasetId}/paper-journal/sessions/${selectedSession.id}/export`)} download>
               <Download className="h-4 w-4" aria-hidden="true" />
               {copy.paperTrading.exportJournalExcel}
             </a>
@@ -860,18 +868,19 @@ export function PaperJournalTable({
             <Settings2 className="h-4 w-4" aria-hidden="true" />
             {copy.paperTrading.setVisibleColumns}
           </Button>
-          <Button type="button" variant="outline" size="sm" onClick={beginRename} disabled={loading || deleting}>
+          {!replaySession || replaySession.status === "ACTIVE" ? <Button type="button" variant="outline" size="sm" onClick={beginRename} disabled={loading || deleting}>
             <Pencil className="h-4 w-4" aria-hidden="true" />
             {copy.paperTrading.renameJournalSession}
-          </Button>
+          </Button> : null}
         </div>
       </div>
       <div className="flex flex-wrap items-center gap-x-3 gap-y-2 rounded-md bg-slate-50 px-3 py-2 text-xs text-slate-600">
         <span className="font-medium text-slate-800">{selectedSession.name}</span>
         <span className="tabular-nums">{new Date(selectedSession.createdAt).toLocaleString("zh-CN")}</span>
         <span>{selectedSession.entryCount} {copy.paperTrading.journalRows}</span>
-        <span>{selectedSession.archivedAt ? copy.paperTrading.journalArchived : copy.paperTrading.journalCurrent}</span>
-        {selectedSession.archivedAt ? <Button type="button" variant="ghost" size="sm" className="ml-auto h-7 text-red-600" onClick={() => setDeleteTarget(selectedSession.id)}><Trash2 className="h-3.5 w-3.5" aria-hidden="true" />{copy.paperTrading.deleteJournalSession}</Button> : null}
+        <span>{replaySession?.status === "ARCHIVED" && !selectedSession.archivedAt ? copy.replaySessions.historicalVersion : selectedSession.archivedAt ? copy.paperTrading.journalArchived : copy.paperTrading.journalCurrent}</span>
+        {replaySession ? <><span>{replaySession.mode === "TRAINING" ? copy.replaySessions.training : copy.replaySessions.liveReplay}</span><span>{copy.replaySessions.source}</span></> : null}
+        {!replaySession && selectedSession.archivedAt ? <Button type="button" variant="ghost" size="sm" className="ml-auto h-7 text-red-600" onClick={() => setDeleteTarget(selectedSession.id)}><Trash2 className="h-3.5 w-3.5" aria-hidden="true" />{copy.paperTrading.deleteJournalSession}</Button> : null}
       </div>
       {summary ? <Card className="shadow-none">
         <CardHeader className="p-4 pb-3">
@@ -1049,6 +1058,7 @@ export function PaperJournalTable({
                 style={{ width: columnWidths[column.id] + distributedTableExtraWidth }}
               />
             ))}
+            {canDeleteCycle ? <col style={{ width: correctionColumnWidth }} /> : null}
           </colgroup>
           <thead className="bg-blue-50 text-xs text-slate-700"><tr>
             {visibleColumns.map((column) => (
@@ -1084,9 +1094,10 @@ export function PaperJournalTable({
                 </div>
                 </th>
               ))}
+            {canDeleteCycle ? <th className="border-b px-3 py-2 text-right">{copy.replaySessions.correction}</th> : null}
           </tr></thead>
           <tbody>{items.length === 0 && scope === "history" ? <tr>
-            <td colSpan={visibleColumnIds.length} className="px-4 py-8 text-center text-sm text-slate-500">
+            <td colSpan={visibleColumnIds.length + Number(canDeleteCycle)} className="px-4 py-8 text-center text-sm text-slate-500">
               {hasActiveFilters ? copy.paperTrading.noFilteredJournalEntries : copy.paperTrading.noJournalEntries}
             </td>
           </tr> : items.map((entry) => <tr key={entry.id} className="border-b last:border-b-0 hover:bg-slate-50">
@@ -1095,7 +1106,7 @@ export function PaperJournalTable({
               className="cursor-pointer font-medium text-blue-700 underline-offset-2 hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-600"
               onClick={() => onFocus(entry)}
             >{entry.no}</button> : <Link
-              href={`/market-replay/${datasetId}/history/${entry.journalSessionId}?trade=${entry.no}`}
+              href={`/market-replay/${datasetId}/history/${entry.journalSessionId}?trade=${entry.no}${replaySession?.status === "ARCHIVED" ? `&projectionId=${encodeURIComponent(replaySession.activeProjectionId)}` : ""}`}
               className="font-medium text-blue-700 underline-offset-2 hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-600"
               aria-label={copy.paperTrading.openHistoricalReplay(entry.no)}
             >{entry.no}</Link>}</td> : null}
@@ -1188,6 +1199,7 @@ export function PaperJournalTable({
                 {savingReviewIds.has(entry.id) ? <Loader2 className="pointer-events-none absolute right-2 top-2 h-4 w-4 animate-spin text-slate-500" aria-hidden="true" /> : null}
               </div>
             </td> : null}
+            {canDeleteCycle ? <td className="px-3 py-2 text-right"><Button type="button" variant="destructive" size="icon" disabled={loading || correction?.pending || !entry.cycleKey} aria-label={copy.replaySessions.deleteCycle} title={copy.replaySessions.deleteCycle} onClick={() => correction?.onDeleteCycle(entry)}><Trash2 className="h-4 w-4" aria-hidden="true" /></Button></td> : null}
           </tr>)}</tbody>
         </table>
       </div>

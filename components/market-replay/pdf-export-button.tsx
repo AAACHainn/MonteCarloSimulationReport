@@ -15,10 +15,12 @@ import { displayIntervalOptions } from "@/lib/market-replay/display-interval";
 import { formatInterval, isValidDisplayInterval } from "@/lib/market-replay/types";
 import { capturePdfChartPreferences } from "./use-replay-preferences";
 import { fetchPdfSnapshot, usePdfExport } from "./pdf-export-provider";
+import { useReplaySession } from "./replay-session-context";
 
 const t = copy.paperTrading.pdf;
 export function PdfExportButton({ datasetId, sessionId, filters, loading, count }: { datasetId: string; sessionId: string; filters: ReplayJournalFilters; loading: boolean; count: number }) {
   const task = usePdfExport();
+  const replaySession = useReplaySession();
   const [open, setOpen] = useState(false);
   const [snapshot, setSnapshot] = useState<PdfSnapshot | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -33,7 +35,7 @@ export function PdfExportButton({ datasetId, sessionId, filters, loading, count 
     const next = new AbortController(); controller.current = next;
     setOpen(true); setReading(true); setError(null); setSnapshot(null);
     try {
-      const data = await fetchPdfSnapshot(datasetId, sessionId, structuredClone(filters), next.signal);
+      const data = await fetchPdfSnapshot(datasetId, sessionId, structuredClone(filters), next.signal, replaySession?.id, replaySession?.status === "ARCHIVED" ? replaySession.activeProjectionId : undefined);
       next.signal.throwIfAborted();
       const source = data.dataset.sourceIntervalSeconds;
       const period = data.entries[0]?.displayIntervalSeconds ?? source ?? 300;
@@ -48,7 +50,7 @@ export function PdfExportButton({ datasetId, sessionId, filters, loading, count 
   function start() {
     if (!snapshot || !valid || task.active || reading || !snapshot.entries.length) return;
     try { window.localStorage.setItem(PDF_DETAIL_STORAGE_KEY, JSON.stringify({ includeDetails: options.includeDetails, detailFieldIds: options.detailFieldIds })); } catch { /* keep settings for this task */ }
-    task.start({ datasetId, sessionId, filters, options, preferences: capturePdfChartPreferences(snapshot.dataset) }); close();
+    task.start({ datasetId, sessionId, replaySessionId: replaySession?.id, viewProjectionId: replaySession?.status === "ARCHIVED" ? replaySession.activeProjectionId : undefined, filters, options, preferences: capturePdfChartPreferences(snapshot.dataset) }); close();
   }
   return <>
     <Button type="button" variant="outline" size="sm" disabled={loading || task.active || count === 0} title={task.active ? t.active : count === 0 ? t.empty : undefined} onClick={() => void show()}>

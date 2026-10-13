@@ -24,6 +24,7 @@ export type PaperSessionState = PaperAccountConfig & {
   peakEquity: number;
   maxDrawdown: number;
   version: number;
+  activeCycleKey?: string | null;
 };
 
 export type PaperOrderData = {
@@ -39,6 +40,7 @@ export type PaperOrderData = {
   reduceOnly: boolean;
   isProtective: boolean;
   ocoGroupId: string | null;
+  parentOrderId?: string | null;
   createdSequence: number;
   activeFromSequence: number;
   filledSequence: number | null;
@@ -50,6 +52,7 @@ export type PaperOrderData = {
 
 export type PaperFillData = {
   id: string;
+  cycleKey?: string | null;
   orderId: string;
   sequence: number;
   timestamp: string;
@@ -100,6 +103,7 @@ export type PaperPositionLotData = PaperJournalContext & {
 
 export type ReplayJournalEntryDraft = PaperJournalContext & {
   id: string;
+  cycleKey?: string | null;
   lotId: string;
   direction: "LONG" | "SHORT";
   quantity: number;
@@ -213,7 +217,7 @@ export type PaperAdvanceInput = {
   state: PaperSessionState;
   orders: PaperOrderData[];
   bar: MarketBarData;
-  makeId: () => string;
+  makeId: (cause?: string) => string;
   lots?: PaperPositionLotData[];
   journalContext?: PaperJournalContext | null;
 };

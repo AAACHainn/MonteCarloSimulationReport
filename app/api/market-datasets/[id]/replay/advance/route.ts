@@ -1,3 +1,5 @@
+import { withReplaySessionRoute } from '@/lib/replay-sessions/scope';
+import { progressWhere } from '@/lib/replay-sessions/scope';
 import { randomUUID } from "node:crypto";
 import { NextResponse } from "next/server";
 import { prisma, replayDatabaseQueryCount } from "@/lib/db";
@@ -12,7 +14,7 @@ import { attachReplayDiagnostics } from "@/lib/market-replay/server-diagnostics"
 
 type RouteContext = { params: Promise<{ id: string }> };
 
-export async function POST(request: Request, context: RouteContext) {
+async function handlePOST(request: Request, context: RouteContext) {
   const startedAt = performance.now();
   const queryStart = replayDatabaseQueryCount();
   const { id } = await context.params;
@@ -21,7 +23,7 @@ export async function POST(request: Request, context: RouteContext) {
 
   const [dataset, progress] = await Promise.all([
     prisma.marketDataset.findUnique({ where: { id } }),
-    prisma.replayProgress.findUnique({ where: { datasetId: id } }),
+    prisma.replayProgress.findFirst({ where: progressWhere(id) }),
   ]);
   if (!dataset || !progress) return NextResponse.json({ error: copy.marketReplay.datasetNotFound }, { status: 404 });
   if (parsed.data.historyVersion !== undefined && parsed.data.historyVersion !== dataset.historyVersion) return NextResponse.json({ error: copy.marketSync.historyChanged, code: "HISTORY_CHANGED" }, { status: 409 });
@@ -143,3 +145,5 @@ export async function POST(request: Request, context: RouteContext) {
     strategy: parsed.data.displayIntervalSeconds === undefined ? "source-advance" : "display-bucket-advance",
   });
 }
+
+export const POST = withReplaySessionRoute(handlePOST, { write: true, annotation: false });

@@ -1,3 +1,5 @@
+import { withReplaySessionRoute } from '@/lib/replay-sessions/scope';
+import { accountWhere, entryProjectionWhere, journalScopeWhere } from '@/lib/replay-sessions/scope';
 import { NextResponse } from "next/server";
 import { prisma } from "@/lib/db";
 import { copy } from "@/lib/i18n";
@@ -23,7 +25,7 @@ const ANNOTATION_SELECT = {
   priceTickSize: true,
 } as const;
 
-export async function GET(request: Request, context: RouteContext) {
+async function handleGET(request: Request, context: RouteContext) {
   const { id } = await context.params;
   const url = new URL(request.url);
   const parsed = replayTradeAnnotationsQuerySchema.safeParse({
@@ -44,9 +46,10 @@ export async function GET(request: Request, context: RouteContext) {
       where: parsed.data.journalSessionId
         ? {
             accountNo: parsed.data.journalNo,
-            journalSession: { id: parsed.data.journalSessionId, datasetId: id },
+            ...entryProjectionWhere(),
+            journalSession: { id: parsed.data.journalSessionId, datasetId: id, ...journalScopeWhere() },
           }
-        : { no: parsed.data.journalNo, journalSession: { datasetId: id } },
+        : { no: parsed.data.journalNo, ...entryProjectionWhere(), journalSession: { datasetId: id, ...journalScopeWhere() } },
       select: ANNOTATION_SELECT,
     });
     return NextResponse.json({
@@ -57,8 +60,8 @@ export async function GET(request: Request, context: RouteContext) {
 
   let journalSessionId = parsed.data.journalSessionId;
   if (!journalSessionId) {
-    const current = await prisma.paperTradingSession.findUnique({
-      where: { datasetId: id },
+    const current = await prisma.paperTradingSession.findFirst({
+      where: accountWhere(id),
       select: { journalSessionId: true },
     });
     journalSessionId = current?.journalSessionId ?? undefined;
@@ -71,7 +74,8 @@ export async function GET(request: Request, context: RouteContext) {
   const records = await prisma.replayJournalEntry.findMany({
     where: {
       journalSessionId,
-      journalSession: { datasetId: id },
+      ...entryProjectionWhere(),
+      journalSession: { datasetId: id, ...journalScopeWhere() },
       OR: [
         { openedSequence: { gte: fromSequence, lte: toSequence } },
         { closedSequence: { gte: fromSequence, lte: toSequence } },
@@ -88,3 +92,5 @@ export async function GET(request: Request, context: RouteContext) {
   const items = visibleRecords.map(serializeReplayTradeAnnotation);
   return NextResponse.json({ items, truncated });
 }
+
+export const GET = withReplaySessionRoute(handleGET, { write: false, annotation: false });

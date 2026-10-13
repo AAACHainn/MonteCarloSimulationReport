@@ -9,8 +9,11 @@ import type {
   PaperSessionState,
 } from "@/lib/paper-trading/types";
 import { paperStateFingerprint } from "@/lib/paper-trading/speculative";
+import { appendContextRun, type ReplayContextRun } from "@/lib/replay-sessions/context-runs";
+import type { PaperJournalContext } from "@/lib/paper-trading/types";
 
 export type PaperReplayDelta = {
+  contextRuns?: ReplayContextRun[];
   state: PaperSessionState;
   activeOrders: PaperOrderData[];
   orderChanges: PaperOrderData[];
@@ -45,6 +48,7 @@ export type ReplaySyncReceipt = {
 };
 
 export type PaperDeltaAccumulator = {
+  contextRuns: ReplayContextRun[];
   fromSequence: number;
   toSequence: number;
   orderChanges: Map<string, PaperOrderData>;
@@ -54,7 +58,7 @@ export type PaperDeltaAccumulator = {
 };
 
 export function createPaperDeltaAccumulator(sequence: number): PaperDeltaAccumulator {
-  return { fromSequence: sequence, toSequence: sequence, orderChanges: new Map(), fills: [], equityPoints: [], journalEntries: [] };
+  return { fromSequence: sequence, toSequence: sequence, orderChanges: new Map(), fills: [], equityPoints: [], journalEntries: [], contextRuns: [] };
 }
 
 export function recordPaperAdvance(
@@ -62,6 +66,8 @@ export function recordPaperAdvance(
   previous: PaperSessionSnapshot,
   result: PaperAdvanceResult,
   shouldSampleEquity: boolean,
+  context?: PaperJournalContext | null,
+  generation = 1,
 ) {
   const previousOrders = new Map([
     ...previous.activeOrders,
@@ -71,6 +77,7 @@ export function recordPaperAdvance(
     if (previousOrders.get(order.id) !== JSON.stringify(order)) accumulator.orderChanges.set(order.id, order);
   }
   accumulator.toSequence = result.state.lastProcessedSequence;
+  if (context !== undefined) appendContextRun(accumulator.contextRuns, result.state.lastProcessedSequence, context, generation);
   accumulator.fills.push(...result.fills);
   accumulator.journalEntries.push(...result.journalEntries);
   if (shouldSampleEquity) accumulator.equityPoints.push(result.equityPoint);
@@ -81,6 +88,7 @@ export function buildPaperReplayDelta(
   snapshot: PaperSessionSnapshot,
 ): PaperReplayDelta {
   return {
+    contextRuns: accumulator.contextRuns,
     state: snapshot.session,
     activeOrders: snapshot.activeOrders,
     orderChanges: [...accumulator.orderChanges.values()],
@@ -100,6 +108,7 @@ export function mergePaperDeltaAccumulators(
   for (const [id, order] of later.orderChanges) orderChanges.set(id, order);
   return {
     fromSequence: earlier.fromSequence,
+    contextRuns: [...earlier.contextRuns, ...later.contextRuns],
     toSequence: later.toSequence,
     orderChanges,
     fills: [...earlier.fills, ...later.fills],

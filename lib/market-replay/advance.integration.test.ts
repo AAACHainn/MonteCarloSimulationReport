@@ -1,3 +1,6 @@
+import type { Prisma } from "@prisma/client";
+import { loadReplayScope, runWithReplayScope } from "@/lib/replay-sessions/scope";
+import { logicalId, projectionRecordId } from "@/lib/replay-sessions/identity";
 import { execFileSync } from "node:child_process";
 import { rmSync } from "node:fs";
 import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
@@ -14,13 +17,12 @@ vi.mock("@/lib/db", async () => {
 });
 
 import { prisma } from "@/lib/db";
-import { POST } from "@/app/api/market-datasets/[id]/replay/advance/route";
-import { POST as syncPOST } from "@/app/api/market-datasets/[id]/replay/sync/route";
-import { POST as resetPOST } from "@/app/api/market-datasets/[id]/replay/reset/route";
-import { POST as paperSessionPOST } from "@/app/api/market-datasets/[id]/paper-session/route";
-import { GET as progressGET, PUT as progressPUT } from "@/app/api/market-datasets/[id]/progress/route";
+import { POST as advanceRoutePOST } from "@/app/api/market-datasets/[id]/replay/advance/route";
+import { POST as syncPOSTRoute } from "@/app/api/market-datasets/[id]/replay/sync/route";
+import { POST as resetPOSTRoute } from "@/app/api/market-datasets/[id]/replay/reset/route";
+import { GET as progressGETRoute, PUT as progressPUTRoute } from "@/app/api/market-datasets/[id]/progress/route";
 import { advancePaperTrading } from "@/lib/paper-trading/engine";
-import { getPaperSessionSnapshot, serializePaperSession, serializePaperOrder } from "@/lib/paper-trading/serialize";
+import { getPaperSessionSnapshot as rawGetPaperSessionSnapshot, serializePaperSession, serializePaperOrder } from "@/lib/paper-trading/serialize";
 import { serializeSourceBar } from "./dataset";
 import { createDeterministicEventIdFactory } from "@/lib/paper-trading/deterministic-id";
 import type { PaperFillData, PaperEquityPointData, PaperSessionSnapshot } from "@/lib/paper-trading/types";
@@ -32,13 +34,45 @@ import { resolveDisplaySession } from "./chart-sessions";
 import { getAggregationBucket } from "./aggregation";
 import { buildMarketBarBlocks } from "./bar-blocks";
 
+
+const fixtureSessions = new Map<string, string>();
+function fixtureRoute<P extends { id: string }>(handler: (request: Request, context: { params: Promise<P> }) => Promise<Response>) {
+  return async (incoming: Request, routeContext: { params: Promise<P> }) => {
+    const { id } = await routeContext.params;
+    const scope = await loadReplayScope(fixtureSessions.get(id)!);
+    const url = new URL(incoming.url); url.searchParams.set("replaySessionId", scope.id);
+    const headers = new Headers(incoming.headers);
+    if (!headers.has("X-Replay-Projection")) headers.set("X-Replay-Projection", scope.projectionId);
+    const input = new Request(url, { method: incoming.method, headers,
+      ...(!["GET", "HEAD"].includes(incoming.method) ? { body: await incoming.clone().text() } : {}) });
+    const response = await handler(input, routeContext);
+    if (handler === resetPOSTRoute && response.ok) {
+      const body = await response.clone().json();
+      if (body.replaySessionId) fixtureSessions.set(id, body.replaySessionId);
+    }
+    return response;
+  };
+}
+const POST = fixtureRoute(advanceRoutePOST);
+const syncPOST = fixtureRoute(syncPOSTRoute);
+const resetPOST = fixtureRoute(resetPOSTRoute);
+const progressGET = fixtureRoute(progressGETRoute);
+const progressPUT = fixtureRoute(progressPUTRoute);
+async function getPaperSessionSnapshot(id: string) {
+  return runWithReplayScope(await loadReplayScope(fixtureSessions.get(id)!), () => rawGetPaperSessionSnapshot(id));
+}
+async function seedOrder(data: Prisma.PaperOrderUncheckedCreateInput) {
+  const account = await prisma.paperTradingSession.findFirstOrThrow({ where: { OR: [{ id: data.sessionId }, { id: { endsWith: "::" + data.sessionId } }], projection: { activeFor: { status: "ACTIVE" } } } });
+  return prisma.paperOrder.create({ data: { ...data, sessionId: account.id, id: projectionRecordId(account.projectionId, data.id!) } });
+}
+
 let databaseFile = "";
 const baseTime = Date.UTC(2026, 8, 1);
 const request = (body: unknown) => new Request("http://localhost/api/advance", {
   method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body),
 });
-const syncRequest = (body: unknown) => new Request("http://localhost/api/sync", {
-  method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body),
+const syncRequest = (body: Record<string, unknown> & { expectedProjectionId?: string }) => new Request("http://localhost/api/sync", {
+  method: "POST", headers: { "Content-Type": "application/json", ...(body.expectedProjectionId ? { "X-Replay-Projection": body.expectedProjectionId } : {}) }, body: JSON.stringify(body),
 });
 const context = (id: string) => ({ params: Promise.resolve({ id }) });
 
@@ -53,7 +87,7 @@ beforeAll(async () => {
 afterAll(async () => {
   await prisma.$disconnect();
   if (databaseFile.includes("replay-integration-")) {
-    for (const suffix of ["", "-journal", "-wal", "-shm"]) rmSync(databaseFile + suffix, { force: true });
+    rmSync(databaseFile, { force: true });
   }
 });
 
@@ -79,11 +113,16 @@ async function seed(
         open: close, high: close + 1, low: close - 1, close, volume: 10 };
     }) });
   }
+  const replay = await prisma.replaySession.create({ data: { datasetId: id, name: id, mode: "TRAINING", legacy: true } });
+  const projection = await prisma.replayProjection.create({ data: { replaySessionId: replay.id, generation: 1, status: "CURRENT", historyVersion: 1, currentSequence: start } });
+  await prisma.replaySession.update({ where: { id: replay.id }, data: { activeProjectionId: projection.id } });
+  fixtureSessions.set(id, replay.id);
   await prisma.replayProgress.create({ data: {
-    datasetId: id, startSequence: start + 1, currentSequence: start,
+    datasetId: id, replaySessionId: replay.id, startSequence: start + 1, currentSequence: start,
     playbackRate: 20, displayIntervalSeconds: 300,
   } });
   if (paper) await prisma.paperTradingSession.create({ data: {
+    id: projectionRecordId(projection.id, "account-" + id), projectionId: projection.id,
     datasetId: id, initialCapital: 100000, currency: "USD", peakEquity: 100000,
     lastProcessedSequence: start, equitySampleStride: Math.max(1, Math.ceil(count / 20000)),
   } });
@@ -92,7 +131,7 @@ async function seed(
 async function clientSyncBody(id: string, targetSequence: number, requestId: string) {
   const [dataset, progress, snapshot] = await Promise.all([
     prisma.marketDataset.findUniqueOrThrow({ where: { id } }),
-    prisma.replayProgress.findUniqueOrThrow({ where: { datasetId: id } }),
+    prisma.replayProgress.findFirstOrThrow({ where: { datasetId: id } }),
     getPaperSessionSnapshot(id),
   ]);
   const accumulator = createPaperDeltaAccumulator(progress.currentSequence);
@@ -108,12 +147,13 @@ async function clientSyncBody(id: string, targetSequence: number, requestId: str
         makeId: createDeterministicEventIdFactory(visible.session.id, progress.generation, record.sequence),
       });
       recordPaperAdvance(accumulator, visible, result,
-        result.fills.length > 0 || record.sequence === dataset.barCount - 1 || record.sequence % Math.max(1, Math.ceil(dataset.barCount / 20_000)) === 0);
+        result.fills.length > 0 || record.sequence === dataset.barCount - 1 || record.sequence % Math.max(1, Math.ceil(dataset.barCount / 20_000)) === 0, null, progress.generation);
       visible = applySpeculativeAdvance(visible, result);
     }
   }
   accumulator.toSequence = targetSequence;
   return {
+    expectedProjectionId: (await loadReplayScope(fixtureSessions.get(id)!)).projectionId,
     generation: progress.generation, requestId, confirmedSequence: progress.currentSequence,
     syncVersion: progress.syncVersion, dataVersion: dataset.dataVersion,
     expectedPaperVersion: snapshot?.session.version ?? null, targetSequence,
@@ -174,7 +214,7 @@ describe("replay advance with real SQLite", () => {
     expect(await prisma.paperEquityPoint.count({
       where: { session: { datasetId: "sync-idempotent" } },
     })).toBe(100);
-    const progress = await prisma.replayProgress.findUniqueOrThrow({ where: { datasetId: "sync-idempotent" } });
+    const progress = await prisma.replayProgress.findFirstOrThrow({ where: { datasetId: "sync-idempotent" } });
     expect(progress).toMatchObject({ currentSequence: 99, syncVersion: 1, lastSyncRequestId: "same-request" });
   });
 
@@ -186,8 +226,8 @@ describe("replay advance with real SQLite", () => {
     const response = await syncPOST(syncRequest(body), context("sync-tampered"));
     expect(response.status).toBe(400);
     const [progress, session] = await Promise.all([
-      prisma.replayProgress.findUniqueOrThrow({ where: { datasetId: "sync-tampered" } }),
-      prisma.paperTradingSession.findUniqueOrThrow({ where: { datasetId: "sync-tampered" } }),
+      prisma.replayProgress.findFirstOrThrow({ where: { datasetId: "sync-tampered" } }),
+      prisma.paperTradingSession.findFirstOrThrow({ where: { datasetId: "sync-tampered" } }),
     ]);
     expect(progress).toMatchObject({ currentSequence: -1, syncVersion: 0 });
     expect(session).toMatchObject({ lastProcessedSequence: -1, version: 1, totalFees: 0 });
@@ -195,6 +235,7 @@ describe("replay advance with real SQLite", () => {
 
   it("rejects stale sync versions and requests from a reset generation", async () => {
     await seed("sync-generation", 1, 300, -1, false);
+    const originalProjection = (await loadReplayScope(fixtureSessions.get("sync-generation")!)).projectionId;
     const staleVersion = await syncPOST(syncRequest({
       generation: 1, requestId: "version", confirmedSequence: -1, syncVersion: 1,
       dataVersion: 1, expectedPaperVersion: null, targetSequence: 1, paperDelta: null,
@@ -204,9 +245,10 @@ describe("replay advance with real SQLite", () => {
     const reset = await resetPOST(request({ action: "RESET" }), context("sync-generation"));
     expect(reset.status).toBe(200);
     const resetBody = await reset.json();
-    expect(resetBody.generation).toBe(2);
+    expect(resetBody.generation).toBe(1);
+    expect(resetBody.replaySessionId).toBe(fixtureSessions.get("sync-generation"));
     const staleGeneration = await syncPOST(syncRequest({
-      generation: 1, requestId: "old-generation", confirmedSequence: -1, syncVersion: 0,
+      expectedProjectionId: originalProjection, generation: 1, requestId: "old-generation", confirmedSequence: -1, syncVersion: 0,
       dataVersion: 1, expectedPaperVersion: null, targetSequence: 1, paperDelta: null,
     }), context("sync-generation"));
     expect(staleGeneration.status).toBe(409);
@@ -223,11 +265,11 @@ describe("replay advance with real SQLite", () => {
 
   it("matches browser-side deterministic fill and protective-order ids", async () => {
     await seed("sync-deterministic", 1, 30);
-    const session = await prisma.paperTradingSession.findUniqueOrThrow({ where: { datasetId: "sync-deterministic" } });
-    await prisma.paperOrder.create({ data: {
+    const session = await prisma.paperTradingSession.findFirstOrThrow({ where: { datasetId: "sync-deterministic" } });
+    await seedOrder({
       id: "entry-sync", sessionId: session.id, side: "BUY", type: "MARKET", quantity: 2,
       stopLoss: 95, takeProfit: 105, createdSequence: -1, activeFromSequence: 0,
-    } });
+    });
     let state = serializePaperSession(session);
     let orders = (await prisma.paperOrder.findMany({ where: { sessionId: session.id } })).map(serializePaperOrder);
     const bars = await prisma.marketBar.findMany({
@@ -240,7 +282,7 @@ describe("replay advance with real SQLite", () => {
         state,
         orders,
         bar: serializeSourceBar(record),
-        makeId: createDeterministicEventIdFactory(session.id, 1, record.sequence),
+        makeId: createDeterministicEventIdFactory(logicalId(session.id), 1, record.sequence),
       });
       state = result.state;
       orders = result.orders;
@@ -255,8 +297,8 @@ describe("replay advance with real SQLite", () => {
       where: { sessionId: session.id, isProtective: true },
       orderBy: { id: "asc" },
     });
-    expect(persistedFills.map((fill) => fill.id)).toEqual(expectedFillIds);
-    expect(persistedProtective.map((order) => order.id)).toEqual(
+    expect(persistedFills.map((fill) => logicalId(fill.id))).toEqual(expectedFillIds);
+    expect(persistedProtective.map((order) => logicalId(order.id))).toEqual(
       orders.filter((order) => order.isProtective).map((order) => order.id).sort(),
     );
   });
@@ -266,14 +308,14 @@ describe("replay advance with real SQLite", () => {
     await seed(id, 1, 30);
     const [dataset, progress, initial] = await Promise.all([
       prisma.marketDataset.findUniqueOrThrow({ where: { id } }),
-      prisma.replayProgress.findUniqueOrThrow({ where: { datasetId: id } }),
+      prisma.replayProgress.findFirstOrThrow({ where: { datasetId: id } }),
       getPaperSessionSnapshot(id),
     ]);
     if (!initial) throw new Error("Expected a paper session");
-    await prisma.paperOrder.create({ data: {
+    await seedOrder({
       id: "metadata-entry", sessionId: initial.session.id, side: "BUY", type: "MARKET", quantity: 2,
       stopLoss: 95, takeProfit: 105, createdSequence: -1, activeFromSequence: 0,
-    } });
+    });
     const starting = await getPaperSessionSnapshot(id);
     if (!starting) throw new Error("Expected a paper session snapshot");
 
@@ -286,7 +328,7 @@ describe("replay advance with real SQLite", () => {
         bar: serializeSourceBar(record),
         makeId: createDeterministicEventIdFactory(snapshot.session.id, progress.generation, sequence),
       });
-      recordPaperAdvance(accumulator, snapshot, result, true);
+      recordPaperAdvance(accumulator, snapshot, result, true, null, progress.generation);
       const next = applySpeculativeAdvance(snapshot, result);
       return { next, delta: buildPaperReplayDelta(accumulator, next) };
     };
@@ -301,7 +343,8 @@ describe("replay advance with real SQLite", () => {
     const firstReceipt = await firstResponse.json();
     expect(first.next.activeOrders).toHaveLength(2);
     expect(first.next.activeOrders.every((order) => order.createdAt === undefined)).toBe(true);
-    const persistedProtective = await prisma.paperOrder.findMany({ where: { sessionId: starting.session.id, status: "PENDING" } });
+    const persistedProtective = await prisma.paperOrder.findMany({ where: { sessionId: projectionRecordId((await loadReplayScope(fixtureSessions.get(id)!)).projectionId, starting.session.id), status: "PENDING" } });
+    expect(persistedProtective).toHaveLength(2);
     expect(persistedProtective.every((order) => order.createdAt instanceof Date)).toBe(true);
 
     const second = await advanceOne(first.next, 1);
@@ -394,11 +437,11 @@ describe("replay advance with real SQLite", () => {
 
   it("matches sequential source-bar fills, OCO, equity and drawdown during a displayed step", async () => {
     await seed("trades", 1, 600);
-    const session = await prisma.paperTradingSession.findUniqueOrThrow({ where: { datasetId: "trades" } });
-    await prisma.paperOrder.create({ data: {
+    const session = await prisma.paperTradingSession.findFirstOrThrow({ where: { datasetId: "trades" } });
+    await seedOrder({
       id: "entry", sessionId: session.id, side: "BUY", type: "MARKET", quantity: 2,
       stopLoss: 95, takeProfit: 105, createdSequence: -1, activeFromSequence: 0,
-    } });
+    });
     await prisma.marketBar.update({ where: { datasetId_sequence: { datasetId: "trades", sequence: 10 } },
       data: { open: 100, high: 110, low: 90, close: 102 } });
     const source = await prisma.marketBar.findMany({ where: { datasetId: "trades", sequence: { lte: 299 } }, orderBy: { sequence: "asc" } });
@@ -436,11 +479,11 @@ describe("replay advance with real SQLite", () => {
   it("persists closed-trade statistics incrementally", async () => {
     const id = "incremental-trade-stats";
     await seed(id, 1, 3);
-    const session = await prisma.paperTradingSession.findUniqueOrThrow({ where: { datasetId: id } });
-    await prisma.paperOrder.create({ data: {
+    const session = await prisma.paperTradingSession.findFirstOrThrow({ where: { datasetId: id } });
+    await seedOrder({
       id: "stats-entry", sessionId: session.id, side: "BUY", type: "MARKET", quantity: 2,
       stopLoss: 90, takeProfit: 105, createdSequence: -1, activeFromSequence: 0,
-    } });
+    });
     await prisma.marketBar.update({
       where: { datasetId_sequence: { datasetId: id, sequence: 1 } },
       data: { high: 110 },
@@ -455,7 +498,7 @@ describe("replay advance with real SQLite", () => {
       tradeCount: 1, winRate: 1, profitFactor: null,
       averageWin: 10, averageLoss: 0, maxConsecutiveWins: 1, maxConsecutiveLosses: 0,
     });
-    expect(await prisma.paperTradingSession.findUniqueOrThrow({ where: { datasetId: id } })).toMatchObject({
+    expect(await prisma.paperTradingSession.findFirstOrThrow({ where: { datasetId: id } })).toMatchObject({
       tradeStatsVersion: 1, closedTradeCount: 1, winningTradeCount: 1, losingTradeCount: 0,
       grossWinningPnl: 10, grossLosingPnl: 0, maxConsecutiveWins: 1,
     });
@@ -471,19 +514,18 @@ describe("replay advance with real SQLite", () => {
 
     const reset = await resetPOST(request({ action: "RESET" }), context(id));
     expect(reset.status).toBe(200);
-    expect(await prisma.paperTradingSession.findUnique({ where: { datasetId: id } })).toBeNull();
+    expect(await prisma.paperTradingSession.findUnique({ where: { id: session.id } })).not.toBeNull();
+    expect(await prisma.replaySession.findFirst({ where: { datasetId: id, status: "ARCHIVED" } })).not.toBeNull();
     expect(await prisma.replayJournalEntry.count({ where: { journalSession: { datasetId: id } } })).toBe(1);
-    expect((await prisma.replayJournalSession.findFirstOrThrow({ where: { datasetId: id } })).archivedAt).not.toBeNull();
+    expect((await prisma.replayJournalSession.findUniqueOrThrow({ where: { id: journalEntry.journalSessionId } })).archivedAt).not.toBeNull();
 
-    const createAccount = await paperSessionPOST(request({
-      initialCapital: 100000, currency: "USD", commissionBps: 0, slippageBps: 0,
-    }), context(id));
-    expect(createAccount.status).toBe(201);
-    const newSession = await prisma.paperTradingSession.findUniqueOrThrow({ where: { datasetId: id } });
-    await prisma.paperOrder.create({ data: {
+    const newScope = await loadReplayScope(fixtureSessions.get(id)!);
+    const newSession = await prisma.paperTradingSession.findUniqueOrThrow({ where: { projectionId: newScope.projectionId } });
+    expect(newSession).toMatchObject({ initialCapital: 100000, netQuantity: 0, closedTradeCount: 0 });
+    await seedOrder({
       id: "stats-entry-new-account", sessionId: newSession.id, side: "BUY", type: "MARKET", quantity: 1,
       stopLoss: 90, takeProfit: 105, createdSequence: -1, activeFromSequence: 0,
-    } });
+    });
     const secondAdvance = await POST(request({
       expectedCurrentSequence: -1, expectedVersion: 1, count: 2,
     }), context(id));
@@ -499,7 +541,7 @@ describe("replay advance with real SQLite", () => {
   it("backfills incremental statistics once for a legacy paper session", async () => {
     const id = "legacy-trade-stats";
     await seed(id, 1, 2);
-    const session = await prisma.paperTradingSession.findUniqueOrThrow({ where: { datasetId: id } });
+    const session = await prisma.paperTradingSession.findFirstOrThrow({ where: { datasetId: id } });
     await prisma.paperTrade.createMany({ data: [
       { sessionId: session.id, side: "LONG", status: "CLOSED", openedSequence: 0,
         openedAt: new Date(baseTime), closedSequence: 0, closedAt: new Date(baseTime), grossPnl: 12, fees: 2 },
@@ -516,7 +558,7 @@ describe("replay advance with real SQLite", () => {
       tradeCount: 2, winRate: 0.5, profitFactor: 2,
       averageWin: 10, averageLoss: -5, maxConsecutiveWins: 1, maxConsecutiveLosses: 1,
     });
-    expect(await prisma.paperTradingSession.findUniqueOrThrow({ where: { datasetId: id } })).toMatchObject({
+    expect(await prisma.paperTradingSession.findFirstOrThrow({ where: { datasetId: id } })).toMatchObject({
       tradeStatsVersion: 1, closedTradeCount: 2, winningTradeCount: 1, losingTradeCount: 1,
       grossWinningPnl: 10, grossLosingPnl: 5,
     });
@@ -526,7 +568,7 @@ describe("replay advance with real SQLite", () => {
   it("repairs a cursor left behind by an older client using the processed account cursor", async () => {
     await seed("old-client", 1, 600);
     await POST(request({ expectedCurrentSequence: -1, expectedVersion: 1, count: 1, displayIntervalSeconds: 300 }), context("old-client"));
-    await prisma.replayProgress.update({ where: { datasetId: "old-client" }, data: { currentSequence: 0 } });
+    await prisma.replayProgress.updateMany({ where: { datasetId: "old-client" }, data: { currentSequence: 0 } });
     const response = await progressGET(new Request("http://localhost/api/progress"), context("old-client"));
     const recovered = await response.json();
     expect(recovered.progress.currentSequence).toBe(299);
@@ -536,13 +578,13 @@ describe("replay advance with real SQLite", () => {
 
   it("does not resurrect a cleared replay from a delayed save", async () => {
     await seed("cleared", 1, 10, -1, false);
-    await prisma.replayProgress.delete({ where: { datasetId: "cleared" } });
+    await prisma.replayProgress.deleteMany({ where: { datasetId: "cleared" } });
     const response = await progressPUT(new Request("http://localhost/api/progress", {
       method: "PUT", headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ startSequence: 0, currentSequence: -1, playbackRate: 1, displayIntervalSeconds: 300 }),
     }), context("cleared"));
     expect(response.status).toBe(409);
-    expect(await prisma.replayProgress.findUnique({ where: { datasetId: "cleared" } })).toBeNull();
+    expect(await prisma.replayProgress.findFirst({ where: { datasetId: "cleared" } })).toBeNull();
   });
 
 
@@ -662,11 +704,11 @@ describe("replay advance with real SQLite", () => {
     const count = 1_041;
     for (const id of ["cme-rth", "cme-eth"]) {
       await seed(id, 60, count, -1, true, { symbol: "ES", startTimeMs });
-      const session = await prisma.paperTradingSession.findUniqueOrThrow({ where: { datasetId: id } });
-      await prisma.paperOrder.create({ data: {
+      const session = await prisma.paperTradingSession.findFirstOrThrow({ where: { datasetId: id } });
+      await seedOrder({
         id: `${id}-night-entry`, sessionId: session.id, side: "BUY", type: "MARKET", quantity: 2,
         createdSequence: -1, activeFromSequence: 0,
-      } });
+      });
     }
 
     const rthResponse = await POST(request({
@@ -732,8 +774,8 @@ describe("replay advance with real SQLite", () => {
       const samples: number[] = [];
       let bytes = 0;
       for (let step = 0; step < 14; step++) {
-        const progress = await prisma.replayProgress.findUniqueOrThrow({ where: { datasetId: id } });
-        const session = await prisma.paperTradingSession.findUniqueOrThrow({ where: { datasetId: id } });
+        const progress = await prisma.replayProgress.findFirstOrThrow({ where: { datasetId: id } });
+        const session = await prisma.paperTradingSession.findFirstOrThrow({ where: { datasetId: id } });
         const start = performance.now();
         const response = await POST(request({
           expectedCurrentSequence: progress.currentSequence, expectedVersion: session.version, count: 1, displayIntervalSeconds: 300,

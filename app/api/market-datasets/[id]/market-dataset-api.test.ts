@@ -41,7 +41,7 @@ function dataset(overrides: Record<string, unknown> = {}) {
     sessionCloseMinute: null,
     tradingWeekdays: "1,2,3,4,5,6,7",
     barCount: 2,
-    progress: { displayIntervalSeconds: 1 },
+    progress: [{ id: "progress-1", displayIntervalSeconds: 1 }],
     ...overrides,
   };
 }
@@ -73,11 +73,11 @@ describe("market dataset settings API", () => {
         priceTickSize: 0.25,
         dataVersion: { increment: 1 },
         historyVersion: { increment: 1 },
-        progress: { update: {
+        progress: { update: [{ where: { id: "progress-1" }, data: {
           displayIntervalSeconds: 60,
           lastSyncRequestId: null,
           lastSyncResponse: null,
-        } },
+        } }] },
       },
     });
     await expect(response.json()).resolves.toMatchObject({

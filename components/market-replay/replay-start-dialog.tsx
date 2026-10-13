@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useState, type ReactNode } from "react";
 import { format } from "date-fns";
 import { zhCN } from "date-fns/locale";
 import { ChevronLeft, ChevronRight } from "lucide-react";
@@ -38,6 +38,10 @@ export function ReplayStartDialog({
   onChange,
   onCancel,
   onConfirm,
+  title,
+  description,
+  confirmLabel,
+  children,
 }: {
   open: boolean;
   value: string;
@@ -49,6 +53,10 @@ export function ReplayStartDialog({
   onChange: (value: string) => void;
   onCancel: () => void;
   onConfirm: () => void;
+  title?: string;
+  description?: string;
+  confirmLabel?: string;
+  children?: ReactNode;
 }) {
   const selectedParts = parts(value) ?? parts(minimum)!;
   const minimumParts = parts(minimum)!;
@@ -83,12 +91,13 @@ export function ReplayStartDialog({
   return (
     <Dialog
       open={open}
-      title={copy.marketReplay.selectReplayDate}
-      description={copy.marketReplay.selectReplayDateDescription}
+      title={title ?? copy.marketReplay.selectReplayDate}
+      description={description ?? copy.marketReplay.selectReplayDateDescription}
       className="max-w-sm"
       onClose={() => { if (!busy) onCancel(); }}
     >
       <div className="space-y-4">
+        {children}
         <div className="grid grid-cols-[1fr_8.5rem] gap-3">
           <div className="space-y-1.5">
             <Label htmlFor="replay-start-date">{copy.marketReplay.startDate}</Label>
@@ -180,7 +189,7 @@ export function ReplayStartDialog({
         {error ? <p className="text-sm text-red-600">{error}</p> : null}
         <div className="flex justify-end gap-2 border-t pt-4">
           <Button type="button" variant="outline" disabled={busy} onClick={onCancel}>{copy.common.cancel}</Button>
-          <Button type="button" disabled={busy} onClick={onConfirm}>{busy ? copy.marketReplay.selectingReplayDate : copy.marketReplay.selectReplayDateConfirm}</Button>
+          <Button type="button" disabled={busy} onClick={onConfirm}>{busy ? copy.marketReplay.selectingReplayDate : confirmLabel ?? copy.marketReplay.selectReplayDateConfirm}</Button>
         </div>
       </div>
     </Dialog>

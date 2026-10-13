@@ -33,6 +33,7 @@ export function paperStateFingerprint(session: PaperSessionState, activeOrders: 
   const state = {
     lastProcessedSequence: session.lastProcessedSequence,
     netQuantity: session.netQuantity,
+    activeCycleKey: session.activeCycleKey ?? null,
     averageEntryPrice: session.averageEntryPrice,
     realizedPnl: session.realizedPnl,
     totalFees: session.totalFees,

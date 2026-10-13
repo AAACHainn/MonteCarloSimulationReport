@@ -1,6 +1,12 @@
 "use client";
 
-import { TZDate } from "@date-fns/tz";
+import { dateTimeLocalValue, selectedTimeToTimestamp } from "@/lib/market-replay/start-time";
+import { useReplayFetch, useReplaySession } from "./replay-session-context";
+import { useRouter } from "next/navigation";
+import { ReplayDateDialog } from "./replay-date-dialog";
+import { ReplaySessionSwitch } from "./replay-session-switch";
+import { ReplayCorrectionProvider } from "./replay-correction-context";
+import { ReplayCorrectionDialog, type CorrectionTarget } from "./replay-correction-dialog";
 import Link from "next/link";
 import { startTransition, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { BookOpen, ListTree, Loader2, Palette, RotateCcw, Ruler, Settings2, Trash2, TrendingUp, WalletCards, X } from "lucide-react";
@@ -29,7 +35,6 @@ import { copy } from "@/lib/i18n";
 import {
   createReplayState,
   calculatePlaybackAdvance,
-  resetReplay,
   setDisplayInterval,
   setDisplaySession,
   setPlaybackRate,
@@ -92,6 +97,7 @@ import {
   recordPaperAdvance,
   type ReplaySyncReceipt,
   type ReplaySyncRequest,
+  type PaperDeltaAccumulator,
 } from "@/lib/market-replay/client-sync";
 
 import { useReplayState } from "@/lib/market-replay/use-replay-state";
@@ -191,23 +197,6 @@ function isValidEmaLength(value: unknown): value is number {
   return Number.isInteger(value) && Number(value) >= EMA_LENGTH_MIN && Number(value) <= EMA_LENGTH_MAX;
 }
 
-function dateTimeLocalValue(value: string, timezone: string) {
-  const parts = Object.fromEntries(new Intl.DateTimeFormat("en-CA", {
-    timeZone: timezone, year: "numeric", month: "2-digit", day: "2-digit",
-    hour: "2-digit", minute: "2-digit", second: "2-digit", hourCycle: "h23",
-  }).formatToParts(new Date(value)).filter((part) => part.type !== "literal").map((part) => [part.type, part.value]));
-  return `${parts.year}-${parts.month}-${parts.day}T${parts.hour}:${parts.minute}:${parts.second}`;
-}
-
-function selectedTimeToTimestamp(value: string, timezone: string) {
-  const match = /^(\d{4})-(\d{2})-(\d{2})T(\d{2}):(\d{2})(?::(\d{2}))?$/.exec(value);
-  if (!match) return Number.NaN;
-  return new TZDate(
-    Number(match[1]), Number(match[2]) - 1, Number(match[3]),
-    Number(match[4]), Number(match[5]), Number(match[6] ?? 0), timezone,
-  ).getTime();
-}
-
 function formatDatasetTime(value: string, timezone: string) {
   return new Intl.DateTimeFormat("zh-CN", {
     timeZone: timezone, year: "numeric", month: "2-digit", day: "2-digit",
@@ -218,9 +207,22 @@ function formatDatasetTime(value: string, timezone: string) {
 type JournalFocus = { sequence: number; no: number; globalNo: number };
 
 export function MarketReplayClient({ dataset: initialDataset, initialJournalFocus = null }: { dataset: MarketDatasetSummary; initialJournalFocus?: JournalFocus | null }) {
+  const fetch = useReplayFetch();
+  const replaySession = useReplaySession();
+  const router = useRouter();
+  const [dateDialogOpen, setDateDialogOpen] = useState(false);
+  const [dateForwarding, setDateForwarding] = useState(false);
+  const [forwardProgress, setForwardProgress] = useState<{ current: number; target: number } | null>(null);
+  const cancelForwardRef = useRef(false);
+  const [correctionTarget, setCorrectionTarget] = useState<CorrectionTarget | null>(null);
+  const [correctionPending, setCorrectionPending] = useState(Boolean(replaySession?.pendingCorrectionId));
+  useEffect(() => { setCorrectionPending(Boolean(replaySession?.pendingCorrectionId)); }, [replaySession?.pendingCorrectionId]);
   const [dataset, setLiveDataset] = useState(initialDataset);
   const initializedDatasetRef = useRef<string | null>(null);
   const historyConflictRef = useRef(false);
+  const preserveFailedSyncRef = useRef(false);
+  const retrySyncBodyRef = useRef<{ body: ReplaySyncRequest; replay: ReplayState; checkpoint: PaperSessionSnapshot | null; accumulator: PaperDeltaAccumulator } | null>(null);
+  const [switchSyncFailed, setSwitchSyncFailed] = useState(false);
   const shortcuts = useReplayShortcuts();
   const [webFullscreen, setWebFullscreen] = useState(false);
   const [bars, setBars] = useState<AggregatedMarketBarData[]>([]);
@@ -456,7 +458,7 @@ export function MarketReplayClient({ dataset: initialDataset, initialJournalFocu
       }
     })();
     return () => controller.abort();
-  }, [dataset.id]);
+  }, [dataset.id, fetch]);
 
   const armDrawing = useCallback((tool: DrawingTool) => {
     setMeasurementArmed(false);
@@ -509,7 +511,7 @@ export function MarketReplayClient({ dataset: initialDataset, initialJournalFocu
     } finally {
       setDrawingPending(temporaryId, false);
     }
-  }, [dataset.id, defaultFibonacciStyle, defaultTrendLineStyle, setDrawingPending]);
+  }, [dataset.id, defaultFibonacciStyle, defaultTrendLineStyle, setDrawingPending, fetch]);
 
   const updateDrawing = useCallback(async (
     id: string,
@@ -539,7 +541,7 @@ export function MarketReplayClient({ dataset: initialDataset, initialJournalFocu
     } finally {
       setDrawingPending(id, false);
     }
-  }, [dataset.id, drawings, pendingDrawingIds, setDrawingPending]);
+  }, [dataset.id, drawings, pendingDrawingIds, setDrawingPending, fetch]);
 
   const deleteDrawing = useCallback(async (id: string) => {
     const index = drawings.findIndex((drawing) => drawing.id === id);
@@ -566,7 +568,7 @@ export function MarketReplayClient({ dataset: initialDataset, initialJournalFocu
     } finally {
       setDrawingPending(id, false);
     }
-  }, [dataset.id, drawings, pendingDrawingIds, setDrawingPending, styleDrawingId]);
+  }, [dataset.id, drawings, pendingDrawingIds, setDrawingPending, styleDrawingId, fetch]);
 
   const openDrawingStyle = useCallback((id: string) => {
     const drawing = drawings.find((item) => item.id === id);
@@ -670,7 +672,7 @@ export function MarketReplayClient({ dataset: initialDataset, initialJournalFocu
     } finally {
       if (annotationAbortRef.current === controller) annotationAbortRef.current = null;
     }
-  }, [dataset.id]);
+  }, [dataset.id, fetch]);
 
   const loadWindow = useCallback(async (
     endSequence: number,
@@ -748,7 +750,7 @@ export function MarketReplayClient({ dataset: initialDataset, initialJournalFocu
       const anchor = tradingDayForTimestamp(data.lastSourceBar?.timestamp ?? dataset.startTime, marketSession);
       marketCache.prefetch(anchor);
     }
-  }, [dataset, getDisplayCache, latestReplayRef, loadTradeAnnotations, marketCache, marketSession, windowCache]);
+  }, [dataset, getDisplayCache, latestReplayRef, loadTradeAnnotations, marketCache, marketSession, windowCache, fetch]);
 
   const primeWindow = useCallback(async (
     endSequence: number,
@@ -773,7 +775,7 @@ export function MarketReplayClient({ dataset: initialDataset, initialJournalFocu
       performance.measure("market-replay-window-prefetch", { start: startedAt, end: performance.now() });
       performance.clearMeasures("market-replay-window-prefetch");
     }
-  }, [dataset, windowCache]);
+  }, [dataset, windowCache, fetch]);
 
   const hydrateCachedHistory = useCallback(async (
     currentSequence: number,
@@ -915,7 +917,7 @@ export function MarketReplayClient({ dataset: initialDataset, initialJournalFocu
       historyLoadingRef.current = false;
       endBuffering();
     }
-  }, [beginBuffering, dataset.id, dataset.sourceIntervalSeconds, endBuffering, getDisplayCache, hydrateCachedHistory, journalReview, latestReplayRef]);
+  }, [beginBuffering, dataset.id, dataset.sourceIntervalSeconds, endBuffering, getDisplayCache, hydrateCachedHistory, journalReview, latestReplayRef, fetch]);
 
   const handleVisibleSequenceRange = useCallback((range: ReplayVisibleSequenceRange) => {
     if (annotationTimerRef.current) clearTimeout(annotationTimerRef.current);
@@ -951,6 +953,7 @@ export function MarketReplayClient({ dataset: initialDataset, initialJournalFocu
       const response = await fetch(`/api/market-datasets/${dataset.id}/progress`);
       const data = await response.json();
       if (!response.ok) throw new Error(data?.error ?? copy.marketReplay.loadError);
+      if (data.projectionId && data.projectionId !== replaySession?.activeProjectionId) throw new Error(copy.replaySessions.projectionChanged);
       if (!cancelled) {
         commitConfirmedPaperSnapshot(data.snapshot as PaperSessionSnapshot | null);
         paperSessionLoadedRef.current = true;
@@ -980,7 +983,7 @@ export function MarketReplayClient({ dataset: initialDataset, initialJournalFocu
     initialize().then(() => { if (!cancelled) initializedDatasetRef.current = dataset.id; }).catch((error) => { if (!cancelled) setLoadError(error instanceof Error ? error.message : copy.marketReplay.loadError); })
       .finally(() => { if (!cancelled) setIsLoading(false); });
     return () => { cancelled = true; };
-  }, [abrSettingsLoaded, commitConfirmedPaperSnapshot, dataset, emaSettingsLoaded, lastSyncStartedAtRef, loadWindow, paperDeltaAccumulatorRef, paperSessionLoadedRef, paperSessionLoadRef, primeWindow, setReplay]);
+  }, [abrSettingsLoaded, commitConfirmedPaperSnapshot, dataset, emaSettingsLoaded, lastSyncStartedAtRef, loadWindow, paperDeltaAccumulatorRef, paperSessionLoadedRef, paperSessionLoadRef, primeWindow, setReplay, fetch, replaySession?.activeProjectionId]);
 
   useEffect(() => {
     if (!emaSettingsLoaded || !abrSettingsLoaded) return;
@@ -1011,11 +1014,12 @@ export function MarketReplayClient({ dataset: initialDataset, initialJournalFocu
     const response = await fetch(`/api/market-datasets/${dataset.id}/paper-session`);
     const data = await response.json();
     if (!response.ok) throw new Error(data?.error ?? copy.paperTrading.requestFailed);
+    if (data.projectionId && data.projectionId !== replaySession?.activeProjectionId) { historyConflictRef.current = true; pausePlayback(); throw new Error(copy.replaySessions.projectionChanged); }
     commitConfirmedPaperSnapshot(data.snapshot as PaperSessionSnapshot | null);
     paperSessionLoadedRef.current = true;
     paperDeltaAccumulatorRef.current = createPaperDeltaAccumulator(latestReplayRef.current?.confirmedSequence ?? -1);
     return data.snapshot as PaperSessionSnapshot | null;
-  }, [commitConfirmedPaperSnapshot, dataset.id, latestReplayRef, paperDeltaAccumulatorRef, paperSessionLoadedRef]);
+  }, [commitConfirmedPaperSnapshot, dataset.id, latestReplayRef, paperDeltaAccumulatorRef, paperSessionLoadedRef, fetch, pausePlayback, replaySession?.activeProjectionId]);
 
   const flushSave = useCallback(() => {
     if (saveTimerRef.current) clearTimeout(saveTimerRef.current);
@@ -1040,7 +1044,7 @@ export function MarketReplayClient({ dataset: initialDataset, initialJournalFocu
       if (!response.ok) throw new Error(copy.marketReplay.saveError);
       setSaveStatus("saved");
     }).catch(() => setSaveStatus("error"));
-  }, [dataset.id]);
+  }, [dataset.id, fetch]);
 
   const queueSave = useCallback((next: ReplayState, immediate: boolean) => {
     pendingSaveRef.current = next;
@@ -1058,6 +1062,9 @@ export function MarketReplayClient({ dataset: initialDataset, initialJournalFocu
     const response = await fetch(`/api/market-datasets/${dataset.id}/progress`);
     const data = await response.json();
     if (!response.ok) throw new Error(data?.error ?? copy.paperTrading.advanceFailed);
+    if (data.projectionId && data.projectionId !== replaySession?.activeProjectionId) {
+      historyConflictRef.current = true; pausePlayback(); setRecoveryNotice(copy.replaySessions.projectionChanged); recoveryRequiredRef.current = true; return;
+    }
     commitConfirmedPaperSnapshot(data.snapshot as PaperSessionSnapshot | null);
     const progress = data.progress;
     if (!progress) {
@@ -1072,17 +1079,20 @@ export function MarketReplayClient({ dataset: initialDataset, initialJournalFocu
       setRecoveryNotice(visibleSequence > next.currentSequence ? copy.marketReplay.recoveredWithRollback(visibleSequence - next.currentSequence) : null);
     }
     recoveryRequiredRef.current = false;
+    retrySyncBodyRef.current = null;
+    setSwitchSyncFailed(false);
     paperDeltaAccumulatorRef.current = createPaperDeltaAccumulator(progress?.currentSequence ?? -1);
     playbackAccumulatorRef.current = 0;
     playbackClockRef.current = performance.now();
-  }, [commitConfirmedPaperSnapshot, dataset, latestReplayRef, loadWindow, paperDeltaAccumulatorRef, setReplay, shouldResumePlayback]);
+  }, [commitConfirmedPaperSnapshot, dataset, latestReplayRef, loadWindow, paperDeltaAccumulatorRef, setReplay, shouldResumePlayback, fetch, pausePlayback, replaySession?.activeProjectionId]);
 
   const startSync = useCallback(async (keepalive = false, silent = false) => {
     if (historyConflictRef.current) return false;
     const syncIntent = capturePlaybackIntent();
     if (!paperSessionLoadedRef.current) await paperSessionLoadRef.current;
     if (syncingRef.current) return syncCompletionRef.current;
-    const current = latestReplayRef.current;
+    const retry = retrySyncBodyRef.current;
+    const current = retry?.replay ?? latestReplayRef.current;
     if (!current || current.currentSequence <= current.confirmedSequence) return true;
     if (current.currentSequence - current.confirmedSequence > REPLAY_SYNC_BATCH_SIZE) {
       recoveryRequiredRef.current = true;
@@ -1098,9 +1108,9 @@ export function MarketReplayClient({ dataset: initialDataset, initialJournalFocu
       return false;
     }
     syncingRef.current = true;
-    const checkpoint = paperSnapshotRef.current;
+    const checkpoint = retry ? retry.checkpoint : paperSnapshotRef.current;
     const checkpointFingerprint = paperCheckpointFingerprint(checkpoint);
-    const frozenAccumulator = paperDeltaAccumulatorRef.current;
+    const frozenAccumulator = retry?.accumulator ?? paperDeltaAccumulatorRef.current;
     if (frozenAccumulator.fromSequence !== current.confirmedSequence
       || frozenAccumulator.toSequence !== current.currentSequence) {
       syncingRef.current = false;
@@ -1116,11 +1126,11 @@ export function MarketReplayClient({ dataset: initialDataset, initialJournalFocu
       }
       return false;
     }
-    paperDeltaAccumulatorRef.current = createPaperDeltaAccumulator(current.currentSequence);
+    if (!retry) paperDeltaAccumulatorRef.current = createPaperDeltaAccumulator(current.currentSequence);
     const requestId = typeof crypto !== "undefined" && "randomUUID" in crypto
       ? crypto.randomUUID()
       : `${Date.now()}-${++syncRequestCounterRef.current}`;
-    const requestBody: ReplaySyncRequest = {
+    const requestBody: ReplaySyncRequest = retry?.body ?? {
       generation: current.generation,
       requestId,
       confirmedSequence: current.confirmedSequence,
@@ -1160,6 +1170,9 @@ export function MarketReplayClient({ dataset: initialDataset, initialJournalFocu
         throw new Error(copy.marketReplay.syncMismatch);
       }
       confirmedPaperSnapshotRef.current = checkpoint;
+      retrySyncBodyRef.current = null;
+      setSwitchSyncFailed(false);
+      if (retry) setRecoveryNotice(null);
       setReplay((value) => value ? {
         ...value,
         confirmedSequence: data.currentSequence,
@@ -1188,6 +1201,16 @@ export function MarketReplayClient({ dataset: initialDataset, initialJournalFocu
       recoveryRequiredRef.current = true;
       setPaperError(error instanceof Error ? error.message : copy.paperTrading.advanceFailed);
       await advanceCompletionRef.current.catch(() => undefined);
+      if (preserveFailedSyncRef.current || retrySyncBodyRef.current) {
+        retrySyncBodyRef.current = { body: requestBody, replay: current, checkpoint, accumulator: frozenAccumulator };
+        recoveryRequiredRef.current = false;
+        setSwitchSyncFailed(true);
+        setSaveStatus("error");
+        setRecoveryNotice(copy.replaySessions.syncFailureRetained);
+        autoPausePlayback("sync-conflict");
+        return false;
+      }
+      paperDeltaAccumulatorRef.current = mergePaperDeltaAccumulators(frozenAccumulator, paperDeltaAccumulatorRef.current);
       if (!isPlaybackIntentCurrent(syncIntent)) return false;
       const suspension = suspendPlayback();
       try {
@@ -1205,7 +1228,7 @@ export function MarketReplayClient({ dataset: initialDataset, initialJournalFocu
     });
     syncCompletionRef.current = operation;
     return operation;
-  }, [autoPausePlayback, capturePlaybackIntent, confirmedPaperSnapshotRef, dataset.dataVersion, dataset.historyVersion, dataset.id, getDisplayCache, isPlaybackIntentCurrent, lastSyncStartedAtRef, latestReplayRef, loadTradeAnnotations, paperDeltaAccumulatorRef, paperSessionLoadedRef, paperSessionLoadRef, paperSnapshotRef, recoverReplay, restorePlayback, setReplay, suspendPlayback, syncCompletionRef, syncLatencyMsRef, syncRequestCounterRef, syncingRef]);
+  }, [autoPausePlayback, capturePlaybackIntent, confirmedPaperSnapshotRef, dataset.dataVersion, dataset.historyVersion, dataset.id, getDisplayCache, isPlaybackIntentCurrent, lastSyncStartedAtRef, latestReplayRef, loadTradeAnnotations, paperDeltaAccumulatorRef, paperSessionLoadedRef, paperSessionLoadRef, paperSnapshotRef, recoverReplay, restorePlayback, setReplay, suspendPlayback, syncCompletionRef, syncLatencyMsRef, syncRequestCounterRef, syncingRef, fetch]);
 
   const flushVisible = useCallback(async (keepalive = false) => {
     if (historyConflictRef.current) return false;
@@ -1244,7 +1267,7 @@ export function MarketReplayClient({ dataset: initialDataset, initialJournalFocu
     };
     const timer = window.setInterval(() => void refreshTail(), 15000);
     return () => { stopped = true; window.clearInterval(timer); };
-  }, [autoPausePlayback, dataset, flushVisible, isLoading, paperMutationActiveRef, restorePlayback, setReplay, suspendPlayback]);
+  }, [autoPausePlayback, dataset, flushVisible, isLoading, paperMutationActiveRef, restorePlayback, setReplay, suspendPlayback, fetch]);
 
   const fastForwardToNextVisibleBar = useCallback(async (
     shouldContinue: () => boolean = () => true,
@@ -1334,7 +1357,7 @@ export function MarketReplayClient({ dataset: initialDataset, initialJournalFocu
       endBuffering();
       viewChangingRef.current = false;
     }
-  }, [abrLength, autoPausePlayback, beginBuffering, commitConfirmedPaperSnapshot, confirmedPaperSnapshotRef, dataset.id, dataset.historyVersion, displayUtcOffsetMinutes, endBuffering, flushVisible, latestReplayRef, loadWindow, paperDeltaAccumulatorRef, paperMutationActiveRef, paperMutationChainRef, recoverReplay, restorePlayback, setReplay, suspendPlayback]);
+  }, [abrLength, autoPausePlayback, beginBuffering, commitConfirmedPaperSnapshot, confirmedPaperSnapshotRef, dataset.id, dataset.historyVersion, displayUtcOffsetMinutes, endBuffering, flushVisible, latestReplayRef, loadWindow, paperDeltaAccumulatorRef, paperMutationActiveRef, paperMutationChainRef, recoverReplay, restorePlayback, setReplay, suspendPlayback, fetch]);
 
   const processLocalBars = useCallback(async (
     requestedCount: number,
@@ -1423,20 +1446,22 @@ export function MarketReplayClient({ dataset: initialDataset, initialJournalFocu
           if (snapshot.session.lastProcessedSequence !== source.sequence - 1) {
             throw new Error(copy.marketReplay.syncMismatch);
           }
-          const result = advancePaperTrading({
-            state: snapshot.session,
-            orders: snapshot.activeOrders,
-            lots: snapshot.openLots ?? [],
-            bar: source,
-            makeId: createDeterministicEventIdFactory(snapshot.session.id, current.generation, source.sequence),
-            journalContext: {
+          const journalContext = {
               abrValue: abrValue !== null && abrValue > 0 ? abrValue : null,
               abrLength,
               displayIntervalSeconds: current.displayIntervalSeconds,
               displaySession: current.displaySession,
               displayUtcOffsetMinutes,
               priceTickSize: dataset.priceTickSize,
-            },
+            };
+          const result = advancePaperTrading({
+            state: snapshot.session,
+            orders: snapshot.activeOrders,
+            lots: snapshot.openLots ?? [],
+            bar: source,
+            makeId: createDeterministicEventIdFactory(snapshot.session.id, current.generation, source.sequence),
+            journalContext,
+
           });
           const equitySampleStride = Math.max(1, Math.ceil(dataset.barCount / 20_000));
           recordPaperAdvance(
@@ -1444,6 +1469,7 @@ export function MarketReplayClient({ dataset: initialDataset, initialJournalFocu
             snapshot,
             result,
             result.fills.length > 0 || source.sequence === dataset.barCount - 1 || source.sequence % equitySampleStride === 0,
+            journalContext, current.generation,
           );
           snapshot = applySpeculativeAdvance(snapshot, result);
         }
@@ -1603,7 +1629,7 @@ export function MarketReplayClient({ dataset: initialDataset, initialJournalFocu
       windowRequestRef.current += 1;
       persistLatest();
     };
-  }, [dataset.id, latestReplayRef, startSync]);
+  }, [dataset.id, latestReplayRef, startSync, fetch]);
 
   async function startReplayAt(value: string) {
     if (!dataset.sourceIntervalSeconds) return setStartError(copy.marketReplay.invalidDisplayInterval);
@@ -1620,6 +1646,11 @@ export function MarketReplayClient({ dataset: initialDataset, initialJournalFocu
     if (!response.ok || !data) {
       setStartError(data?.error ?? copy.marketReplay.startError);
       return false;
+    }
+    if (data.replaySessionId && data.replaySessionId !== replaySession?.id) {
+      pausePlayback();
+      router.push(`/market-replay/${dataset.id}?sessionId=${encodeURIComponent(data.replaySessionId)}`);
+      return true;
     }
     const next = createReplayState(dataset.barCount, data.startSequence, data.playbackRate, data.displayIntervalSeconds, data.currentSequence, data.generation, data.syncVersion, data.displaySession ?? "ETH");
     next.confirmedSequence = data.currentSequence;
@@ -1648,7 +1679,7 @@ export function MarketReplayClient({ dataset: initialDataset, initialJournalFocu
 
   const togglePlayback = useCallback(() => {
     const current = latestReplayRef.current;
-    if (!current || viewChangingRef.current || journalReview || current.status === "finished") return;
+    if (!current || retrySyncBodyRef.current || correctionPending || dateForwarding || dateDialogOpen || viewChangingRef.current || journalReview || current.status === "finished") return;
     manualStepsRef.current.cancel();
     playbackEpochRef.current += 1;
     if (current.status === "playing") {
@@ -1676,11 +1707,11 @@ export function MarketReplayClient({ dataset: initialDataset, initialJournalFocu
         }
       });
     }
-  }, [autoPausePlayback, flushVisible, journalReview, lastSyncStartedAtRef, latestReplayRef, pausePlayback, playPlayback, queueSave, recoverReplay, restorePlayback, suspendPlayback]);
+  }, [autoPausePlayback, flushVisible, journalReview, lastSyncStartedAtRef, latestReplayRef, pausePlayback, playPlayback, queueSave, recoverReplay, restorePlayback, suspendPlayback, correctionPending, dateDialogOpen, dateForwarding]);
 
   const revealNextBar = useCallback(() => {
     const current = latestReplayRef.current;
-    if (!current || journalReview || current.status === "playing" || current.status === "finished") return;
+    if (!current || retrySyncBodyRef.current || correctionPending || dateForwarding || dateDialogOpen || journalReview || current.status === "playing" || current.status === "finished") return;
     void manualStepsRef.current.enqueue(async (isCancelled) => {
       await advanceCompletionRef.current;
       await paperMutationChainRef.current;
@@ -1730,7 +1761,7 @@ export function MarketReplayClient({ dataset: initialDataset, initialJournalFocu
         if (processed < inBucket.length || inBucket.length < candidates.length) break;
       }
     });
-  }, [dataset.sourceIntervalSeconds, dataset.startTime, displayMarketSession, fastForwardToNextVisibleBar, flushVisible, journalReview, latestReplayRef, marketCache, marketSession, paperMutationChainRef, processLocalBars]);
+  }, [dataset.sourceIntervalSeconds, dataset.startTime, displayMarketSession, fastForwardToNextVisibleBar, flushVisible, journalReview, latestReplayRef, marketCache, marketSession, paperMutationChainRef, processLocalBars, correctionPending, dateDialogOpen, dateForwarding]);
 
   const enterJournalReview = useCallback(async (focus: JournalFocus) => {
     const current = latestReplayRef.current;
@@ -1754,7 +1785,7 @@ export function MarketReplayClient({ dataset: initialDataset, initialJournalFocu
       null,
       focus.sequence,
       true,
-      focus.globalNo,
+      focus.globalNo || null,
     );
   }, [flushVisible, latestReplayRef, loadWindow, pausePlayback]);
 
@@ -2031,13 +2062,8 @@ export function MarketReplayClient({ dataset: initialDataset, initialJournalFocu
       try {
         const response = await fetch(`/api/market-datasets/${dataset.id}/paper-session`, { method: "DELETE" });
         if (!response.ok) throw new Error(copy.paperTrading.requestFailed);
-        commitConfirmedPaperSnapshot(null);
-        setTradeAnnotations([]);
-        setTradeAnnotationsTruncated(false);
-        setPaperError(null);
-        const suspension = confirmationSuspensionRef.current;
-        confirmationSuspensionRef.current = null;
-        restorePlayback(suspension);
+        pausePlayback();
+        router.push(`/market-replay/${dataset.id}`);
       } catch {
         setPaperError(copy.paperTrading.requestFailed);
         try {
@@ -2072,22 +2098,13 @@ export function MarketReplayClient({ dataset: initialDataset, initialJournalFocu
         setConfirmAction(null);
         return;
       }
-      commitConfirmedPaperSnapshot(null);
-      const current = latestReplayRef.current;
-      if (!current) return;
-      const reset = resetReplay(current);
-      reset.generation = data.generation;
-      reset.syncVersion = data.syncVersion;
-      reset.confirmedSequence = data.currentSequence;
-      recoveryRequiredRef.current = false;
-      setReplay(reset);
-      await loadWindow(reset.currentSequence, reset.displayIntervalSeconds, reset.displaySession, indicatorWarmupCountRef.current);
-      setSaveStatus("idle");
+      router.push(`/market-replay/${dataset.id}?sessionId=${encodeURIComponent(data.replaySessionId)}`);
     }
     setConfirmAction(null);
   }
 
   async function mutatePaper(url: string, createInit: (version: number | null) => RequestInit) {
+    if (correctionPending || dateForwarding) { setPaperError(copy.replaySessions.busy); return false; }
     pendingPaperMutationsRef.current += 1;
     setPaperBusy(true);
     setPaperError(null);
@@ -2130,6 +2147,43 @@ export function MarketReplayClient({ dataset: initialDataset, initialJournalFocu
       pendingPaperMutationsRef.current -= 1;
       if (pendingPaperMutationsRef.current === 0) setPaperBusy(false);
     });
+  }
+
+  function openCorrectionTarget(target: CorrectionTarget) {
+    if (correctionPending) return;
+    pausePlayback(); manualStepsRef.current.cancel(); setCorrectionTarget(target);
+  }
+
+  async function locateReplayDate(timestamp: string, forward: boolean) {
+    if (correctionPending || dateForwarding) return false;
+    if (!await prepareSessionSwitch()) return false;
+    const response = await fetch(`/api/replay-sessions/${encodeURIComponent(replaySession!.id)}/locate?timestamp=${encodeURIComponent(timestamp)}${forward ? "&direction=FORWARD" : ""}`);
+    const data = await response.json();
+    if (!response.ok) throw new Error(data.error ?? copy.replaySessions.requestFailed);
+    if (!forward) { await enterJournalReview({ sequence: data.sequence, no: 0, globalNo: 0 }); return true; }
+    setDateDialogOpen(false); setJournalReview(null); setDateForwarding(true); cancelForwardRef.current = false;
+    try {
+      while ((latestReplayRef.current?.currentSequence ?? data.sequence) < data.sequence && !cancelForwardRef.current) {
+        const current = latestReplayRef.current!;
+        const processed = await processLocalBars(Math.min(100, data.sequence - current.currentSequence), () => !cancelForwardRef.current);
+        if (!processed || !await flushVisible()) return false;
+        setForwardProgress({ current: latestReplayRef.current!.currentSequence, target: data.sequence });
+      }
+      return true;
+    } finally { await flushVisible(); setDateForwarding(false); setForwardProgress(null); pausePlayback(); }
+  }
+
+  async function prepareSessionSwitch() {
+    preserveFailedSyncRef.current = true;
+    try {
+      cancelForwardRef.current = true;
+      pausePlayback();
+      manualStepsRef.current.cancel();
+      await paperMutationChainRef.current;
+      await advanceCompletionRef.current;
+      pausePlayback();
+      return await flushVisible();
+    } finally { preserveFailedSyncRef.current = false; }
   }
 
   async function createPaperAccount(config: { initialCapital: number; currency: string; commissionBps: number; slippageBps: number }) {
@@ -2254,6 +2308,7 @@ export function MarketReplayClient({ dataset: initialDataset, initialJournalFocu
   }
 
   return (
+    <ReplayCorrectionProvider pending={correctionPending} onDeleteCycle={(entry) => { if (entry.cycleKey) openCorrectionTarget({ type: "DELETE_CYCLE", cycleKey: entry.cycleKey, no: entry.no }); }}>
     <>
       <div
         data-web-fullscreen={webFullscreen}
@@ -2262,17 +2317,22 @@ export function MarketReplayClient({ dataset: initialDataset, initialJournalFocu
           ? "fixed inset-0 z-40 flex h-dvh min-h-0 flex-col overflow-hidden bg-white"
           : "flex h-full min-h-0 flex-col overflow-hidden rounded-lg border bg-white shadow-sm"}
       >
+        <ReplaySessionSwitch beforeSwitch={prepareSessionSwitch} />
+        <div className="flex shrink-0 items-center gap-2 border-b px-3 py-1"><Button size="sm" variant="ghost" disabled={correctionPending || dateForwarding} onClick={() => { pausePlayback(); setDateDialogOpen(true); }}>{copy.replaySessions.locateDate}</Button>
+          {dateForwarding ? <><span role="status" className="text-xs tabular-nums text-slate-600">{forwardProgress ? copy.replaySessions.forwardProgress(forwardProgress.current, forwardProgress.target) : copy.replaySessions.forwarding}</span><Button size="sm" variant="outline" onClick={() => { cancelForwardRef.current = true; }}>{copy.replaySessions.forwardCancel}</Button></> : null}
+        </div>
+        {replaySession?.mode === "LIVE_REPLAY" ? <ReplayCorrectionDialog target={correctionTarget} timezone={dataset.timezone} beforeCreate={prepareSessionSwitch} onClose={() => setCorrectionTarget(null)} onPendingChange={setCorrectionPending} /> : null}
         <div className="flex h-12 shrink-0 items-center gap-2 overflow-x-auto border-b px-3 [&>*]:shrink-0">
           <DisplayIntervalControls
             value={replay.displayIntervalSeconds}
             sourceIntervalSeconds={dataset.sourceIntervalSeconds}
-            disabled={Boolean(journalReview)}
+            disabled={Boolean(journalReview) || correctionPending}
             onChange={changeDisplayInterval}
           />
           {dataset.availableDisplaySessions.length > 1 ? (
             <>
               <Label htmlFor="display-session" className="whitespace-nowrap text-xs text-slate-500">{copy.marketReplay.displaySession}</Label>
-              <Select disabled={Boolean(journalReview)} value={replay.displaySession} onValueChange={(value) => void changeChartSession(value as DisplaySession)}>
+              <Select disabled={Boolean(journalReview) || correctionPending} value={replay.displaySession} onValueChange={(value) => void changeChartSession(value as DisplaySession)}>
                 <SelectTrigger id="display-session" className="h-8 w-20" title={copy.marketReplay.displaySessionHint}><SelectValue /></SelectTrigger>
                 <SelectContent>
                   <SelectItem value="ETH">{copy.marketReplay.displaySessionEth}</SelectItem>
@@ -2383,7 +2443,7 @@ export function MarketReplayClient({ dataset: initialDataset, initialJournalFocu
           </Button>
           <Button type="button" variant="ghost" size="sm" className="h-8" onClick={() => setSettingsDialog("indicators")}><Settings2 className="h-4 w-4" />{copy.marketReplay.indicators}</Button>
           <Button type="button" variant="ghost" size="sm" className="h-8" onClick={() => setSettingsDialog("paper")}><WalletCards className="h-4 w-4" />{copy.marketReplay.accountSettings}</Button>
-          <Button asChild type="button" variant="ghost" size="sm" className="h-8"><Link href={`/market-replay/${dataset.id}/trade-history`}><BookOpen className="h-4 w-4" />{copy.paperTrading.openJournalHistory}</Link></Button>
+          <Button asChild type="button" variant="ghost" size="sm" className="h-8"><Link href={`/market-replay/${dataset.id}/trade-history?sessionId=${encodeURIComponent(replaySession?.id ?? "")}`}><BookOpen className="h-4 w-4" />{copy.paperTrading.openJournalHistory}</Link></Button>
           {paperSnapshot ? <div className="hidden items-center gap-3 text-xs text-slate-500 xl:flex"><span>{copy.paperTrading.equity} <strong className="font-medium text-slate-800">{paperSnapshot.stats.equity.toLocaleString("zh-CN", { maximumFractionDigits: 2 })} {paperSnapshot.session.currency}</strong></span><span>{copy.paperTrading.netPosition} <strong className="font-medium text-slate-800">{paperSnapshot.session.netQuantity}</strong></span></div> : null}
           <div className="ml-auto flex items-center gap-1">
             <Button type="button" variant="ghost" size="sm" className="h-8" disabled={draftActive} title={draftActive ? copy.paperTrading.draftLockedReplay : undefined} onClick={() => requestConfirmation("reset")}><RotateCcw className="h-4 w-4" /><span className="hidden xl:inline">{copy.marketReplay.reset}</span></Button>
@@ -2436,7 +2496,7 @@ export function MarketReplayClient({ dataset: initialDataset, initialJournalFocu
             tradeAnnotationsTruncated={tradeAnnotationsTruncated}
             tradeAnnotationsVisible={chartVisibility.tradeAnnotations}
             focusSequence={journalReview?.sequence ?? null}
-            paperBusy={paperBusy}
+            paperBusy={paperBusy || correctionPending || dateForwarding}
             paperError={paperError}
             onSubmitOrder={submitPaperOrder}
             onOrderPriceChange={updatePaperOrder}
@@ -2446,7 +2506,7 @@ export function MarketReplayClient({ dataset: initialDataset, initialJournalFocu
             onOpenPaperAccount={() => setSettingsDialog("paper")}
             onVisibleSequenceRangeChange={handleVisibleSequenceRange}
           />
-          {journalReview ? <div className="absolute left-1/2 top-3 z-50 flex -translate-x-1/2 items-center gap-3 rounded-md border border-violet-200 bg-white/95 px-3 py-2 text-sm text-violet-800 shadow-lg backdrop-blur"><span className="font-medium">{copy.paperTrading.journalReviewing(journalReview.no)}</span><Button type="button" variant="outline" size="sm" className="h-7" onClick={() => void returnToLiveWindow()}>{copy.paperTrading.returnToLive}</Button></div> : null}
+          {journalReview ? <div className="absolute left-1/2 top-3 z-50 flex -translate-x-1/2 items-center gap-3 rounded-md border border-violet-200 bg-white/95 px-3 py-2 text-sm text-violet-800 shadow-lg backdrop-blur"><span className="font-medium">{journalReview.no > 0 ? copy.paperTrading.journalReviewing(journalReview.no) : copy.replaySessions.viewingPast}</span><Button type="button" variant="outline" size="sm" className="h-7" onClick={() => void returnToLiveWindow()}>{copy.paperTrading.returnToLive}</Button></div> : null}
           {drawingError ? (
             <div className="pointer-events-none absolute left-3 top-3 z-40 max-w-sm rounded-md border border-red-200 bg-red-50/95 px-3 py-2 text-xs text-red-700 shadow-sm">
               {drawingError}
@@ -2514,6 +2574,8 @@ export function MarketReplayClient({ dataset: initialDataset, initialJournalFocu
           ) : null}
         </div>
         <ReplayPlaybackBar
+          correctionPending={correctionPending || dateForwarding || dateDialogOpen || switchSyncFailed}
+          onRewind={replaySession?.mode === "LIVE_REPLAY" ? () => { const current = latestReplayRef.current; if (current) openCorrectionTarget({ type: "REWIND", sequence: barsRef.current.at(-2)?.lastSequence ?? Math.max(current.startSequence - 1, current.currentSequence - 1) }); } : undefined}
           replay={replay}
           sourceIntervalSeconds={dataset.sourceIntervalSeconds}
           journalReview={Boolean(journalReview)}
@@ -2636,7 +2698,7 @@ export function MarketReplayClient({ dataset: initialDataset, initialJournalFocu
       <Dialog open={settingsDialog === "paper"} title={copy.marketReplay.accountSettings} description={copy.marketReplay.accountSettingsDescription} className="max-w-3xl" onClose={() => setSettingsDialog(null)}>
         <div className="space-y-4">
           <PaperAccountStrip snapshot={paperSnapshot} />
-          {journalReview ? null : <PaperTradingPanel priceTickSize={dataset.priceTickSize} snapshot={paperSnapshot} currentBar={currentBar} busy={paperBusy} error={paperError} onCreate={createPaperAccount} onSubmit={submitPaperOrder} onCancel={cancelPaperOrder} onUpdate={updatePaperOrder} onCancelScope={cancelPaperScope} onClear={() => requestConfirmation("paper-clear")} />}
+          {journalReview ? null : <PaperTradingPanel priceTickSize={dataset.priceTickSize} snapshot={paperSnapshot} currentBar={currentBar} busy={paperBusy || correctionPending || dateForwarding} error={paperError} onCreate={createPaperAccount} onSubmit={submitPaperOrder} onCancel={cancelPaperOrder} onUpdate={updatePaperOrder} onCancelScope={cancelPaperScope} onClear={() => requestConfirmation("paper-clear")} />}
         </div>
       </Dialog>
       <Dialog
@@ -2925,8 +2987,8 @@ export function MarketReplayClient({ dataset: initialDataset, initialJournalFocu
       </Dialog>
       <ConfirmDialog
         open={Boolean(confirmAction)}
-        title={confirmAction === "paper-clear" ? copy.paperTrading.resetAccountTitle : copy.marketReplay.resetTitle}
-        description={confirmAction === "paper-clear" ? copy.paperTrading.resetAccountConfirm : copy.marketReplay.resetConfirm}
+        title={confirmAction === "paper-clear" ? copy.replaySessions.archiveTitle : copy.replaySessions.restartTitle}
+        description={confirmAction === "paper-clear" ? copy.replaySessions.archiveDescription : copy.replaySessions.restartDescription}
         onCancel={() => {
           const suspension = confirmationSuspensionRef.current;
           confirmationSuspensionRef.current = null;
@@ -2935,6 +2997,7 @@ export function MarketReplayClient({ dataset: initialDataset, initialJournalFocu
         }}
         onConfirm={applyConfirmedAction}
       />
+      {dateDialogOpen ? <ReplayDateDialog key={currentSourceBar?.timestamp ?? dataset.startTime} open currentTime={currentSourceBar?.timestamp ?? dataset.startTime} minimum={dataset.startTime} maximum={dataset.endTime} timezone={dataset.timezone} allowForward={replaySession?.mode === "LIVE_REPLAY"} onClose={() => setDateDialogOpen(false)} onLocate={locateReplayDate} /> : null}
       <ReplayStartDialog
         open={startDialogOpen}
         value={startDialogValue}
@@ -2948,5 +3011,6 @@ export function MarketReplayClient({ dataset: initialDataset, initialJournalFocu
         onConfirm={() => void applyNewReplayStart()}
       />
     </>
+    </ReplayCorrectionProvider>
   );
 }

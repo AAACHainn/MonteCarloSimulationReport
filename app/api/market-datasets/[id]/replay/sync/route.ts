@@ -1,3 +1,4 @@
+import { withReplaySessionRoute } from '@/lib/replay-sessions/scope';
 import { NextResponse } from "next/server";
 import { replayDatabaseQueryCount } from "@/lib/db";
 import { persistClientReplayBatch } from "@/lib/market-replay/replay-sync";
@@ -6,7 +7,7 @@ import { attachReplayDiagnostics } from "@/lib/market-replay/server-diagnostics"
 
 type RouteContext = { params: Promise<{ id: string }> };
 
-export async function POST(request: Request, context: RouteContext) {
+async function handlePOST(request: Request, context: RouteContext) {
   const startedAt = performance.now();
   const queryStart = replayDatabaseQueryCount();
   const { id } = await context.params;
@@ -27,3 +28,5 @@ export async function POST(request: Request, context: RouteContext) {
     strategy: "idempotent-replay-sync",
   });
 }
+
+export const POST = withReplaySessionRoute(handlePOST, { write: true, annotation: false });

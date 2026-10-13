@@ -1,12 +1,13 @@
 import { defaultLocale } from "./i18n";
 
-export function formatMoney(value: number) {
-  return new Intl.NumberFormat(defaultLocale, {
+export function formatMoney(value: number, currency = "USD") {
+  try { return new Intl.NumberFormat(defaultLocale, {
     style: "currency",
-    currency: "USD",
+    currency,
     minimumFractionDigits: 2,
     maximumFractionDigits: 2,
-  }).format(value);
+  }).format(value); }
+  catch { return `${formatNumber(value)} ${currency}`; }
 }
 
 export function formatNumber(value: number) {

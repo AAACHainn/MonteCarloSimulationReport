@@ -1,3 +1,5 @@
+import { withReplaySessionRoute } from '@/lib/replay-sessions/scope';
+import { accountWhere, entryProjectionWhere, journalScopeWhere } from '@/lib/replay-sessions/scope';
 import { NextResponse } from "next/server";
 import { prisma } from "@/lib/db";
 import { copy } from "@/lib/i18n";
@@ -6,7 +8,7 @@ import { calculateReplayJournalSummary, serializeReplayJournalEntry } from "@/li
 
 type RouteContext = { params: Promise<{ id: string }> };
 
-export async function GET(request: Request, context: RouteContext) {
+async function handleGET(request: Request, context: RouteContext) {
   const { id } = await context.params;
   const url = new URL(request.url);
   const scope = url.searchParams.get("scope") === "current" ? "current" : "history";
@@ -16,11 +18,11 @@ export async function GET(request: Request, context: RouteContext) {
   if (!dataset) return NextResponse.json({ error: copy.marketReplay.datasetNotFound }, { status: 404 });
 
   if (scope === "current") {
-    const current = await prisma.paperTradingSession.findUnique({
-      where: { datasetId: id }, select: { journalSessionId: true },
+    const current = await prisma.paperTradingSession.findFirst({
+      where: accountWhere(id), select: { journalSessionId: true },
     });
     const allRecords = await prisma.replayJournalEntry.findMany({
-      where: { journalSessionId: current?.journalSessionId ?? "__none__" },
+      where: { journalSessionId: current?.journalSessionId ?? "__none__", ...entryProjectionWhere() },
       include: {
         journalSession: { select: { archivedAt: true } },
         setupOption: { select: { name: true } },
@@ -41,11 +43,11 @@ export async function GET(request: Request, context: RouteContext) {
   }
 
   const sessions = await prisma.replayJournalSession.findMany({
-    where: { datasetId: id, entries: { some: {} } },
+    where: { datasetId: id, ...journalScopeWhere(), entries: { some: entryProjectionWhere() } },
     orderBy: [{ createdAt: "desc" }, { id: "desc" }],
     select: {
       id: true, name: true, replayGeneration: true, initialCapital: true, currency: true,
-      archivedAt: true, createdAt: true, _count: { select: { entries: true } },
+      archivedAt: true, createdAt: true, _count: { select: { entries: { where: entryProjectionWhere() } } },
     },
   });
   const requestedSessionId = url.searchParams.get("sessionId")?.trim() || null;
@@ -63,7 +65,7 @@ export async function GET(request: Request, context: RouteContext) {
   }
 
   const allRecords = selectedSession ? await prisma.replayJournalEntry.findMany({
-    where: { journalSessionId: selectedSession.id },
+    where: { journalSessionId: selectedSession.id, ...entryProjectionWhere() },
     include: {
       journalSession: { select: { archivedAt: true } },
       setupOption: { select: { name: true } },
@@ -112,3 +114,5 @@ export async function GET(request: Request, context: RouteContext) {
     pagination: { page, pageSize: take, totalItems, totalPages },
   });
 }
+
+export const GET = withReplaySessionRoute(handleGET, { write: false, annotation: false });

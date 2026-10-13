@@ -151,8 +151,9 @@ model MarketDataset {
   barBlocks    MarketBarBlock[]
   barBlockBuildStates MarketBarBlockBuildState[]
   importJobs   MarketDatasetImport[]
-  progress     ReplayProgress?
-  paperSession PaperTradingSession?
+  progress     ReplayProgress[]
+  paperSession PaperTradingSession[]
+  replaySessions ReplaySession[]
   replayJournalSessions ReplayJournalSession[]
   drawings     MarketDrawing[]
   syncConfig   MarketDatasetSyncConfig?
@@ -237,6 +238,8 @@ model MarketDrawing {
   id        String        @id @default(cuid())
   datasetId String
   dataset   MarketDataset @relation(fields: [datasetId], references: [id], onDelete: Cascade)
+  replaySessionId String?
+  replaySession ReplaySession? @relation(fields: [replaySessionId], references: [id], onDelete: Cascade)
   type      String
   geometry  String
   style     String
@@ -244,6 +247,7 @@ model MarketDrawing {
   updatedAt DateTime      @updatedAt
 
   @@index([datasetId, createdAt])
+  @@index([replaySessionId, createdAt])
 }
 
 model MarketBarBlock {
@@ -320,8 +324,11 @@ model MarketBar {
 }
 
 model ReplayProgress {
-  datasetId       String        @id
+  id              String        @id @default(cuid())
+  datasetId       String
   dataset         MarketDataset @relation(fields: [datasetId], references: [id], onDelete: Cascade)
+  replaySessionId String?       @unique
+  replaySession ReplaySession? @relation(fields: [replaySessionId], references: [id], onDelete: Cascade)
   startSequence   Int
   currentSequence Int
   playbackRate    Int           @default(1)
@@ -333,13 +340,17 @@ model ReplayProgress {
   lastSyncResponse      String?
   createdAt       DateTime      @default(now())
   updatedAt       DateTime      @updatedAt
+
+  @@index([datasetId])
 }
 
 model PaperTradingSession {
   id                    String             @id @default(cuid())
-  datasetId             String             @unique
+  datasetId             String
   dataset               MarketDataset      @relation(fields: [datasetId], references: [id], onDelete: Cascade)
-  journalSessionId      String?             @unique
+  projectionId          String?             @unique
+  projection            ReplayProjection?   @relation(fields: [projectionId], references: [id], onDelete: Cascade)
+  journalSessionId      String?
   journalSession        ReplayJournalSession? @relation(fields: [journalSessionId], references: [id], onDelete: SetNull)
   initialCapital        Float
   currency              String
@@ -347,6 +358,7 @@ model PaperTradingSession {
   slippageBps           Float              @default(0)
   lastProcessedSequence Int
   netQuantity           Float              @default(0)
+  activeCycleKey        String?
   averageEntryPrice     Float?
   realizedPnl           Float              @default(0)
   totalFees             Float              @default(0)
@@ -380,6 +392,8 @@ model ReplayJournalSession {
   id             String               @id @default(cuid())
   datasetId      String
   dataset        MarketDataset        @relation(fields: [datasetId], references: [id], onDelete: Cascade)
+  replaySessionId String?              @unique
+  replaySession ReplaySession?        @relation(fields: [replaySessionId], references: [id], onDelete: Cascade)
   name           String               @default("回放会话")
   replayGeneration Int
   initialCapital Float
@@ -388,7 +402,7 @@ model ReplayJournalSession {
   slippageBps    Float
   nextEntryNo    Int                  @default(0)
   archivedAt     DateTime?
-  paperSession   PaperTradingSession?
+  paperSession   PaperTradingSession[]
   entries        ReplayJournalEntry[]
   createdAt      DateTime             @default(now())
   updatedAt      DateTime             @updatedAt
@@ -439,6 +453,10 @@ model ReplayJournalEntry {
   id                       String               @id
   journalSessionId         String
   journalSession           ReplayJournalSession @relation(fields: [journalSessionId], references: [id], onDelete: Cascade)
+  projectionId             String?
+  projection               ReplayProjection? @relation(fields: [projectionId], references: [id], onDelete: Cascade)
+  logicalKey               String?
+  cycleKey                 String?
   no                       Int
   accountNo                Int                  @default(0)
   lotId                    String
@@ -468,11 +486,133 @@ model ReplayJournalEntry {
   createdAt                DateTime             @default(now())
 
   @@unique([journalSessionId, id])
-  @@unique([journalSessionId, accountNo])
+  @@unique([journalSessionId, projectionId, accountNo])
+  @@index([projectionId, closedSequence])
+  @@index([projectionId, cycleKey])
   @@index([journalSessionId, no])
   @@index([journalSessionId, openedSequence])
   @@index([journalSessionId, closedSequence])
   @@index([setupOptionId])
+}
+
+// A replay session owns user intent; projections own derived trading results.
+// Correcting a session builds a sibling projection before changing the head.
+model ReplaySession {
+  id                 String @id @default(cuid())
+  datasetId          String
+  dataset            MarketDataset @relation(fields: [datasetId], references: [id], onDelete: Cascade)
+  name               String
+  mode               String @default("TRAINING")
+  status             String @default("ACTIVE")
+  version            Int @default(1)
+  activeProjectionId String? @unique
+  activeProjection   ReplayProjection? @relation("ActiveReplayProjection", fields: [activeProjectionId], references: [id], onDelete: SetNull)
+  pendingCorrectionId String?
+  legacy             Boolean @default(false)
+  riskPreferences    String @default("{}")
+  progress           ReplayProgress?
+  journal            ReplayJournalSession?
+  projections        ReplayProjection[] @relation("SessionProjections")
+  commands           ReplayCommand[]
+  corrections        ReplayCorrectionJob[]
+  drawings           MarketDrawing[]
+  createdAt          DateTime @default(now())
+  updatedAt          DateTime @updatedAt
+
+  @@index([datasetId, status, createdAt])
+}
+
+model ReplayProjection {
+  id              String @id @default(cuid())
+  replaySessionId String
+  replaySession   ReplaySession @relation("SessionProjections", fields: [replaySessionId], references: [id], onDelete: Cascade)
+  activeFor       ReplaySession? @relation("ActiveReplayProjection")
+  generation      Int
+  status          String @default("BUILDING")
+  historyVersion  Int
+  parentId        String?
+  currentSequence Int
+  account         PaperTradingSession?
+  entries         ReplayJournalEntry[]
+  commands        ReplayProjectionCommand[]
+  contexts        ReplayContextRun[]
+  checkpoints     ReplayCheckpoint[]
+  createdAt       DateTime @default(now())
+
+  @@index([replaySessionId, generation])
+}
+
+model ReplayCommand {
+  id              String @id @default(cuid())
+  replaySessionId String
+  replaySession   ReplaySession @relation(fields: [replaySessionId], references: [id], onDelete: Cascade)
+  sourceSequence  Int
+  ordinal         Int
+  type            String
+  payload         String
+  projections     ReplayProjectionCommand[]
+  createdAt       DateTime @default(now())
+
+  @@index([replaySessionId, sourceSequence, ordinal])
+}
+
+model ReplayProjectionCommand {
+  projectionId String
+  projection ReplayProjection @relation(fields: [projectionId], references: [id], onDelete: Cascade)
+  commandId String
+  command ReplayCommand @relation(fields: [commandId], references: [id], onDelete: Cascade)
+
+  @@id([projectionId, commandId])
+}
+
+model ReplayContextRun {
+  id String @id @default(cuid())
+  projectionId String
+  projection ReplayProjection @relation(fields: [projectionId], references: [id], onDelete: Cascade)
+  fromSequence Int
+  toSequence Int
+  context String
+
+  @@index([projectionId, fromSequence, toSequence])
+}
+
+model ReplayCheckpoint {
+  id String @id @default(cuid())
+  projectionId String
+  projection ReplayProjection @relation(fields: [projectionId], references: [id], onDelete: Cascade)
+  sourceSequence Int
+  commandOrdinal Int @default(0)
+  state String
+  createdAt DateTime @default(now())
+
+  @@index([projectionId, sourceSequence, commandOrdinal])
+}
+
+model ReplayCorrectionJob {
+  id String @id @default(cuid())
+  requestId String?
+  replaySessionId String
+  replaySession ReplaySession @relation(fields: [replaySessionId], references: [id], onDelete: Cascade)
+  type String
+  status String @default("QUEUED")
+  baseProjectionId String
+  targetProjectionId String?
+  targetSequence Int
+  cycleKey String?
+  expectedVersion Int
+  historyVersion Int
+  processedSourceBars Int @default(0)
+  totalSourceBars Int @default(0)
+  summary String @default("{}")
+  error String?
+  workerPid Int?
+  heartbeatAt DateTime?
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([replaySessionId, createdAt])
+  @@index([status, heartbeatAt])
+  @@unique([replaySessionId, requestId])
 }
 
 model PaperOrder {
@@ -490,6 +630,7 @@ model PaperOrder {
   reduceOnly         Boolean             @default(false)
   isProtective       Boolean             @default(false)
   ocoGroupId         String?
+  parentOrderId      String?
   createdSequence    Int
   activeFromSequence Int
   filledSequence     Int?
@@ -506,6 +647,7 @@ model PaperOrder {
 
 model PaperFill {
   id                String              @id @default(cuid())
+  cycleKey          String?
   sessionId         String
   session           PaperTradingSession @relation(fields: [sessionId], references: [id], onDelete: Cascade)
   orderId           String
@@ -526,6 +668,7 @@ model PaperFill {
   createdAt         DateTime            @default(now())
 
   @@index([sessionId, sequence])
+  @@index([sessionId, cycleKey])
   @@index([orderId])
 }
 

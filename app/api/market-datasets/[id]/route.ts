@@ -68,14 +68,16 @@ async function patchDataset(request: Request, context: RouteContext) {
         }
       }
     }
-    const resetDisplayInterval = sourceIntervalChanged && dataset.progress
-      && !isValidDisplayInterval(sourceIntervalSeconds, dataset.progress.displayIntervalSeconds ?? dataset.sourceIntervalSeconds);
-    const progressUpdate = sourceIntervalChanged && dataset.progress ? {
-      update: {
-        displayIntervalSeconds: resetDisplayInterval ? sourceIntervalSeconds : dataset.progress.displayIntervalSeconds,
-        lastSyncRequestId: null,
-        lastSyncResponse: null,
-      },
+    const progresses = Array.isArray(dataset.progress) ? dataset.progress : dataset.progress ? [dataset.progress] : [];
+    const progressUpdate = sourceIntervalChanged ? {
+      update: progresses.map((progress) => ({
+        where: { id: progress.id },
+        data: {
+          displayIntervalSeconds: isValidDisplayInterval(sourceIntervalSeconds, progress.displayIntervalSeconds ?? dataset.sourceIntervalSeconds ?? sourceIntervalSeconds)
+            ? progress.displayIntervalSeconds : sourceIntervalSeconds,
+          lastSyncRequestId: null, lastSyncResponse: null,
+        },
+      })),
     } : undefined;
     await prisma.marketDataset.update({ where: { id }, data: {
       sourceIntervalSeconds,
@@ -90,7 +92,7 @@ async function patchDataset(request: Request, context: RouteContext) {
       sourceIntervalSeconds,
       timeframe: formatInterval(sourceIntervalSeconds),
       priceTickSize: parsed.data.priceTickSize,
-      displayIntervalSeconds: resetDisplayInterval ? sourceIntervalSeconds : dataset.progress?.displayIntervalSeconds ?? null,
+      displayIntervalSeconds: sourceIntervalChanged ? sourceIntervalSeconds : null,
     });
   }
   const parsed = marketDatasetSchema.safeParse({ ...dataset, ...input });

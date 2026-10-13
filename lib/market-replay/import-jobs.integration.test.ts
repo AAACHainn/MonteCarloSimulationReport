@@ -256,8 +256,8 @@ describe("market dataset append import", () => {
     const bars = await prisma.marketBar.findMany({ where: { datasetId: target.id }, orderBy: { sequence: "asc" } });
     expect(bars.slice(0, 63)).toEqual(oldBars);
     expect(bars.map((bar) => bar.sequence)).toEqual(Array.from({ length: 65 }, (_, i) => i));
-    expect(await prisma.replayProgress.findUnique({ where: { datasetId: target.id } })).toEqual(progress);
-    expect(await prisma.paperTradingSession.findUnique({ where: { datasetId: target.id } })).toEqual(account);
+    expect(await prisma.replayProgress.findFirst({ where: { datasetId: target.id } })).toEqual(progress);
+    expect(await prisma.paperTradingSession.findFirst({ where: { datasetId: target.id } })).toEqual(account);
     const blocks = await prisma.marketBarBlock.findMany({ where: { datasetId: target.id } });
     expect(blocks).toEqual(expect.arrayContaining([
       expect.objectContaining({ blockSize: 64, startSequence: 0, endSequence: 63, barCount: 64, volume: 320 }),

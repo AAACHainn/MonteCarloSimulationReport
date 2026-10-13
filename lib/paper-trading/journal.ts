@@ -159,6 +159,7 @@ export function closeLotsFifo(
 
 export function serializeReplayJournalEntry(entry: {
   id: string; no: number; accountNo: number; journalSessionId: string; direction: string; quantity: number;
+  cycleKey?: string | null;
   openedSequence: number; openedAt: Date; closedSequence: number; closedAt: Date;
   entryPrice: number; entryOrderType: string | null; exitPrice: number; initialStopPrice: number | null; abrValue: number | null; abrLength: number;
   displayIntervalSeconds: number; displaySession: string; displayUtcOffsetMinutes: number;
@@ -174,6 +175,7 @@ export function serializeReplayJournalEntry(entry: {
   const result = replayJournalResult(entry.gainLoss, entry.priceTickSize);
   return {
     id: entry.id, no: entry.accountNo, globalNo: entry.no, journalSessionId: entry.journalSessionId,
+    cycleKey: entry.cycleKey ?? null,
     setupOptionId: entry.setupOptionId ?? null,
     setupOption: entry.setupOption ? { name: entry.setupOption.name } : null,
     tradeReasons: entry.tradeReasons?.map((reason) => ({ id: reason.id, name: reason.name })) ?? [],

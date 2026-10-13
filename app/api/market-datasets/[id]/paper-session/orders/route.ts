@@ -1,24 +1,29 @@
+import { withReplaySessionRoute } from '@/lib/replay-sessions/scope';
+import { accountWhere, progressWhere, assertReplayWritable, markReplayMutation, getReplayScope, storageId } from '@/lib/replay-sessions/scope';
+import { logicalId } from '@/lib/replay-sessions/identity';
+import { recordReplayCommand } from '@/lib/replay-sessions/service';
 import { NextResponse } from "next/server";
 import { z } from "zod";
 import { prisma } from "@/lib/db";
 import { copy } from "@/lib/i18n";
-import { getPaperSessionSnapshot } from "@/lib/paper-trading/serialize";
+import { getPaperSessionSnapshot, serializePaperOrder } from "@/lib/paper-trading/serialize";
 import { calculateRiskSizing, isValidBracket } from "@/lib/paper-trading/risk-sizing";
 import { isPriceOnTick } from "@/lib/market-replay/price-ticks";
 import { paperOrderSchema } from "@/lib/validations";
 
 type RouteContext = { params: Promise<{ id: string }> };
 
-export async function POST(request: Request, context: RouteContext) {
+async function handlePOST(request: Request, context: RouteContext) {
   const { id } = await context.params;
   const parsed = paperOrderSchema.safeParse(await request.json());
   if (!parsed.success) return NextResponse.json({ error: parsed.error.issues[0]?.message }, { status: 400 });
   const result = await prisma.$transaction(async (tx) => {
-    const session = await tx.paperTradingSession.findUnique({ where: { datasetId: id } });
+    await assertReplayWritable(tx);
+    const session = await tx.paperTradingSession.findFirst({ where: accountWhere(id) });
     if (!session) return { status: 404, error: copy.paperTrading.sessionNotFound };
     if (session.version !== parsed.data.expectedVersion) return { status: 409, error: copy.paperTrading.conflict };
     const [progress, dataset] = await Promise.all([
-      tx.replayProgress.findUnique({ where: { datasetId: id } }),
+      tx.replayProgress.findFirst({ where: progressWhere(id) }),
       tx.marketDataset.findUnique({ where: { id }, select: { barCount: true, priceTickSize: true } }),
     ]);
     if (!progress || !dataset || progress.currentSequence < 0) return { status: 400, error: copy.paperTrading.noCurrentBar };
@@ -50,7 +55,7 @@ export async function POST(request: Request, context: RouteContext) {
       if (!sizing.ok) return { status: 400, error: copy.paperTrading.invalidBracket };
       quantity = sizing.value.quantity;
     }
-    await tx.paperOrder.create({
+    let order = await tx.paperOrder.create({
       data: {
         sessionId: session.id,
         side: parsed.data.side,
@@ -65,14 +70,17 @@ export async function POST(request: Request, context: RouteContext) {
         activeFromSequence: progress.currentSequence + 1,
       },
     });
+    if (getReplayScope()) order = await tx.paperOrder.update({ where: { id: order.id }, data: { id: storageId(order.id) } });
     await tx.paperTradingSession.update({ where: { id: session.id }, data: { version: { increment: 1 } } });
+    await recordReplayCommand(tx, progress.currentSequence, "ORDER_CREATE", { order: serializePaperOrder(order) });
+    await markReplayMutation(tx);
     return { status: 201, error: null };
   });
   if (result.error) return NextResponse.json({ error: result.error }, { status: result.status });
   return NextResponse.json({ snapshot: await getPaperSessionSnapshot(id) }, { status: 201 });
 }
 
-export async function DELETE(request: Request, context: RouteContext) {
+async function handleDELETE(request: Request, context: RouteContext) {
   const { id } = await context.params;
   const body = z.object({
     expectedVersion: z.number().int().positive(),
@@ -80,17 +88,20 @@ export async function DELETE(request: Request, context: RouteContext) {
   }).safeParse(await request.json().catch(() => ({})));
   if (!body.success) return NextResponse.json({ error: copy.paperTrading.conflict }, { status: 400 });
   const result = await prisma.$transaction(async (tx) => {
-    const session = await tx.paperTradingSession.findUnique({ where: { datasetId: id } });
+    await assertReplayWritable(tx);
+    const session = await tx.paperTradingSession.findFirst({ where: accountWhere(id) });
     if (!session) return { status: 404, error: copy.paperTrading.sessionNotFound } as const;
     if (session.version !== body.data.expectedVersion) {
       return { status: 409, error: copy.paperTrading.conflict } as const;
     }
-    const updated = await tx.paperOrder.updateMany({
-      where: {
+    const where = {
         sessionId: session.id,
-        status: "PENDING",
+        status: "PENDING" as const,
         ...(body.data.scope === "BRACKET" ? { isProtective: true } : {}),
-      },
+    };
+    const targets = await tx.paperOrder.findMany({ where, select: { id: true } });
+    const updated = await tx.paperOrder.updateMany({
+      where,
       data: { status: "CANCELLED", cancelReason: "USER_CANCELLED" },
     });
     if (updated.count) {
@@ -98,9 +109,15 @@ export async function DELETE(request: Request, context: RouteContext) {
         where: { id: session.id },
         data: { version: { increment: 1 } },
       });
+      await recordReplayCommand(tx, session.lastProcessedSequence, "ORDER_CANCEL", { orderIds: targets.map((order) => logicalId(order.id)) });
+      await markReplayMutation(tx);
     }
     return { status: 200, error: null } as const;
   });
   if (result.error) return NextResponse.json({ error: result.error }, { status: result.status });
   return NextResponse.json({ snapshot: await getPaperSessionSnapshot(id) });
 }
+
+export const POST = withReplaySessionRoute(handlePOST, { write: true, annotation: false });
+
+export const DELETE = withReplaySessionRoute(handleDELETE, { write: true, annotation: false });

@@ -1,3 +1,5 @@
+import { withReplaySessionRoute } from '@/lib/replay-sessions/scope';
+import { progressWhere, assertReplayWritable, markReplayMutation, getReplayScope } from '@/lib/replay-sessions/scope';
 import { NextResponse } from "next/server";
 import { prisma, replayDatabaseQueryCount } from "@/lib/db";
 import { replayProgressSchema } from "@/lib/validations";
@@ -11,22 +13,27 @@ import { attachReplayDiagnostics } from "@/lib/market-replay/server-diagnostics"
 
 type RouteContext = { params: Promise<{ id: string }> };
 
-export async function GET(_request: Request, context: RouteContext) {
+async function handleGET(_request: Request, context: RouteContext) {
   const startedAt = performance.now();
   const queryStart = replayDatabaseQueryCount();
   const { id } = await context.params;
   const transactionStartedAt = performance.now();
   const state = await prisma.$transaction(async (tx) => {
-    let progress = await tx.replayProgress.findUnique({ where: { datasetId: id } });
+    let progress = await tx.replayProgress.findFirst({ where: progressWhere(id) });
     const snapshot = await getPaperSessionSnapshot(id, tx);
+    const scope = getReplayScope();
+    const projection = scope ? await tx.replayProjection.findUnique({ where: { id: scope.projectionId } }) : null;
+    if (progress && scope?.status === "ARCHIVED" && projection) {
+      progress = { ...progress, currentSequence: projection.currentSequence, generation: projection.generation };
+    }
     // The account records which source bars were actually processed. Repair stale saves
     // produced by older clients without replaying fills or resetting the account.
-    if (progress && snapshot && progress.currentSequence !== snapshot.session.lastProcessedSequence) {
+    if (progress && snapshot && scope?.status !== "ARCHIVED" && progress.currentSequence !== snapshot.session.lastProcessedSequence) {
       progress = await tx.replayProgress.update({
-        where: { datasetId: id }, data: { currentSequence: snapshot.session.lastProcessedSequence },
+        where: { id: progress.id }, data: { currentSequence: snapshot.session.lastProcessedSequence },
       });
     }
-    return { progress, snapshot };
+    return { progress, snapshot, projectionId: scope?.projectionId, sessionVersion: scope?.version };
   });
   return attachReplayDiagnostics(NextResponse.json(state), {
     startedAt,
@@ -36,13 +43,14 @@ export async function GET(_request: Request, context: RouteContext) {
   });
 }
 
-export async function PUT(request: Request, context: RouteContext) {
+async function handlePUT(request: Request, context: RouteContext) {
   const { id } = await context.params;
   const parsed = replayProgressSchema.safeParse(await request.json());
   if (!parsed.success) {
     return NextResponse.json({ error: parsed.error.issues[0]?.message ?? copy.marketReplay.validation.progressInvalid }, { status: 400 });
   }
   const result = await prisma.$transaction(async (tx) => {
+    await assertReplayWritable(tx);
     const dataset = await tx.marketDataset.findUnique({ where: { id } });
     if (!dataset) return { error: copy.marketReplay.datasetNotFound, status: 404 } as const;
     const { startSequence, playbackRate, displayIntervalSeconds, displaySession } = parsed.data;
@@ -56,21 +64,27 @@ export async function PUT(request: Request, context: RouteContext) {
     // Advancing and resetting own the cursor. Delayed settings/pagehide requests must
     // never rewind it, even when no paper account exists.
     const updated = await tx.replayProgress.updateMany({
-      where: { datasetId: id, startSequence },
+      where: { ...progressWhere(id), startSequence },
       data: { playbackRate, displayIntervalSeconds, displaySession },
     });
     if (!updated.count) return { error: copy.paperTrading.conflict, status: 409 } as const;
-    const progress = await tx.replayProgress.findUniqueOrThrow({ where: { datasetId: id } });
+    const progress = await tx.replayProgress.findFirstOrThrow({ where: progressWhere(id) });
+    await markReplayMutation(tx);
     return { progress, error: null, status: 200 } as const;
   });
   return NextResponse.json(result.error ? { error: result.error } : result.progress, { status: result.status });
 }
 
-export async function DELETE(_request: Request, context: RouteContext) {
+async function handleDELETE(_request: Request, context: RouteContext) {
   const { id } = await context.params;
   await prisma.$transaction(async (tx) => {
     await archiveAndDeletePaperSession(tx, id);
-    await tx.replayProgress.deleteMany({ where: { datasetId: id } });
   });
   return NextResponse.json({ ok: true });
 }
+
+export const GET = withReplaySessionRoute(handleGET, { write: false, annotation: false });
+
+export const PUT = withReplaySessionRoute(handlePUT, { write: true, annotation: false });
+
+export const DELETE = withReplaySessionRoute(handleDELETE, { write: true, annotation: false, allowHistoryChange: true });

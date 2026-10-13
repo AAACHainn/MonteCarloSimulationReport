@@ -459,8 +459,6 @@ const indexStatements = [
   `CREATE INDEX IF NOT EXISTS "TradeReason_name_idx" ON "TradeReason"("name")`,
   `CREATE INDEX IF NOT EXISTS "MarketDataset_createdAt_idx" ON "MarketDataset"("createdAt")`,
   `CREATE UNIQUE INDEX IF NOT EXISTS "MarketBar_datasetId_timestamp_key" ON "MarketBar"("datasetId", "timestamp")`,
-  `CREATE UNIQUE INDEX IF NOT EXISTS "PaperTradingSession_datasetId_key" ON "PaperTradingSession"("datasetId")`,
-  `CREATE UNIQUE INDEX IF NOT EXISTS "PaperTradingSession_journalSessionId_key" ON "PaperTradingSession"("journalSessionId")`,
   `CREATE INDEX IF NOT EXISTS "PaperTradingSession_datasetId_idx" ON "PaperTradingSession"("datasetId")`,
   `CREATE INDEX IF NOT EXISTS "PaperOrder_sessionId_status_idx" ON "PaperOrder"("sessionId", "status")`,
   `CREATE INDEX IF NOT EXISTS "PaperOrder_sessionId_createdSequence_idx" ON "PaperOrder"("sessionId", "createdSequence")`,
@@ -472,7 +470,6 @@ const indexStatements = [
   `CREATE INDEX IF NOT EXISTS "ReplayJournalSession_datasetId_archivedAt_idx" ON "ReplayJournalSession"("datasetId", "archivedAt")`,
   `CREATE INDEX IF NOT EXISTS "PaperPositionLot_sessionId_openedSequence_idx" ON "PaperPositionLot"("sessionId", "openedSequence")`,
   `CREATE UNIQUE INDEX IF NOT EXISTS "ReplayJournalEntry_journalSessionId_id_key" ON "ReplayJournalEntry"("journalSessionId", "id")`,
-  `CREATE UNIQUE INDEX IF NOT EXISTS "ReplayJournalEntry_journalSessionId_accountNo_key" ON "ReplayJournalEntry"("journalSessionId", "accountNo")`,
   `CREATE INDEX IF NOT EXISTS "ReplayJournalEntry_journalSessionId_no_idx" ON "ReplayJournalEntry"("journalSessionId", "no")`,
   `CREATE INDEX IF NOT EXISTS "ReplayJournalEntry_journalSessionId_openedSequence_idx" ON "ReplayJournalEntry"("journalSessionId", "openedSequence")`,
   `CREATE INDEX IF NOT EXISTS "ReplayJournalEntry_journalSessionId_closedSequence_idx" ON "ReplayJournalEntry"("journalSessionId", "closedSequence")`,
@@ -652,6 +649,29 @@ try {
   for (const statement of syncMigration.split(";").map((s) => s.trim()).filter(Boolean)) {
     if (statement.startsWith('ALTER TABLE "MarketDataset"') && syncColumns.some((column) => column.name === "historyVersion")) continue;
     await prisma.$executeRawUnsafe(statement);
+  }
+  const progressColumns = await prisma.$queryRawUnsafe('PRAGMA table_info("ReplayProgress")');
+  if (!progressColumns.some((column) => column.name === "id")) {
+    const replayMigration = readFileSync(new URL("../prisma/migrations/20261013120000_add_replay_sessions/migration.sql", import.meta.url), "utf8");
+    // SQL comments are removed before splitting; quoted strings in this migration
+    // contain no semicolons. Run table redefinitions outside a Prisma transaction
+    // so SQLite's foreign_keys pragma can actually take effect.
+    const statements = replayMigration.replace(/^\s*--.*$/gm, "").split(";").map((s) => s.trim()).filter((statement) => statement && !statement.startsWith("PRAGMA"));
+    await prisma.$executeRawUnsafe("PRAGMA foreign_keys=OFF");
+    try { await prisma.$transaction(statements.map((statement) => prisma.$executeRawUnsafe(statement)), { timeout: 120_000 }); }
+    finally { await prisma.$executeRawUnsafe("PRAGMA foreign_keys=ON"); }
+  }
+  const cycleMigration = readFileSync(new URL("../prisma/migrations/20261013130000_add_replay_cycles/migration.sql", import.meta.url), "utf8");
+  const cycleColumns = await prisma.$queryRawUnsafe('PRAGMA table_info("PaperTradingSession")');
+  if (!cycleColumns.some((column) => column.name === "activeCycleKey")) {
+    await prisma.$transaction(cycleMigration.split(";").map((s) => s.trim()).filter(Boolean).map((statement) => prisma.$executeRawUnsafe(statement)));
+  }
+  const identityMigration = readFileSync(new URL("../prisma/migrations/20261013140000_version_replay_record_ids/migration.sql", import.meta.url), "utf8");
+  await prisma.$transaction(identityMigration.replace(/^\s*--.*$/gm, "").split(";").map((s) => s.trim()).filter(Boolean).map((statement) => prisma.$executeRawUnsafe(statement)));
+  const [reviewConstraint] = await prisma.$queryRawUnsafe(`SELECT sql FROM sqlite_master WHERE type='table' AND name='ReplayJournalEntry'`);
+  if (!/CHECK\s*\(\s*length\s*\(\s*"review"\s*\)\s*<=\s*2000\s*\)/i.test(reviewConstraint.sql)) {
+    const reviewMigration = readFileSync(new URL("../prisma/migrations/20261013150000_preserve_replay_review_constraint/migration.sql", import.meta.url), "utf8");
+    await prisma.$transaction(reviewMigration.replace(/^\s*--.*$/gm, "").split(";").map((s) => s.trim()).filter(Boolean).map((statement) => prisma.$executeRawUnsafe(statement)));
   }
 } finally {
   await prisma.$disconnect();

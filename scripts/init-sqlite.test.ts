@@ -39,7 +39,7 @@ describe("SQLite initialization compatibility", () => {
         `PRAGMA table_info("ReplayProgress")`,
       );
       expect(await repairedClient.replayReviewTemplate.findUniqueOrThrow({ where: { id: "review-template-1" } })).toMatchObject({ name: "复盘模板", content: "入场依据：\n执行情况：" });
-      const progress = await repairedClient.replayProgress.findUniqueOrThrow({
+      const progress = await repairedClient.replayProgress.findFirstOrThrow({
         where: { datasetId: "legacy-dataset" },
       });
       await repairedClient.marketDataset.create({ data: {

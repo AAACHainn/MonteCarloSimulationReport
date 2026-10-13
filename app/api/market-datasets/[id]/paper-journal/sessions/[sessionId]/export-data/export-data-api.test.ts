@@ -1,3 +1,7 @@
+import { replayRouteBusinessScope } from "@/test-utils/replay-route-business-scope";
+vi.mock("@/lib/replay-sessions/scope", async (importOriginal) => ({
+  ...await importOriginal<typeof import("@/lib/replay-sessions/scope")>(), ...replayRouteBusinessScope,
+}));
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { pdfEntry, pdfSnapshot } from "@/lib/paper-trading/pdf-test-fixtures";
 const mocks = vi.hoisted(() => ({ dataset: vi.fn(), session: vi.fn(), transaction: vi.fn() }));

@@ -1,6 +1,6 @@
 "use client";
 
-import { ChevronRight, Maximize, Minimize, Pause, Play } from "lucide-react";
+import { ChevronLeft, ChevronRight, Maximize, Minimize, Pause, Play } from "lucide-react";
 import { PaperTradingDetails } from "./paper-trading-panel";
 import { useReplayShortcuts } from "./use-replay-shortcuts";
 import { Button } from "@/components/ui/button";
@@ -27,13 +27,15 @@ type Props = {
   onNext: () => void;
   onSpeedChange: (value: number) => void;
   onFocusJournalEntry: (entry: ReplayJournalEntryData) => void;
+  onRewind?: () => void;
+  correctionPending?: boolean;
 };
 
 export function ReplayPlaybackBar({
   replay, sourceIntervalSeconds, journalReview, paperSnapshot, currentBar,
   displayUtcOffsetMinutes, revealedCount, replayCount, statusText,
   webFullscreen, onToggleWebFullscreen,
-  onToggle, onNext, onSpeedChange, onFocusJournalEntry,
+  onToggle, onNext, onSpeedChange, onFocusJournalEntry, onRewind, correctionPending = false,
 }: Props) {
   const shortcuts = useReplayShortcuts();
   const stateLabel = replay.status === "playing"
@@ -49,13 +51,14 @@ export function ReplayPlaybackBar({
           title={`${copy.marketReplay.playbackTiming(sourceIntervalSeconds / replay.playbackRate)}\n${copy.marketReplay.playbackShortcutHint(shortcuts.playback)}`}
           aria-keyshortcuts={shortcuts.playbackAria}
           onClick={onToggle}
-          disabled={replay.status === "finished" || journalReview}
+          disabled={replay.status === "finished" || journalReview || correctionPending}
         >
           {replay.status === "playing" ? <Pause className="h-4 w-4" /> : <Play className="h-4 w-4" />}{replay.status === "playing" ? copy.marketReplay.pause : copy.marketReplay.play}
         </Button>
-        <Button type="button" size="sm" variant="outline" className="h-9" title={copy.marketReplay.playbackShortcutHint(shortcuts.nextBar)} aria-keyshortcuts={shortcuts.nextBarAria} onClick={onNext} disabled={replay.status === "finished" || replay.status === "playing" || journalReview}>
+        <Button type="button" size="sm" variant="outline" className="h-9" title={copy.marketReplay.playbackShortcutHint(shortcuts.nextBar)} aria-keyshortcuts={shortcuts.nextBarAria} onClick={onNext} disabled={replay.status === "finished" || replay.status === "playing" || journalReview || correctionPending}>
           <ChevronRight className="h-4 w-4" />{copy.marketReplay.nextBar}<kbd className="ml-1 hidden rounded border bg-white px-1.5 py-0.5 font-mono text-[10px] text-slate-500 lg:inline">{shortcuts.nextBar}</kbd>
         </Button>
+        {onRewind ? <Button type="button" variant="outline" size="sm" className="h-9" disabled={journalReview || correctionPending} onClick={onRewind}><ChevronLeft className="h-4 w-4" />{copy.replaySessions.rewind}</Button> : null}
         <PaperTradingDetails snapshot={paperSnapshot} onFocusJournalEntry={onFocusJournalEntry} />
         <div className="mx-1 h-6 w-px bg-slate-200" />
         <Label htmlFor="replay-speed" className="whitespace-nowrap text-xs text-slate-500">{copy.marketReplay.speed}</Label>

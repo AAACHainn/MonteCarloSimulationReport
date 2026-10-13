@@ -1,4 +1,6 @@
+import { accountWhere, entryProjectionWhere } from '@/lib/replay-sessions/scope';
 import type { Prisma } from "@prisma/client";
+import { logicalId } from "@/lib/replay-sessions/identity";
 import { prisma } from "@/lib/db";
 import type {
   PaperFillData,
@@ -23,6 +25,7 @@ export type SessionRecord = {
   tradeStatsVersion: number; closedTradeCount: number; winningTradeCount: number; losingTradeCount: number;
   grossWinningPnl: number; grossLosingPnl: number; currentWinStreak: number; currentLossStreak: number;
   maxConsecutiveWins: number; maxConsecutiveLosses: number;
+  activeCycleKey?: string | null;
 };
 
 export function tradeStatsFromSession(session: SessionRecord): IncrementalTradeStats {
@@ -58,12 +61,13 @@ export async function ensurePaperTradeStats(
 
 export function serializePaperSession(session: SessionRecord): PaperSessionState {
   return {
-    id: session.id, datasetId: session.datasetId, initialCapital: session.initialCapital,
+    id: logicalId(session.id), datasetId: session.datasetId, initialCapital: session.initialCapital,
     currency: session.currency, commissionBps: session.commissionBps, slippageBps: session.slippageBps,
     lastProcessedSequence: session.lastProcessedSequence, netQuantity: session.netQuantity,
     averageEntryPrice: session.averageEntryPrice, realizedPnl: session.realizedPnl,
     totalFees: session.totalFees, totalSlippage: session.totalSlippage,
     peakEquity: session.peakEquity, maxDrawdown: session.maxDrawdown, version: session.version,
+    activeCycleKey: session.activeCycleKey ?? null,
   };
 }
 
@@ -71,36 +75,39 @@ export function serializePaperOrder(order: {
   id: string; side: string; type: string; status: string; quantity: number; price: number | null;
   riskAmount: number | null;
   stopLoss: number | null; takeProfit: number | null; reduceOnly: boolean; isProtective: boolean;
-  ocoGroupId: string | null; createdSequence: number; activeFromSequence: number;
+  ocoGroupId: string | null; parentOrderId?: string | null; createdSequence: number; activeFromSequence: number;
   filledSequence: number | null; filledAt: Date | null; filledPrice: number | null;
   cancelReason: string | null; createdAt?: Date;
 }): PaperOrderData {
-  return {
-    ...order,
-    side: order.side as PaperSide,
-    type: order.type as PaperOrderType,
-    status: order.status as PaperOrderStatus,
-    filledAt: order.filledAt?.toISOString() ?? null,
-    createdAt: order.createdAt?.toISOString(),
-  };
+  return { id: logicalId(order.id), side: order.side as PaperSide, type: order.type as PaperOrderType,
+    status: order.status as PaperOrderStatus, quantity: order.quantity, riskAmount: order.riskAmount,
+    price: order.price, stopLoss: order.stopLoss, takeProfit: order.takeProfit, reduceOnly: order.reduceOnly,
+    isProtective: order.isProtective, ocoGroupId: order.ocoGroupId, parentOrderId: order.parentOrderId ?? null,
+    createdSequence: order.createdSequence, activeFromSequence: order.activeFromSequence,
+    filledSequence: order.filledSequence, filledAt: order.filledAt?.toISOString() ?? null,
+    filledPrice: order.filledPrice, cancelReason: order.cancelReason, createdAt: order.createdAt?.toISOString() };
 }
 
 export function serializePaperFill(fill: {
-  id: string; orderId: string; sequence: number; timestamp: Date; side: string; price: number;
+  id: string; orderId: string; cycleKey?: string | null; sequence: number; timestamp: Date; side: string; price: number;
   quantity: number; fee: number; slippageCost: number; realizedPnl: number; closedQuantity: number;
   openedQuantity: number; netQuantityAfter: number; averagePriceAfter: number | null; reason: string;
 }): PaperFillData {
-  return { ...fill, side: fill.side as PaperSide, reason: fill.reason as PaperFillReason, timestamp: fill.timestamp.toISOString() };
+  return { id: logicalId(fill.id), orderId: logicalId(fill.orderId), cycleKey: fill.cycleKey ?? null,
+    sequence: fill.sequence, timestamp: fill.timestamp.toISOString(), side: fill.side as PaperSide,
+    price: fill.price, quantity: fill.quantity, fee: fill.fee, slippageCost: fill.slippageCost,
+    realizedPnl: fill.realizedPnl, closedQuantity: fill.closedQuantity, openedQuantity: fill.openedQuantity,
+    netQuantityAfter: fill.netQuantityAfter, averagePriceAfter: fill.averagePriceAfter, reason: fill.reason as PaperFillReason };
 }
 
 export function serializePaperTrade(trade: {
   id: string; side: string; status: string; openedSequence: number; openedAt: Date;
   closedSequence: number | null; closedAt: Date | null; grossPnl: number; fees: number; plannedRisk: number | null;
 }): PaperTradeData {
-  return {
-    ...trade, side: trade.side as "LONG" | "SHORT", status: trade.status as "OPEN" | "CLOSED",
-    openedAt: trade.openedAt.toISOString(), closedAt: trade.closedAt?.toISOString() ?? null,
-  };
+  return { id: logicalId(trade.id), side: trade.side as "LONG" | "SHORT", status: trade.status as "OPEN" | "CLOSED",
+    openedSequence: trade.openedSequence, openedAt: trade.openedAt.toISOString(),
+    closedSequence: trade.closedSequence, closedAt: trade.closedAt?.toISOString() ?? null,
+    grossPnl: trade.grossPnl, fees: trade.fees, plannedRisk: trade.plannedRisk };
 }
 
 export function serializePaperPositionLot(lot: {
@@ -109,17 +116,17 @@ export function serializePaperPositionLot(lot: {
   actualRisk: number; abrValue: number | null; abrLength: number; displayIntervalSeconds: number;
   displaySession: string; displayUtcOffsetMinutes: number; priceTickSize: number;
 }): PaperPositionLotData {
-  return {
-    ...lot,
-    side: lot.side as "LONG" | "SHORT",
-    entryOrderType: lot.entryOrderType as PaperPositionLotData["entryOrderType"],
-    displaySession: lot.displaySession as "ETH" | "RTH",
-    openedAt: lot.openedAt.toISOString(),
-  };
+  return { id: logicalId(lot.id), entryFillId: logicalId(lot.entryFillId), side: lot.side as "LONG" | "SHORT",
+    openedSequence: lot.openedSequence, openedAt: lot.openedAt.toISOString(), entryPrice: lot.entryPrice,
+    entryOrderType: lot.entryOrderType as PaperPositionLotData["entryOrderType"], initialStopPrice: lot.initialStopPrice,
+    initialQuantity: lot.initialQuantity, remainingQuantity: lot.remainingQuantity, initialRisk: lot.initialRisk,
+    actualRisk: lot.actualRisk, abrValue: lot.abrValue, abrLength: lot.abrLength,
+    displayIntervalSeconds: lot.displayIntervalSeconds, displaySession: lot.displaySession as "ETH" | "RTH",
+    displayUtcOffsetMinutes: lot.displayUtcOffsetMinutes, priceTickSize: lot.priceTickSize };
 }
 
 export async function getPaperSessionSnapshot(datasetId: string, db: Prisma.TransactionClient = prisma): Promise<PaperSessionSnapshot | null> {
-  const storedSession = await db.paperTradingSession.findUnique({ where: { datasetId } });
+  const storedSession = await db.paperTradingSession.findFirst({ where: accountWhere(datasetId) });
   if (!storedSession) return null;
   const session = await ensurePaperTradeStats(storedSession as SessionRecord, db);
   const [activeOrders, recentOrders, recentFills, recentTrades, openLots, currentBar, journalEntryCount] = await Promise.all([
@@ -132,7 +139,7 @@ export async function getPaperSessionSnapshot(datasetId: string, db: Prisma.Tran
       ? db.marketBar.findUnique({ where: { datasetId_sequence: { datasetId, sequence: session.lastProcessedSequence } } })
       : Promise.resolve(null),
     session.journalSessionId
-      ? db.replayJournalEntry.count({ where: { journalSessionId: session.journalSessionId } })
+      ? db.replayJournalEntry.count({ where: { journalSessionId: session.journalSessionId, ...entryProjectionWhere() } })
       : Promise.resolve(0),
   ]);
   const recentOrderIds = new Set(recentOrders.map((order) => order.id));

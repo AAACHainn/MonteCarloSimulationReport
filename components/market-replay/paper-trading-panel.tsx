@@ -1,4 +1,5 @@
 "use client";
+import { useReplayFetch } from "./replay-session-context";
 
 import { useEffect, useRef, useState, type PointerEvent as ReactPointerEvent } from "react";
 import { createPortal } from "react-dom";
@@ -275,7 +276,7 @@ export function PaperTradingDetails({ snapshot, onFocusJournalEntry }: { snapsho
           ref={panelRef}
           role="dialog"
           aria-label={copy.paperTrading.records}
-          className="fixed z-[100] h-[min(44rem,calc(100vh-1rem))] w-[min(80rem,calc(100vw-1rem))]"
+          className="fixed z-40 h-[min(44rem,calc(100dvh-1rem))] w-[min(80rem,calc(100vw-1rem))]"
           style={position && size
             ? { left: position.x, top: position.y, width: size.width, height: size.height }
             : { left: "50%", top: "50%", transform: "translate(-50%, -50%)" }}
@@ -365,6 +366,7 @@ type JournalTrainingStats = {
 };
 
 function Stats({ snapshot }: { snapshot: PaperSessionSnapshot }) {
+  const fetch = useReplayFetch();
   const [stats, setStats] = useState<JournalTrainingStats | null>(null);
   const [error, setError] = useState(false);
   useEffect(() => {
@@ -379,7 +381,7 @@ function Stats({ snapshot }: { snapshot: PaperSessionSnapshot }) {
       .then((data) => { if (!cancelled) setStats(data); })
       .catch(() => { if (!cancelled) setError(true); });
     return () => { cancelled = true; };
-  }, [snapshot.session.datasetId, snapshot.session.id, snapshot.stats.journalEntryCount]);
+  }, [snapshot.session.datasetId, snapshot.session.id, snapshot.stats.journalEntryCount, fetch]);
   if (error) return <p role="alert" className="text-sm text-red-700">{copy.paperTrading.journalStatsError}</p>;
   if (!stats) return <p role="status" className="text-sm text-slate-600">{copy.paperTrading.journalStatsLoading}</p>;
   const values = [

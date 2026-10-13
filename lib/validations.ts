@@ -190,6 +190,7 @@ const paperSessionStateSchema = z.object({
   slippageBps: z.number().finite().min(0).max(10_000),
   lastProcessedSequence: z.number().int().min(-1),
   netQuantity: z.number().finite(),
+  activeCycleKey: z.string().max(2048).nullable().optional(),
   averageEntryPrice: z.number().finite().nullable(),
   realizedPnl: z.number().finite(),
   totalFees: z.number().finite().min(0),
@@ -200,20 +201,21 @@ const paperSessionStateSchema = z.object({
 });
 
 const paperOrderDataSchema = z.object({
-  id: z.string().min(1).max(160), side: z.enum(["BUY", "SELL"]),
+  id: z.string().min(1).max(2048), side: z.enum(["BUY", "SELL"]),
   type: z.enum(["MARKET", "LIMIT", "STOP"]),
   status: z.enum(["PENDING", "FILLED", "CANCELLED", "REJECTED"]),
   quantity: z.number().finite().positive(), riskAmount: z.number().finite().positive().nullable(),
   price: z.number().finite().nullable(), stopLoss: z.number().finite().nullable(),
   takeProfit: z.number().finite().nullable(), reduceOnly: z.boolean(), isProtective: z.boolean(),
-  ocoGroupId: z.string().max(160).nullable(), createdSequence: z.number().int().min(-1),
+  ocoGroupId: z.string().max(2048).nullable(), parentOrderId: z.string().max(2048).nullable().optional(), createdSequence: z.number().int().min(-1),
   activeFromSequence: z.number().int().min(0), filledSequence: z.number().int().min(0).nullable(),
   filledAt: z.string().datetime().nullable(), filledPrice: z.number().finite().nullable(),
   cancelReason: z.string().max(120).nullable(), createdAt: z.string().datetime().optional(),
 });
 
 const paperFillDataSchema = z.object({
-  id: z.string().min(1).max(160), orderId: z.string().min(1).max(160),
+  id: z.string().min(1).max(2048), orderId: z.string().min(1).max(2048),
+  cycleKey: z.string().max(2048).nullable().optional(),
   sequence: z.number().int().min(0), timestamp: z.string().datetime(), side: z.enum(["BUY", "SELL"]),
   price: z.number().finite().positive(), quantity: z.number().finite().positive(),
   fee: z.number().finite().min(0), slippageCost: z.number().finite().min(0), realizedPnl: z.number().finite(),
@@ -237,7 +239,7 @@ const paperJournalContextSchema = z.object({
 });
 
 const paperPositionLotDataSchema = paperJournalContextSchema.extend({
-  id: z.string().min(1).max(240), entryFillId: z.string().min(1).max(160),
+  id: z.string().min(1).max(4096), entryFillId: z.string().min(1).max(2048),
   side: z.enum(["LONG", "SHORT"]), openedSequence: z.number().int().min(0),
   openedAt: z.string().datetime(), entryPrice: z.number().finite().positive(),
   entryOrderType: z.enum(["MARKET", "LIMIT", "STOP"]).nullable(),
@@ -247,7 +249,8 @@ const paperPositionLotDataSchema = paperJournalContextSchema.extend({
 });
 
 const replayJournalEntryDraftSchema = paperJournalContextSchema.extend({
-  id: z.string().min(1).max(500), lotId: z.string().min(1).max(240),
+  id: z.string().min(1).max(8192), lotId: z.string().min(1).max(4096),
+  cycleKey: z.string().max(2048).nullable().optional(),
   direction: z.enum(["LONG", "SHORT"]), quantity: z.number().finite().positive(),
   openedSequence: z.number().int().min(0), openedAt: z.string().datetime(),
   closedSequence: z.number().int().min(0), closedAt: z.string().datetime(),
@@ -259,6 +262,10 @@ const replayJournalEntryDraftSchema = paperJournalContextSchema.extend({
 });
 
 const paperReplayDeltaSchema = z.object({
+  contextRuns: z.array(z.object({
+    fromSequence: z.number().int().nonnegative(), toSequence: z.number().int().nonnegative(),
+    generation: z.number().int().positive(), context: paperJournalContextSchema.nullable(),
+  })).max(MAX_REPLAY_SYNC_SOURCE_BARS).optional(),
   state: paperSessionStateSchema,
   activeOrders: z.array(paperOrderDataSchema).max(10_000),
   orderChanges: z.array(paperOrderDataSchema).max(10_000),

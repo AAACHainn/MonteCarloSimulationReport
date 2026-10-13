@@ -67,12 +67,12 @@ function createBracket(
   parent: PaperOrderData,
   state: PaperSessionState,
   sequence: number,
-  makeId: () => string,
+  makeId: (cause?: string) => string,
 ) {
   cancelProtectiveOrders(orders, "REPLACED");
   if (sign(state.netQuantity) === 0) return;
   const side: PaperSide = state.netQuantity > 0 ? "SELL" : "BUY";
-  const group = makeId();
+  const group = makeId(`oco:${parent.id}`);
   const common = {
     status: "PENDING" as const,
     side,
@@ -83,6 +83,7 @@ function createBracket(
     reduceOnly: true,
     isProtective: true,
     ocoGroupId: group,
+    parentOrderId: parent.id,
     createdSequence: sequence,
     activeFromSequence: sequence,
     filledSequence: null,
@@ -91,10 +92,10 @@ function createBracket(
     cancelReason: null,
   };
   if (parent.stopLoss !== null) {
-    orders.push({ ...common, id: makeId(), type: "STOP", price: parent.stopLoss });
+    orders.push({ ...common, id: makeId(`stop:${parent.id}`), type: "STOP", price: parent.stopLoss });
   }
   if (parent.takeProfit !== null) {
-    orders.push({ ...common, id: makeId(), type: "LIMIT", price: parent.takeProfit });
+    orders.push({ ...common, id: makeId(`target:${parent.id}`), type: "LIMIT", price: parent.takeProfit });
   }
 }
 
@@ -195,11 +196,13 @@ export function advancePaperTrading(input: PaperAdvanceInput): PaperAdvanceResul
     }
 
     const fill: PaperFillData = {
-      id: makeId(), orderId: order.id, sequence: bar.sequence, timestamp: bar.timestamp,
+      id: makeId(`fill:${order.id}`), orderId: order.id, sequence: bar.sequence, timestamp: bar.timestamp,
       side: order.side, price, quantity, fee, slippageCost, realizedPnl,
       closedQuantity, openedQuantity, netQuantityAfter: nextQuantity,
       averagePriceAfter: nextAverage, reason: fillReason(oldQuantity, nextQuantity, order),
     };
+    fill.cycleKey = oldSign === 0 ? fill.id : state.activeCycleKey ?? `legacy-cycle:${state.id}`;
+    state.activeCycleKey = sign(nextQuantity) === 0 ? null : fill.cycleKey;
     fills.push(fill);
 
     if (closedQuantity > EPSILON && lots.length > 0) {
@@ -207,7 +210,7 @@ export function advancePaperTrading(input: PaperAdvanceInput): PaperAdvanceResul
         fillId: fill.id, sequence: fill.sequence, timestamp: fill.timestamp, price: fill.price,
       });
       lots = closed.lots;
-      journalEntries.push(...closed.entries);
+      journalEntries.push(...closed.entries.map((entry) => ({ ...entry, cycleKey: fill.cycleKey })));
     }
     if (journalTrackingBlocked && closedQuantity >= Math.abs(oldQuantity) - EPSILON) {
       journalTrackingBlocked = false;

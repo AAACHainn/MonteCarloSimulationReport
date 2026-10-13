@@ -1,4 +1,5 @@
 "use client";
+import { useReplaySession } from "./replay-session-context";
 
 import { formatChartTick, chartCandleData as candle, chartVolumeData as volume } from "@/lib/market-replay/chart-data";
 
@@ -290,6 +291,7 @@ export function ReplayChart({
   onOpenPaperAccount: () => void;
   onVisibleSequenceRangeChange?: (range: ReplayVisibleSequenceRange) => void;
 }) {
+  const replaySession = useReplaySession();
   const containerRef = useRef<HTMLDivElement | null>(null);
   const interactionRef = useRef<HTMLDivElement | null>(null);
   const orderTicketRef = useRef<HTMLDivElement | null>(null);
@@ -519,14 +521,15 @@ export function ReplayChart({
     }
     const fallback = paperInitialCapital * 0.01;
     try {
-      const stored = JSON.parse(window.localStorage.getItem(`market-replay-risk-settings-v1:${datasetId}`) ?? "null") as { riskAmount?: unknown; targetR?: unknown } | null;
-      setDefaultRiskAmount(typeof stored?.riskAmount === "number" && stored.riskAmount > 0 ? stored.riskAmount : fallback);
-      setDefaultTargetR(typeof stored?.targetR === "number" && stored.targetR > 0 ? stored.targetR : 2);
+      const stored = JSON.parse(window.localStorage.getItem(`market-replay-risk-settings-v2:${replaySession?.id ?? datasetId}`) ?? "null") as { riskAmount?: unknown; targetR?: unknown } | null;
+      const preferences = stored ?? replaySession?.riskPreferences;
+      setDefaultRiskAmount(typeof preferences?.riskAmount === "number" && preferences.riskAmount > 0 ? preferences.riskAmount : fallback);
+      setDefaultTargetR(typeof preferences?.targetR === "number" && preferences.targetR > 0 ? preferences.targetR : 2);
     } catch {
       setDefaultRiskAmount(fallback);
       setDefaultTargetR(2);
     }
-  }, [datasetId, paperInitialCapital, paperSessionId]);
+  }, [datasetId, paperInitialCapital, paperSessionId, replaySession]);
 
   useEffect(() => {
     onDraftActiveChange(Boolean(draft));
@@ -1665,13 +1668,29 @@ export function ReplayChart({
     setDraftError(null);
   }
 
-  function saveDefaults() {
+  async function saveDefaults() {
     if (!draft || draft.riskAmount <= 0 || draft.targetR <= 0) return;
     setDefaultRiskAmount(draft.riskAmount); setDefaultTargetR(draft.targetR);
     try {
-      window.localStorage.setItem(`market-replay-risk-settings-v1:${datasetId}`, JSON.stringify({ riskAmount: draft.riskAmount, targetR: draft.targetR }));
+      window.localStorage.setItem(`market-replay-risk-settings-v2:${replaySession?.id ?? datasetId}`, JSON.stringify({ riskAmount: draft.riskAmount, targetR: draft.targetR }));
     } catch {
       // Local storage is optional; the current draft remains usable.
+    }
+    if (replaySession) {
+      try {
+        for (let attempt = 0; attempt < 3; attempt += 1) {
+          const response = await fetch(`/api/replay-sessions/${encodeURIComponent(replaySession.id)}`, { cache: "no-store" });
+          const data = await response.json();
+          if (!response.ok) throw new Error(data.error ?? copy.replaySessions.requestFailed);
+          const saved = await fetch(`/api/replay-sessions/${encodeURIComponent(replaySession.id)}`, {
+            method: "PATCH", headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ expectedVersion: data.session.version, riskPreferences: { riskAmount: draft.riskAmount, targetR: draft.targetR } }),
+          });
+          if (saved.status === 409 && attempt < 2) continue;
+          if (!saved.ok) throw new Error((await saved.json()).error ?? copy.replaySessions.requestFailed);
+          break;
+        }
+      } catch (error) { setDraftError(error instanceof Error ? error.message : copy.replaySessions.requestFailed); return; }
     }
     setDefaultSaved(true);
   }

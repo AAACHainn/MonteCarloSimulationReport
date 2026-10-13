@@ -1,3 +1,4 @@
+import { withReplaySessionRoute, drawingScopeWhere } from '@/lib/replay-sessions/scope';
 import { NextResponse } from "next/server";
 import { prisma } from "@/lib/db";
 import { copy } from "@/lib/i18n";
@@ -8,18 +9,18 @@ import {
 
 type RouteContext = { params: Promise<{ id: string }> };
 
-export async function GET(_request: Request, context: RouteContext) {
+async function handleGET(_request: Request, context: RouteContext) {
   const { id } = await context.params;
   const dataset = await prisma.marketDataset.findUnique({ where: { id }, select: { id: true } });
   if (!dataset) return NextResponse.json({ error: copy.marketReplay.datasetNotFound }, { status: 404 });
   const drawings = await prisma.marketDrawing.findMany({
-    where: { datasetId: id },
+    where: { datasetId: id, ...drawingScopeWhere() },
     orderBy: [{ createdAt: "asc" }, { id: "asc" }],
   });
   return NextResponse.json({ drawings: drawings.map(serializeMarketDrawing) });
 }
 
-export async function POST(request: Request, context: RouteContext) {
+async function handlePOST(request: Request, context: RouteContext) {
   const { id } = await context.params;
   const parsed = createMarketDrawingSchema.safeParse(await request.json());
   if (!parsed.success) {
@@ -30,6 +31,7 @@ export async function POST(request: Request, context: RouteContext) {
   const drawing = await prisma.marketDrawing.create({
     data: {
       datasetId: id,
+      ...drawingScopeWhere(),
       type: parsed.data.type,
       geometry: JSON.stringify(parsed.data.geometry),
       style: JSON.stringify(parsed.data.style),
@@ -37,3 +39,7 @@ export async function POST(request: Request, context: RouteContext) {
   });
   return NextResponse.json({ drawing: serializeMarketDrawing(drawing) }, { status: 201 });
 }
+
+export const GET = withReplaySessionRoute(handleGET, { write: false, annotation: false });
+
+export const POST = withReplaySessionRoute(handlePOST, { write: true, annotation: false });

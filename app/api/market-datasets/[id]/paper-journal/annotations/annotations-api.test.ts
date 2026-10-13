@@ -1,3 +1,7 @@
+import { replayRouteBusinessScope } from "@/test-utils/replay-route-business-scope";
+vi.mock("@/lib/replay-sessions/scope", async (importOriginal) => ({
+  ...await importOriginal<typeof import("@/lib/replay-sessions/scope")>(), ...replayRouteBusinessScope,
+}));
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 const mocks = vi.hoisted(() => ({
@@ -10,7 +14,7 @@ const mocks = vi.hoisted(() => ({
 vi.mock("@/lib/db", () => ({
   prisma: {
     marketDataset: { findUnique: mocks.datasetFindUnique },
-    paperTradingSession: { findUnique: mocks.paperSessionFindUnique },
+    paperTradingSession: { findFirst: mocks.paperSessionFindUnique },
     replayJournalEntry: {
       findFirst: mocks.journalFindFirst,
       findMany: mocks.journalFindMany,

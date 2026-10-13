@@ -40,7 +40,7 @@ const styleIndexes = {
   integer: 5,
 } as const;
 
-export async function createReplayJournalExcel(entries: ReplayJournalEntryData[]) {
+export async function createReplayJournalExcel(entries: ReplayJournalEntryData[], caption?: string) {
   const zip = new JSZip();
   zip.file("[Content_Types].xml", contentTypesXml);
   zip.file("_rels/.rels", packageRelationshipsXml);
@@ -49,7 +49,7 @@ export async function createReplayJournalExcel(entries: ReplayJournalEntryData[]
   zip.file("xl/workbook.xml", workbookXml);
   zip.file("xl/_rels/workbook.xml.rels", workbookRelationshipsXml);
   zip.file("xl/styles.xml", stylesXml);
-  zip.file("xl/worksheets/sheet1.xml", worksheetXml(entries));
+  zip.file("xl/worksheets/sheet1.xml", worksheetXml(entries, caption));
   return zip.generateAsync({ type: "uint8array", compression: "DEFLATE" });
 }
 
@@ -68,15 +68,16 @@ function excelDate(entry: ReplayJournalEntryData) {
   return Date.UTC(Number(parts.year), Number(parts.month) - 1, Number(parts.day)) / 86_400_000 + 25_569;
 }
 
-function worksheetXml(entries: ReplayJournalEntryData[]) {
-  const lastRow = entries.length + 1;
+function worksheetXml(entries: ReplayJournalEntryData[], caption?: string) {
+  const headerRow = caption ? 2 : 1;
+  const lastRow = entries.length + headerRow;
   const lastColumn = columnName(columns.length);
   const columnDefinitions = columns.map((column, index) => (
     `<col min="${index + 1}" max="${index + 1}" width="${column.width}" customWidth="1"/>`
   )).join("");
-  const header = columns.map((column, index) => stringCell(columnName(index + 1), 1, column.header, 1)).join("");
+  const header = columns.map((column, index) => stringCell(columnName(index + 1), headerRow, column.header, 1)).join("");
   const rows = entries.map((entry, rowIndex) => {
-    const row = rowIndex + 2;
+    const row = rowIndex + headerRow + 1;
     const cells = columns.map((column, columnIndex) => {
       const reference = columnName(columnIndex + 1);
       const value = column.value(entry);
@@ -90,11 +91,12 @@ function worksheetXml(entries: ReplayJournalEntryData[]) {
   return xml(`
 <worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main">
   <dimension ref="A1:${lastColumn}${lastRow}"/>
-  <sheetViews><sheetView workbookViewId="0"><pane ySplit="1" topLeftCell="A2" activePane="bottomLeft" state="frozen"/></sheetView></sheetViews>
+  <sheetViews><sheetView workbookViewId="0"><pane ySplit="${headerRow}" topLeftCell="A${headerRow + 1}" activePane="bottomLeft" state="frozen"/></sheetView></sheetViews>
   <sheetFormatPr defaultRowHeight="18"/>
   <cols>${columnDefinitions}</cols>
-  <sheetData><row r="1" ht="24" customHeight="1">${header}</row>${rows}</sheetData>
-  <autoFilter ref="A1:${lastColumn}${lastRow}"/>
+  <sheetData>${caption ? `<row r="1" ht="30" customHeight="1">${stringCell("A", 1, caption, 1)}</row>` : ""}<row r="${headerRow}" ht="24" customHeight="1">${header}</row>${rows}</sheetData>
+  <autoFilter ref="A${headerRow}:${lastColumn}${lastRow}"/>
+  ${caption ? `<mergeCells count="1"><mergeCell ref="A1:${lastColumn}1"/></mergeCells>` : ""}
 </worksheet>`);
 }
 

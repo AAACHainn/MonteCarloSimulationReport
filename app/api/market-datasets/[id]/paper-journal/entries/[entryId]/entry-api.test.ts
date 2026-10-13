@@ -1,3 +1,7 @@
+import { replayRouteBusinessScope } from "@/test-utils/replay-route-business-scope";
+vi.mock("@/lib/replay-sessions/scope", async (importOriginal) => ({
+  ...await importOriginal<typeof import("@/lib/replay-sessions/scope")>(), ...replayRouteBusinessScope,
+}));
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 const mocks = vi.hoisted(() => ({
@@ -12,7 +16,9 @@ vi.mock("@/lib/db", () => ({
     replayJournalEntry: {
       findFirst: mocks.entryFindFirst,
       update: mocks.entryUpdate,
+      findUniqueOrThrow: mocks.entryUpdate,
     },
+    $transaction: async (callback: (tx: unknown) => unknown) => callback({ replayJournalEntry: { update: mocks.entryUpdate, findUniqueOrThrow: mocks.entryUpdate } }),
     tradeOption: { findFirst: mocks.optionFindFirst },
     tradeReason: { count: mocks.reasonCount },
   },
@@ -59,7 +65,7 @@ describe("replay journal Setup API", () => {
     expect(response.status).toBe(200);
     expect(mocks.entryFindFirst).toHaveBeenCalledWith({
       where: { id: "entry-1", journalSession: { datasetId: "dataset-1" } },
-      select: { id: true },
+      select: { id: true, logicalKey: true, journalSessionId: true },
     });
     expect(mocks.optionFindFirst).toHaveBeenCalledWith({
       where: { id: "setup-1", type: "STRATEGY", active: true },
@@ -96,6 +102,8 @@ describe("replay journal Setup API", () => {
     expect(mocks.reasonCount).toHaveBeenCalledWith({ where: { id: { in: ["reason-1", "reason-2"] } } });
     expect(mocks.entryUpdate).toHaveBeenCalledWith(expect.objectContaining({
       data: { tradeReasons: { set: [{ id: "reason-1" }, { id: "reason-2" }] } },
+    }));
+    expect(mocks.entryUpdate).toHaveBeenCalledWith(expect.objectContaining({
       include: expect.objectContaining({
         tradeReasons: { select: { id: true, name: true }, orderBy: { name: "asc" } },
       }),

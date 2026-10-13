@@ -1,12 +1,16 @@
+import { replayRouteBusinessScope } from "@/test-utils/replay-route-business-scope";
+vi.mock("@/lib/replay-sessions/scope", async (importOriginal) => ({
+  ...await importOriginal<typeof import("@/lib/replay-sessions/scope")>(), ...replayRouteBusinessScope,
+}));
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 const mocks = vi.hoisted(() => {
   const tx = {
-    paperTradingSession: { findUnique: vi.fn(), update: vi.fn() },
-    replayProgress: { findUnique: vi.fn() },
+    paperTradingSession: { findFirst: vi.fn(), update: vi.fn() },
+    replayProgress: { findFirst: vi.fn() },
     marketDataset: { findUnique: vi.fn() },
     marketBar: { findUnique: vi.fn() },
-    paperOrder: { create: vi.fn(), findFirst: vi.fn(), update: vi.fn(), updateMany: vi.fn() },
+    paperOrder: { create: vi.fn(), findMany: vi.fn(), findFirst: vi.fn(), update: vi.fn(), updateMany: vi.fn() },
   };
   return {
     tx,
@@ -16,7 +20,7 @@ const mocks = vi.hoisted(() => {
 });
 
 vi.mock("@/lib/db", () => ({ prisma: { $transaction: mocks.transaction } }));
-vi.mock("@/lib/paper-trading/serialize", () => ({ getPaperSessionSnapshot: mocks.getSnapshot }));
+vi.mock("@/lib/paper-trading/serialize", async (importOriginal) => ({ ...await importOriginal<typeof import("@/lib/paper-trading/serialize")>(), getPaperSessionSnapshot: mocks.getSnapshot }));
 
 import { DELETE, POST } from "./route";
 import { PATCH } from "./[orderId]/route";
@@ -35,12 +39,13 @@ function request(method: string, body: unknown) {
 describe("paper order API fixed-risk behavior", () => {
   beforeEach(() => {
     vi.clearAllMocks();
-    mocks.tx.paperTradingSession.findUnique.mockResolvedValue({
+    mocks.tx.paperTradingSession.findFirst.mockResolvedValue({
       id: "session", version: 1, commissionBps: 0, slippageBps: 0, netQuantity: 0,
     });
-    mocks.tx.replayProgress.findUnique.mockResolvedValue({ currentSequence: 9 });
+    mocks.tx.replayProgress.findFirst.mockResolvedValue({ currentSequence: 9 });
     mocks.tx.marketDataset.findUnique.mockResolvedValue({ barCount: 100, priceTickSize: 0.01 });
     mocks.tx.marketBar.findUnique.mockResolvedValue({ close: 100 });
+    mocks.tx.paperOrder.findMany.mockResolvedValue([{ id: "order" }, { id: "other" }]);
     mocks.tx.paperOrder.create.mockResolvedValue({ id: "order" });
     mocks.tx.paperOrder.update.mockResolvedValue({ id: "order" });
     mocks.tx.paperOrder.updateMany.mockResolvedValue({ count: 2 });
@@ -79,7 +84,7 @@ describe("paper order API fixed-risk behavior", () => {
       price: 100, stopLoss: 101, takeProfit: 110, expectedVersion: 1,
     }), context);
     expect(invalid.status).toBe(400);
-    mocks.tx.paperTradingSession.findUnique.mockResolvedValueOnce({
+    mocks.tx.paperTradingSession.findFirst.mockResolvedValueOnce({
       id: "session", version: 2, commissionBps: 0, slippageBps: 0, netQuantity: 0,
     });
     const conflict = await POST(request("POST", {
