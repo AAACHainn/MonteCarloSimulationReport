@@ -1,6 +1,7 @@
 "use client";
 
 import { addCalendarDays, chunkRequestDates } from "./chunks";
+import { HistoryVersionConflict, marketVersionMatches } from "./history-version";
 import {
   MARKET_CACHE_BUDGET_BYTES,
   MARKET_CACHE_EVICT_TO_RATIO,
@@ -119,7 +120,7 @@ export class MarketBarCache {
   private writeCounter = Date.now();
 
   constructor(
-    private dataset: Pick<MarketDatasetSummary, "id" | "dataVersion" | "symbol" | "sourceIntervalSeconds">,
+    private dataset: Pick<MarketDatasetSummary, "id" | "dataVersion" | "symbol" | "sourceIntervalSeconds" | "historyVersion">,
     private fetcher: typeof fetch = fetch,
     private budgetBytes = MARKET_CACHE_BUDGET_BYTES,
   ) {}
@@ -319,6 +320,7 @@ export class MarketBarCache {
     if (uncovered.length) {
       const params = new URLSearchParams({
         version: String(this.dataset.dataVersion),
+        ...(this.dataset.historyVersion !== undefined ? { historyVersion: String(this.dataset.historyVersion) } : {}),
         startDate,
         dates: uncovered.join(","),
       });
@@ -330,6 +332,7 @@ export class MarketBarCache {
         { signal: controller.signal },
       ).then(async (response) => {
         const body = await response.json();
+        if (body?.code === "HISTORY_CHANGED") throw new HistoryVersionConflict(body.error);
         if (!response.ok) throw new Error(body?.error ?? "Unable to load market bars.");
         return body as MarketBarChunksResponse;
       });
@@ -345,7 +348,7 @@ export class MarketBarCache {
     const responses = await Promise.all(pending);
     const persistence: StoredMarketChunk[] = [];
     for (const response of responses) {
-      if (response.dataVersion !== this.dataset.dataVersion || response.datasetId !== this.dataset.id) {
+      if (!marketVersionMatches(response, this.dataset) || response.datasetId !== this.dataset.id) {
         throw new Error("Market data cache version conflict.");
       }
       this.nextRanges.set(response.requestStartDate, response.nextStartDate);

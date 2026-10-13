@@ -134,6 +134,7 @@ model MarketDataset {
   timezone     String
   status                String  @default("READY")
   dataVersion           Int     @default(1)
+  historyVersion        Int     @default(1)
   replayGeneration      Int     @default(0)
   nextReplayJournalNo   Int     @default(0)
   barBlockBuildCursor   Int     @default(-1)
@@ -154,10 +155,82 @@ model MarketDataset {
   paperSession PaperTradingSession?
   replayJournalSessions ReplayJournalSession[]
   drawings     MarketDrawing[]
+  syncConfig   MarketDatasetSyncConfig?
+  syncRuns     MarketDataSyncRun[]
   createdAt    DateTime             @default(now())
   updatedAt    DateTime             @updatedAt
 
   @@index([createdAt])
+}
+
+model MarketDataConnection {
+  id            String   @id @default("databento")
+  encryptedKey  String
+  keySuffix     String
+  keyVersion    Int      @default(1)
+  status        String   @default("UNTESTED")
+  testedAt      DateTime?
+  error         String?
+  updatedAt     DateTime @updatedAt
+}
+
+model MarketDatasetSyncConfig {
+  datasetId       String   @id
+  dataset         MarketDataset @relation(fields: [datasetId], references: [id], onDelete: Cascade)
+  mode            String   @default("OFF")
+  profile         String
+  schedule        String
+  perRunBudget    Float    @default(0)
+  dailyBudget     Float    @default(0)
+  checkedThrough  DateTime?
+  verified        Boolean  @default(false)
+  nextRunAt       DateTime?
+  lastCheckedAt   DateTime?
+  availableThrough DateTime?
+  pausedReason    String?
+  leaseOwner      String?
+  leaseUntil      DateTime?
+  updatedAt       DateTime @updatedAt
+  @@index([mode, nextRunAt])
+}
+
+model MarketDataSyncRun {
+  id              String   @id @default(cuid())
+  datasetId       String
+  dataset         MarketDataset @relation(fields: [datasetId], references: [id], onDelete: Cascade)
+  trigger         String
+  status          String   @default("QUEUED")
+  stage           String   @default("CHECKING")
+  configSnapshot  String
+  requestStart    DateTime?
+  requestEnd      DateTime?
+  cursor          DateTime?
+  addedBars       Int      @default(0)
+  estimatedCost   Float    @default(0)
+  charges         String   @default("[]")
+  mappings        String   @default("{}")
+  conflicts       String   @default("[]")
+  error           String?
+  leaseOwner      String?
+  leaseUntil      DateTime?
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+  @@index([status, createdAt])
+  @@index([datasetId, createdAt])
+  @@index([datasetId, updatedAt])
+}
+
+model MarketDatasetUpdateLease {
+  datasetId String @id
+  owner     String
+  expiresAt DateTime
+}
+
+model MarketSyncSchedulerLease {
+  id        String @id
+  owner     String
+  expiresAt DateTime
+  heartbeat DateTime
 }
 
 model MarketDrawing {

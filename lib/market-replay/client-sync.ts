@@ -27,6 +27,7 @@ export type ReplaySyncRequest = {
   confirmedSequence: number;
   syncVersion: number;
   dataVersion: number;
+  historyVersion?: number;
   expectedPaperVersion: number | null;
   targetSequence: number;
   paperDelta: PaperReplayDelta | null;
@@ -38,6 +39,7 @@ export type ReplaySyncReceipt = {
   generation: number;
   syncVersion: number;
   dataVersion: number;
+  historyVersion?: number;
   paperVersion: number | null;
   fingerprint: string;
 };

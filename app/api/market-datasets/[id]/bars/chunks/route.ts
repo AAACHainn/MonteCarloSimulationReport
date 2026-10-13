@@ -5,6 +5,7 @@ import { chunkRequestBounds, tradingDayBounds, tradingDayForTimestamp } from "@/
 import { datasetSession, datasetSourceInterval, serializeSourceBar } from "@/lib/market-replay/dataset";
 import { replayChunksSchema } from "@/lib/validations";
 import { attachReplayDiagnostics } from "@/lib/market-replay/server-diagnostics";
+import { marketVersionMatches } from "@/lib/market-replay/history-version";
 
 type RouteContext = { params: Promise<{ id: string }> };
 
@@ -20,8 +21,8 @@ export async function GET(request: Request, context: RouteContext) {
   if (!dataset || dataset.status !== "READY") {
     return NextResponse.json({ error: copy.marketReplay.datasetNotFound }, { status: 404 });
   }
-  if (dataset.dataVersion !== parsed.data.version) {
-    return NextResponse.json({ error: copy.marketReplay.cacheVersionConflict, dataVersion: dataset.dataVersion }, { status: 409 });
+  if (!marketVersionMatches(dataset, { dataVersion: parsed.data.version, historyVersion: parsed.data.historyVersion })) {
+    return NextResponse.json({ error: copy.marketReplay.cacheVersionConflict, dataVersion: dataset.dataVersion, code: parsed.data.historyVersion !== undefined && parsed.data.historyVersion !== dataset.historyVersion ? "HISTORY_CHANGED" : undefined }, { status: 409 });
   }
   const sourceIntervalSeconds = datasetSourceInterval(dataset);
   if (!sourceIntervalSeconds) {
@@ -64,6 +65,7 @@ export async function GET(request: Request, context: RouteContext) {
   const response = NextResponse.json({
     datasetId: id,
     dataVersion: dataset.dataVersion,
+    historyVersion: dataset.historyVersion,
     symbol: dataset.symbol,
     sourceIntervalSeconds,
     requestStartDate: range.dates[0],

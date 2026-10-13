@@ -8,6 +8,16 @@ export type SupportedLocale = (typeof supportedLocales)[number];
 
 export const dictionaries = {
   "zh-CN": {
+    marketSync: {
+      noRuns: "暂无同步记录。",
+      providerError: (message: string, status: number, errorCase: string | null) => `${message}（HTTP ${status}${errorCase ? `，${errorCase}` : ""}）`,
+      entitlement: "当前 Databento 订阅或许可无法访问请求的行情时段，请检查 CME 订阅或等待数据进入可用范围。",
+      entitlementThrough: (time: string) => `当前许可可用截至 ${time}（UTC）。`,
+      payment: "Databento 账户付款或额度状态异常，请检查账户账单后重试。",
+      symbology: "Databento 拒绝了合约代码转换参数，请检查接入配置后重试。",
+      weekdayLabel: "执行星期", weekdays: { "0": "周日", "1": "周一", "2": "周二", "3": "周三", "4": "周四", "5": "周五", "6": "周六" },
+      connection: "行情连接", connectionTitle: "Databento 行情连接", key: "API Key", keyHint: "密钥仅在服务器加密保存；留空不会更换已保存的密钥。", saveKey: "保存密钥", test: "测试连接", saved: "已保存", unconfigured: "尚未配置", connected: "连接正常", untested: "尚未测试", masterMissing: "服务器未配置有效的 MARKET_DATA_ENCRYPTION_KEY（32 字节 Base64）。", keyInvalid: "API Key 格式无效。", failed: "行情服务请求失败，请检查连接或稍后重试。", origin: "请求来源不匹配。", invalid: "同步配置无效，请检查品种、周期、计划和预算。", missing: "行情数据集不存在。", busy: "该数据集正在更新，请等待任务完成。", disabled: "此数据集尚未启用同步。", noConnection: "请先保存并测试 Databento 连接。", unsupported: "仅支持 CME 品种及 1 秒、1 分钟、1 小时、1 天源周期，且必须与现有数据一致。", budget: "费用估算超过单次或每日预算，请调整预算后重试。", quality: "数据源报告数据尚未发布、缺失或质量异常，暂未推进该区间。", conflict: "发现已有行情修订或绑定不一致，已保留本地历史并暂停同步。", unavailable: "可用历史范围无法覆盖本地末尾，不能校验或完整补齐。", interrupted: "任务已中断，应用运行时将恢复未完成的区间。", changed: "数据集或同步绑定已改变，请重新校验。", mode: "同步模式", modes: { OFF: "不启用同步", MANUAL: "仅手动同步", AUTO: "自动＋手动同步" }, settings: "行情同步设置", source: "同步源", root: "CME 品种根代码", contractMode: "合约规则", continuous: "成交量主力连续合约", outright: "指定交割合约", contract: "交割合约代码", interval: "源 K 线周期（秒）", frequency: "同步频率", every: "间隔数量", units: { MINUTE: "分钟", HOUR: "小时", DAY: "天", WEEK: "周", MONTH: "月" }, time: "执行时间", timezone: "计划时区", weekday: "星期（0 为周日）", monthDay: "每月日期", monthEnd: "在月末执行", monthHint: "短月没有所选日期时在月末执行，下一月恢复原日期。", next: "下次同步", checked: "最近检查", available: "数据源可用截至", dataThrough: "数据截至", runBudget: "单次估算预算（美元）", dailyBudget: "每日估算预算（美元）", budgetHint: "预算必填，0 表示仅允许估算免费的下载；失败请求可能计费，估算不等于实际账单。", frequencyHint: "同步频率控制检查时间，不改变 K 线周期；仅获取数据源已发布的完整 K 线。", sync: "同步最新", syncing: "同步中…", save: "保存同步设置", cancel: "取消", retry: "重新校验并重试", noNew: "暂无可同步的新 K 线。", count: (n: number) => `新增 ${n.toLocaleString("zh-CN")} 根 K 线。`, stages: { CHECKING: "正在检查", DOWNLOADING: "正在下载", VALIDATING: "正在校验", PUBLISHING: "正在保存" }, statuses: { QUEUED: "等待同步", RUNNING: "正在同步", COMPLETED: "同步完成", FAILED: "同步失败", BLOCKED: "需要处理", INTERRUPTED: "等待恢复" }, historyChanged: "行情设置发生变化，已暂停回放。当前未保存操作仍保留在页面中，请核对后再重新打开。", missingBudget: "请填写单次和每日预算。", conflicts: "冲突详情", taskHistory: "最近同步记录", syncSuccess: "同步设置已保存。", auth: "Databento 鉴权或数据权限校验失败，请更换密钥或检查订阅。",
+    },
     nav: {
       home: "首页",
       brand: "交易系统分析台",
@@ -121,7 +131,7 @@ export const dictionaries = {
       descriptionPlaceholder: "行情来源或训练目标（可选）",
       symbol: "品种 / 合约根代码",
       symbolPlaceholder: "例如：ES、MES、NQ、BTCUSDT",
-      symbolHint: "Databento CME 文件请输入根代码（如 ES），系统会按 CME 换月日只保留当时的季度主力合约。",
+      symbolHint: "Databento CME 文件请输入根代码（如 ES），系统按前一个可用 UTC 日的成交量选择主力合约。",
       timeframe: "周期",
       timeframePlaceholder: "例如：1m、15m、1h、1d",
       sourceInterval: "源 K 线周期",

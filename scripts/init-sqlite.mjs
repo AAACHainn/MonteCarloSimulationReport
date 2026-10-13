@@ -1,4 +1,5 @@
 import { PrismaClient } from "@prisma/client";
+import { readFileSync } from "node:fs";
 
 const prisma = new PrismaClient();
 
@@ -646,6 +647,12 @@ try {
     await prisma.$executeRawUnsafe(statement);
   }
   console.log("SQLite database initialized.");
+  const syncMigration = readFileSync(new URL("../prisma/migrations/20261013090000_add_market_sync/migration.sql", import.meta.url), "utf8");
+  const syncColumns = await prisma.$queryRawUnsafe('PRAGMA table_info("MarketDataset")');
+  for (const statement of syncMigration.split(";").map((s) => s.trim()).filter(Boolean)) {
+    if (statement.startsWith('ALTER TABLE "MarketDataset"') && syncColumns.some((column) => column.name === "historyVersion")) continue;
+    await prisma.$executeRawUnsafe(statement);
+  }
 } finally {
   await prisma.$disconnect();
 }

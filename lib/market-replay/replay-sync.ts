@@ -21,8 +21,10 @@ import type { PaperReplayDelta, ReplaySyncReceipt, ReplaySyncRequest } from "@/l
 import type { PaperSessionState } from "@/lib/paper-trading/types";
 import { recordClosedTrade, type IncrementalTradeStats } from "@/lib/paper-trading/trade-stats";
 import { ensureReplayJournalSession, persistPaperJournalState } from "@/lib/paper-trading/journal-storage";
+import { marketVersionMatches } from "./history-version";
 
 export type ReplaySyncInput = {
+  historyVersion?: number;
   generation: number;
   requestId: string;
   confirmedSequence: number;
@@ -44,7 +46,7 @@ export type ReplaySyncSuccess = {
 
 export type ReplaySyncOutcome =
   | { status: 200; error: null; response: ReplaySyncSuccess }
-  | { status: 400 | 404 | 409; error: string; response?: never };
+  | { status: 400 | 404 | 409; error: string; code?: string; response?: never };
 
 function orderCreateData(sessionId: string, order: PaperOrderData) {
   return {
@@ -254,7 +256,7 @@ function validateClientPaperDelta(
 export async function persistClientReplayBatch(
   datasetId: string,
   input: ReplaySyncRequest,
-): Promise<{ status: 200; error: null; response: ReplaySyncReceipt } | { status: 400 | 404 | 409; error: string }> {
+): Promise<{ status: 200; error: null; response: ReplaySyncReceipt } | { status: 400 | 404 | 409; error: string; code?: string }> {
   return prisma.$transaction(async (tx) => {
     const [dataset, progress, sessionRecord] = await Promise.all([
       tx.marketDataset.findUnique({ where: { id: datasetId } }),
@@ -265,8 +267,10 @@ export async function persistClientReplayBatch(
     if (progress.lastSyncRequestId === input.requestId && progress.lastSyncResponse) {
       return { status: 200, error: null, response: JSON.parse(progress.lastSyncResponse) as ReplaySyncReceipt } as const;
     }
+    if (input.historyVersion !== undefined && input.historyVersion !== dataset.historyVersion) return { status: 409, error: copy.marketSync.historyChanged, code: "HISTORY_CHANGED" } as const;
     if (
-      dataset.dataVersion !== input.dataVersion || progress.generation !== input.generation
+      !marketVersionMatches(dataset, input)
+      || progress.generation !== input.generation
       || progress.syncVersion !== input.syncVersion || progress.currentSequence !== input.confirmedSequence
     ) return { status: 409, error: copy.paperTrading.conflict } as const;
     if (
@@ -339,7 +343,7 @@ export async function persistClientReplayBatch(
 
     const response: ReplaySyncReceipt = {
       requestId: input.requestId, currentSequence: input.targetSequence, generation: progress.generation,
-      syncVersion: progress.syncVersion + 1, dataVersion: dataset.dataVersion, paperVersion, fingerprint,
+      syncVersion: progress.syncVersion + 1, dataVersion: dataset.dataVersion, historyVersion: dataset.historyVersion, paperVersion, fingerprint,
     };
     await tx.replayProgress.update({
       where: { datasetId },
@@ -367,6 +371,7 @@ export async function syncReplayToTarget(
     if (progress.lastSyncRequestId === input.requestId && progress.lastSyncResponse) {
       return { status: 200, error: null, response: JSON.parse(progress.lastSyncResponse) as ReplaySyncSuccess } as const;
     }
+    if (input.historyVersion !== undefined && input.historyVersion !== dataset.historyVersion) return { status: 409, error: copy.marketSync.historyChanged, code: "HISTORY_CHANGED" } as const;
     if (
       progress.generation !== input.generation
       || progress.syncVersion !== input.syncVersion

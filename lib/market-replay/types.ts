@@ -133,6 +133,7 @@ export type MarketDatasetSummary = {
   timezone: string;
   status: string;
   dataVersion: number;
+  historyVersion?: number;
   sourceIntervalSeconds: number | null;
   priceTickSize: number;
   sessionMode: SessionMode;
@@ -157,6 +158,7 @@ export type MarketBarDayChunk = {
 export type MarketBarChunksResponse = {
   datasetId: string;
   dataVersion: number;
+  historyVersion?: number;
   symbol: string;
   sourceIntervalSeconds: number;
   requestStartDate: string;

@@ -88,6 +88,7 @@ import { applySpeculativeAdvance, paperCheckpointFingerprint } from "@/lib/paper
 import {
   buildPaperReplayDelta,
   createPaperDeltaAccumulator,
+  mergePaperDeltaAccumulators,
   recordPaperAdvance,
   type ReplaySyncReceipt,
   type ReplaySyncRequest,
@@ -103,6 +104,7 @@ import {
 import { useReplayWindowCaches } from "@/lib/market-replay/use-replay-window-cache";
 import { useReplayAccountRuntime } from "@/lib/market-replay/use-replay-account-runtime";
 import { createReplayStepQueue } from "@/lib/market-replay/step-queue";
+import { HistoryVersionConflict } from "@/lib/market-replay/history-version";
 import {
   DRAWING_TYPE_FIB_RETRACEMENT,
   DRAWING_TYPE_TREND_LINE,
@@ -215,7 +217,10 @@ function formatDatasetTime(value: string, timezone: string) {
 
 type JournalFocus = { sequence: number; no: number; globalNo: number };
 
-export function MarketReplayClient({ dataset, initialJournalFocus = null }: { dataset: MarketDatasetSummary; initialJournalFocus?: JournalFocus | null }) {
+export function MarketReplayClient({ dataset: initialDataset, initialJournalFocus = null }: { dataset: MarketDatasetSummary; initialJournalFocus?: JournalFocus | null }) {
+  const [dataset, setLiveDataset] = useState(initialDataset);
+  const initializedDatasetRef = useRef<string | null>(null);
+  const historyConflictRef = useRef(false);
   const shortcuts = useReplayShortcuts();
   const [webFullscreen, setWebFullscreen] = useState(false);
   const [bars, setBars] = useState<AggregatedMarketBarData[]>([]);
@@ -929,7 +934,7 @@ export function MarketReplayClient({ dataset, initialJournalFocus = null }: { da
   }, [loadEarlierHistory, loadTradeAnnotations]);
 
   useEffect(() => {
-    if (!emaSettingsLoaded || !abrSettingsLoaded) return;
+    if (!emaSettingsLoaded || !abrSettingsLoaded || initializedDatasetRef.current === dataset.id) return;
     let cancelled = false;
     const initialize = async () => {
       const initializedAt = performance.now();
@@ -972,7 +977,7 @@ export function MarketReplayClient({ dataset, initialJournalFocus = null }: { da
       performance.measure("market-replay-initialize", { start: initializedAt, end: performance.now() });
       performance.clearMeasures("market-replay-initialize");
     };
-    initialize().catch((error) => { if (!cancelled) setLoadError(error instanceof Error ? error.message : copy.marketReplay.loadError); })
+    initialize().then(() => { if (!cancelled) initializedDatasetRef.current = dataset.id; }).catch((error) => { if (!cancelled) setLoadError(error instanceof Error ? error.message : copy.marketReplay.loadError); })
       .finally(() => { if (!cancelled) setIsLoading(false); });
     return () => { cancelled = true; };
   }, [abrSettingsLoaded, commitConfirmedPaperSnapshot, dataset, emaSettingsLoaded, lastSyncStartedAtRef, loadWindow, paperDeltaAccumulatorRef, paperSessionLoadedRef, paperSessionLoadRef, primeWindow, setReplay]);
@@ -1073,6 +1078,7 @@ export function MarketReplayClient({ dataset, initialJournalFocus = null }: { da
   }, [commitConfirmedPaperSnapshot, dataset, latestReplayRef, loadWindow, paperDeltaAccumulatorRef, setReplay, shouldResumePlayback]);
 
   const startSync = useCallback(async (keepalive = false, silent = false) => {
+    if (historyConflictRef.current) return false;
     const syncIntent = capturePlaybackIntent();
     if (!paperSessionLoadedRef.current) await paperSessionLoadRef.current;
     if (syncingRef.current) return syncCompletionRef.current;
@@ -1120,6 +1126,7 @@ export function MarketReplayClient({ dataset, initialJournalFocus = null }: { da
       confirmedSequence: current.confirmedSequence,
       syncVersion: current.syncVersion,
       dataVersion: dataset.dataVersion,
+      historyVersion: dataset.historyVersion ?? 1,
       expectedPaperVersion: confirmedPaperSnapshotRef.current?.session.version ?? null,
       targetSequence: current.currentSequence,
       paperDelta: checkpoint ? buildPaperReplayDelta(frozenAccumulator, checkpoint) : null,
@@ -1129,7 +1136,7 @@ export function MarketReplayClient({ dataset, initialJournalFocus = null }: { da
     const operation = (async () => {
       if (!silent) setSaveStatus("saving");
       let response: Response | null = null;
-      let data: ReplaySyncReceipt & { error?: string } | null = null;
+      let data: ReplaySyncReceipt & { error?: string; code?: string } | null = null;
       for (let attempt = 0; attempt < 3; attempt += 1) {
         try {
           response = await fetch(`/api/market-datasets/${dataset.id}/replay/sync`, {
@@ -1143,8 +1150,9 @@ export function MarketReplayClient({ dataset, initialJournalFocus = null }: { da
         }
         await new Promise((resolve) => setTimeout(resolve, attempt === 0 ? 150 : 400));
       }
+      if (data?.code === "HISTORY_CHANGED") throw new HistoryVersionConflict(copy.marketSync.historyChanged);
       if (!response || !data || !response.ok) throw new Error(data?.error ?? copy.paperTrading.advanceFailed);
-      if (data.dataVersion !== dataset.dataVersion || data.generation !== current.generation) {
+      if ((data.historyVersion ?? 1) !== (dataset.historyVersion ?? 1) || data.generation !== current.generation) {
         throw new Error(copy.marketReplay.cacheVersionConflict);
       }
       if (data.fingerprint !== checkpointFingerprint
@@ -1169,6 +1177,14 @@ export function MarketReplayClient({ dataset, initialJournalFocus = null }: { da
       }
       return true;
     })().catch(async (error) => {
+      if (error instanceof HistoryVersionConflict) {
+        historyConflictRef.current = true;
+        paperDeltaAccumulatorRef.current = mergePaperDeltaAccumulators(frozenAccumulator, paperDeltaAccumulatorRef.current);
+        setPaperError(copy.marketSync.historyChanged);
+        setSaveStatus("error");
+        autoPausePlayback("sync-conflict");
+        return false;
+      }
       recoveryRequiredRef.current = true;
       setPaperError(error instanceof Error ? error.message : copy.paperTrading.advanceFailed);
       await advanceCompletionRef.current.catch(() => undefined);
@@ -1189,9 +1205,10 @@ export function MarketReplayClient({ dataset, initialJournalFocus = null }: { da
     });
     syncCompletionRef.current = operation;
     return operation;
-  }, [autoPausePlayback, capturePlaybackIntent, confirmedPaperSnapshotRef, dataset.dataVersion, dataset.id, getDisplayCache, isPlaybackIntentCurrent, lastSyncStartedAtRef, latestReplayRef, loadTradeAnnotations, paperDeltaAccumulatorRef, paperSessionLoadedRef, paperSessionLoadRef, paperSnapshotRef, recoverReplay, restorePlayback, setReplay, suspendPlayback, syncCompletionRef, syncLatencyMsRef, syncRequestCounterRef, syncingRef]);
+  }, [autoPausePlayback, capturePlaybackIntent, confirmedPaperSnapshotRef, dataset.dataVersion, dataset.historyVersion, dataset.id, getDisplayCache, isPlaybackIntentCurrent, lastSyncStartedAtRef, latestReplayRef, loadTradeAnnotations, paperDeltaAccumulatorRef, paperSessionLoadedRef, paperSessionLoadRef, paperSnapshotRef, recoverReplay, restorePlayback, setReplay, suspendPlayback, syncCompletionRef, syncLatencyMsRef, syncRequestCounterRef, syncingRef]);
 
   const flushVisible = useCallback(async (keepalive = false) => {
+    if (historyConflictRef.current) return false;
     while (true) {
       if (syncingRef.current && !(await syncCompletionRef.current)) return false;
       const current = latestReplayRef.current;
@@ -1199,6 +1216,35 @@ export function MarketReplayClient({ dataset, initialJournalFocus = null }: { da
       if (!(await startSync(keepalive))) return false;
     }
   }, [latestReplayRef, startSync, syncCompletionRef, syncingRef]);
+
+  useEffect(() => {
+    if (isLoading) return;
+    let stopped = false; let checking = false;
+    const refreshTail = async () => {
+      if (checking || stopped || paperMutationActiveRef.current) return;
+      checking = true;
+      let suspension: ReplaySuspension | null = null;
+      try {
+        const response = await fetch(`/api/market-datasets/${dataset.id}`, { cache: "no-store" });
+        if (!response.ok || stopped) return;
+        const next = await response.json() as MarketDatasetSummary;
+        if (next.dataVersion === dataset.dataVersion) return;
+        suspension = suspendPlayback();
+        await advanceCompletionRef.current;
+        if ((next.historyVersion ?? 1) !== (dataset.historyVersion ?? 1)) {
+          historyConflictRef.current = true;
+          setPaperError(copy.marketSync.historyChanged);
+          autoPausePlayback("sync-conflict"); return;
+        }
+        if (!await flushVisible() || stopped) return;
+        setLiveDataset(next);
+        setReplay((value) => value ? { ...value, barCount: next.barCount, status: value.status === "finished" && value.currentSequence < next.barCount - 1 ? "paused" : value.status } : value);
+      } catch { /* Retry later while preserving the current replay. */ }
+      finally { if (suspension && !stopped) restorePlayback(suspension); checking = false; }
+    };
+    const timer = window.setInterval(() => void refreshTail(), 15000);
+    return () => { stopped = true; window.clearInterval(timer); };
+  }, [autoPausePlayback, dataset, flushVisible, isLoading, paperMutationActiveRef, restorePlayback, setReplay, suspendPlayback]);
 
   const fastForwardToNextVisibleBar = useCallback(async (
     shouldContinue: () => boolean = () => true,
@@ -1225,6 +1271,7 @@ export function MarketReplayClient({ dataset, initialJournalFocus = null }: { da
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({
             expectedCurrentSequence: next.currentSequence,
+            historyVersion: dataset.historyVersion ?? 1,
             expectedVersion: snapshot?.session.version ?? null,
             count: 1,
             displayIntervalSeconds: next.displayIntervalSeconds,
@@ -1234,7 +1281,13 @@ export function MarketReplayClient({ dataset, initialJournalFocus = null }: { da
             displayUtcOffsetMinutes,
           }),
         });
-        const data = await response.json() as ServerAdvancePayload & { error?: string };
+        const data = await response.json() as ServerAdvancePayload & { error?: string; code?: string };
+        if (data.code === "HISTORY_CHANGED") {
+          commitConfirmedPaperSnapshot(snapshot);
+          paperDeltaAccumulatorRef.current = createPaperDeltaAccumulator(next.currentSequence);
+          setReplay(next); currentSourceBarRef.current = lastSourceBar; setCurrentSourceBar(lastSourceBar);
+          throw new HistoryVersionConflict(copy.marketSync.historyChanged);
+        }
         if (!response.ok) throw new Error(data.error ?? copy.paperTrading.advanceFailed);
         if (data.currentSequence <= next.currentSequence || data.generation !== next.generation) {
           throw new Error(copy.marketReplay.syncMismatch);
@@ -1262,6 +1315,10 @@ export function MarketReplayClient({ dataset, initialJournalFocus = null }: { da
       setRecoveryNotice(null);
       return reachedVisibleBucket;
     } catch (error) {
+      if (error instanceof HistoryVersionConflict) {
+        historyConflictRef.current = true;
+        setPaperError(copy.marketSync.historyChanged); autoPausePlayback("operation-failed"); return false;
+      }
       recoveryRequiredRef.current = true;
       setPaperError(error instanceof Error ? error.message : copy.paperTrading.advanceFailed);
       const suspension = suspendPlayback();
@@ -1277,7 +1334,7 @@ export function MarketReplayClient({ dataset, initialJournalFocus = null }: { da
       endBuffering();
       viewChangingRef.current = false;
     }
-  }, [abrLength, autoPausePlayback, beginBuffering, commitConfirmedPaperSnapshot, confirmedPaperSnapshotRef, dataset.id, displayUtcOffsetMinutes, endBuffering, flushVisible, latestReplayRef, loadWindow, paperDeltaAccumulatorRef, paperMutationActiveRef, paperMutationChainRef, recoverReplay, restorePlayback, setReplay, suspendPlayback]);
+  }, [abrLength, autoPausePlayback, beginBuffering, commitConfirmedPaperSnapshot, confirmedPaperSnapshotRef, dataset.id, dataset.historyVersion, displayUtcOffsetMinutes, endBuffering, flushVisible, latestReplayRef, loadWindow, paperDeltaAccumulatorRef, paperMutationActiveRef, paperMutationChainRef, recoverReplay, restorePlayback, setReplay, suspendPlayback]);
 
   const processLocalBars = useCallback(async (
     requestedCount: number,
@@ -1287,7 +1344,7 @@ export function MarketReplayClient({ dataset, initialJournalFocus = null }: { da
     const frameStartedAt = performance.now();
     let current = latestReplayRef.current;
     if (
-      !shouldContinue() || !current || advancingRef.current || paperMutationActiveRef.current || viewChangingRef.current
+      historyConflictRef.current || !shouldContinue() || !current || advancingRef.current || paperMutationActiveRef.current || viewChangingRef.current
       || current.currentSequence >= current.barCount - 1 || !dataset.sourceIntervalSeconds
     ) return 0;
     const unconfirmedLimit = replaySyncCapacity(current, dataset.sourceIntervalSeconds, syncingRef.current, syncLatencyMsRef.current);
@@ -1418,6 +1475,10 @@ export function MarketReplayClient({ dataset, initialJournalFocus = null }: { da
       return sourceBars.length;
     } catch (error) {
       endBuffering();
+      if (error instanceof HistoryVersionConflict) {
+        historyConflictRef.current = true;
+        setPaperError(copy.marketSync.historyChanged); autoPausePlayback("source-failed"); return 0;
+      }
       recoveryRequiredRef.current = true;
       setPaperError(error instanceof Error ? error.message : copy.paperTrading.advanceFailed);
       autoPausePlayback("source-failed", playbackIntent);

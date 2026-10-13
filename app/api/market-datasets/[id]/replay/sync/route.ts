@@ -19,7 +19,7 @@ export async function POST(request: Request, context: RouteContext) {
     expectedPaperVersion: parsed.data.expectedPaperVersion ?? null,
   });
   const response = outcome.status !== 200
-    ? NextResponse.json({ error: outcome.error }, { status: outcome.status })
+    ? NextResponse.json({ error: outcome.error, code: outcome.code }, { status: outcome.status })
     : NextResponse.json(outcome.response);
   return attachReplayDiagnostics(response, {
     startedAt,

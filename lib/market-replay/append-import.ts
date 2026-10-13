@@ -9,6 +9,7 @@ import { parseMarketCsvRow, parseMarketTimestamp, readCsvValue, type CsvValues, 
 import { addToBlock, countedCsvStream, inspectHeaders, inspectImportFile, memorySnapshot, startWorkerHeartbeat,
   INSERT_CHUNK_SIZE, type BlockAccumulator } from "./import-file";
 import type { AppendImportMetadata, AppendPreview } from "./append-import-types";
+import { acquireDatasetLease, releaseDatasetLease, LEASE_MS } from "@/lib/market-sync/lease";
 
 /** Publish the staged tail in one transaction; existing source sequences and replay state stay stable. */
 async function publishAppend(job: MarketDatasetImport, metadata: AppendImportMetadata, stagingId: string) {
@@ -16,6 +17,8 @@ async function publishAppend(job: MarketDatasetImport, metadata: AppendImportMet
   const snapshot = metadata.snapshot!;
   const finalCount = snapshot.barCount + preview.importedBars;
   await prisma.$transaction(async (tx) => {
+    const lease = await tx.marketDatasetUpdateLease.findUnique({ where: { datasetId: metadata.targetDatasetId } });
+    if (!lease || lease.owner !== `import_${job.id}` || lease.expiresAt <= new Date()) throw new Error(copy.marketSync.busy);
     const target = await tx.marketDataset.findUnique({ where: { id: metadata.targetDatasetId } });
     if (!target || target.status !== "READY" || target.barCount !== snapshot.barCount
       || target.endTime.toISOString() !== snapshot.endTime || target.dataVersion !== snapshot.dataVersion
@@ -52,6 +55,17 @@ async function publishAppend(job: MarketDatasetImport, metadata: AppendImportMet
 }
 
 export async function processAppendImportJob(job: MarketDatasetImport) {
+  const metadata = JSON.parse(job.metadata) as AppendImportMetadata;
+  const owner = `import_${job.id}`;
+  await acquireDatasetLease(prisma, metadata.targetDatasetId, owner);
+  const timer = setInterval(() => {
+    void prisma.marketDatasetUpdateLease.updateMany({ where: { datasetId: metadata.targetDatasetId, owner }, data: { expiresAt: new Date(Date.now() + LEASE_MS) } }).catch(() => undefined);
+  }, 20000);
+  try { await processLockedAppendImportJob(job); }
+  finally { clearInterval(timer); await releaseDatasetLease(metadata.targetDatasetId, owner); }
+}
+
+async function processLockedAppendImportJob(job: MarketDatasetImport) {
   const metadata = JSON.parse(job.metadata) as AppendImportMetadata;
   marketDatasetSchema.parse(metadata);
   const file = await stat(job.storedPath!);

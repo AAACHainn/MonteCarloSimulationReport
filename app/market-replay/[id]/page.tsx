@@ -26,10 +26,10 @@ export default async function MarketReplayDetailPage({ params, searchParams }: {
         <Breadcrumbs items={[{ label: copy.marketReplay.title, href: "/market-replay" }, { label: dataset.name }]} />
         <div className="mt-1 flex items-baseline gap-3">
           <h1 className="truncate text-xl font-semibold tracking-tight text-slate-950">{copy.marketReplay.replayTitle(dataset.symbol, dataset.timeframe)}</h1>
-          <p className="truncate text-xs text-slate-500">{dataset.name} · {dataset.timezone} · {dataset.barCount.toLocaleString("zh-CN")} {copy.marketReplay.bars}</p>
+          <p className="truncate text-xs text-slate-500">{dataset.name} · {dataset.timezone}</p>
         </div>
       </div>
-      <div className="min-h-0 flex-1"><MarketReplayClient dataset={serialized} initialJournalFocus={journalEntry ? { sequence: journalEntry.openedSequence, no: journalEntry.accountNo, globalNo: journalEntry.no } : null} /></div>
+      <div className="min-h-0 flex-1"><MarketReplayClient key={serialized.id} dataset={serialized} initialJournalFocus={journalEntry ? { sequence: journalEntry.openedSequence, no: journalEntry.accountNo, globalNo: journalEntry.no } : null} /></div>
     </div>
   );
 }

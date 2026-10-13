@@ -1,3 +1,5 @@
+import { HistoryVersionConflict } from "./history-version";
+
 export type ReplayAutoPauseReason =
   | "page-hidden"
   | "operation-failed"
@@ -67,7 +69,7 @@ export async function retryReplayRead<T>(
     try {
       return await operation(attempt);
     } catch (error) {
-      if (attempt >= delays.length) throw error;
+      if (error instanceof HistoryVersionConflict || attempt >= delays.length) throw error;
       await wait(delays[attempt]);
     }
   }

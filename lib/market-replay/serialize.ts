@@ -10,6 +10,7 @@ type DatasetRecord = {
   timezone: string;
   status: string;
   dataVersion: number;
+  historyVersion?: number;
   sourceIntervalSeconds: number | null;
   priceTickSize: number;
   sessionMode: string;
@@ -36,6 +37,7 @@ export function serializeMarketDataset(dataset: DatasetRecord): MarketDatasetSum
   const sourceIntervalSeconds = dataset.sourceIntervalSeconds ?? parseSourceInterval(dataset.timeframe);
   return {
     ...dataset,
+    historyVersion: dataset.historyVersion ?? 1,
     startTime: dataset.startTime.toISOString(),
     endTime: dataset.endTime.toISOString(),
     createdAt: dataset.createdAt.toISOString(),

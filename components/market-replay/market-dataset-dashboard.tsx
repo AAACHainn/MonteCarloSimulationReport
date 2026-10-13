@@ -18,6 +18,7 @@ import type { MarketDatasetSummary } from "@/lib/market-replay/types";
 import { formatInterval } from "@/lib/market-replay/types";
 import { formatPriceForTick } from "@/lib/market-replay/price-ticks";
 import { MarketImportProgress, type ImportIssue, type ImportJob } from "./market-import-progress";
+import { MarketDataConnectionControl, MarketSyncSettings, MarketSyncSummary } from "./market-sync-controls";
 
 function uploadImportFile(jobId: string, file: File, onProgress: (percentage: number) => void) {
   return new Promise<{ ok: boolean; data: { error?: string } | null }>((resolve) => {
@@ -72,6 +73,7 @@ export function MarketDatasetDashboard({ datasets }: { datasets: MarketDatasetSu
   const [settingsSourceInterval, setSettingsSourceInterval] = useState("");
   const [settingsError, setSettingsError] = useState<string | null>(null);
   const [isSavingSettings, setIsSavingSettings] = useState(false);
+  const [isSavingSyncSettings, setIsSavingSyncSettings] = useState(false);
   const [appendDataset, setAppendDataset] = useState<MarketDatasetSummary | null>(null);
   const [gapJobId, setGapJobId] = useState<string | null>(null);
   const gapJob = importJobs.find((job) => job.id === gapJobId && job.status === "AWAITING_CONFIRMATION");
@@ -370,9 +372,12 @@ export function MarketDatasetDashboard({ datasets }: { datasets: MarketDatasetSu
         </Card>
 
         <section className="space-y-4">
-          <div>
+          <div className="flex flex-wrap items-center justify-between gap-3">
+            <div>
             <h2 className="text-2xl font-semibold tracking-tight text-slate-950">{copy.marketReplay.datasetsTitle}</h2>
             <p className="text-sm text-slate-600">{copy.marketReplay.datasetsDescription}</p>
+            </div>
+            <MarketDataConnectionControl />
           </div>
           <div className="grid gap-3">
             {datasets.length === 0 ? (
@@ -395,6 +400,7 @@ export function MarketDatasetDashboard({ datasets }: { datasets: MarketDatasetSu
                       <p className="mt-2 text-xs text-slate-500">{dataset.barCount.toLocaleString("zh-CN")} {copy.marketReplay.bars} · {dataset.timezone} · {copy.marketReplay.priceTickSizeValue(formatPriceForTick(dataset.priceTickSize, dataset.priceTickSize))}</p>
                     </div>
                   </div>
+                  <MarketSyncSummary dataset={dataset} />
                   <div className="flex flex-wrap justify-end gap-2">
                     <Button type="button" variant="outline" size="sm" className="min-h-10 sm:min-h-0" disabled={isImporting || isPending} onClick={() => {
                       setMessage(null); setIssues([]); setMessageIsError(true);
@@ -455,8 +461,8 @@ export function MarketDatasetDashboard({ datasets }: { datasets: MarketDatasetSu
         open={Boolean(settingsDataset)}
         title={copy.marketReplay.editMarketSettingsTitle}
         description={copy.marketReplay.editMarketSettingsDescription}
-        className="max-w-md"
-        onClose={() => { if (!isSavingSettings) setSettingsDataset(null); }}
+        className="max-w-2xl"
+        onClose={() => { if (!isSavingSettings && !isSavingSyncSettings) setSettingsDataset(null); }}
       >
         <form className="space-y-4" onSubmit={saveMarketSettings}>
           <div className="space-y-2">
@@ -471,10 +477,11 @@ export function MarketDatasetDashboard({ datasets }: { datasets: MarketDatasetSu
           </div>
           {settingsError ? <p className="rounded-md border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-700">{settingsError}</p> : null}
           <div className="flex justify-end gap-2">
-            <Button type="button" variant="outline" disabled={isSavingSettings} onClick={() => setSettingsDataset(null)}>{copy.paperTrading.cancel}</Button>
-            <Button type="submit" disabled={isSavingSettings}>{isSavingSettings ? <Loader2 className="h-4 w-4 animate-spin" /> : null}{copy.marketReplay.saveMarketSettings}</Button>
+            <Button type="button" variant="outline" disabled={isSavingSettings || isSavingSyncSettings} onClick={() => setSettingsDataset(null)}>{copy.paperTrading.cancel}</Button>
+            <Button type="submit" disabled={isSavingSettings || isSavingSyncSettings}>{isSavingSettings ? <Loader2 className="h-4 w-4 animate-spin" /> : null}{copy.marketReplay.saveMarketSettings}</Button>
           </div>
         </form>
+        {settingsDataset ? <MarketSyncSettings dataset={settingsDataset} onBusyChange={setIsSavingSyncSettings} onCancel={() => setSettingsDataset(null)} /> : null}
       </Dialog>
       <ConfirmDialog
         open={Boolean(deleteDataset)}

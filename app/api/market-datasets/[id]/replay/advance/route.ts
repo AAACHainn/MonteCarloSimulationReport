@@ -24,6 +24,7 @@ export async function POST(request: Request, context: RouteContext) {
     prisma.replayProgress.findUnique({ where: { datasetId: id } }),
   ]);
   if (!dataset || !progress) return NextResponse.json({ error: copy.marketReplay.datasetNotFound }, { status: 404 });
+  if (parsed.data.historyVersion !== undefined && parsed.data.historyVersion !== dataset.historyVersion) return NextResponse.json({ error: copy.marketSync.historyChanged, code: "HISTORY_CHANGED" }, { status: 409 });
   if (progress.currentSequence !== parsed.data.expectedCurrentSequence) {
     return NextResponse.json({ error: copy.paperTrading.conflict }, { status: 409 });
   }
@@ -81,6 +82,7 @@ export async function POST(request: Request, context: RouteContext) {
   }
 
   const outcome = await syncReplayToTarget(id, {
+    historyVersion: parsed.data.historyVersion,
     generation: progress.generation,
     requestId: `legacy_${randomUUID()}`,
     confirmedSequence: progress.currentSequence,
@@ -96,7 +98,7 @@ export async function POST(request: Request, context: RouteContext) {
       priceTickSize: dataset.priceTickSize,
     },
   }, MAX_DISPLAY_ADVANCE_SOURCE_BARS);
-  if (outcome.status !== 200) return NextResponse.json({ error: outcome.error }, { status: outcome.status });
+  if (outcome.status !== 200) return NextResponse.json({ error: outcome.error, code: outcome.code }, { status: outcome.status });
 
   const advanced = await prisma.marketBar.findMany({
     where: { datasetId: id, sequence: { gt: progress.currentSequence, lte: targetSequence } },

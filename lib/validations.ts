@@ -164,6 +164,7 @@ export const paperOrderUpdateSchema = z.object({
 copy.paperTrading.orderUpdateRequired);
 
 export const paperAdvanceSchema = z.object({
+  historyVersion: z.coerce.number().int().positive().optional(),
   expectedCurrentSequence: z.coerce.number().int().min(-1),
   expectedVersion: z.coerce.number().int().positive().optional().nullable(),
   count: z.coerce.number().int().min(1).max(MAX_REPLAY_ADVANCE_COUNT).default(1),
@@ -176,6 +177,7 @@ export const paperAdvanceSchema = z.object({
 
 export const replayChunksSchema = z.object({
   version: z.coerce.number().int().positive(),
+  historyVersion: z.coerce.number().int().positive().optional(),
   startDate: z.string().regex(/^\d{4}-\d{2}-\d{2}$/),
 });
 
@@ -273,6 +275,7 @@ export const replaySyncSchema = z.object({
   confirmedSequence: z.coerce.number().int().min(-1),
   syncVersion: z.coerce.number().int().min(0),
   dataVersion: z.coerce.number().int().positive(),
+  historyVersion: z.coerce.number().int().positive().optional(),
   expectedPaperVersion: z.coerce.number().int().positive().optional().nullable(),
   targetSequence: z.coerce.number().int().min(0),
   paperDelta: paperReplayDeltaSchema.nullable(),

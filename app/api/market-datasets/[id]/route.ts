@@ -5,8 +5,19 @@ import { copy } from "@/lib/i18n";
 import { marketDatasetSchema } from "@/lib/validations";
 import { isMarketTimestampAligned } from "@/lib/market-replay/parse-market-bars";
 import { formatInterval, isValidDisplayInterval } from "@/lib/market-replay/types";
+import { withDatasetUpdate } from "@/lib/market-sync/lease";
+import { SyncError } from "@/lib/market-sync/security";
 
 type RouteContext = { params: Promise<{ id: string }> };
+
+export async function DELETE(request: Request, context: RouteContext) {
+  try { return await withDatasetUpdate((await context.params).id, () => deleteDataset(request, context)); }
+  catch (error) { return NextResponse.json({ error: error instanceof SyncError ? error.message : copy.marketSync.failed }, { status: error instanceof SyncError ? error.status : 500 }); }
+}
+export async function PATCH(request: Request, context: RouteContext) {
+  try { return await withDatasetUpdate((await context.params).id, () => patchDataset(request, context)); }
+  catch (error) { return NextResponse.json({ error: error instanceof SyncError ? error.message : copy.marketSync.failed }, { status: error instanceof SyncError ? error.status : 500 }); }
+}
 
 export async function GET(_request: Request, context: RouteContext) {
   const { id } = await context.params;
@@ -15,7 +26,7 @@ export async function GET(_request: Request, context: RouteContext) {
   return NextResponse.json(serializeMarketDataset(dataset));
 }
 
-export async function DELETE(_request: Request, context: RouteContext) {
+async function deleteDataset(_request: Request, context: RouteContext) {
   const { id } = await context.params;
   const dataset = await prisma.marketDataset.findUnique({ where: { id }, select: { id: true } });
   if (!dataset) return NextResponse.json({ error: copy.marketReplay.datasetNotFound }, { status: 404 });
@@ -23,7 +34,7 @@ export async function DELETE(_request: Request, context: RouteContext) {
   return NextResponse.json({ ok: true });
 }
 
-export async function PATCH(request: Request, context: RouteContext) {
+async function patchDataset(request: Request, context: RouteContext) {
   const { id } = await context.params;
   const dataset = await prisma.marketDataset.findUnique({ where: { id }, include: { progress: true } });
   if (!dataset) return NextResponse.json({ error: copy.marketReplay.datasetNotFound }, { status: 404 });
@@ -70,7 +81,8 @@ export async function PATCH(request: Request, context: RouteContext) {
       sourceIntervalSeconds,
       timeframe: formatInterval(sourceIntervalSeconds),
       priceTickSize: parsed.data.priceTickSize,
-      dataVersion: sourceIntervalChanged ? { increment: 1 } : undefined,
+      dataVersion: sourceIntervalChanged || parsed.data.priceTickSize !== dataset.priceTickSize ? { increment: 1 } : undefined,
+      historyVersion: sourceIntervalChanged || parsed.data.priceTickSize !== dataset.priceTickSize ? { increment: 1 } : undefined,
       progress: progressUpdate,
     } });
     return NextResponse.json({
@@ -101,6 +113,7 @@ export async function PATCH(request: Request, context: RouteContext) {
     sessionOpenMinute: parsed.data.sessionOpenMinute ?? null, sessionCloseMinute: parsed.data.sessionCloseMinute ?? null,
     tradingWeekdays: parsed.data.tradingWeekdays.join(","),
     dataVersion: { increment: 1 },
+    historyVersion: { increment: 1 },
   } });
   return NextResponse.json({ ok: true });
 }

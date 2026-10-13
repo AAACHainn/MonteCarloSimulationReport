@@ -1,4 +1,5 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
+vi.mock("@/lib/market-sync/lease", () => ({ withDatasetUpdate: vi.fn(async (_id: string, action: () => Promise<unknown>) => action()) }));
 
 const mocks = vi.hoisted(() => ({
   datasetFindUnique: vi.fn(),
@@ -71,6 +72,7 @@ describe("market dataset settings API", () => {
         timeframe: "1m",
         priceTickSize: 0.25,
         dataVersion: { increment: 1 },
+        historyVersion: { increment: 1 },
         progress: { update: {
           displayIntervalSeconds: 60,
           lastSyncRequestId: null,
@@ -96,7 +98,7 @@ describe("market dataset settings API", () => {
     expect(mocks.datasetUpdate).not.toHaveBeenCalled();
   });
 
-  it("keeps price-only edits compatible without rescanning bars", async () => {
+  it("versions price semantics without rescanning bars", async () => {
     const response = await PATCH(request({ priceTickSize: 0.25 }), context);
 
     expect(response.status).toBe(200);
@@ -107,7 +109,8 @@ describe("market dataset settings API", () => {
         sourceIntervalSeconds: 1,
         timeframe: "1s",
         priceTickSize: 0.25,
-        dataVersion: undefined,
+        dataVersion: { increment: 1 },
+        historyVersion: { increment: 1 },
         progress: undefined,
       },
     });
