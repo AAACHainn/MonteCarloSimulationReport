@@ -35,7 +35,7 @@ export function ReplaySessionSwitch({ beforeSwitch, disabled = false }: { before
       router.push(`/market-replay/${current.datasetId}${id ? `?sessionId=${encodeURIComponent(id)}` : ""}`);
     } catch (error) { setError(error instanceof Error ? error.message : copy.replaySessions.switchFailed); setBusy(false); }
   }
-  return <div className="flex min-w-0 items-center gap-2" aria-busy={busy}>
+  return <div className="flex min-w-0 flex-wrap items-center gap-2" aria-busy={busy}>
     <Badge>{current.mode === "TRAINING" ? copy.replaySessions.training : copy.replaySessions.liveReplay}</Badge>
     <Select value={current.id} disabled={busy || disabled} onValueChange={(id) => void navigate(id)}>
       <SelectTrigger aria-label={copy.replaySessions.switch} className="h-8 w-56"><SelectValue /></SelectTrigger>

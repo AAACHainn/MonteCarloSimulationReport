@@ -1,3 +1,4 @@
+import { cancelUncheckedEntries, countGateEntry, settleGateEntries } from "./training-gate";
 import type {
   PaperAdvanceInput,
   PaperAdvanceResult,
@@ -109,7 +110,7 @@ function fillReason(oldQuantity: number, newQuantity: number, order: PaperOrderD
 }
 
 export function advancePaperTrading(input: PaperAdvanceInput): PaperAdvanceResult {
-  const state = { ...input.state };
+  const state = { ...input.state, ...(input.state.trainingGate ? { trainingGate: { ...input.state.trainingGate } } : {}) };
   const orders = input.orders.map((order) => ({ ...order }));
   const fills: PaperFillData[] = [];
   let lots = (input.lots ?? []).map((lot) => ({ ...lot }));
@@ -166,6 +167,23 @@ export function advancePaperTrading(input: PaperAdvanceInput): PaperAdvanceResul
       }
     }
 
+    const fillId = makeId(`fill:${order.id}`);
+    const feePerUnit = Math.abs(price) * state.commissionBps / 10_000;
+    const closed = closedQuantity > EPSILON && lots.length > 0 ? closeLotsFifo(lots, closedQuantity, {
+      fillId, sequence: bar.sequence, timestamp: bar.timestamp, price, feePerUnit,
+    }) : null;
+    const gateWasActive = state.trainingGate?.active ?? false;
+    if (state.trainingGate && closed) state.trainingGate = settleGateEntries(state.trainingGate, closed.completedNetResults, bar.sequence);
+    // A reverse may close the second losing entry. Permit that close, but never
+    // open its unchecked remainder after the gate has become active.
+    if (state.trainingGate?.active && openedQuantity > EPSILON && !order.discipline) {
+      if (closedQuantity <= EPSILON) {
+        order.status = "CANCELLED"; order.cancelReason = "TRAINING_GATE_REQUIRED";
+        return;
+      }
+      quantity = closedQuantity; openedQuantity = 0; nextQuantity = 0; nextAverage = null;
+      order.stopLoss = null; order.takeProfit = null;
+    }
     const fee = Math.abs(price * quantity) * state.commissionBps / 10_000;
     const slippageCost = Math.abs(price - basePrice) * quantity;
     state.netQuantity = nextQuantity;
@@ -196,7 +214,7 @@ export function advancePaperTrading(input: PaperAdvanceInput): PaperAdvanceResul
     }
 
     const fill: PaperFillData = {
-      id: makeId(`fill:${order.id}`), orderId: order.id, sequence: bar.sequence, timestamp: bar.timestamp,
+      id: fillId, orderId: order.id, sequence: bar.sequence, timestamp: bar.timestamp,
       side: order.side, price, quantity, fee, slippageCost, realizedPnl,
       closedQuantity, openedQuantity, netQuantityAfter: nextQuantity,
       averagePriceAfter: nextAverage, reason: fillReason(oldQuantity, nextQuantity, order),
@@ -205,13 +223,14 @@ export function advancePaperTrading(input: PaperAdvanceInput): PaperAdvanceResul
     state.activeCycleKey = sign(nextQuantity) === 0 ? null : fill.cycleKey;
     fills.push(fill);
 
-    if (closedQuantity > EPSILON && lots.length > 0) {
-      const closed = closeLotsFifo(lots, closedQuantity, {
-        fillId: fill.id, sequence: fill.sequence, timestamp: fill.timestamp, price: fill.price,
-      });
+    if (closed) {
       lots = closed.lots;
       journalEntries.push(...closed.entries.map((entry) => ({ ...entry, cycleKey: fill.cycleKey })));
     }
+    if (state.trainingGate?.active && !gateWasActive) {
+      state.trainingGate.cancelledOrderCount += cancelUncheckedEntries(orders, state.netQuantity, order.id);
+    }
+    if (state.trainingGate && openedQuantity > EPSILON) state.trainingGate = countGateEntry(state.trainingGate);
     if (journalTrackingBlocked && closedQuantity >= Math.abs(oldQuantity) - EPSILON) {
       journalTrackingBlocked = false;
     }
@@ -219,6 +238,8 @@ export function advancePaperTrading(input: PaperAdvanceInput): PaperAdvanceResul
       lots.push({
         id: `lot_${fill.id}`,
         entryFillId: fill.id,
+        ...(state.trainingGate ? { entryNetPnl: -feePerUnit * openedQuantity } : {}),
+        ...(order.discipline ? { discipline: order.discipline } : {}),
         side: nextQuantity > 0 ? "LONG" : "SHORT",
         openedSequence: fill.sequence,
         openedAt: fill.timestamp,

@@ -26,6 +26,9 @@ export async function persistDerivedBatch(tx: Prisma.TransactionClient, account:
   const scope = getReplayScope();
   const owner = scope ? await tx.replaySession.findUniqueOrThrow({ where: { id: scope.id }, select: { activeProjectionId: true } }) : null;
   await tx.paperTradingSession.update({ where: { id: account.id }, data: paperStateUpdate(batch.state) });
+  if (scope?.mode === "TRAINING" && batch.state.trainingGate) {
+    await tx.replaySession.update({ where: { id: scope.id }, data: { trainingGate: JSON.stringify(batch.state.trainingGate) } });
+  }
   for (const order of batch.orders) {
     const create = orderCreateData(account.id, order);
     if (!create.createdAt && owner?.activeProjectionId && owner.activeProjectionId !== scope?.projectionId) {

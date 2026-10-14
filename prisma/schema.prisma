@@ -93,6 +93,8 @@ model TradeOption {
   type             TradeOptionType
   name             String
   active           Boolean         @default(true)
+  checklist        String          @default("[]")
+  checklistVersion Int             @default(1)
   instrumentTrades Trade[]         @relation("TradeInstrumentOption")
   strategyTrades   Trade[]         @relation("TradeStrategyOption")
   replayJournalSetups ReplayJournalEntry[] @relation("ReplayJournalSetupOption")
@@ -432,6 +434,8 @@ model PaperPositionLot {
   displaySession           String
   displayUtcOffsetMinutes  Int
   priceTickSize            Float
+  entryNetPnl              Float?
+  discipline               String?
   createdAt                DateTime             @default(now())
   updatedAt                DateTime             @updatedAt
 
@@ -483,6 +487,7 @@ model ReplayJournalEntry {
   setupOptionId            String?
   setupOption              TradeOption?         @relation("ReplayJournalSetupOption", fields: [setupOptionId], references: [id])
   tradeReasons             TradeReason[]         @relation("ReplayJournalTradeReasons")
+  discipline               String?
   createdAt                DateTime             @default(now())
 
   @@unique([journalSessionId, id])
@@ -510,6 +515,7 @@ model ReplaySession {
   pendingCorrectionId String?
   legacy             Boolean @default(false)
   riskPreferences    String @default("{}")
+  trainingGate       String @default("{}")
   progress           ReplayProgress?
   journal            ReplayJournalSession?
   projections        ReplayProjection[] @relation("SessionProjections")
@@ -637,6 +643,7 @@ model PaperOrder {
   filledPrice        Float?
   cancelReason       String?
   fills              PaperFill[]
+  discipline               String?
   createdAt          DateTime            @default(now())
   updatedAt          DateTime            @updatedAt
 

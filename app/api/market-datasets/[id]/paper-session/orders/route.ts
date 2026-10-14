@@ -1,3 +1,4 @@
+import { isClosingOrder, parseChecklist, parseTrainingGate, type EntryDiscipline } from "@/lib/paper-trading/training-gate";
 import { withReplaySessionRoute } from '@/lib/replay-sessions/scope';
 import { accountWhere, progressWhere, assertReplayWritable, markReplayMutation, getReplayScope, storageId } from '@/lib/replay-sessions/scope';
 import { logicalId } from '@/lib/replay-sessions/identity';
@@ -55,17 +56,36 @@ async function handlePOST(request: Request, context: RouteContext) {
       if (!sizing.ok) return { status: 400, error: copy.paperTrading.invalidBracket };
       quantity = sizing.value.quantity;
     }
+    const reduceOnly = parsed.data.reduceOnly || isClosingOrder(session.netQuantity, parsed.data.side, quantity);
+    let discipline: EntryDiscipline | null = null;
+    if (getReplayScope()?.mode === "TRAINING" && !reduceOnly) {
+      const owner = await tx.replaySession.findUniqueOrThrow({ where: { id: getReplayScope()!.id }, select: { trainingGate: true } });
+      if (parseTrainingGate(owner.trainingGate).active) {
+        const approval = parsed.data.gateApproval;
+        if (!approval) return { status: 400, error: copy.trainingGate.required };
+        const strategy = await tx.tradeOption.findFirst({ where: { id: approval.strategyId, type: "STRATEGY", active: true } });
+        const checklist = parseChecklist(strategy?.checklist);
+        if (!strategy || !checklist.length) return { status: 400, error: copy.trainingGate.invalidStrategy };
+        if (strategy.checklistVersion !== approval.checklistVersion) return { status: 409, error: copy.trainingGate.checklistChanged };
+        const checked = new Set(approval.checkedItemIds);
+        if (checked.size !== checklist.length || approval.checkedItemIds.length !== checked.size || checklist.some((item) => !checked.has(item.id))) {
+          return { status: 400, error: copy.trainingGate.required };
+        }
+        discipline = { strategyId: strategy.id, strategyName: strategy.name, checklistVersion: strategy.checklistVersion, checklist, confirmedAt: new Date().toISOString() };
+      }
+    }
     let order = await tx.paperOrder.create({
       data: {
         sessionId: session.id,
         side: parsed.data.side,
         type: parsed.data.type,
         quantity,
-        riskAmount: parsed.data.reduceOnly ? null : parsed.data.riskAmount,
+        riskAmount: reduceOnly ? null : parsed.data.riskAmount,
         price: parsed.data.type === "MARKET" ? null : parsed.data.price,
-        stopLoss: parsed.data.reduceOnly ? null : parsed.data.stopLoss,
-        takeProfit: parsed.data.reduceOnly ? null : parsed.data.takeProfit,
-        reduceOnly: parsed.data.reduceOnly,
+        stopLoss: reduceOnly ? null : parsed.data.stopLoss,
+        takeProfit: reduceOnly ? null : parsed.data.takeProfit,
+        reduceOnly,
+        discipline: discipline ? JSON.stringify(discipline) : null,
         createdSequence: progress.currentSequence,
         activeFromSequence: progress.currentSequence + 1,
       },

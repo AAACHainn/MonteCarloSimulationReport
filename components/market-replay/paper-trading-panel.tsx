@@ -15,6 +15,8 @@ import { copy } from "@/lib/i18n";
 import { formatNumber } from "@/lib/format";
 import { snapPriceToTick } from "@/lib/market-replay/price-ticks";
 import type { MarketBarData } from "@/lib/market-replay/types";
+import { isClosingOrder } from "@/lib/paper-trading/training-gate";
+import type { OrderSubmitResult } from "@/lib/paper-trading/types";
 import type { PaperOrderData, PaperOrderType, PaperSessionSnapshot, PaperSide, ReplayJournalEntryData } from "@/lib/paper-trading/types";
 
 type OrderInput = {
@@ -35,7 +37,7 @@ type Props = {
   busy: boolean;
   error: string | null;
   onCreate: (config: { initialCapital: number; currency: string; commissionBps: number; slippageBps: number }) => Promise<boolean>;
-  onSubmit: (order: OrderInput) => Promise<boolean>;
+  onSubmit: (order: OrderInput) => Promise<OrderSubmitResult>;
   onCancel: (orderId: string) => Promise<boolean>;
   onUpdate: (orderId: string, update: { price?: number; quantity?: number; stopLoss?: number | null; takeProfit?: number | null; riskAmount?: number | null }) => Promise<boolean>;
   onCancelScope: (scope: "ALL" | "BRACKET") => Promise<boolean>;
@@ -109,6 +111,7 @@ export function PaperAccountStrip({ snapshot }: { snapshot: PaperSessionSnapshot
 export function PaperTradingPanel({ priceTickSize, snapshot, currentBar, busy, error, onCreate, onSubmit, onCancel, onUpdate, onCancelScope, onClear }: Props) {
   const [side, setSide] = useState<PaperSide>("BUY");
   const [type, setType] = useState<PaperOrderType>("MARKET");
+  const [inputQuantity, setInputQuantity] = useState(1);
   if (!snapshot) {
     return (
       <Card className="h-fit">
@@ -139,11 +142,11 @@ export function PaperTradingPanel({ priceTickSize, snapshot, currentBar, busy, e
         }}>
           <div className="grid grid-cols-2 gap-2"><Button type="button" variant={side === "BUY" ? "default" : "outline"} onClick={() => setSide("BUY")} className={side === "BUY" ? "bg-emerald-600 hover:bg-emerald-700" : ""}>{copy.paperTrading.buy}</Button><Button type="button" variant={side === "SELL" ? "destructive" : "outline"} onClick={() => setSide("SELL")}>{copy.paperTrading.sell}</Button></div>
           <div><Label htmlFor="paper-type">{copy.paperTrading.orderType}</Label><Select value={type} onValueChange={(value) => setType(value as PaperOrderType)}><SelectTrigger id="paper-type"><SelectValue /></SelectTrigger><SelectContent><SelectItem value="MARKET">{copy.paperTrading.market}</SelectItem><SelectItem value="LIMIT">{copy.paperTrading.limit}</SelectItem><SelectItem value="STOP">{copy.paperTrading.stop}</SelectItem></SelectContent></Select></div>
-          <div><Label htmlFor="paper-quantity">{copy.paperTrading.quantity}</Label><Input id="paper-quantity" name="quantity" type="number" min="0.00000001" step="any" defaultValue="1" required /></div>
+          <div><Label htmlFor="paper-quantity">{copy.paperTrading.quantity}</Label><Input id="paper-quantity" name="quantity" type="number" min="0.00000001" step="any" value={inputQuantity} onChange={(event) => setInputQuantity(Number(event.target.value))} required /></div>
           {type !== "MARKET" ? <div><Label htmlFor="paper-price">{copy.paperTrading.orderPrice}</Label><Input id="paper-price" name="price" type="number" step={priceTickSize} defaultValue={currentBar ? snapPriceToTick(currentBar.close, priceTickSize) : undefined} required /></div> : null}
           <div className="grid grid-cols-2 gap-2"><div><Label htmlFor="paper-stop-loss">{copy.paperTrading.stopLoss}（{copy.paperTrading.optional}）</Label><Input id="paper-stop-loss" name="stopLoss" type="number" step={priceTickSize} /></div><div><Label htmlFor="paper-take-profit">{copy.paperTrading.takeProfit}（{copy.paperTrading.optional}）</Label><Input id="paper-take-profit" name="takeProfit" type="number" step={priceTickSize} /></div></div>
           {error ? <p className="text-sm text-red-600">{error}</p> : null}
-          <Button type="submit" disabled={busy || !currentBar} className="w-full">{busy ? <Loader2 className="h-4 w-4 animate-spin" /> : null}{busy ? copy.paperTrading.submitting : copy.paperTrading.submitOrder}</Button>
+          <Button type="submit" disabled={busy || !currentBar} className="w-full">{busy ? <Loader2 className="h-4 w-4 animate-spin" /> : null}{busy ? copy.paperTrading.submitting : snapshot.session.trainingGate?.active && !isClosingOrder(snapshot.session.netQuantity, side, inputQuantity) ? copy.trainingGate.selectStrategy : copy.paperTrading.submitOrder}</Button>
         </form>
         {quantity > 0 ? <div className="grid grid-cols-2 gap-2 border-t pt-3"><Button type="button" variant="outline" disabled={busy} onClick={() => void onSubmit({ side: snapshot.session.netQuantity > 0 ? "SELL" : "BUY", type: "MARKET", quantity, price: null, stopLoss: null, takeProfit: null, reduceOnly: true })}>{copy.paperTrading.closePosition}</Button><Button type="button" variant="outline" disabled={busy} onClick={() => void onSubmit({ side: snapshot.session.netQuantity > 0 ? "SELL" : "BUY", type: "MARKET", quantity: quantity * 2, price: null, stopLoss: null, takeProfit: null })}>{copy.paperTrading.reversePosition}</Button></div> : null}
         <div className="grid grid-cols-2 gap-2"><Button type="button" variant="ghost" size="sm" onClick={() => void onCancelScope("ALL")}>{copy.paperTrading.cancelAll}</Button><Button type="button" variant="ghost" size="sm" onClick={() => void onCancelScope("BRACKET")}>{copy.paperTrading.cancelBracket}</Button></div>

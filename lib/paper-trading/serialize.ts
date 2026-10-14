@@ -1,4 +1,5 @@
-import { accountWhere, entryProjectionWhere } from '@/lib/replay-sessions/scope';
+import { parseEntryDiscipline, parseTrainingGate } from "./training-gate";
+import { accountWhere, entryProjectionWhere, getReplayScope } from '@/lib/replay-sessions/scope';
 import type { Prisma } from "@prisma/client";
 import { logicalId } from "@/lib/replay-sessions/identity";
 import { prisma } from "@/lib/db";
@@ -68,6 +69,7 @@ export function serializePaperSession(session: SessionRecord): PaperSessionState
     totalFees: session.totalFees, totalSlippage: session.totalSlippage,
     peakEquity: session.peakEquity, maxDrawdown: session.maxDrawdown, version: session.version,
     activeCycleKey: session.activeCycleKey ?? null,
+    ...(getReplayScope()?.trainingGate ? { trainingGate: { ...getReplayScope()!.trainingGate! } } : {}),
   };
 }
 
@@ -77,9 +79,9 @@ export function serializePaperOrder(order: {
   stopLoss: number | null; takeProfit: number | null; reduceOnly: boolean; isProtective: boolean;
   ocoGroupId: string | null; parentOrderId?: string | null; createdSequence: number; activeFromSequence: number;
   filledSequence: number | null; filledAt: Date | null; filledPrice: number | null;
-  cancelReason: string | null; createdAt?: Date;
+  cancelReason: string | null; createdAt?: Date; discipline?: string | null;
 }): PaperOrderData {
-  return { id: logicalId(order.id), side: order.side as PaperSide, type: order.type as PaperOrderType,
+  return { discipline: parseEntryDiscipline(order.discipline), id: logicalId(order.id), side: order.side as PaperSide, type: order.type as PaperOrderType,
     status: order.status as PaperOrderStatus, quantity: order.quantity, riskAmount: order.riskAmount,
     price: order.price, stopLoss: order.stopLoss, takeProfit: order.takeProfit, reduceOnly: order.reduceOnly,
     isProtective: order.isProtective, ocoGroupId: order.ocoGroupId, parentOrderId: order.parentOrderId ?? null,
@@ -114,9 +116,9 @@ export function serializePaperPositionLot(lot: {
   id: string; entryFillId: string; side: string; openedSequence: number; openedAt: Date;
   entryPrice: number; entryOrderType: string | null; initialStopPrice: number | null; initialQuantity: number; remainingQuantity: number; initialRisk: number | null;
   actualRisk: number; abrValue: number | null; abrLength: number; displayIntervalSeconds: number;
-  displaySession: string; displayUtcOffsetMinutes: number; priceTickSize: number;
+  displaySession: string; displayUtcOffsetMinutes: number; priceTickSize: number; discipline?: string | null; entryNetPnl?: number | null;
 }): PaperPositionLotData {
-  return { id: logicalId(lot.id), entryFillId: logicalId(lot.entryFillId), side: lot.side as "LONG" | "SHORT",
+  return { discipline: parseEntryDiscipline(lot.discipline), entryNetPnl: lot.entryNetPnl ?? null, id: logicalId(lot.id), entryFillId: logicalId(lot.entryFillId), side: lot.side as "LONG" | "SHORT",
     openedSequence: lot.openedSequence, openedAt: lot.openedAt.toISOString(), entryPrice: lot.entryPrice,
     entryOrderType: lot.entryOrderType as PaperPositionLotData["entryOrderType"], initialStopPrice: lot.initialStopPrice,
     initialQuantity: lot.initialQuantity, remainingQuantity: lot.remainingQuantity, initialRisk: lot.initialRisk,
@@ -126,9 +128,15 @@ export function serializePaperPositionLot(lot: {
 }
 
 export async function getPaperSessionSnapshot(datasetId: string, db: Prisma.TransactionClient = prisma): Promise<PaperSessionSnapshot | null> {
+  const scope = getReplayScope();
+  if (scope?.mode === "TRAINING") {
+    const owner = await db.replaySession.findUniqueOrThrow({ where: { id: scope.id }, select: { trainingGate: true } });
+    scope.trainingGate = parseTrainingGate(owner.trainingGate);
+  }
   const storedSession = await db.paperTradingSession.findFirst({ where: accountWhere(datasetId) });
   if (!storedSession) return null;
   const session = await ensurePaperTradeStats(storedSession as SessionRecord, db);
+  if (scope?.mode === "TRAINING") await hydrateTrainingLots(db, session.id);
   const [activeOrders, recentOrders, recentFills, recentTrades, openLots, currentBar, journalEntryCount] = await Promise.all([
     db.paperOrder.findMany({ where: { sessionId: session.id, status: "PENDING" }, orderBy: [{ createdSequence: "asc" }, { createdAt: "asc" }] }),
     db.paperOrder.findMany({ where: { sessionId: session.id, status: { not: "PENDING" } }, orderBy: { updatedAt: "desc" }, take: 30 }),
@@ -189,4 +197,21 @@ export async function getPaperSessionSnapshot(datasetId: string, db: Prisma.Tran
     openLots: openLots.map(serializePaperPositionLot),
     stats,
   };
+}
+
+/** One-time reconstruction for batches opened by a pre-gate client. No candle replay. */
+export async function hydrateTrainingLots(db: Prisma.TransactionClient, sessionId: string) {
+  const lots = await db.paperPositionLot.findMany({ where: { sessionId, entryNetPnl: null } });
+  for (const lot of lots) {
+    const opening = await db.paperFill.findUnique({ where: { id: lot.entryFillId } });
+    if (!opening) continue;
+    let pnl = -opening.fee * lot.initialQuantity / opening.quantity;
+    const entries = await db.replayJournalEntry.findMany({ where: { lotId: lot.id, ...entryProjectionWhere() } });
+    for (const entry of entries) {
+      const closing = await db.paperFill.findMany({ where: { sessionId, sequence: entry.closedSequence } });
+      const fill = closing.find((item) => logicalId(entry.id).startsWith(`journal_${logicalId(item.id)}_`));
+      pnl += entry.gainLoss * entry.quantity - (fill ? fill.fee * entry.quantity / fill.quantity : 0);
+    }
+    await db.paperPositionLot.update({ where: { id: lot.id }, data: { entryNetPnl: pnl } });
+  }
 }

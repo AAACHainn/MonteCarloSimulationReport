@@ -83,7 +83,7 @@ export async function cloneCheckpointPrefix(baseProjectionId: string, targetProj
       openedAt: new Date(trade.openedAt), closedAt: trade.closedAt ? new Date(trade.closedAt) : null } });
   }
   if (state.lots?.length) await prisma.paperPositionLot.createMany({ data: state.lots.map((lot) => ({
-    ...lot, id: storageId(lot.id), entryFillId: storageId(lot.entryFillId), sessionId: account.id, openedAt: new Date(lot.openedAt),
+    ...lot, discipline: lot.discipline ? JSON.stringify(lot.discipline) : null, id: storageId(lot.id), entryFillId: storageId(lot.entryFillId), sessionId: account.id, openedAt: new Date(lot.openedAt),
   })) });
   await copyRows({ ...owned, table: "PaperEquityPoint", where: "sequence<=?", values: [sequence] });
   await copyRows({ ...prefix, table: "ReplayJournalEntry", where: "closedSequence<=?", values: [sequence], identityColumns: ["id", "lotId"] });

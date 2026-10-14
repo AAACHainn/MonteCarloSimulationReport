@@ -52,7 +52,7 @@ async function handlePATCH(request: Request, context: RouteContext) {
     const nextTakeProfit = parsed.data.takeProfit !== undefined ? parsed.data.takeProfit : order.takeProfit;
     const nextRiskAmount = parsed.data.riskAmount !== undefined ? parsed.data.riskAmount : order.riskAmount;
     let nextQuantity = parsed.data.quantity ?? order.quantity;
-    if (!order.isProtective) {
+    if (!order.isProtective && !order.reduceOnly) {
       if (!isValidBracket(order.side as "BUY" | "SELL", reference, nextStopLoss, nextTakeProfit)) {
         return { status: 400, error: copy.paperTrading.invalidBracket };
       }
@@ -79,9 +79,9 @@ async function handlePATCH(request: Request, context: RouteContext) {
       data: {
         quantity: order.isProtective ? undefined : nextQuantity,
         price: parsed.data.price,
-        stopLoss: order.isProtective ? undefined : parsed.data.stopLoss,
-        takeProfit: order.isProtective ? undefined : parsed.data.takeProfit,
-        riskAmount: order.isProtective ? undefined : parsed.data.riskAmount,
+        stopLoss: order.isProtective || order.reduceOnly ? undefined : parsed.data.stopLoss,
+        takeProfit: order.isProtective || order.reduceOnly ? undefined : parsed.data.takeProfit,
+        riskAmount: order.isProtective || order.reduceOnly ? undefined : parsed.data.riskAmount,
         activeFromSequence: progress.currentSequence + 1,
       },
     });

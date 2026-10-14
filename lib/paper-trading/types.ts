@@ -1,3 +1,4 @@
+import type { EntryDiscipline, TrainingGateState } from "./training-gate";
 import type { MarketBarData } from "@/lib/market-replay/types";
 
 export type PaperSide = "BUY" | "SELL";
@@ -25,9 +26,11 @@ export type PaperSessionState = PaperAccountConfig & {
   maxDrawdown: number;
   version: number;
   activeCycleKey?: string | null;
+  trainingGate?: TrainingGateState | null;
 };
 
 export type PaperOrderData = {
+  discipline?: EntryDiscipline | null;
   id: string;
   side: PaperSide;
   type: PaperOrderType;
@@ -87,6 +90,8 @@ export type PaperJournalContext = {
 };
 
 export type PaperPositionLotData = PaperJournalContext & {
+  discipline?: EntryDiscipline | null;
+  entryNetPnl?: number | null;
   id: string;
   entryFillId: string;
   side: "LONG" | "SHORT";
@@ -102,6 +107,7 @@ export type PaperPositionLotData = PaperJournalContext & {
 };
 
 export type ReplayJournalEntryDraft = PaperJournalContext & {
+  discipline?: EntryDiscipline | null;
   id: string;
   cycleKey?: string | null;
   lotId: string;
@@ -224,3 +230,10 @@ export type PaperAdvanceInput = {
   lots?: PaperPositionLotData[];
   journalContext?: PaperJournalContext | null;
 };
+
+export type PaperOrderInput = {
+  side: PaperSide; type: PaperOrderType; quantity: number; riskAmount?: number | null;
+  price: number | null; stopLoss: number | null; takeProfit: number | null; reduceOnly?: boolean;
+};
+export type OrderSubmitResult = "SUCCESS" | "CANCELLED" | "FAILED";
+export type GateApprovalInput = { strategyId: string; checklistVersion: number; checkedItemIds: string[] };

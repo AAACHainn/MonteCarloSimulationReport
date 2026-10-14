@@ -4,6 +4,7 @@ import * as PopoverPrimitive from "@radix-ui/react-popover";
 import { Check, ChevronDown, Loader2 } from "lucide-react";
 import { useId, useMemo, useRef, useState, type KeyboardEvent } from "react";
 import { Button } from "@/components/ui/button";
+import { OptionPopoverContent } from "@/components/ui/option-popover";
 import { filterSelectOptions, OptionSearch } from "@/components/ui/option-search";
 import { copy } from "@/lib/i18n";
 import { cn } from "@/lib/utils";
@@ -113,12 +114,8 @@ export function SearchableSelect({
       </Button>
     </PopoverPrimitive.Trigger>
     <PopoverPrimitive.Portal>
-      <PopoverPrimitive.Content
-        sideOffset={6}
-        align="start"
-        collisionPadding={12}
+      <OptionPopoverContent
         onOpenAutoFocus={(event) => { event.preventDefault(); searchRef.current?.focus(); }}
-        className="z-[200] flex max-h-[min(28rem,var(--radix-popover-content-available-height))] w-[28rem] max-w-[calc(100vw-2rem)] flex-col overflow-hidden rounded-md border bg-white p-2 text-slate-950 shadow-lg"
       >
         <div className="mb-2 shrink-0 border-b pb-2">
           <OptionSearch ref={searchRef} value={query} onChange={setQuery} placeholder={searchPlaceholder} onKeyDown={onSearchKeyDown} />
@@ -149,7 +146,7 @@ export function SearchableSelect({
             </Button>
           ))}
         </div>
-      </PopoverPrimitive.Content>
+      </OptionPopoverContent>
     </PopoverPrimitive.Portal>
   </PopoverPrimitive.Root>;
 }

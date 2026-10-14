@@ -1,3 +1,5 @@
+import { validateTrainingDelta } from "@/lib/paper-trading/validate-training-delta";
+import { hydrateTrainingLots } from "@/lib/paper-trading/serialize";
 import { progressWhere, accountWhere, assertReplayWritable, markReplayMutation, getReplayScope } from '@/lib/replay-sessions/scope';
 import { prisma } from "@/lib/db";
 import { copy } from "@/lib/i18n";
@@ -242,6 +244,9 @@ export async function persistClientReplayBatch(
       if (getReplayScope() && !validContextRuns(delta.contextRuns ?? [], progress.currentSequence + 1, input.targetSequence, progress.generation)) {
         return { status: 400, error: copy.marketReplay.syncMismatch } as const;
       }
+      if (getReplayScope()?.mode === "TRAINING" && !await validateTrainingDelta(tx, sessionRecord.id, progress.generation, session, currentOrders, delta)) {
+        return { status: 400, error: copy.marketReplay.syncMismatch } as const;
+      }
       await persistDerivedBatch(tx, { ...sessionRecord, ...statsSession }, progress.generation, {
         state: delta.state, orders: delta.orderChanges, fills: delta.fills, lots: delta.openLots,
         entries: delta.journalEntries, equityPoints: delta.equityPoints,
@@ -316,6 +321,7 @@ export async function syncReplayToTarget(
       }
       const statsSession = await ensurePaperTradeStats(session as SessionRecord, tx);
       let account = { ...session, ...statsSession };
+      if (getReplayScope()?.mode === "TRAINING") await hydrateTrainingLots(tx, session.id);
       let state = serializePaperSession(statsSession);
       let orders = (await tx.paperOrder.findMany({
         where: { sessionId: account.id, status: "PENDING" }, orderBy: [{ createdSequence: "asc" }, { id: "asc" }],

@@ -678,6 +678,12 @@ try {
     const resultMigration = readFileSync(new URL("../prisma/migrations/20261014120000_keep_current_replay_result/migration.sql", import.meta.url), "utf8");
     await prisma.$transaction(resultMigration.replace(/^\s*--.*$/gm, "").split(";").map((s) => s.trim()).filter(Boolean).map((statement) => prisma.$executeRawUnsafe(statement)), { timeout: 120_000 });
   }
+  const gateMigration = readFileSync(new URL("../prisma/migrations/20261014160000_add_training_gate/migration.sql", import.meta.url), "utf8");
+  for (const statement of gateMigration.split(";").map((s) => s.trim()).filter(Boolean)) {
+    const [, table, column] = statement.match(/ALTER TABLE "([^"\n]+)" ADD COLUMN "([^"\n]+)"/);
+    const columns = await prisma.$queryRawUnsafe(`PRAGMA table_info("${table}")`);
+    if (!columns.some((item) => item.name === column)) await prisma.$executeRawUnsafe(statement);
+  }
   await prisma.$executeRawUnsafe('CREATE INDEX IF NOT EXISTS "ReplayProjectionCommand_commandId_idx" ON "ReplayProjectionCommand"("commandId")');
 } finally {
   await prisma.$disconnect();

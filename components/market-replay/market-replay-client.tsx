@@ -8,6 +8,9 @@ import { ReplaySessionSwitch } from "./replay-session-switch";
 import { ReplayCorrectionProvider } from "./replay-correction-context";
 import { ReplayCorrectionDialog, type CorrectionTarget } from "./replay-correction-dialog";
 import Link from "next/link";
+import { TrainingGateConfigDialog, EntryCheckDialog } from "./training-gate-dialogs";
+import { defaultTrainingGate, isClosingOrder, type TrainingGateState } from "@/lib/paper-trading/training-gate";
+import type { GateApprovalInput, PaperOrderInput, OrderSubmitResult } from "@/lib/paper-trading/types";
 import { startTransition, useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { Breadcrumbs } from "@/components/breadcrumbs";
 import { BookOpen, ListTree, Loader2, Palette, RotateCcw, Ruler, Settings2, Trash2, TrendingUp, WalletCards, X } from "lucide-react";
@@ -84,9 +87,7 @@ import {
 } from "@/lib/market-replay/history";
 import { readLaterHistoryWindow } from "@/lib/market-replay/historical-window";
 import type {
-  PaperOrderType,
   PaperSessionSnapshot,
-  PaperSide,
   ReplayTradeAnnotationData,
 } from "@/lib/paper-trading/types";
 import { createDeterministicEventIdFactory } from "@/lib/paper-trading/deterministic-id";
@@ -292,6 +293,24 @@ export function MarketReplayClient({ dataset: initialDataset, initialJournalFocu
   const [buffering, setBuffering] = useState(false);
   const [recoveryNotice, setRecoveryNotice] = useState<string | null>(null);
   const [draftActive, setDraftActive] = useState(false);
+  const [gateSettings, setGateSettings] = useState<TrainingGateState>(defaultTrainingGate);
+  const [gateDialogOpen, setGateDialogOpen] = useState(false);
+  const [gateBusy, setGateBusy] = useState(false);
+  const [gateError, setGateError] = useState<string | null>(null);
+  const [gateNotice, setGateNotice] = useState<string | null>(null);
+  const [checkingOrder, setCheckingOrder] = useState<PaperOrderInput | null>(null);
+  const checkResolverRef = useRef<((result: OrderSubmitResult) => void) | null>(null);
+  const gateSeenRef = useRef<number | null>(null);
+  useEffect(() => () => { checkResolverRef.current?.("CANCELLED"); }, []);
+  useEffect(() => {
+    if (replaySession?.mode !== "TRAINING") return;
+    const controller = new AbortController();
+    void fetch(`/api/replay-sessions/${replaySession.id}/training-gate`, { signal: controller.signal }).then(async (response) => {
+      if (response.ok) { const data = await response.json(); if (!controller.signal.aborted) setGateSettings(data.gate); }
+    }).catch(() => undefined);
+    return () => controller.abort();
+  }, [fetch, replaySession?.id, replaySession?.mode]);
+
   const [measurementArmed, setMeasurementArmed] = useState(false);
   const [drawingToolOpen, setDrawingToolOpen] = useState(false);
   const [drawingTool, setDrawingTool] = useState<DrawingTool | null>(null);
@@ -1354,6 +1373,17 @@ export function MarketReplayClient({ dataset: initialDataset, initialJournalFocu
     return () => { stopped = true; window.clearInterval(timer); };
   }, [autoPausePlayback, dataset, flushVisible, isLoading, paperMutationActiveRef, restorePlayback, setReplay, suspendPlayback, fetch]);
 
+  useEffect(() => {
+    const gate = paperSnapshot?.session.trainingGate;
+    if (!gate) return;
+    const previous = gateSeenRef.current;
+    gateSeenRef.current = gate.activationCount;
+    if (previous !== null && gate.activationCount > previous && gate.source === "LOSS_STREAK") {
+      pausePlayback(); manualStepsRef.current.cancel();
+      setGateNotice(`${copy.trainingGate.automatic} ${copy.trainingGate.cancelled(gate.cancelledOrderCount)}`);
+    }
+  }, [paperSnapshot?.session.trainingGate, pausePlayback]);
+
   const fastForwardToNextVisibleBar = useCallback(async (
     shouldContinue: () => boolean = () => true,
     playbackIntent?: ReplayPlaybackIntent,
@@ -1911,7 +1941,7 @@ export function MarketReplayClient({ dataset: initialDataset, initialJournalFocu
     const stepShortcut = stepShortcutRef.current;
     const onKeyDown = (event: KeyboardEvent) => {
       if (!isReplayPlaybackShortcut(event, "ArrowRight", shortcuts.platform)) return;
-      if (settingsDialog || startDialogOpen || confirmAction || isReplayShortcutInputTarget(event.target)) {
+      if (settingsDialog || gateDialogOpen || checkingOrder || startDialogOpen || confirmAction || isReplayShortcutInputTarget(event.target)) {
         stepShortcut.release();
         return;
       }
@@ -1933,13 +1963,13 @@ export function MarketReplayClient({ dataset: initialDataset, initialJournalFocu
       window.removeEventListener("keyup", onKeyUp, true);
       window.removeEventListener("blur", onBlur);
     };
-  }, [confirmAction, revealNextBar, settingsDialog, shortcuts.platform, startDialogOpen]);
+  }, [confirmAction, gateDialogOpen, checkingOrder, revealNextBar, settingsDialog, shortcuts.platform, startDialogOpen]);
 
   useEffect(() => {
     const onKeyDown = (event: KeyboardEvent) => {
       if (!isReplayPlaybackShortcut(event, "ArrowDown", shortcuts.platform)) return;
       if (
-        settingsDialog || startDialogOpen || confirmAction
+        settingsDialog || gateDialogOpen || checkingOrder || startDialogOpen || confirmAction
         || isReplayShortcutInputTarget(event.target)
       ) return;
       event.preventDefault();
@@ -1947,14 +1977,14 @@ export function MarketReplayClient({ dataset: initialDataset, initialJournalFocu
     };
     window.addEventListener("keydown", onKeyDown);
     return () => window.removeEventListener("keydown", onKeyDown);
-  }, [confirmAction, settingsDialog, shortcuts.platform, startDialogOpen, togglePlayback]);
+  }, [confirmAction, gateDialogOpen, checkingOrder, settingsDialog, shortcuts.platform, startDialogOpen, togglePlayback]);
 
   useEffect(() => {
     const onKeyDown = (event: KeyboardEvent) => {
       const key = replayDrawingShortcutKey(event);
       if (!key) return;
       if (
-        settingsDialog || startDialogOpen || confirmAction || styleDrawingId
+        settingsDialog || gateDialogOpen || checkingOrder || startDialogOpen || confirmAction || styleDrawingId
         || isReplayShortcutInputTarget(event.target)
       ) return;
       event.preventDefault();
@@ -1962,7 +1992,7 @@ export function MarketReplayClient({ dataset: initialDataset, initialJournalFocu
     };
     window.addEventListener("keydown", onKeyDown);
     return () => window.removeEventListener("keydown", onKeyDown);
-  }, [armFibonacciRetracement, armTrendLine, confirmAction, settingsDialog, startDialogOpen, styleDrawingId]);
+  }, [armFibonacciRetracement, armTrendLine, confirmAction, gateDialogOpen, checkingOrder, settingsDialog, startDialogOpen, styleDrawingId]);
 
   function changeSpeed(value: number) {
     const current = latestReplayRef.current;
@@ -2367,12 +2397,72 @@ export function MarketReplayClient({ dataset: initialDataset, initialJournalFocu
     }));
   }
 
-  async function submitPaperOrder(order: { side: PaperSide; type: PaperOrderType; quantity: number; riskAmount?: number | null; price: number | null; stopLoss: number | null; takeProfit: number | null; reduceOnly?: boolean }) {
+  async function sendPaperOrder(order: PaperOrderInput, gateApproval?: GateApprovalInput) {
     if (!paperSnapshotRef.current) return false;
     return mutatePaper(`/api/market-datasets/${dataset.id}/paper-session/orders`, (version) => ({
-      method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ ...order, expectedVersion: version }),
+      method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ ...order, gateApproval, expectedVersion: version }),
     }));
   }
+
+  async function submitPaperOrder(order: PaperOrderInput): Promise<OrderSubmitResult> {
+    const snapshot = paperSnapshotRef.current;
+    if (!snapshot || checkingOrder || checkResolverRef.current) return "CANCELLED";
+    const closing = order.reduceOnly || isClosingOrder(snapshot.session.netQuantity, order.side, order.quantity);
+    if (replaySession?.mode === "TRAINING" && snapshot.session.trainingGate?.active && !closing) {
+      if (!await prepareSessionSwitch()) return "FAILED";
+      setPaperError(null);
+      return new Promise<OrderSubmitResult>((resolve) => { checkResolverRef.current = resolve; setCheckingOrder({ ...order }); });
+    }
+    return await sendPaperOrder(order) ? "SUCCESS" : "FAILED";
+  }
+
+  function cancelEntryCheck() {
+    if (paperBusy) return;
+    setCheckingOrder(null); setPaperError(null);
+    const resolve = checkResolverRef.current; checkResolverRef.current = null; resolve?.("CANCELLED");
+  }
+  async function confirmEntryCheck(approval: GateApprovalInput) {
+    if (!checkingOrder || paperBusy) return false;
+    const success = await sendPaperOrder(checkingOrder, approval);
+    if (success) {
+      setCheckingOrder(null);
+      const resolve = checkResolverRef.current; checkResolverRef.current = null; resolve?.("SUCCESS");
+    }
+    return success;
+  }
+
+  async function openGateConfig() {
+    if (!replaySession || gateBusy || checkingOrder) return;
+    setGateBusy(true); setGateError(null);
+    try {
+      if (!await prepareSessionSwitch()) throw new Error(copy.replaySessions.switchFailed);
+      const response = await fetch(`/api/replay-sessions/${replaySession.id}/training-gate`, { cache: "no-store" });
+      const data = await response.json();
+      if (!response.ok) throw new Error(data.error ?? copy.trainingGate.failed);
+      setGateSettings(data.gate); setGateDialogOpen(true);
+    } catch (error) { setGateNotice(error instanceof Error ? error.message : copy.trainingGate.failed); }
+    finally { setGateBusy(false); }
+  }
+  async function saveGateConfig(tradeCount: number, start: boolean) {
+    if (!replaySession || gateBusy) return;
+    setGateBusy(true); setGateError(null);
+    try {
+      const current = await fetch(`/api/replay-sessions/${replaySession.id}/training-gate`, { cache: "no-store" });
+      const latest = await current.json();
+      if (!current.ok) throw new Error(latest.error ?? copy.trainingGate.failed);
+      const response = await fetch(`/api/replay-sessions/${replaySession.id}/training-gate`, { method: start ? "POST" : "PUT", headers: { "Content-Type": "application/json", "X-Replay-Projection": replaySession.activeProjectionId }, body: JSON.stringify({ tradeCount, expectedVersion: latest.version }) });
+      const data = await response.json();
+      if (!response.ok) throw new Error(data.error ?? copy.trainingGate.failed);
+      setGateSettings(data.gate); commitConfirmedPaperSnapshot(data.snapshot);
+      setGateNotice(start ? `${copy.trainingGate.manual} · ${copy.trainingGate.cancelled(data.gate.cancelledOrderCount)}` : copy.trainingGate.saved);
+      setGateDialogOpen(false);
+    } catch (error) { setGateError(error instanceof Error ? error.message : copy.trainingGate.failed); }
+    finally { setGateBusy(false); }
+  }
+  const currentGate = paperSnapshot?.session.trainingGate ?? gateSettings;
+  const gateButton = replaySession?.mode === "TRAINING" ? <Button variant="outline" size="sm" className="h-10 md:h-9" disabled={gateBusy || isLoading || Boolean(loadError) || !replay || Boolean(checkingOrder) || Boolean(journalReview)} onClick={() => void openGateConfig()}>{gateBusy ? <Loader2 className="h-4 w-4 animate-spin" /> : null}{currentGate.active ? copy.trainingGate.remaining(currentGate.targetCount - currentGate.completedCount) : copy.trainingGate.title}</Button> : null;
+
+  const gateNoticeBlock = gateNotice ? <div className="flex shrink-0 items-center justify-between gap-2 rounded-md border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-800" role="status"><span>{gateNotice}</span><Button variant="ghost" size="icon" aria-label={copy.common.cancel} onClick={() => setGateNotice(null)}><X className="h-4 w-4" /></Button></div> : null;
 
   async function updatePaperOrder(orderId: string, update: { price?: number; quantity?: number; stopLoss?: number | null; takeProfit?: number | null; riskAmount?: number | null }) {
     if (!paperSnapshotRef.current) return false;
@@ -2398,7 +2488,7 @@ export function MarketReplayClient({ dataset: initialDataset, initialJournalFocu
   async function closePaperPosition() {
     const quantity = Math.abs(paperSnapshotRef.current?.session.netQuantity ?? 0);
     if (quantity <= 0) return false;
-    return submitPaperOrder({
+    return await submitPaperOrder({
       side: Number(paperSnapshotRef.current?.session.netQuantity) > 0 ? "SELL" : "BUY",
       type: "MARKET",
       quantity,
@@ -2406,7 +2496,7 @@ export function MarketReplayClient({ dataset: initialDataset, initialJournalFocu
       stopLoss: null,
       takeProfit: null,
       reduceOnly: true,
-    });
+    }) === "SUCCESS";
   }
 
   const currentBar = replay && replay.currentSequence >= 0 ? currentSourceBar : null;
@@ -2433,12 +2523,15 @@ export function MarketReplayClient({ dataset: initialDataset, initialJournalFocu
     return <div className="flex h-full min-h-0 flex-col gap-2">
       {!webFullscreen ? <header className="shrink-0" data-replay-workspace-header>
         <Breadcrumbs items={[{ label: copy.marketReplay.title, href: "/market-replay" }, { label: dataset.name }]} />
-        <div className="mt-1 flex items-center gap-4">
+        <div className="mt-1 flex flex-wrap items-center gap-4">
           <h1 className="shrink-0 text-xl font-semibold tracking-tight text-slate-950">{copy.marketReplay.replayTitle(dataset.symbol, dataset.timeframe)}</h1>
           <p className="min-w-0 truncate text-xs text-slate-500">{dataset.name} · {dataset.timezone}</p>
-          <div className="ml-auto min-w-0"><ReplaySessionSwitch beforeSwitch={prepareSessionSwitch} disabled={isLoading || Boolean(loadError) || !replay} /></div>
+          <div className="ml-auto flex min-w-0 flex-wrap items-center gap-2">{gateButton}<ReplaySessionSwitch beforeSwitch={prepareSessionSwitch} disabled={isLoading || Boolean(loadError) || !replay} /></div>
         </div>
       </header> : null}
+      {!webFullscreen ? gateNoticeBlock : null}
+      {gateDialogOpen ? <TrainingGateConfigDialog gate={currentGate} busy={gateBusy} error={gateError} onClose={() => setGateDialogOpen(false)} onSave={saveGateConfig} /> : null}
+      {checkingOrder ? <EntryCheckDialog order={checkingOrder} busy={paperBusy} error={paperError} onClose={cancelEntryCheck} onConfirm={confirmEntryCheck} /> : null}
       {content}
     </div>;
   }
@@ -2506,8 +2599,10 @@ export function MarketReplayClient({ dataset: initialDataset, initialJournalFocu
           ? "fixed inset-0 z-40 flex h-dvh min-h-0 flex-col overflow-hidden bg-white"
           : "flex min-h-0 flex-1 flex-col overflow-hidden rounded-lg border bg-white shadow-sm"}
       >
+        {webFullscreen ? gateNoticeBlock : null}
         {replaySession?.mode === "LIVE_REPLAY" ? <ReplayCorrectionDialog target={correctionTarget} displayUtcOffsetMinutes={displayUtcOffsetMinutes} beforeCreate={prepareSessionSwitch} onClose={() => setCorrectionTarget(null)} onPendingChange={setCorrectionPending} /> : null}
         <div className="flex h-12 shrink-0 items-center gap-2 overflow-x-auto border-b px-3 [&>*]:shrink-0">
+          {webFullscreen ? gateButton : null}
           <DisplayIntervalControls
             value={replay.displayIntervalSeconds}
             sourceIntervalSeconds={dataset.sourceIntervalSeconds}

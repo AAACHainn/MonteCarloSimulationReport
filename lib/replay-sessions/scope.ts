@@ -1,3 +1,4 @@
+import { parseTrainingGate, type TrainingGateState } from "@/lib/paper-trading/training-gate";
 import { AsyncLocalStorage } from "node:async_hooks";
 import { NextResponse } from "next/server";
 import type { Prisma } from "@prisma/client";
@@ -12,6 +13,7 @@ export type ReplayScope = {
   mode: "TRAINING" | "LIVE_REPLAY";
   status: string;
   version: number;
+  trainingGate?: TrainingGateState | null;
 };
 
 export class ReplaySessionError extends Error {
@@ -51,6 +53,7 @@ export async function loadReplayScope(id: string, datasetId?: string): Promise<R
   return {
     id: session.id, datasetId: session.datasetId, projectionId: session.activeProjectionId,
     mode: session.mode as ReplayScope["mode"], status: session.status, version: session.version,
+    trainingGate: session.mode === "TRAINING" ? parseTrainingGate(session.trainingGate) : null,
   };
 }
 

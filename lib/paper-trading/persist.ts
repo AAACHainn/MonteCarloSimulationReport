@@ -6,6 +6,7 @@ import { recordClosedTrade, type IncrementalTradeStats } from "./trade-stats";
 
 export function orderCreateData(sessionId: string, order: PaperOrderData) {
   return {
+    discipline: order.discipline ? JSON.stringify(order.discipline) : null,
     id: storageId(order.id), sessionId, side: order.side, type: order.type, status: order.status,
     quantity: order.quantity, riskAmount: order.riskAmount, price: order.price,
     stopLoss: order.stopLoss, takeProfit: order.takeProfit, reduceOnly: order.reduceOnly,

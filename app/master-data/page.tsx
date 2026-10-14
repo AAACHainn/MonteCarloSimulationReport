@@ -1,5 +1,6 @@
 import { Breadcrumbs } from "@/components/breadcrumbs";
-import { TradeOptionManager } from "@/components/master-data/trade-option-manager";
+import { StrategyManager } from "@/components/master-data/strategy-manager";
+import { parseChecklist } from "@/lib/paper-trading/training-gate";
 import { TradeReasonManager } from "@/components/master-data/trade-reason-manager";
 import { TradeTagManager } from "@/components/master-data/trade-tag-manager";
 import { prisma } from "@/lib/db";
@@ -32,7 +33,7 @@ export default async function MasterDataPage() {
         <p className="mt-2 max-w-3xl text-sm text-slate-600">{copy.masterData.subtitle}</p>
       </section>
       <div className="space-y-6">
-        <TradeOptionManager type="STRATEGY" options={strategies} />
+        <StrategyManager options={strategies.map((strategy) => ({ ...strategy, checklist: parseChecklist(strategy.checklist) }))} />
         <TradeReasonManager reasons={reasons} />
         <TradeTagManager tags={tags} />
       </div>

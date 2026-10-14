@@ -4,10 +4,12 @@ const mocks = vi.hoisted(() => ({
   findUnique: vi.fn(),
   update: vi.fn(),
   delete: vi.fn(),
+  queryRaw: vi.fn(),
 }));
 
 vi.mock("@/lib/db", () => ({
   prisma: {
+    $queryRaw: mocks.queryRaw,
     tradeOption: {
       findUnique: mocks.findUnique,
       update: mocks.update,
@@ -22,6 +24,7 @@ const context = { params: Promise.resolve({ id: "setup-1" }) };
 
 beforeEach(() => {
   vi.clearAllMocks();
+  mocks.queryRaw.mockResolvedValue([]);
 });
 
 describe("trade option deletion with replay journal references", () => {
@@ -45,4 +48,12 @@ describe("trade option deletion with replay journal references", () => {
     expect(await response.json()).toEqual({ ok: true, deactivated: false });
     expect(mocks.delete).toHaveBeenCalledWith({ where: { id: "setup-1" } });
   });
+  it("deactivates a strategy already approved by a pending order", async () => {
+    mocks.findUnique.mockResolvedValue({ id: "setup-1", _count: { instrumentTrades: 0, strategyTrades: 0, replayJournalSetups: 0 } });
+    mocks.queryRaw.mockResolvedValue([{ found: 1 }]);
+    const response = await DELETE(new Request("http://localhost/api/trade-options/setup-1"), context);
+    expect(await response.json()).toEqual({ ok: true, deactivated: true });
+    expect(mocks.delete).not.toHaveBeenCalled();
+  });
+
 });

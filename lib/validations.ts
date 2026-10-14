@@ -136,7 +136,17 @@ export const paperSessionSchema = z.object({
   slippageBps: z.coerce.number().finite().min(0).max(10_000),
 });
 
+export const strategyChecklistSchema = z.array(z.object({ id: z.string().min(1).max(120), text: z.string().trim().min(1).max(1000) }).strict()).max(100)
+  .refine((items) => new Set(items.map((item) => item.id)).size === items.length && new Set(items.map((item) => item.text)).size === items.length, copy.trainingGate.itemRequired);
+export const entryDisciplineSchema = z.object({ strategyId: z.string().min(1), strategyName: z.string().min(1), checklistVersion: z.number().int().positive(),
+  checklist: strategyChecklistSchema.refine((items) => items.length > 0, copy.trainingGate.required), confirmedAt: z.string().datetime() });
+export const trainingGateStateSchema = z.object({ tradeCount: z.number().int().positive().max(2147483647), active: z.boolean(), targetCount: z.number().int().nonnegative(),
+  completedCount: z.number().int().nonnegative(), lossStreak: z.number().int().nonnegative(), activationCount: z.number().int().nonnegative(),
+  source: z.enum(["MANUAL", "LOSS_STREAK"]).nullable(), activatedAtSequence: z.number().int().min(-1).nullable(), cancelledOrderCount: z.number().int().nonnegative() });
+export const gateApprovalSchema = z.object({ strategyId: z.string().min(1), checklistVersion: z.number().int().positive(), checkedItemIds: z.array(z.string().min(1)).min(1).max(100) }).strict();
+
 export const paperOrderSchema = z.object({
+  gateApproval: gateApprovalSchema.optional(),
   side: z.enum(["BUY", "SELL"]),
   type: z.enum(["MARKET", "LIMIT", "STOP"]),
   quantity: z.coerce.number().finite().positive().max(1_000_000_000_000),
@@ -191,6 +201,7 @@ const paperSessionStateSchema = z.object({
   lastProcessedSequence: z.number().int().min(-1),
   netQuantity: z.number().finite(),
   activeCycleKey: z.string().max(2048).nullable().optional(),
+  trainingGate: trainingGateStateSchema.nullable().optional(),
   averageEntryPrice: z.number().finite().nullable(),
   realizedPnl: z.number().finite(),
   totalFees: z.number().finite().min(0),
@@ -201,6 +212,7 @@ const paperSessionStateSchema = z.object({
 });
 
 const paperOrderDataSchema = z.object({
+  discipline: entryDisciplineSchema.nullable().optional(),
   id: z.string().min(1).max(2048), side: z.enum(["BUY", "SELL"]),
   type: z.enum(["MARKET", "LIMIT", "STOP"]),
   status: z.enum(["PENDING", "FILLED", "CANCELLED", "REJECTED"]),
@@ -239,6 +251,7 @@ const paperJournalContextSchema = z.object({
 });
 
 const paperPositionLotDataSchema = paperJournalContextSchema.extend({
+  discipline: entryDisciplineSchema.nullable().optional(), entryNetPnl: z.number().finite().nullable().optional(),
   id: z.string().min(1).max(4096), entryFillId: z.string().min(1).max(2048),
   side: z.enum(["LONG", "SHORT"]), openedSequence: z.number().int().min(0),
   openedAt: z.string().datetime(), entryPrice: z.number().finite().positive(),
@@ -249,6 +262,7 @@ const paperPositionLotDataSchema = paperJournalContextSchema.extend({
 });
 
 const replayJournalEntryDraftSchema = paperJournalContextSchema.extend({
+  discipline: entryDisciplineSchema.nullable().optional(),
   id: z.string().min(1).max(8192), lotId: z.string().min(1).max(4096),
   cycleKey: z.string().max(2048).nullable().optional(),
   direction: z.enum(["LONG", "SHORT"]), quantity: z.number().finite().positive(),
@@ -327,6 +341,7 @@ export const replayJournalSessionNameSchema = z.object({
 export const paperResetSchema = z.object({ action: z.enum(["RESET", "CHANGE_START"]) });
 
 export const tradeOptionSchema = z.object({
+  checklist: strategyChecklistSchema.optional(),
   type: z.enum(["INSTRUMENT", "STRATEGY"]),
   name: z.string().trim().min(1, copy.api.optionNameRequired).max(80),
 });
@@ -335,8 +350,10 @@ export const tradeOptionUpdateSchema = z
   .object({
     name: z.string().trim().min(1, copy.api.optionNameRequired).max(80).optional(),
     active: z.boolean().optional(),
+    checklist: strategyChecklistSchema.optional(),
+    checklistVersion: z.number().int().positive().optional(),
   })
-  .refine((value) => value.name !== undefined || value.active !== undefined, {
+  .refine((value) => value.name !== undefined || value.active !== undefined || value.checklist !== undefined, {
     message: copy.api.optionNameRequired,
   });
 

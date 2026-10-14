@@ -1,3 +1,4 @@
+import { parseEntryDiscipline } from "./training-gate";
 import type {
   PaperJournalContext,
   PaperPositionLotData,
@@ -119,10 +120,11 @@ export function updateLotAdverseRisk(lots: PaperPositionLotData[], price: number
 export function closeLotsFifo(
   lots: PaperPositionLotData[],
   quantity: number,
-  exit: { fillId: string; sequence: number; timestamp: string; price: number },
+  exit: { fillId: string; sequence: number; timestamp: string; price: number; feePerUnit?: number },
 ) {
   let remaining = quantity;
   const entries: ReplayJournalEntryDraft[] = [];
+  const completedNetResults: number[] = [];
   for (const lot of lots) {
     if (remaining <= EPSILON || lot.remainingQuantity <= EPSILON) continue;
     const matched = Math.min(remaining, lot.remainingQuantity);
@@ -131,6 +133,7 @@ export function closeLotsFifo(
     entries.push({
       id: `journal_${exit.fillId}_${lot.id}_${entries.length}`,
       lotId: lot.id,
+      ...(lot.discipline ? { discipline: lot.discipline } : {}),
       direction: lot.side,
       quantity: matched,
       openedSequence: lot.openedSequence,
@@ -151,10 +154,14 @@ export function closeLotsFifo(
       displayUtcOffsetMinutes: lot.displayUtcOffsetMinutes,
       priceTickSize: lot.priceTickSize,
     });
+    if (lot.entryNetPnl != null) {
+      lot.entryNetPnl += gainLoss * matched - (exit.feePerUnit ?? 0) * matched;
+      if (lot.remainingQuantity - matched <= EPSILON) completedNetResults.push(lot.entryNetPnl);
+    }
     lot.remainingQuantity -= matched;
     remaining -= matched;
   }
-  return { lots: lots.filter((lot) => lot.remainingQuantity > EPSILON), entries, unmatchedQuantity: remaining };
+  return { lots: lots.filter((lot) => lot.remainingQuantity > EPSILON), entries, completedNetResults, unmatchedQuantity: remaining };
 }
 
 export function serializeReplayJournalEntry(entry: {
@@ -164,6 +171,7 @@ export function serializeReplayJournalEntry(entry: {
   entryPrice: number; entryOrderType: string | null; exitPrice: number; initialStopPrice: number | null; abrValue: number | null; abrLength: number;
   displayIntervalSeconds: number; displaySession: string; displayUtcOffsetMinutes: number;
   priceTickSize: number; initialRisk: number; actualRisk: number; gainLoss: number; lotId: string;
+  discipline?: string | null;
   setupOptionId?: string | null; setupOption?: { name: string } | null;
   tradeReasons?: { id: string; name: string }[];
   review?: string;
@@ -176,6 +184,7 @@ export function serializeReplayJournalEntry(entry: {
   return {
     id: entry.id, no: entry.accountNo, globalNo: entry.no, journalSessionId: entry.journalSessionId,
     cycleKey: entry.cycleKey ?? null,
+    discipline: parseEntryDiscipline(entry.discipline),
     setupOptionId: entry.setupOptionId ?? null,
     setupOption: entry.setupOption ? { name: entry.setupOption.name } : null,
     tradeReasons: entry.tradeReasons?.map((reason) => ({ id: reason.id, name: reason.name })) ?? [],

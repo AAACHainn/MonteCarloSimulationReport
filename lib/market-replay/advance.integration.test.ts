@@ -145,7 +145,7 @@ async function clientSyncBody(id: string, targetSequence: number, requestId: str
     });
     for (const record of bars) {
       const result = advancePaperTrading({
-        state: visible.session, orders: visible.activeOrders, bar: serializeSourceBar(record),
+        state: visible.session, orders: visible.activeOrders, lots: visible.openLots ?? [], bar: serializeSourceBar(record),
         makeId: createDeterministicEventIdFactory(visible.session.id, progress.generation, record.sequence),
       });
       recordPaperAdvance(accumulator, visible, result,
@@ -327,6 +327,7 @@ describe("replay advance with real SQLite", () => {
       const result = advancePaperTrading({
         state: snapshot.session,
         orders: snapshot.activeOrders,
+        lots: snapshot.openLots ?? [],
         bar: serializeSourceBar(record),
         makeId: createDeterministicEventIdFactory(snapshot.session.id, progress.generation, sequence),
       });

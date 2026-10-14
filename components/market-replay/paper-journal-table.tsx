@@ -179,6 +179,7 @@ export function PaperJournalTable({
   const [tableViewportWidth, setTableViewportWidth] = useState(0);
   const [tableMinimumLeftOffset, setTableMinimumLeftOffset] = useState(0);
   const [resizingTarget, setResizingTarget] = useState<JournalColumnId | "table-start" | "table-end" | null>(null);
+  const [disciplineEntry, setDisciplineEntry] = useState<ReplayJournalEntryData | null>(null);
   const [summary, setSummary] = useState<ReplayJournalSummary | null>(null);
   const [filterDrafts, setFilterDrafts] = useState<ReplayJournalFilters>(createEmptyReplayJournalFilters);
   const [appliedFilters, setAppliedFilters] = useState<ReplayJournalFilters>(createEmptyReplayJournalFilters);
@@ -1119,6 +1120,7 @@ export function PaperJournalTable({
                     })),
                   ]}
                 />
+                {entry.discipline ? <Button variant="ghost" size="sm" className="h-8 max-w-full" onClick={() => setDisciplineEntry(entry)}>{copy.trainingGate.snapshot}</Button> : null}
               </div>
             </td> : null}
             {visibleColumnSet.has("reason") ? <td className="border-r p-1 text-left last:border-r-0">
@@ -1234,6 +1236,9 @@ export function PaperJournalTable({
           </div>
         </div>
       </div>
+    </Dialog>
+    <Dialog open={Boolean(disciplineEntry)} title={copy.trainingGate.snapshot} onClose={() => setDisciplineEntry(null)}>
+      {disciplineEntry?.discipline ? <div className="space-y-4"><p className="text-sm font-medium">{disciplineEntry.discipline.strategyName}</p><p className="text-xs text-slate-500">{copy.trainingGate.confirmedAt} · {new Date(disciplineEntry.discipline.confirmedAt).toLocaleString("zh-CN")}</p>{disciplineEntry.discipline.checklist.map((item) => <CheckboxField key={item.id} checked disabled onChange={() => undefined}>{item.text}</CheckboxField>)}</div> : null}
     </Dialog>
     <ReviewEditorDialog
       open={reviewDialogEntryId !== null}

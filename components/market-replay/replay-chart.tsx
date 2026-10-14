@@ -17,6 +17,8 @@ import {
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import { isClosingOrder } from "@/lib/paper-trading/training-gate";
+import type { OrderSubmitResult } from "@/lib/paper-trading/types";
 import type {
   AggregatedMarketBarData,
   BarCountIndicatorConfig,
@@ -288,7 +290,7 @@ export function ReplayChart({
   readOnly?: boolean;
   paperBusy: boolean;
   paperError: string | null;
-  onSubmitOrder: (order: { side: PaperSide; type: "LIMIT" | "STOP"; quantity: number; riskAmount: number; price: number; stopLoss: number; takeProfit: number }) => Promise<boolean>;
+  onSubmitOrder: (order: { side: PaperSide; type: "LIMIT" | "STOP"; quantity: number; riskAmount: number; price: number; stopLoss: number; takeProfit: number }) => Promise<boolean | OrderSubmitResult>;
   onOrderPriceChange: (orderId: string, update: OrderUpdate) => Promise<boolean>;
   onCancelOrder: (orderId: string) => Promise<boolean>;
   onClosePosition: () => Promise<boolean>;
@@ -1735,9 +1737,9 @@ export function ReplayChart({
       riskAmount: draft.riskAmount, price: draft.entryPrice,
       stopLoss: draft.stopLoss, takeProfit: draft.takeProfit,
     });
-    if (success) {
+    if (success === true || success === "SUCCESS") {
       setDraft(null); setDraftError(null); setOrderTicketPosition(null);
-    } else setDraftError(copy.paperTrading.draftSubmitFailed);
+    } else if (success !== "CANCELLED") setDraftError(copy.paperTrading.draftSubmitFailed);
   }
 
   const contextEntryOrderTypes = currentPrice !== null && contextMenu !== null
@@ -2049,7 +2051,7 @@ export function ReplayChart({
             {draftError || paperError ? <p className="text-xs text-red-600">{draftError ?? paperError}</p> : null}
             <div className="grid grid-cols-[1fr_1.6fr] gap-2">
               <Button type="button" variant="outline" size="sm" disabled={paperBusy} onClick={() => { setDraft(null); setDraftError(null); setOrderTicketPosition(null); }}>{copy.paperTrading.cancelDraft}</Button>
-              <Button type="button" size="sm" data-testid="confirm-risk-order" disabled={paperBusy || !draftSizing?.ok} onClick={() => void submitDraft()}>{paperBusy ? <Loader2 className="h-4 w-4 animate-spin" /> : null}{paperBusy ? copy.paperTrading.submitting : copy.paperTrading.confirmDraft}</Button>
+              <Button type="button" size="sm" data-testid="confirm-risk-order" disabled={paperBusy || !draftSizing?.ok} onClick={() => void submitDraft()}>{paperBusy ? <Loader2 className="h-4 w-4 animate-spin" /> : null}{paperBusy ? copy.paperTrading.submitting : paperSnapshot.session.trainingGate?.active && !isClosingOrder(paperSnapshot.session.netQuantity, draft.side, draftSizing?.ok ? draftSizing.value.quantity : 0) ? copy.trainingGate.selectStrategy : copy.paperTrading.confirmDraft}</Button>
             </div>
           </div>
         </div>

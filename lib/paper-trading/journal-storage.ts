@@ -62,7 +62,7 @@ export async function persistPaperJournalState(
   if (lots.length) {
     await tx.paperPositionLot.createMany({
       data: lots.map((lot) => ({
-        ...lot,
+        ...lot, discipline: lot.discipline ? JSON.stringify(lot.discipline) : null,
         id: storageId(lot.id), entryFillId: storageId(lot.entryFillId),
         sessionId: paperSessionId,
         openedAt: new Date(lot.openedAt),
@@ -94,11 +94,11 @@ export async function persistPaperJournalState(
     for (const entry of entries) {
       const original = known.get(entry.id);
       await tx.replayJournalEntry.create({ data: {
-        ...entry, id: storageId(entry.id), lotId: storageId(entry.lotId), logicalKey: entry.id,
+        ...entry, discipline: entry.discipline ? JSON.stringify(entry.discipline) : null, id: storageId(entry.id), lotId: storageId(entry.lotId), logicalKey: entry.id,
         projectionId: scope.projectionId, journalSessionId,
         no: original?.no ?? ++globalNo, accountNo: original?.accountNo ?? ++accountNo,
         openedAt: new Date(entry.openedAt), closedAt: new Date(entry.closedAt),
-        review: original?.review ?? "", setupOptionId: original?.setupOptionId ?? null,
+        review: original?.review ?? "", setupOptionId: original ? original.setupOptionId : entry.discipline?.strategyId ?? null,
         ...(original?.tradeReasons.length ? { tradeReasons: { connect: original.tradeReasons.map(({ id }) => ({ id })) } } : {}),
       } });
     }
@@ -118,7 +118,8 @@ export async function persistPaperJournalState(
   const firstAccountNo = journal.nextEntryNo - entries.length + 1;
   await tx.replayJournalEntry.createMany({
     data: entries.map((entry, index) => ({
-      ...entry,
+      ...entry, discipline: entry.discipline ? JSON.stringify(entry.discipline) : null,
+      setupOptionId: entry.discipline?.strategyId ?? null,
       projectionId: getReplayScope()?.projectionId,
       logicalKey: entry.id,
       journalSessionId,

@@ -1,3 +1,4 @@
+import { stableJson } from "./training-gate";
 import type { PaperAdvanceResult, PaperOrderData, PaperSessionSnapshot, PaperSessionState } from "./types";
 import { applyLiveAccountStats, derivePaperTradeTransitions, reduceRecentPaperTrades } from "./reducers";
 
@@ -41,6 +42,7 @@ export function paperStateFingerprint(session: PaperSessionState, activeOrders: 
     peakEquity: session.peakEquity,
     maxDrawdown: session.maxDrawdown,
     version: session.version,
+    ...(session.trainingGate ? { trainingGate: session.trainingGate } : {}),
     orders: [...activeOrders].sort((a, b) => a.id.localeCompare(b.id)).map((order) => ({
       id: order.id,
       status: order.status,
@@ -50,14 +52,16 @@ export function paperStateFingerprint(session: PaperSessionState, activeOrders: 
       filledSequence: order.filledSequence,
       filledPrice: order.filledPrice,
       cancelReason: order.cancelReason,
+      discipline: order.discipline ?? null,
     })),
     lots: [...openLots].sort((a, b) => a.id.localeCompare(b.id)).map((lot) => ({
       id: lot.id,
       remainingQuantity: lot.remainingQuantity,
       actualRisk: lot.actualRisk,
+      discipline: lot.discipline ?? null, entryNetPnl: lot.entryNetPnl ?? null,
     })),
   };
-  return JSON.stringify(state);
+  return stableJson(state);
 }
 
 export function paperCheckpointFingerprint(snapshot: PaperSessionSnapshot | null) {

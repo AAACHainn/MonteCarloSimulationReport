@@ -8,6 +8,25 @@ export type SupportedLocale = (typeof supportedLocales)[number];
 
 export const dictionaries = {
   "zh-CN": {
+    trainingGate: {
+      loadingStrategies: "正在加载交易策略…", inactive: "已停用",
+      title: "交易关卡", remaining: (n: number) => `关卡 · 剩余 ${n} 笔`,
+      description: "开启后，每个新入场订单必须选择策略并逐项检查。按实际入场成交计数，完成前不能手动关闭。连续两笔亏损会自动开启。",
+      tradeCount: "持续入场成交笔数", countHint: "正整数；开仓和加仓成交各计 1 笔，平仓、撤单和未成交挂单不计数。",
+      save: "保存配置", start: "保存并开启", saved: "关卡配置已保存。", locked: "关卡运行中，配置不可修改。关闭弹窗不会关闭关卡。",
+      progress: (done: number, total: number) => `已完成 ${done} / ${total} 次入场成交`,
+      manual: "手动开启", automatic: "连续两笔亏损，已强制开启交易关卡。", cancelled: (n: number) => `已撤销 ${n} 个未经检查的入场挂单。`,
+      selectStrategy: "选择交易策略", strategy: "交易策略", checklist: "策略检查清单", checked: (n: number, total: number) => `已确认 ${n} / ${total} 项`,
+      orderSummary: "订单摘要", checkDescription: "请按当前行情逐项确认，全部通过后才能下单。",
+      noStrategies: "暂无启用且配置了检查清单的策略。", configureStrategies: "配置交易策略", retry: "重新加载",
+      required: "请选择交易策略并确认所有检查项。", invalidStrategy: "策略未启用或没有检查项，请重新选择。",
+      checklistChanged: "策略检查清单已更新，请重新加载并逐项确认。", failed: "操作失败，请重试。",
+      invalidCount: "请输入有效的正整数笔数。", trainingOnly: "交易关卡仅适用于模拟训练。",
+      checklistCount: (n: number) => `${n} 项检查`, emptyChecklist: "未配置检查清单", editStrategy: "编辑交易策略", addStrategy: "新增交易策略",
+      strategyName: "策略名称", checklistHint: "每个检查项都是必选项；至少配置 1 项，策略才能用于交易关卡。",
+      addItem: "添加检查项", itemLabel: (n: number) => `检查项 ${n}`, moveUp: "上移检查项", moveDown: "下移检查项", removeItem: "移除检查项",
+      itemRequired: "检查项不能为空，且不能重复。", snapshot: "下单时的策略检查记录", confirmedAt: "确认时间", completed: "关卡已完成。",
+    },
     replaySessions: {
       title: "回放会话", create: "新建会话", name: "会话名称", mode: "用途",
       training: "模拟训练", liveReplay: "实盘重演", active: "进行中", archived: "已归档",

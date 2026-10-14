@@ -1,3 +1,4 @@
+import { parseTrainingGate, restartTrainingGate } from "@/lib/paper-trading/training-gate";
 import type { Prisma } from "@prisma/client";
 import { z } from "zod";
 import { prisma } from "@/lib/db";
@@ -121,7 +122,7 @@ export async function restartReplaySession(input?: CreateReplaySessionInput) {
         mode: next.mode as "TRAINING" | "LIVE_REPLAY", status: "ACTIVE", version: 1 },
       () => recordReplayCommand(tx, next.progress.currentSequence, "ACCOUNT_INIT", { ...config, logicalAccountId: `account_${next.id}`, equitySampleStride: account.equitySampleStride }));
     }
-    await tx.replaySession.update({ where: { id: next.id }, data: { riskPreferences: existing.riskPreferences } });
+    await tx.replaySession.update({ where: { id: next.id }, data: { riskPreferences: existing.riskPreferences, trainingGate: JSON.stringify(restartTrainingGate(parseTrainingGate(existing.trainingGate))) } });
     await archiveReplaySession(tx);
     return next;
   });
