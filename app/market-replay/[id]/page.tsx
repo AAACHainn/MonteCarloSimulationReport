@@ -19,7 +19,7 @@ import { runWithReplayScope } from "@/lib/replay-sessions/scope";
 
 export const dynamic = "force-dynamic";
 
-export default async function MarketReplayDetailPage({ params, searchParams }: { params: Promise<{ id: string }>; searchParams: Promise<{ sessionId?: string; projectionId?: string; focusSequence?: string; journalNo?: string }> }) {
+export default async function MarketReplayDetailPage({ params, searchParams }: { params: Promise<{ id: string }>; searchParams: Promise<{ sessionId?: string; projectionId?: string; focusSequence?: string; journalNo?: string; create?: string }> }) {
   const { id } = await params;
   const query = await searchParams;
   const dataset = await prisma.marketDataset.findUnique({ where: { id }, include: { progress: true } });
@@ -54,7 +54,7 @@ export default async function MarketReplayDetailPage({ params, searchParams }: {
   if (!selected) return <div className="space-y-6">
     <Breadcrumbs items={[{ label: copy.marketReplay.title, href: "/market-replay" }, { label: dataset.name }]} />
     <section className="border-b pb-6"><h1 className="text-3xl font-semibold tracking-tight text-slate-950">{dataset.name} · {copy.replaySessions.title}</h1></section>
-    <ReplaySessionsDashboard dataset={serialized} initialSessions={sessions} />
+    <ReplaySessionsDashboard dataset={serialized} initialSessions={sessions} initialCreateOpen={query.create === "1"} />
   </div>;
   if (selected.status === "ARCHIVED") {
     const projection = await prisma.replayProjection.findUniqueOrThrow({ where: { id: selected.activeProjectionId } });
@@ -81,13 +81,6 @@ export default async function MarketReplayDetailPage({ params, searchParams }: {
   }
   return (
     <div className="market-replay-page relative left-1/2 flex h-[calc(100dvh-4.3125rem)] w-[calc(100vw-2rem)] max-w-none -translate-x-1/2 flex-col gap-2 overflow-hidden sm:w-[calc(100vw-3rem)]">
-      <div className="shrink-0">
-        <Breadcrumbs items={[{ label: copy.marketReplay.title, href: "/market-replay" }, { label: dataset.name }]} />
-        <div className="mt-1 flex items-baseline gap-3">
-          <h1 className="truncate text-xl font-semibold tracking-tight text-slate-950">{copy.marketReplay.replayTitle(dataset.symbol, dataset.timeframe)}</h1>
-          <p className="truncate text-xs text-slate-500">{dataset.name} · {dataset.timezone}</p>
-        </div>
-      </div>
       <div className="min-h-0 flex-1"><ReplaySessionProvider session={selected}><MarketReplayClient key={`${serialized.id}:${selected.id}:${selected.activeProjectionId}`} dataset={serialized} initialJournalFocus={journalEntry ? { sequence: journalEntry.openedSequence, no: journalEntry.accountNo, globalNo: journalEntry.no } : null} /></ReplaySessionProvider></div>
     </div>
   );

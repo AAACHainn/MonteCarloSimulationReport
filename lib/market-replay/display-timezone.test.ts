@@ -6,6 +6,8 @@ import {
   isSupportedUtcOffsetMinutes,
   utcDateParts,
   utcOffsetMinutesForTimezone,
+  utcOffsetDateTimeLocalValue,
+  utcOffsetDateTimeToTimestamp,
 } from "./display-timezone";
 
 describe("market replay display timezone", () => {
@@ -30,6 +32,22 @@ describe("market replay display timezone", () => {
     expect(utcOffsetMinutesForTimezone("2026-09-05T00:00:00.000Z", "Asia/Shanghai")).toBe(480);
     expect(utcOffsetMinutesForTimezone("2026-01-15T12:00:00.000Z", "America/New_York")).toBe(-300);
     expect(utcOffsetMinutesForTimezone("2026-07-15T12:00:00.000Z", "America/New_York")).toBe(-240);
+  });
+
+  it("locates the chart's UTC-4 wall-clock time rather than the dataset or machine timezone", () => {
+    const timestamp = "2026-09-17T19:34:00.000Z";
+    expect(utcOffsetDateTimeLocalValue(timestamp, -240)).toBe("2026-09-17T15:34:00");
+    expect(new Date(utcOffsetDateTimeToTimestamp("2026-09-17T15:34", -240)).toISOString()).toBe(timestamp);
+  });
+
+  it.each(UTC_OFFSET_OPTIONS)("round-trips date boundaries and seconds for chart offset %s", (offset) => {
+    for (const timestamp of ["2026-01-01T00:00:17.000Z", "2026-12-31T23:59:59.000Z", "2028-02-29T03:15:31.000Z"]) {
+      expect(utcOffsetDateTimeToTimestamp(utcOffsetDateTimeLocalValue(timestamp, offset), offset)).toBe(new Date(timestamp).getTime());
+    }
+  });
+
+  it.each(["", "2026-02-30T12:00", "2026-09-17T24:00", "2026-09-17T15:60", "2026-13-17T15:00", "2026-09-17T15:00:60"])("rejects invalid local input %s instead of locating a different date", (input) => {
+    expect(utcOffsetDateTimeToTimestamp(input, -240)).toBeNaN();
   });
 
   it("falls back to UTC for invalid timezone data and exposes supported offsets", () => {

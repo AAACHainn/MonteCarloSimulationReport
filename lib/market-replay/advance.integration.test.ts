@@ -33,6 +33,8 @@ import { buildPaperReplayDelta, createPaperDeltaAccumulator, recordPaperAdvance 
 import { resolveDisplaySession } from "./chart-sessions";
 import { getAggregationBucket } from "./aggregation";
 import { buildMarketBarBlocks } from "./bar-blocks";
+import { readLaterHistoryWindow, mergeHistoricalBars } from "./historical-window";
+import type { AggregatedMarketBarData } from "./types";
 
 
 const fixtureSessions = new Map<string, string>();
@@ -697,6 +699,36 @@ describe("replay advance with real SQLite", () => {
       "http://localhost/api/window?displayIntervalSeconds=300&displaySession=RTH&endSequence=9&visibleCount=5&warmupCount=0",
     ), context("chunk-week"));
     expect(unsupported.status).toBe(400);
+  });
+
+  it("keeps later revealed RTH candles accessible after locating Friday, across the weekend", async () => {
+    const datasetId = "rth-date-navigation";
+    const startTimeMs = Date.parse("2021-09-10T13:30:00.000Z");
+    const revealedTime = Date.parse("2021-09-14T14:30:00.000Z");
+    const count = (Date.parse("2021-09-14T20:15:00.000Z") - startTimeMs) / 60_000 + 1;
+    const revealedSequence = (revealedTime - startTimeMs) / 60_000;
+    await seed(datasetId, 60, count, revealedSequence, false, { symbol: "ES1!", startTimeMs });
+    const progressBefore = await prisma.replayProgress.findFirstOrThrow({ where: { datasetId } });
+    const focus = (Date.parse("2021-09-10T19:30:00.000Z") - startTimeMs) / 60_000;
+    const readWindow = async (focusSequence: number, visibleCount: number) => {
+      const response = await windowGET(new Request(`http://localhost/api/window?displayIntervalSeconds=300&displaySession=RTH&endSequence=${revealedSequence}&focusSequence=${focusSequence}&visibleCount=${visibleCount}&warmupCount=20`), context(datasetId));
+      expect(response.status).toBe(200);
+      return await response.json() as { visibleBars: AggregatedMarketBarData[] };
+    };
+    const located = await readWindow(focus, 300);
+    expect(located.visibleBars.at(-1)!.timestamp).toBe("2021-09-10T20:10:00.000Z");
+    const later = await readLaterHistoryWindow({
+      afterSequence: located.visibleBars.at(-1)!.lastSequence, endSequence: revealedSequence,
+      sourceSeconds: 60, displaySeconds: 300, visibleCount: 300,
+      readWindow: (sequence) => readWindow(sequence, 300),
+    });
+    expect(later).not.toBeNull();
+    const merged = mergeHistoricalBars(located.visibleBars, later!.visibleBars);
+    expect(merged.some((bar) => bar.timestamp === "2021-09-10T19:30:00.000Z")).toBe(true);
+    expect(merged.some((bar) => bar.timestamp === "2021-09-13T13:30:00.000Z")).toBe(true);
+    expect(merged.every((bar) => bar.lastSequence <= revealedSequence)).toBe(true);
+    expect(new Set(merged.map((bar) => bar.timestamp)).size).toBe(merged.length);
+    expect(await prisma.replayProgress.findFirstOrThrow({ where: { datasetId } })).toEqual(progressBefore);
   });
 
   it("fast-forwards hidden RTH bars without changing paper fills or equity", async () => {

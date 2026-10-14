@@ -11,6 +11,20 @@ import {
 export const DEFAULT_REPLAY_MAX_VISIBLE_BARS = REPLAY_INITIAL_VISIBLE_BARS;
 const DEFAULT_REPLAY_LATEST_BAR_POSITION = 0.618;
 
+/** Move to an existing candle without replacing data or changing the user's zoom. */
+export function rangeForReplayFocus(
+  bars: AggregatedMarketBarData[],
+  sourceSequence: number,
+  visibleRange: ReplayLogicalRange | null,
+): ReplayLogicalRange | null {
+  if (!bars.length) return null;
+  const followingIndex = bars.findIndex((bar) => bar.lastSequence >= sourceSequence);
+  const index = followingIndex < 0 ? bars.length - 1 : followingIndex;
+  const span = visibleRange && visibleRange.to > visibleRange.from
+    ? visibleRange.to - visibleRange.from : 60;
+  return { from: index - span / 2, to: index + span / 2 };
+}
+
 export function defaultReplayLogicalRange(chartWidth: number, barCount: number): ReplayLogicalRange {
   // Five CSS pixels per candle; smaller screens show fewer bars, wide screens at most 300.
   const visibleBars = Math.min(DEFAULT_REPLAY_MAX_VISIBLE_BARS, Math.max(80, Math.round(chartWidth / 5)));

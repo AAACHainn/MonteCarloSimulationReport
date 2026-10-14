@@ -4,6 +4,7 @@ import {
   rangeAfterNewReplayBar,
   rangeAfterTimelineChange,
   rangeAfterWindowReplacement,
+  rangeForReplayFocus,
 } from "./chart-range";
 import type { AggregatedMarketBarData } from "./types";
 
@@ -23,6 +24,31 @@ function aggregatedBars(count: number, minutes: number, sourcePerBar: number): A
     status: "COMPLETE",
   }));
 }
+
+describe("date navigation in the active chart", () => {
+  it("only moves the viewport and retains both earlier and later loaded candles", () => {
+    const bars = aggregatedBars(200, 5, 5);
+    const before = structuredClone(bars);
+    const range = rangeForReplayFocus(bars, 501, { from: 140, to: 240 });
+    expect(range).toEqual({ from: 50, to: 150 });
+    expect(bars).toEqual(before);
+    expect(bars.at(-1)!.lastSequence).toBe(999);
+  });
+
+  it("preserves a wide chart's zoom instead of switching to a 60-candle close-up", () => {
+    expect(rangeForReplayFocus(aggregatedBars(500, 5, 5), 1002, { from: 150, to: 453 }))
+      .toEqual({ from: 48.5, to: 351.5 });
+  });
+
+  it("locates the next displayed candle when the target is in a filtered session gap", () => {
+    const bars = aggregatedBars(3, 5, 5);
+    bars[1] = { ...bars[1], firstSequence: 100, lastSequence: 104 };
+    bars[2] = { ...bars[2], firstSequence: 105, lastSequence: 109 };
+    expect(rangeForReplayFocus(bars, 50, { from: -1, to: 5 })).toEqual({ from: -2, to: 4 });
+    expect(rangeForReplayFocus(bars, 110, { from: -1, to: 5 })).toEqual({ from: -1, to: 5 });
+    expect(rangeForReplayFocus([], 50, null)).toBeNull();
+  });
+});
 
 describe("rangeAfterNewReplayBar", () => {
   it("keeps the viewport fixed when the latest bar is around the middle", () => {

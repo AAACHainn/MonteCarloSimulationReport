@@ -48,6 +48,25 @@ export function formatUtcDateTime(value: TimestampValue, offsetMinutes: number) 
   return `${parts.year}/${parts.month}/${parts.day} ${parts.hour}:${parts.minute}:${parts.second}`;
 }
 
+export function utcOffsetDateTimeLocalValue(value: TimestampValue, offsetMinutes: number) {
+  const parts = utcDateParts(value, offsetMinutes);
+  return `${parts.year}-${parts.month}-${parts.day}T${parts.hour}:${parts.minute}:${parts.second}`;
+}
+
+/** Interpret a wall-clock input in the chart's fixed UTC offset, independent of the host timezone. */
+export function utcOffsetDateTimeToTimestamp(value: string, offsetMinutes: number) {
+  const match = /^(\d{4})-(\d{2})-(\d{2})T(\d{2}):(\d{2})(?::(\d{2}))?$/.exec(value);
+  if (!match || !Number.isFinite(offsetMinutes)) return Number.NaN;
+  const [, year, month, day, hour, minute, second = "00"] = match;
+  const local = new Date(0);
+  local.setUTCFullYear(Number(year), Number(month) - 1, Number(day));
+  local.setUTCHours(Number(hour), Number(minute), Number(second), 0);
+  const timestamp = local.getTime() - offsetMinutes * 60_000;
+  // Reject normalized dates such as February 30 or 24:00.
+  return utcOffsetDateTimeLocalValue(timestamp, offsetMinutes) === `${year}-${month}-${day}T${hour}:${minute}:${second}`
+    ? timestamp : Number.NaN;
+}
+
 export function utcOffsetMinutesForTimezone(value: TimestampValue, timezone: string) {
   try {
     const timestamp = new Date(value);

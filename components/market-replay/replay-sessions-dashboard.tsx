@@ -21,10 +21,10 @@ import type { MarketDatasetSummary } from "@/lib/market-replay/types";
 import type { ReplaySessionSummary, ReplaySessionMode } from "@/lib/replay-sessions/types";
 
 const t = copy.replaySessions;
-export function ReplaySessionsDashboard({ dataset, initialSessions }: { dataset: MarketDatasetSummary; initialSessions: ReplaySessionSummary[] }) {
+export function ReplaySessionsDashboard({ dataset, initialSessions, initialCreateOpen = false }: { dataset: MarketDatasetSummary; initialSessions: ReplaySessionSummary[]; initialCreateOpen?: boolean }) {
   const router = useRouter();
   const [sessions, setSessions] = useState(initialSessions);
-  const [createOpen, setCreateOpen] = useState(false);
+  const [createOpen, setCreateOpen] = useState(initialCreateOpen);
   const [name, setName] = useState(t.training as string);
   const [mode, setMode] = useState<ReplaySessionMode>("TRAINING");
   const [start, setStart] = useState(() => dateTimeLocalValue(dataset.startTime, dataset.timezone));

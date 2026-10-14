@@ -1,9 +1,9 @@
 "use client";
 
-import Link from "next/link";
 import { useEffect, useRef, useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
-import { ChartCandlestick, Loader2, PencilLine, Play, Trash2, Upload } from "lucide-react";
+import { ChartCandlestick, Loader2, PencilLine, Trash2, Upload } from "lucide-react";
+import { ReplaySessionEntry } from "./replay-session-entry";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
@@ -415,9 +415,7 @@ export function MarketDatasetDashboard({ datasets }: { datasets: MarketDatasetSu
                     }}>
                       <PencilLine className="h-4 w-4" />{copy.marketReplay.editMarketSettings}
                     </Button>
-                    <Button asChild size="sm">
-                      <Link href={`/market-replay/${dataset.id}`}><Play className="h-4 w-4" />{copy.marketReplay.open}</Link>
-                    </Button>
+                    <ReplaySessionEntry datasetId={dataset.id} />
                     <Button type="button" variant="outline" size="sm" className="text-red-700" onClick={() => setDeleteDataset(dataset)}>
                       <Trash2 className="h-4 w-4" />{copy.marketReplay.delete}
                     </Button>

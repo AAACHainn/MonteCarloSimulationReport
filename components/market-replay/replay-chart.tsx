@@ -30,6 +30,7 @@ import {
   rangeAfterNewReplayBar,
   rangeAfterTimelineChange,
   rangeAfterWindowReplacement,
+  rangeForReplayFocus,
 } from "@/lib/market-replay/chart-range";
 import {
   candlestickSeriesStyleOptions,
@@ -149,6 +150,7 @@ export type ReplayVisibleSequenceRange = {
   fromSequence: number;
   toSequence: number;
   barsBefore: number;
+  barsAfter: number;
 };
 
 function sameLineActions(current: LineAction[], next: LineAction[]) {
@@ -234,7 +236,7 @@ export function ReplayChart({
   onSelectedDrawingIdChange, onCreateDrawing, onUpdateDrawing, onDeleteDrawing,
   onOpenDrawingStyle, emaEnabled, emaIndicators, abrEnabled, abrLength, volumeVisible,
   displaySession, barCountSession, barCountConfig, paperSnapshot,
-  tradeAnnotations, tradeAnnotationsTruncated, focusSequence = null,
+  tradeAnnotations, tradeAnnotationsTruncated, focusSequence = null, onFocusApplied,
   tradeAnnotationsVisible = true,
   candleCountdownEnabled = false, playbackActive = false, currentSourceTimestamp = null, sourceIntervalSeconds,
   readOnly = false,
@@ -280,6 +282,7 @@ export function ReplayChart({
   tradeAnnotationsTruncated: boolean;
   tradeAnnotationsVisible?: boolean;
   focusSequence?: number | null;
+  onFocusApplied?: () => void;
   readOnly?: boolean;
   paperBusy: boolean;
   paperError: string | null;
@@ -317,6 +320,8 @@ export function ReplayChart({
   requestedDrawingSessionRef.current = barCountSession;
   const onVisibleSequenceRangeChangeRef = useRef(onVisibleSequenceRangeChange);
   onVisibleSequenceRangeChangeRef.current = onVisibleSequenceRangeChange;
+  const onFocusAppliedRef = useRef(onFocusApplied);
+  onFocusAppliedRef.current = onFocusApplied;
   const tradeAnnotationsRef = useRef(tradeAnnotations);
   tradeAnnotationsRef.current = tradeAnnotations;
   const tradeAnnotationsVisibleRef = useRef(tradeAnnotationsVisible);
@@ -511,6 +516,7 @@ export function ReplayChart({
       fromSequence: currentBars[fromIndex].firstSequence,
       toSequence: currentBars[toIndex].lastSequence,
       barsBefore: fromIndex,
+      barsAfter: currentBars.length - toIndex - 1,
     });
   }, []);
 
@@ -777,10 +783,12 @@ export function ReplayChart({
 
   useEffect(() => {
     if (focusSequence === null) return;
-    const index = bars.findIndex((bar) => focusSequence >= bar.firstSequence && focusSequence <= bar.lastSequence);
     const chart = chartRef.current;
-    if (index < 0 || !chart) return;
-    chart.timeScale().setVisibleLogicalRange({ from: Math.max(-2, index - 30), to: index + 30 });
+    if (!chart) return;
+    const range = rangeForReplayFocus(bars, focusSequence, chart.timeScale().getVisibleLogicalRange());
+    if (!range) return;
+    chart.timeScale().setVisibleLogicalRange(range);
+    onFocusAppliedRef.current?.();
   }, [bars, focusSequence]);
 
   useEffect(() => {
