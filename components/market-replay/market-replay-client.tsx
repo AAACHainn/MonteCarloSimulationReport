@@ -23,7 +23,7 @@ import type { CandlestickStyle } from "@/lib/market-replay/candlestick-style";
 import { PaperAccountStrip, PaperTradingPanel } from "@/components/market-replay/paper-trading-panel";
 import { ReplayPlaybackBar } from "@/components/market-replay/replay-playback-bar";
 import { useReplayShortcuts } from "@/components/market-replay/use-replay-shortcuts";
-import { isReplayPlaybackShortcut, isReplayShortcutInputTarget, replayDrawingShortcutKey } from "@/lib/market-replay/keyboard-shortcuts";
+import { createReplayStepShortcut, isReplayPlaybackShortcut, isReplayShortcutInputTarget, replayDrawingShortcutKey } from "@/lib/market-replay/keyboard-shortcuts";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
@@ -376,6 +376,7 @@ export function MarketReplayClient({ dataset: initialDataset, initialJournalFocu
   const previousIndicatorWarmupCountRef = useRef<number | null>(null);
   const skipNextIndicatorReloadRef = useRef(false);
   const manualStepsRef = useRef(createReplayStepQueue());
+  const stepShortcutRef = useRef(createReplayStepShortcut());
   const marketSession = useMemo(() => datasetSession(dataset), [dataset]);
   const displayMarketSession = useMemo(() => (
     resolveDisplaySession(dataset, replay?.displaySession ?? "ETH") ?? marketSession
@@ -1816,8 +1817,8 @@ export function MarketReplayClient({ dataset: initialDataset, initialJournalFocu
     }
   }, [autoPausePlayback, flushVisible, journalReview, lastSyncStartedAtRef, latestReplayRef, pausePlayback, playPlayback, queueSave, recoverReplay, restorePlayback, returnToLiveWindow, suspendPlayback, correctionPending, dateDialogOpen, dateDialogOpening, dateForwarding]);
 
-  const revealNextBar = useCallback(async () => {
-    if (retrySyncBodyRef.current || correctionPending || dateForwarding || dateDialogOpen || dateDialogOpening || viewChangingRef.current) return;
+  const revealNextBar = useCallback(async (canStart: () => boolean = () => true) => {
+    if (!canStart() || retrySyncBodyRef.current || correctionPending || dateForwarding || dateDialogOpen || dateDialogOpening || viewChangingRef.current) return;
     if ((journalReview || chartWindowDetachedRef.current) && !await returnToLiveWindow()) return;
     const current = latestReplayRef.current;
     if (!current || current.status === "playing" || current.status === "finished") return;
@@ -1869,7 +1870,7 @@ export function MarketReplayClient({ dataset: initialDataset, initialJournalFocu
         if (!processed || !(await flushVisible())) break;
         if (processed < inBucket.length || inBucket.length < candidates.length) break;
       }
-    });
+    }, canStart);
   }, [dataset.sourceIntervalSeconds, dataset.startTime, displayMarketSession, fastForwardToNextVisibleBar, flushVisible, journalReview, latestReplayRef, marketCache, marketSession, paperMutationChainRef, processLocalBars, returnToLiveWindow, correctionPending, dateDialogOpen, dateDialogOpening, dateForwarding]);
 
   const enterJournalReview = useCallback(async (focus: JournalFocus) => {
@@ -1907,14 +1908,31 @@ export function MarketReplayClient({ dataset: initialDataset, initialJournalFocu
   }, [enterJournalReview, initialJournalFocus, replay]);
 
   useEffect(() => {
+    const stepShortcut = stepShortcutRef.current;
     const onKeyDown = (event: KeyboardEvent) => {
       if (!isReplayPlaybackShortcut(event, "ArrowRight", shortcuts.platform)) return;
-      if (settingsDialog || startDialogOpen || confirmAction || isReplayShortcutInputTarget(event.target)) return;
+      if (settingsDialog || startDialogOpen || confirmAction || isReplayShortcutInputTarget(event.target)) {
+        stepShortcut.release();
+        return;
+      }
+      const canStart = stepShortcut.keyDown(event, shortcuts.platform);
+      if (!canStart) return;
       event.preventDefault();
-      revealNextBar();
+      void revealNextBar(canStart);
     };
+    const onKeyUp = (event: KeyboardEvent) => {
+      stepShortcut.keyUp(event, shortcuts.platform);
+    };
+    const onBlur = () => stepShortcut.release();
     window.addEventListener("keydown", onKeyDown);
-    return () => window.removeEventListener("keydown", onKeyDown);
+    window.addEventListener("keyup", onKeyUp, true);
+    window.addEventListener("blur", onBlur);
+    return () => {
+      stepShortcut.release();
+      window.removeEventListener("keydown", onKeyDown);
+      window.removeEventListener("keyup", onKeyUp, true);
+      window.removeEventListener("blur", onBlur);
+    };
   }, [confirmAction, revealNextBar, settingsDialog, shortcuts.platform, startDialogOpen]);
 
   useEffect(() => {
@@ -2760,7 +2778,7 @@ export function MarketReplayClient({ dataset: initialDataset, initialJournalFocu
           webFullscreen={webFullscreen}
           onToggleWebFullscreen={() => setWebFullscreen((current) => !current)}
           onToggle={togglePlayback}
-          onNext={revealNextBar}
+          onNext={() => void revealNextBar()}
           onSpeedChange={changeSpeed}
           onFocusJournalEntry={(entry) => void enterJournalReview({ sequence: entry.openedSequence, no: entry.no, globalNo: entry.globalNo })}
         />

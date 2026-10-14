@@ -3,10 +3,12 @@ export function createReplayStepQueue() {
   let generation = 0;
   let tail = Promise.resolve();
   return {
-    enqueue(step: (isCancelled: () => boolean) => Promise<void>) {
+    enqueue(step: (isCancelled: () => boolean) => Promise<void>, canStart: () => boolean = () => true) {
       const queuedGeneration = generation;
       const operation = tail.then(async () => {
-        if (queuedGeneration === generation) {
+        // Key release only skips waiting repeats. Once started, a display candle
+        // finishes normally; reset/view changes can still cancel active work.
+        if (queuedGeneration === generation && canStart()) {
           await step(() => queuedGeneration !== generation);
         }
       });

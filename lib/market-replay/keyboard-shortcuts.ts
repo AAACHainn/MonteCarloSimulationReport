@@ -25,6 +25,26 @@ export function isReplayPlaybackShortcut(
   return platform === "mac" ? event.metaKey && !event.ctrlKey : event.ctrlKey && !event.metaKey;
 }
 
+/** Every physical press survives key release; repeats belong to that specific hold. */
+export function createReplayStepShortcut() {
+  let hold: object | null = null;
+  return {
+    keyDown(event: ShortcutKeyEvent & { repeat: boolean }, platform: ReplayShortcutPlatform): (() => boolean) | null {
+      if (!isReplayPlaybackShortcut(event, "ArrowRight", platform)) return null;
+      if (!event.repeat) {
+        hold = {};
+        return () => true;
+      }
+      const repeatedHold = hold;
+      return repeatedHold ? () => hold === repeatedHold : null;
+    },
+    keyUp(event: Pick<KeyboardEvent, "key">, platform: ReplayShortcutPlatform) {
+      if (event.key === "ArrowRight" || event.key === (platform === "mac" ? "Meta" : "Control")) hold = null;
+    },
+    release() { hold = null; },
+  };
+}
+
 export function replayDrawingShortcutKey(event: ShortcutKeyEvent): "t" | "f" | null {
   if (event.defaultPrevented || event.isComposing || !event.altKey || event.ctrlKey || event.metaKey || event.shiftKey) return null;
   // Option changes event.key on macOS; match the physical T/F keys instead.
