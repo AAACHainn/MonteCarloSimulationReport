@@ -4,6 +4,7 @@ import { prisma } from "@/lib/db";
 import { copy } from "@/lib/i18n";
 import { createReplayJournalExcel, replayJournalExcelFilename } from "@/lib/paper-trading/journal-excel";
 import { serializeReplayJournalEntry } from "@/lib/paper-trading/journal";
+import { withReplayJournalDisplayNumbers } from "@/lib/paper-trading/journal-numbering";
 
 type RouteContext = { params: Promise<{ id: string; sessionId: string }> };
 
@@ -28,7 +29,7 @@ async function handleGET(_request: Request, context: RouteContext) {
   if (!session) return NextResponse.json({ error: copy.paperTrading.journalNotFound }, { status: 404 });
 
   try {
-    const entries = session.entries.map((entry) => serializeReplayJournalEntry({
+    const entries = (await withReplayJournalDisplayNumbers(session.entries)).map((entry) => serializeReplayJournalEntry({
       ...entry,
       journalSession: { archivedAt: session.archivedAt },
     }));

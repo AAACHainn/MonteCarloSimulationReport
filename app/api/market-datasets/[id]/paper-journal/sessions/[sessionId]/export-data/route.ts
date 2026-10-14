@@ -4,6 +4,7 @@ import { prisma } from "@/lib/db";
 import { copy } from "@/lib/i18n";
 import { readReplayJournalFilters, compileReplayJournalFilters } from "@/lib/paper-trading/journal-filters";
 import { calculateReplayJournalSummary, serializeReplayJournalEntry } from "@/lib/paper-trading/journal";
+import { withReplayJournalDisplayNumbers } from "@/lib/paper-trading/journal-numbering";
 import { describePdfFilters } from "@/lib/paper-trading/pdf-settings";
 import { serializeMarketDataset } from "@/lib/market-replay/serialize";
 import type { PdfSnapshot } from "@/lib/paper-trading/pdf-types";
@@ -21,11 +22,12 @@ async function handleGET(request: Request, context: { params: Promise<{ id: stri
       where: { id: sessionId, datasetId: id, ...journalScopeWhere() },
       include: { entries: { where: entryProjectionWhere(), include: { setupOption: { select: { name: true } }, tradeReasons: { select: { id: true, name: true }, orderBy: { name: "asc" } } }, orderBy: [{ accountNo: "asc" }, { id: "asc" }] } },
     });
-    return { dataset, session, projection, capturedAt: new Date().toISOString() };
+    const entries = session ? await withReplayJournalDisplayNumbers(session.entries, scope?.projectionId, tx) : [];
+    return { dataset, session, entries, projection, capturedAt: new Date().toISOString() };
   });
   if (!records.dataset || records.dataset.status !== "READY" || !records.session)
     return NextResponse.json({ error: copy.paperTrading.journalNotFound }, { status: 404 });
-  const all = records.session.entries.map((e) => serializeReplayJournalEntry({ ...e, journalSession: { archivedAt: records.session!.archivedAt } }));
+  const all = records.entries.map((e) => serializeReplayJournalEntry({ ...e, journalSession: { archivedAt: records.session!.archivedAt } }));
   const entries = all.filter(compiled.test);
   const snapshot: PdfSnapshot = {
     session: { id: records.session.id, name: getReplayScope() ? `${records.session.name} · ${getReplayScope()!.mode === "TRAINING" ? copy.replaySessions.training : copy.replaySessions.liveReplay} · ${copy.replaySessions.source}` : records.session.name,

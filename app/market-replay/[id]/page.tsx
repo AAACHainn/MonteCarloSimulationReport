@@ -14,6 +14,7 @@ import { listReplaySessions } from "@/lib/replay-sessions/read";
 import { PaperAccountStrip } from "@/components/market-replay/paper-trading-panel";
 import { getPaperSessionSnapshot } from "@/lib/paper-trading/serialize";
 import { runWithReplayScope } from "@/lib/replay-sessions/scope";
+import { withReplayJournalDisplayNumbers } from "@/lib/paper-trading/journal-numbering";
 
 export const dynamic = "force-dynamic";
 
@@ -26,7 +27,7 @@ export default async function MarketReplayDetailPage({ params, searchParams }: {
   const journalEntry = Number.isInteger(requestedJournalNo) && requestedJournalNo > 0
     ? await prisma.replayJournalEntry.findFirst({
       where: { no: requestedJournalNo, journalSession: { datasetId: id, ...(query.sessionId ? { replaySessionId: query.sessionId } : {}) }, projection: { status: "CURRENT" } },
-      select: { no: true, accountNo: true, openedSequence: true, journalSession: { select: { replaySessionId: true } } },
+      select: { id: true, no: true, accountNo: true, openedSequence: true, journalSession: { select: { replaySessionId: true } } },
     })
     : null;
   if (!query.sessionId && journalEntry?.journalSession.replaySessionId) {
@@ -56,9 +57,10 @@ export default async function MarketReplayDetailPage({ params, searchParams }: {
       <PaperJournalTable datasetId={id} scope="history" replaySessions={sessions} />
     </div></ReplaySessionProvider>;
   }
+  const focusedEntry = journalEntry ? (await withReplayJournalDisplayNumbers([journalEntry], selected.activeProjectionId))[0] : null;
   return (
     <div className="market-replay-page relative left-1/2 flex h-[calc(100dvh-4.3125rem)] w-[calc(100vw-2rem)] max-w-none -translate-x-1/2 flex-col gap-2 overflow-hidden sm:w-[calc(100vw-3rem)]">
-      <div className="min-h-0 flex-1"><ReplaySessionProvider session={selected}><MarketReplayClient key={`${serialized.id}:${selected.id}:${selected.activeProjectionId}`} dataset={serialized} initialJournalFocus={journalEntry ? { sequence: journalEntry.openedSequence, no: journalEntry.accountNo, globalNo: journalEntry.no } : null} /></ReplaySessionProvider></div>
+      <div className="min-h-0 flex-1"><ReplaySessionProvider session={selected}><MarketReplayClient key={`${serialized.id}:${selected.id}:${selected.activeProjectionId}`} dataset={serialized} initialJournalFocus={focusedEntry ? { sequence: focusedEntry.openedSequence, no: focusedEntry.accountNo, globalNo: focusedEntry.no } : null} /></ReplaySessionProvider></div>
     </div>
   );
 }

@@ -40,6 +40,8 @@ import { GET as excelGET } from "@/app/api/market-datasets/[id]/paper-journal/se
 import { aggregateMarketBars } from "@/lib/market-replay/aggregation";
 import { chartRewindTarget } from "@/lib/market-replay/chart-rewind";
 import { formatUtcDateTime } from "@/lib/market-replay/display-timezone";
+import { GET as annotationsGET } from "@/app/api/market-datasets/[id]/paper-journal/annotations/route";
+import { replayJournalLinkTarget, replayJournalTradeHref } from "@/lib/paper-trading/journal-links";
 
 let file = "";
 const base = new Date("2026-10-01T00:00:00Z");
@@ -157,6 +159,84 @@ describe("complete replay corrections", () => {
       method: "DELETE", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body),
     }), { params: Promise.resolve({ sessionId }) });
   }
+  async function exportedNumbers(session: Awaited<ReturnType<typeof create>>, journalId: string) {
+    const routeContext = { params: Promise.resolve({ id: "shared", sessionId: journalId }) };
+    const pdf = await pdfSnapshotGET(request(session, "GET"), routeContext);
+    expect(pdf.status).toBe(200);
+    const excel = await excelGET(request(session, "GET"), routeContext);
+    expect(excel.status).toBe(200);
+    const zip = await JSZip.loadAsync(await excel.arrayBuffer());
+    const sheet = await zip.file("xl/worksheets/sheet1.xml")!.async("string");
+    const numbers = Array.from(sheet.matchAll(/<c r="A(\d+)"[^>]*><v>(\d+)<\/v><\/c>/g)).map((match) => Number(match[2]));
+    return { pdf: await pdf.json(), excel: numbers };
+  }
+  it("displays the sixth allocated trade as 1 after repeated rewinds, then continues at 2 without changing internal identity", async () => {
+    const session = await create("LIVE_REPLAY"); await account(session); await advance(session);
+    for (let attempt = 0; attempt < 5; attempt++) {
+      await order(session, "BUY", 1); await advance(session);
+      await order(session, "SELL", 1, true); await advance(session);
+      const job = await createCorrection(session.id, { requestId: `number-rewind-${attempt}`, type: "REWIND", targetSequence: 0,
+        expectedVersion: (await loadReplayScope(session.id)).version });
+      await runReplayCorrection(job.id); await commitCorrection(session.id, job.id);
+      session.activeProjectionId = (await loadReplayScope(session.id)).projectionId;
+    }
+    await order(session, "BUY", 1); await advance(session);
+    await order(session, "SELL", 1, true); await advance(session);
+    const entry = await prisma.replayJournalEntry.findFirstOrThrow({ where: { projectionId: session.activeProjectionId } });
+    expect(entry.accountNo).toBe(6);
+    const before = await snapshot(session.id);
+    const journal = await (await journalGET(request(session, "GET"), context)).json();
+    expect(journal.items).toMatchObject([{ id: entry.id, no: 1, globalNo: entry.no }]);
+    expect((await (await annotationsGET(request(session, "GET", undefined, "&fromSequence=0&toSequence=7"), context)).json()).items)
+      .toMatchObject([{ id: entry.id, no: 1 }]);
+    const exported = await exportedNumbers(session, entry.journalSessionId);
+    expect(exported.pdf.entries.map((item: { no: number }) => item.no)).toEqual([1]);
+    expect(exported.excel).toEqual([1]);
+    expect(await snapshot(session.id)).toEqual(before);
+    expect(await prisma.replayJournalEntry.findUniqueOrThrow({ where: { id: entry.id } })).toEqual(entry);
+    await order(session, "BUY", 1); await advance(session);
+    await order(session, "SELL", 1, true); await advance(session);
+    expect((await (await journalGET(request(session, "GET"), context)).json()).items.map((item: { no: number }) => item.no)).toEqual([1, 2]);
+  });
+  it("keeps session-wide numbering across pagination, filtering, chart windows, edits, exports and legacy/new links", async () => {
+    const session = await create("TRAINING"); await account(session); await advance(session);
+    await order(session, "BUY", 1); await advance(session);
+    await order(session, "SELL", 1, true); await advance(session);
+    const original = await prisma.replayJournalEntry.findFirstOrThrow({ where: { projectionId: session.activeProjectionId } });
+    await prisma.replayJournalEntry.update({ where: { id: original.id }, data: { accountNo: 2 } });
+    // Seed a gapped persisted journal in this isolated database, representing surviving records.
+    const counter = await prisma.marketDataset.update({ where: { id: "shared" }, data: { nextReplayJournalNo: { increment: 11 } }, select: { nextReplayJournalNo: true } });
+    await prisma.replayJournalEntry.createMany({ data: Array.from({ length: 11 }, (_, index) => {
+      const ordinal = index + 2, openedSequence = ordinal === 12 ? 5 : 3, closedSequence = ordinal === 12 ? 6 : 4;
+      return { ...original, id: `${session.id}-number-${ordinal}`, logicalKey: `${session.id}-logical-${ordinal}`, accountNo: ordinal * 2,
+        no: counter.nextReplayJournalNo - 10 + index, direction: ordinal % 2 ? "LONG" : "SHORT", openedSequence, closedSequence,
+        openedAt: new Date(base.getTime() + openedSequence * 60_000), closedAt: new Date(base.getTime() + closedSequence * 60_000) };
+    }) });
+    const stored = await prisma.replayJournalEntry.findMany({ where: { projectionId: session.activeProjectionId }, orderBy: { accountNo: "asc" } });
+    const accountBefore = await snapshot(session.id);
+    expect((await (await journalGET(request(session, "GET", undefined, "&page=2&take=10"), context)).json()).items.map((item: { no: number }) => item.no)).toEqual([11, 12]);
+    expect((await (await journalGET(request(session, "GET", undefined, "&directions=SHORT"), context)).json()).items.map((item: { no: number }) => item.no)).toEqual([2, 4, 6, 8, 10, 12]);
+    expect((await (await annotationsGET(request(session, "GET", undefined, "&fromSequence=5&toSequence=6"), context)).json()).items.map((item: { no: number }) => item.no)).toEqual([12]);
+    const exported = await exportedNumbers(session, original.journalSessionId);
+    expect(exported.pdf.entries.map((item: { no: number }) => item.no)).toEqual(Array.from({ length: 12 }, (_, index) => index + 1));
+    expect(exported.excel).toEqual(Array.from({ length: 12 }, (_, index) => index + 1));
+    const filteredPdf = await (await pdfSnapshotGET(request(session, "GET", undefined, "&directions=SHORT"), { params: Promise.resolve({ id: "shared", sessionId: original.journalSessionId }) })).json();
+    expect(filteredPdf.entries.map((item: { no: number }) => item.no)).toEqual([2, 4, 6, 8, 10, 12]);
+    expect(await snapshot(session.id)).toEqual(accountBefore);
+    expect(await prisma.replayJournalEntry.findMany({ where: { projectionId: session.activeProjectionId }, orderBy: { accountNo: "asc" } })).toEqual(stored);
+    const last = stored.at(-1)!;
+    const edited = await entryPATCH(request(session, "PATCH", { review: "第十二笔复盘" }), { params: Promise.resolve({ id: "shared", entryId: last.id }) });
+    expect(edited.status).toBe(200); expect(await edited.json()).toMatchObject({ id: last.id, no: 12, globalNo: last.no, review: "第十二笔复盘" });
+    const focused = await annotationsGET(request(session, "GET", undefined, `&journalNo=${last.no}`), context);
+    expect((await focused.json()).items).toMatchObject([{ id: last.id, no: 12 }]);
+    const href = replayJournalTradeHref("shared", last.journalSessionId, last.no);
+    const stableTarget = replayJournalLinkTarget({ journalNo: new URL(href, "http://localhost").searchParams.get("journalNo")! });
+    const parent = { journalSessionId: last.journalSessionId, projectionId: session.activeProjectionId };
+    expect((await prisma.replayJournalEntry.findFirstOrThrow({ where: { ...parent, ...stableTarget! } })).id).toBe(last.id);
+    expect((await prisma.replayJournalEntry.findFirstOrThrow({ where: { ...parent, ...replayJournalLinkTarget({ trade: "24" })! } })).id).toBe(last.id);
+    // An old bookmark to deleted stored No 1 never opens the newly displayed No 1.
+    expect(await prisma.replayJournalEntry.findFirst({ where: { ...parent, ...replayJournalLinkTarget({ trade: "1" })! } })).toBeNull();
+  });
   it.each(["ACTIVE", "ARCHIVED"])("permanently deletes a %s session and its owned records, preserving sibling sessions and market data", async (status) => {
     const session = await create("LIVE_REPLAY"), sibling = await create("TRAINING");
     for (const item of [session, sibling]) {
@@ -423,7 +503,7 @@ describe("complete replay corrections", () => {
     const rejected = await orderPOST(request(session, "POST", { side: "SELL", type: "MARKET", price: null, quantity: 1, expectedVersion: restored!.session.version }), context);
     expect(rejected.status).toBe(409);
   });
-  it("deletes a closed cycle and replays later trades with stable annotations and numbering", async () => {
+  it("deletes a closed cycle and keeps internal identities while compacting visible numbers", async () => {
     const session = await create("LIVE_REPLAY");
     await account(session); await advance(session);
     await order(session, "BUY", 1); await advance(session);
@@ -450,6 +530,8 @@ describe("complete replay corrections", () => {
     expect(entries).toHaveLength(1);
     expect(entries[0]).toMatchObject({ logicalKey: originals[1].logicalKey, accountNo: originals[1].accountNo, no: originals[1].no,
       entryPrice: originals[1].entryPrice, exitPrice: originals[1].exitPrice, quantity: originals[1].quantity, review: "确认前的新复盘" });
+    const visible = await (await journalGET(request(session, "GET"), context)).json();
+    expect(visible.items).toMatchObject([{ id: entries[0].id, no: 1, globalNo: originals[1].no, review: "确认前的新复盘" }]);
     expect(await prisma.replayJournalEntry.count({ where: { projectionId: session.activeProjectionId } })).toBe(0);
     expect(await prisma.replayProjection.count({ where: { replaySessionId: session.id } })).toBe(1);
     expect(await prisma.paperTradingSession.count({ where: { journalSession: { replaySessionId: session.id } } })).toBe(1);

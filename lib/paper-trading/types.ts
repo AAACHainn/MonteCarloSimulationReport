@@ -121,7 +121,9 @@ export type ReplayJournalEntryDraft = PaperJournalContext & {
 };
 
 export type ReplayJournalEntryData = ReplayJournalEntryDraft & {
+  /** Consecutive ordinal in the current session result; presentation only. */
   no: number;
+  /** Unrecycled stored identity used by trade links and focused annotation requests. */
   globalNo: number;
   setupOptionId: string | null;
   setupOption: { name: string } | null;
@@ -151,6 +153,7 @@ export type ReplayJournalSummary = {
 
 export type ReplayTradeAnnotationData = {
   id: string;
+  /** Same session-wide display ordinal as the journal and exports. */
   no: number;
   direction: "LONG" | "SHORT";
   entryOrderType: PaperOrderType | null;

@@ -23,6 +23,7 @@ import { ReviewEditorDialog } from "@/components/market-replay/review-editor-dia
 import { MAX_REVIEW_LENGTH, limitReview, reviewLength } from "@/lib/paper-trading/review-templates";
 import { formatNumber, formatPercent } from "@/lib/format";
 import { copy } from "@/lib/i18n";
+import { replayJournalTradeHref } from "@/lib/paper-trading/journal-links";
 import { formatInterval } from "@/lib/market-replay/types";
 import { utcDateParts } from "@/lib/market-replay/display-timezone";
 import {
@@ -1092,7 +1093,7 @@ export function PaperJournalTable({
               className="cursor-pointer font-medium text-blue-700 underline-offset-2 hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-600"
               onClick={() => onFocus(entry)}
             >{entry.no}</button> : <Link
-              href={`/market-replay/${datasetId}/history/${entry.journalSessionId}?trade=${entry.no}`}
+              href={replayJournalTradeHref(datasetId, entry.journalSessionId, entry.globalNo)}
               className="font-medium text-blue-700 underline-offset-2 hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-600"
               aria-label={copy.paperTrading.openHistoricalReplay(entry.no)}
             >{entry.no}</Link>}</td> : null}

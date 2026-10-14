@@ -3,6 +3,7 @@ import { NextResponse } from "next/server";
 import { prisma } from "@/lib/db";
 import { copy } from "@/lib/i18n";
 import { serializeReplayJournalEntry } from "@/lib/paper-trading/journal";
+import { withReplayJournalDisplayNumbers } from "@/lib/paper-trading/journal-numbering";
 import { replayJournalEntryUpdateSchema } from "@/lib/validations";
 
 type RouteContext = { params: Promise<{ id: string; entryId: string }> };
@@ -55,7 +56,8 @@ async function handlePATCH(request: Request, context: RouteContext) {
       tradeReasons: { select: { id: true, name: true }, orderBy: { name: "asc" } },
     } as const;
   const updated = await prisma.replayJournalEntry.update({ where: { id: entry.id }, data, include });
-  return NextResponse.json(serializeReplayJournalEntry(updated));
+  const [numbered] = await withReplayJournalDisplayNumbers([updated]);
+  return NextResponse.json(serializeReplayJournalEntry(numbered));
 }
 
 async function handleDELETE(_request: Request, context: RouteContext) {

@@ -12,6 +12,7 @@ import { serializeMarketDataset } from "@/lib/market-replay/serialize";
 import { formatInterval, type DisplaySession } from "@/lib/market-replay/types";
 import { listReplaySessions } from "@/lib/replay-sessions/read";
 import { ReplaySessionProvider } from "@/components/market-replay/replay-session-context";
+import { replayJournalLinkTarget } from "@/lib/paper-trading/journal-links";
 
 export const dynamic = "force-dynamic";
 
@@ -20,7 +21,7 @@ export default async function HistoricalReplayPage({
   searchParams,
 }: {
   params: Promise<{ id: string; sessionId: string }>;
-  searchParams: Promise<{ trade?: string }>;
+  searchParams: Promise<{ trade?: string; journalNo?: string }>;
 }) {
   const { id, sessionId } = await params;
   const query = await searchParams;
@@ -41,16 +42,18 @@ export default async function HistoricalReplayPage({
   const replaySession = (await listReplaySessions(id)).find((item) => item.id === session.replaySessionId);
   if (!replaySession) notFound();
 
-  const requestedTradeNo = Number(query.trade);
+  const requestedTarget = replayJournalLinkTarget(query);
+  const requested = query.trade !== undefined || query.journalNo !== undefined;
+  if (requested && !requestedTarget) notFound();
   const [bounds, requestedEntry, firstEntry] = await Promise.all([
     prisma.replayJournalEntry.aggregate({
       where: { journalSessionId: session.id, projectionId: replaySession.activeProjectionId },
       _min: { openedSequence: true },
       _max: { closedSequence: true },
     }),
-    Number.isInteger(requestedTradeNo) && requestedTradeNo > 0
+    requestedTarget
       ? prisma.replayJournalEntry.findFirst({
-          where: { journalSessionId: session.id, accountNo: requestedTradeNo, projectionId: replaySession.activeProjectionId },
+          where: { journalSessionId: session.id, ...requestedTarget, projectionId: replaySession.activeProjectionId },
           select: {
             accountNo: true,
             openedSequence: true,
@@ -70,7 +73,7 @@ export default async function HistoricalReplayPage({
       },
     }),
   ]);
-  if (Number.isInteger(requestedTradeNo) && requestedTradeNo > 0 && !requestedEntry) notFound();
+  if (requested && !requestedEntry) notFound();
   const entry = requestedEntry ?? firstEntry;
   const startSequence = bounds._min.openedSequence;
   const endSequence = bounds._max.closedSequence;

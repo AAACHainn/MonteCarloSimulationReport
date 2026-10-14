@@ -4,6 +4,7 @@ import { NextResponse } from "next/server";
 import { prisma } from "@/lib/db";
 import { copy } from "@/lib/i18n";
 import { serializeReplayTradeAnnotation } from "@/lib/paper-trading/journal";
+import { withReplayJournalDisplayNumbers } from "@/lib/paper-trading/journal-numbering";
 import { REPLAY_TRADE_ANNOTATION_LIMIT } from "@/lib/paper-trading/trade-annotations";
 import { replayTradeAnnotationsQuerySchema } from "@/lib/validations";
 
@@ -53,7 +54,7 @@ async function handleGET(request: Request, context: RouteContext) {
       select: ANNOTATION_SELECT,
     });
     return NextResponse.json({
-      items: record ? [serializeReplayTradeAnnotation(record)] : [],
+      items: (await withReplayJournalDisplayNumbers(record ? [record] : [])).map(serializeReplayTradeAnnotation),
       truncated: false,
     });
   }
@@ -89,7 +90,7 @@ async function handleGET(request: Request, context: RouteContext) {
   const visibleRecords = historicalSessionRequested
     ? records
     : records.slice(0, REPLAY_TRADE_ANNOTATION_LIMIT).reverse();
-  const items = visibleRecords.map(serializeReplayTradeAnnotation);
+  const items = (await withReplayJournalDisplayNumbers(visibleRecords)).map(serializeReplayTradeAnnotation);
   return NextResponse.json({ items, truncated });
 }
 

@@ -5,6 +5,7 @@ import { prisma } from "@/lib/db";
 import { copy } from "@/lib/i18n";
 import { compileReplayJournalFilters, readReplayJournalFilters } from "@/lib/paper-trading/journal-filters";
 import { calculateReplayJournalSummary, serializeReplayJournalEntry } from "@/lib/paper-trading/journal";
+import { withReplayJournalDisplayNumbers } from "@/lib/paper-trading/journal-numbering";
 
 type RouteContext = { params: Promise<{ id: string }> };
 
@@ -30,7 +31,7 @@ async function handleGET(request: Request, context: RouteContext) {
       },
       orderBy: [{ accountNo: "asc" }, { id: "asc" }],
     });
-    const serializedRecords = allRecords.map(serializeReplayJournalEntry);
+    const serializedRecords = (await withReplayJournalDisplayNumbers(allRecords)).map(serializeReplayJournalEntry);
     const totalItems = serializedRecords.length;
     const totalPages = Math.max(1, Math.ceil(totalItems / take));
     const page = Math.min(requestedPage, totalPages);
@@ -73,7 +74,7 @@ async function handleGET(request: Request, context: RouteContext) {
     },
     orderBy: [{ accountNo: "asc" }, { id: "asc" }],
   }) : [];
-  const serializedRecords = allRecords.map(serializeReplayJournalEntry);
+  const serializedRecords = (await withReplayJournalDisplayNumbers(allRecords)).map(serializeReplayJournalEntry);
   const setupFilterOptions = new Map<string, string>();
   const tradeReasonFilterOptions = new Map<string, string>();
   let hasEntriesWithoutSetup = false;
