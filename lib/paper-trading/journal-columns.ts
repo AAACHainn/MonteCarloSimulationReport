@@ -10,7 +10,7 @@ export const journalColumns: { id: JournalColumnId; label: string; text: boolean
   { id: "date", label: copy.paperTrading.journalFields.date, text: false, defaultWidth: 120 },
   { id: "direction", label: copy.paperTrading.journalFields.direction, text: false, defaultWidth: 112, optionFilterKey: "directions" },
   { id: "setup", label: copy.paperTrading.setup, text: true, defaultWidth: 208, optionFilterKey: "setupOptionIds" },
-  { id: "checklistUsed", label: copy.paperTrading.checklistUsed, text: true, defaultWidth: 160 },
+  { id: "checklistUsed", label: copy.paperTrading.checklistUsed, text: true, defaultWidth: 160, optionFilterKey: "checklistUsed" },
   { id: "reason", label: copy.paperTrading.tradeReason, text: true, defaultWidth: 256, optionFilterKey: "tradeReasonIds" },
   { id: "abr", label: copy.paperTrading.journalFields.abr, text: false, defaultWidth: 104 },
   { id: "initialRisk", label: copy.paperTrading.journalFields.initialRisk, text: false, defaultWidth: 104 },

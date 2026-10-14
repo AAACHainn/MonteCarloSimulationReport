@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
   compileReplayJournalFilters,
+  countActiveReplayJournalFilters,
   createEmptyReplayJournalFilters,
   hasActiveReplayJournalFilters,
   NO_SETUP_FILTER_VALUE,
@@ -8,6 +9,12 @@ import {
   readReplayJournalFilters,
 } from "./journal-filters";
 import type { ReplayJournalEntryData } from "./types";
+import type { EntryDiscipline } from "./training-gate";
+
+const discipline: EntryDiscipline = {
+  strategyId: "setup-1", strategyName: "顺势交易", checklistVersion: 1,
+  checklist: [{ id: "risk", text: "确认风险金额" }], confirmedAt: "2026-10-14T00:00:00.000Z",
+};
 
 function entry(overrides: Partial<ReplayJournalEntryData> = {}): ReplayJournalEntryData {
   return {
@@ -25,6 +32,53 @@ function entry(overrides: Partial<ReplayJournalEntryData> = {}): ReplayJournalEn
 }
 
 describe("replay journal expression filters", () => {
+  it("filters checklist use from submission history rather than the editable Setup", () => {
+    const filters = createEmptyReplayJournalFilters();
+    filters.checklistUsed = ["YES"];
+    const compiled = compileReplayJournalFilters(filters);
+
+    expect(compiled.test(entry({ discipline, setupOptionId: "changed-setup" }))).toBe(true);
+    expect(compiled.test(entry({ discipline, setupOptionId: null }))).toBe(true);
+    expect(compiled.test(entry({ setupOptionId: discipline.strategyId }))).toBe(false);
+    expect(compiled.test(entry({ discipline: null }))).toBe(false);
+  });
+
+  it("includes legacy entries without discipline when selecting No", () => {
+    const filters = createEmptyReplayJournalFilters();
+    filters.checklistUsed = ["NO"];
+    const compiled = compileReplayJournalFilters(filters);
+
+    expect(compiled.test(entry())).toBe(true);
+    expect(compiled.test(entry({ discipline: null }))).toBe(true);
+    expect(compiled.test(entry({ discipline }))).toBe(false);
+  });
+
+  it("normalizes checklist selections and combines them with other column filters", () => {
+    const filters = readReplayJournalFilters(new URLSearchParams([
+      ["checklistUsed", "YES"], ["checklistUsed", "YES"], ["checklistUsed", "invalid"],
+      ["directions", "LONG"], ["results", "W"], ["actualRiskRr", "p>3"],
+    ]));
+    expect(filters.checklistUsed).toEqual(["YES"]);
+    expect(countActiveReplayJournalFilters(filters)).toBe(4);
+    const compiled = compileReplayJournalFilters(filters);
+    expect(compiled.test(entry({ discipline }))).toBe(true);
+    expect(compiled.test(entry({ discipline, direction: "SHORT" }))).toBe(false);
+    expect(compiled.test(entry({ discipline, result: "L" }))).toBe(false);
+    expect(compiled.test(entry({ discipline, actualRiskRr: 3 }))).toBe(false);
+    expect(compiled.test(entry())).toBe(false);
+  });
+
+  it("matches all entries when both options are selected or the filter is cleared", () => {
+    const filters = readReplayJournalFilters(new URLSearchParams("checklistUsed=YES&checklistUsed=NO"));
+    expect(countActiveReplayJournalFilters(filters)).toBe(1);
+    for (const selection of [filters, createEmptyReplayJournalFilters()]) {
+      const compiled = compileReplayJournalFilters(selection);
+      expect(compiled.test(entry({ discipline }))).toBe(true);
+      expect(compiled.test(entry())).toBe(true);
+    }
+    expect(hasActiveReplayJournalFilters(createEmptyReplayJournalFilters())).toBe(false);
+  });
+
   it("combines active column expressions with AND semantics", () => {
     const filters = createEmptyReplayJournalFilters();
     filters.initialRiskAbr = "[0.4,0.6]";

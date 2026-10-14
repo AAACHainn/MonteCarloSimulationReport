@@ -234,6 +234,41 @@ describe("replay paper journal API", () => {
     });
   });
 
+  it.each(["YES", "NO"])("filters checklist use (%s) before statistics and pagination", async (selection) => {
+    const discipline = JSON.stringify({
+      strategyId: "setup-1", strategyName: "顺势交易", checklistVersion: 1,
+      checklist: [{ id: "risk", text: "确认风险金额" }], confirmedAt: "2026-10-14T00:00:00.000Z",
+    });
+    mocks.journalSessionFindMany.mockResolvedValue([{
+      id: "journal-1", name: "回放会话 1", replayGeneration: 1, initialCapital: 10_000,
+      currency: "USD", archivedAt: null, createdAt: new Date("2026-09-16T12:00:00Z"),
+      _count: { entries: 45 },
+    }]);
+    mocks.entryFindMany.mockResolvedValue(Array.from({ length: 45 }, (_, index) => ({
+      ...record(), id: `entry-${index + 1}`, no: index + 1, accountNo: index + 1,
+      discipline: index % 2 === 0 ? discipline : null,
+      gainLoss: index % 2 === 0 ? 2 : -1,
+    })));
+
+    const response = await GET(new Request(
+      `http://localhost/api/market-datasets/dataset-1/paper-journal?scope=history&checklistUsed=${selection}&page=2&take=10`,
+    ), context);
+
+    expect(response.status).toBe(200);
+    const data = await response.json();
+    const used = selection === "YES";
+    const totalItems = used ? 23 : 22;
+    expect(data.items).toHaveLength(10);
+    expect(data.items[0].no).toBe(used ? 21 : 22);
+    expect(data.items.every((item: { discipline: unknown }) => Boolean(item.discipline) === used)).toBe(true);
+    expect(data.pagination).toEqual({ page: 2, pageSize: 10, totalItems, totalPages: 3 });
+    expect(data.summary).toMatchObject({
+      tradeCount: totalItems, winningTradeCount: used ? 23 : 0, losingTradeCount: used ? 0 : 22,
+      totalProfitPoints: used ? 46 : 0, totalLossPoints: used ? 0 : 22,
+    });
+    expect(data.sessions[0].entryCount).toBe(45);
+  });
+
   it("rejects invalid filter expressions", async () => {
     mocks.journalSessionFindMany.mockResolvedValue([{
       id: "journal-1", name: "回放会话 1", replayGeneration: 1, initialCapital: 10_000,
