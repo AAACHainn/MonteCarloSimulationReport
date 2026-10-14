@@ -1,4 +1,5 @@
 import { prisma } from "@/lib/db";
+import { randomUUID } from "node:crypto";
 import type { PaperTradingSession, ReplayCommand, ReplayCorrectionJob } from "@prisma/client";
 import { copy } from "@/lib/i18n";
 import { ReplaySessionError, runWithReplayScope, type ReplayScope } from "./scope";
@@ -14,6 +15,7 @@ import { serializeSourceBar } from "@/lib/market-replay/dataset";
 import { serializePaperOrder, serializePaperPositionLot, serializePaperSession } from "@/lib/paper-trading/serialize";
 import type { PaperOrderData, PaperJournalContext, PaperFillData, ReplayJournalEntryDraft, PaperEquityPointData } from "@/lib/paper-trading/types";
 import { endCorrection } from "./corrections";
+import { pruneReplayResults } from "./prune-results";
 
 async function stillRunning(jobId: string) {
   const job = await prisma.replayCorrectionJob.findUnique({ where: { id: jobId }, select: { status: true } });
@@ -52,10 +54,9 @@ async function filterCommand(job: ReplayCorrectionJob, command: ReplayCommand, b
     const kept: string[] = [];
     for (const id of payload.orderIds) if (!await excluded(id)) kept.push(id);
     if (!kept.length) return null;
-    if (kept.length !== payload.orderIds.length) return prisma.replayCommand.create({ data: {
-      replaySessionId: job.replaySessionId, sourceSequence: command.sourceSequence, ordinal: command.ordinal,
-      type: command.type, payload: JSON.stringify({ ...payload, orderIds: kept }), createdAt: command.createdAt,
-    } });
+    if (kept.length !== payload.orderIds.length) return {
+      ...command, id: randomUUID(), payload: JSON.stringify({ ...payload, orderIds: kept }),
+    };
   }
   return command;
 }
@@ -76,11 +77,18 @@ export async function runReplayCorrection(jobId: string) {
       orderBy: [{ sourceSequence: "desc" }, { commandOrdinal: "desc" }],
     });
     if (!checkpoint) throw new ReplaySessionError("HISTORY_MISSING", 409, copy.replaySessions.correctionHistoryMissing);
-    const projection = await prisma.replayProjection.create({ data: {
-      replaySessionId: session.id, generation: session.progress.generation + 1, status: "BUILDING", historyVersion: job.historyVersion,
-      parentId: job.baseProjectionId, currentSequence: checkpoint.sourceSequence,
-    } });
-    await prisma.replayCorrectionJob.update({ where: { id: jobId }, data: { targetProjectionId: projection.id, totalSourceBars: job.targetSequence - checkpoint.sourceSequence } });
+    const generation = session.progress.generation + 1;
+    const projection = await prisma.$transaction(async (tx) => {
+      const currentJob = await tx.replayCorrectionJob.findUniqueOrThrow({ where: { id: jobId } });
+      if (currentJob.status !== "RUNNING") return null;
+      const draft = await tx.replayProjection.create({ data: {
+        replaySessionId: session.id, status: "BUILDING", historyVersion: job.historyVersion,
+        currentSequence: checkpoint.sourceSequence,
+      } });
+      await tx.replayCorrectionJob.update({ where: { id: jobId }, data: { targetProjectionId: draft.id, totalSourceBars: job.targetSequence - checkpoint.sourceSequence } });
+      return draft;
+    });
+    if (!projection) return;
     const scope: ReplayScope = { id: session.id, datasetId: session.datasetId, projectionId: projection.id, mode: "LIVE_REPLAY", status: "ACTIVE", version: session.version };
     const baseAccount = await prisma.paperTradingSession.findUnique({ where: { projectionId: job.baseProjectionId } });
     await runWithReplayScope(scope, async () => {
@@ -90,14 +98,22 @@ export async function runReplayCorrection(jobId: string) {
       let cursor = checkpoint.sourceSequence;
       let commandOrdinal = checkpoint.commandOrdinal;
       let referencePrice = cursor >= 0 ? (await prisma.marketBar.findUnique({ where: { datasetId_sequence: { datasetId: session.datasetId, sequence: cursor } }, select: { close: true } }))?.close ?? null : null;
+      async function applyCommand(command: ReplayCommand, original: ReplayCommand) {
+        if (command.id !== original.id) removedCommands += 1;
+        // Persist filtered intent and its draft link together so cancellation
+        // cannot leave a command outside either retained result.
+        account = await prisma.$transaction(async (tx) => {
+          if (command.id !== original.id) await tx.replayCommand.create({ data: command });
+          return applyRecordedCommand(tx, command, account, referencePrice);
+        });
+      }
       // Commands after a restored checkpoint run before its next source candle.
       async function applyCommands(from: number, to: number, afterOrdinal: number) {
         for await (const original of commandsInRange(job.baseProjectionId, from, to, afterOrdinal)) {
           if (job.type === "REWIND" && original.sourceSequence === job.targetSequence) continue;
           const command = await filterCommand(job, original, baseAccount, cache);
           if (!command) { removedCommands += 1; continue; }
-          if (command.id !== original.id) removedCommands += 1;
-          account = await prisma.$transaction((tx) => applyRecordedCommand(tx, command, account, referencePrice));
+          await applyCommand(command, original);
           commandOrdinal = command.ordinal;
         }
       }
@@ -142,7 +158,7 @@ export async function runReplayCorrection(jobId: string) {
             if (hasCommands || fills.length >= 1000 || entries.length >= 1000) { offset += 1; break; }
           }
           await prisma.$transaction(async (tx) => {
-            if (account && state) account = await persistDerivedBatch(tx, account, projection.generation, { state, orders: [...changed.values()], fills, lots, entries, equityPoints });
+            if (account && state) account = await persistDerivedBatch(tx, account, generation, { state, orders: [...changed.values()], fills, lots, entries, equityPoints });
             const runs = contexts.filter((run) => run.toSequence >= firstSequence && run.fromSequence <= cursor).map((run) => {
               const metadata = JSON.parse(run.context) as { generation: number; context: PaperJournalContext | null };
               return { ...metadata, fromSequence: Math.max(firstSequence, run.fromSequence), toSequence: Math.min(cursor, run.toSequence) };
@@ -157,8 +173,7 @@ export async function runReplayCorrection(jobId: string) {
             if (job.type === "REWIND" && cursor === job.targetSequence) continue;
             const command = await filterCommand(job, original, baseAccount, cache);
             if (!command) { removedCommands += 1; continue; }
-            if (command.id !== original.id) removedCommands += 1;
-            account = await prisma.$transaction((tx) => applyRecordedCommand(tx, command, account, referencePrice));
+            await applyCommand(command, original);
           }
         }
         await prisma.replayCorrectionJob.updateMany({ where: { id: jobId, status: "RUNNING" }, data: { heartbeatAt: new Date(), processedSourceBars: cursor - checkpoint.sourceSequence } });
@@ -181,5 +196,14 @@ export async function runReplayCorrection(jobId: string) {
   } catch (error) {
     await endCorrection(jobId, "FAILED", error instanceof ReplaySessionError ? error.message : copy.replaySessions.requestFailed);
     if (!(error instanceof ReplaySessionError)) console.error("Replay correction failed.", error);
+  } finally {
+    // A worker may notice cancellation after an in-flight copy. Sweep again
+    // after it exits, preserving any newer pending correction's draft.
+    await prisma.$transaction(async (tx) => {
+      const job = await tx.replayCorrectionJob.findUnique({ where: { id: jobId } });
+      if (job && ["APPLIED", "CANCELLED", "FAILED", "INTERRUPTED"].includes(job.status)) {
+        await pruneReplayResults(tx, job.replaySessionId);
+      }
+    }, { timeout: 120_000 });
   }
 }

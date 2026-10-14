@@ -1,5 +1,6 @@
 import { execFileSync } from "node:child_process";
 import { rmSync } from "node:fs";
+import JSZip from "jszip";
 import { beforeAll, afterAll, describe, it, expect, vi } from "vitest";
 
 vi.mock("@/lib/db", async () => {
@@ -19,10 +20,11 @@ import { loadReplayScope, runWithReplayScope } from "./scope";
 import { GET as progressGET } from "@/app/api/market-datasets/[id]/progress/route";
 import { POST as accountPOST } from "@/app/api/market-datasets/[id]/paper-session/route";
 import { POST as orderPOST } from "@/app/api/market-datasets/[id]/paper-session/orders/route";
-import { DELETE as entryDELETE } from "@/app/api/market-datasets/[id]/paper-journal/entries/[entryId]/route";
+import { DELETE as entryDELETE, PATCH as entryPATCH } from "@/app/api/market-datasets/[id]/paper-journal/entries/[entryId]/route";
 import { POST as advancePOST } from "@/app/api/market-datasets/[id]/replay/advance/route";
 import { POST as drawingPOST, GET as drawingsGET } from "@/app/api/market-datasets/[id]/drawings/route";
-import { PATCH as sessionPATCH } from "@/app/api/replay-sessions/[sessionId]/route";
+import { DELETE as sessionDELETE, GET as sessionGET, PATCH as sessionPATCH } from "@/app/api/replay-sessions/[sessionId]/route";
+import { DELETE as journalSessionDELETE } from "@/app/api/market-datasets/[id]/paper-journal/sessions/[sessionId]/route";
 import { getPaperSessionSnapshot } from "@/lib/paper-trading/serialize";
 import { DEFAULT_TREND_LINE_STYLE } from "@/lib/market-replay/chart-drawings";
 import { createCorrection, commitCorrection, cancelCorrection, readCorrection } from "./corrections";
@@ -33,6 +35,8 @@ import { GET as locateGET } from "@/app/api/replay-sessions/[sessionId]/locate/r
 import { startReplayCorrectionWorker } from "./worker";
 import { PATCH as amendOrderPATCH } from "@/app/api/market-datasets/[id]/paper-session/orders/[orderId]/route";
 import { DELETE as cancelOrderDELETE } from "@/app/api/market-datasets/[id]/paper-session/orders/[orderId]/route";
+import { GET as sessionsGET } from "@/app/api/market-datasets/[id]/replay-sessions/route";
+import { GET as excelGET } from "@/app/api/market-datasets/[id]/paper-journal/sessions/[sessionId]/export/route";
 
 let file = "";
 const base = new Date("2026-10-01T00:00:00Z");
@@ -145,7 +149,211 @@ describe("complete replay corrections", () => {
     const response = await orderPOST(request(session, "POST", { side, type: "MARKET", price: null, quantity, reduceOnly, expectedVersion: state!.session.version }), context);
     expect(response.status).toBe(201);
   }
-  it("restores the target close before user actions and retains the old version", async () => {
+  function remove(sessionId: string, body: unknown) {
+    return sessionDELETE(new Request("http://localhost/api/session", {
+      method: "DELETE", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body),
+    }), { params: Promise.resolve({ sessionId }) });
+  }
+  it.each(["ACTIVE", "ARCHIVED"])("permanently deletes a %s session and its owned records, preserving sibling sessions and market data", async (status) => {
+    const session = await create("LIVE_REPLAY"), sibling = await create("TRAINING");
+    for (const item of [session, sibling]) {
+      await account(item); await advance(item); await order(item, "BUY", 1); await advance(item);
+      await order(item, "SELL", 1, true); await advance(item);
+    }
+    // Also retain an open lot and a working order, so deletion cannot leave live trading records behind.
+    await order(session, "BUY", 1); await advance(session); await order(session, "SELL", 1, true);
+    const drawing = await drawingPOST(request(session, "POST", {
+      type: "TREND_LINE", geometry: { start: { timestamp: base.toISOString(), sourceSequence: 0, price: 100 },
+        end: { timestamp: new Date(base.getTime() + 60_000).toISOString(), sourceSequence: 1, price: 101 } }, style: DEFAULT_TREND_LINE_STYLE,
+    }), context);
+    expect(drawing.status).toBe(201);
+    const job = await createCorrection(session.id, { requestId: `delete-${status}`, type: "REWIND", targetSequence: 0,
+      expectedVersion: (await loadReplayScope(session.id)).version });
+    await cancelCorrection(session.id, job.id);
+    const entry = await prisma.replayJournalEntry.findFirstOrThrow({ where: { projectionId: session.activeProjectionId } });
+    const reason = await prisma.tradeReason.create({ data: { name: `删除验证 ${status}`, normalizedName: `delete-${status}` } });
+    const setup = await prisma.tradeOption.create({ data: { type: "STRATEGY", name: `delete-${status}` } });
+    await prisma.replayJournalEntry.update({ where: { id: entry.id }, data: { review: "删除验证备注", setupOptionId: setup.id, tradeReasons: { connect: { id: reason.id } } } });
+    if (status === "ARCHIVED") {
+      expect((await sessionPATCH(new Request("http://localhost/api/session", { method: "PATCH", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ expectedVersion: (await loadReplayScope(session.id)).version, status }) }), { params: Promise.resolve({ sessionId: session.id }) })).status).toBe(200);
+    }
+    const projectionId = session.activeProjectionId!;
+    const journal = await prisma.replayJournalSession.findUniqueOrThrow({ where: { replaySessionId: session.id } });
+    const accountId = (await prisma.paperTradingSession.findUniqueOrThrow({ where: { projectionId } })).id;
+    const accountWhere = { sessionId: accountId };
+    expect(await prisma.paperOrder.count({ where: accountWhere })).toBeGreaterThan(0);
+    expect(await prisma.paperFill.count({ where: accountWhere })).toBeGreaterThan(0);
+    expect(await prisma.paperTrade.count({ where: accountWhere })).toBeGreaterThan(0);
+    expect(await prisma.paperPositionLot.count({ where: accountWhere })).toBeGreaterThan(0);
+    expect(await prisma.paperEquityPoint.count({ where: accountWhere })).toBeGreaterThan(0);
+    expect(await prisma.replayCommand.count({ where: { replaySessionId: session.id } })).toBeGreaterThan(0);
+    expect(await prisma.replayContextRun.count({ where: { projectionId } })).toBeGreaterThan(0);
+    expect(await prisma.replayCheckpoint.count({ where: { projectionId } })).toBeGreaterThan(0);
+    const siblingState = await prisma.replaySession.findUniqueOrThrow({ where: { id: sibling.id }, include: {
+      progress: true, drawings: true, journal: { include: { entries: true } }, commands: true,
+      projections: { include: { account: { include: { orders: true, fills: true, trades: true, positionLots: true, equityPoints: true } }, contexts: true, checkpoints: true } },
+    } });
+    const market = await prisma.marketDataset.findUniqueOrThrow({ where: { id: "shared" } });
+    const bars = await prisma.marketBar.findMany({ where: { datasetId: "shared" }, orderBy: { sequence: "asc" } });
+    expect((await remove(session.id, { expectedVersion: (await loadReplayScope(session.id)).version })).status).toBe(200);
+    expect(await prisma.replaySession.findUnique({ where: { id: session.id } })).toBeNull();
+    expect(await prisma.replayProgress.count({ where: { replaySessionId: session.id } })).toBe(0);
+    expect(await prisma.replayProjection.count({ where: { replaySessionId: session.id } })).toBe(0);
+    expect(await prisma.replayJournalSession.findUnique({ where: { id: journal.id } })).toBeNull();
+    expect(await prisma.replayJournalEntry.findUnique({ where: { id: entry.id } })).toBeNull();
+    expect(await prisma.paperTradingSession.findUnique({ where: { id: accountId } })).toBeNull();
+    expect(await prisma.paperOrder.count({ where: accountWhere })).toBe(0);
+    expect(await prisma.paperFill.count({ where: accountWhere })).toBe(0);
+    expect(await prisma.paperTrade.count({ where: accountWhere })).toBe(0);
+    expect(await prisma.paperPositionLot.count({ where: accountWhere })).toBe(0);
+    expect(await prisma.paperEquityPoint.count({ where: accountWhere })).toBe(0);
+    expect(await prisma.marketDrawing.count({ where: { replaySessionId: session.id } })).toBe(0);
+    expect(await prisma.replayCommand.count({ where: { replaySessionId: session.id } })).toBe(0);
+    expect(await prisma.replayProjectionCommand.count({ where: { projectionId } })).toBe(0);
+    expect(await prisma.replayContextRun.count({ where: { projectionId } })).toBe(0);
+    expect(await prisma.replayCheckpoint.count({ where: { projectionId } })).toBe(0);
+    expect(await prisma.replayCorrectionJob.findUnique({ where: { id: job.id } })).toBeNull();
+    expect(await prisma.tradeReason.findUniqueOrThrow({ where: { id: reason.id }, include: { replayJournalEntries: true } })).toMatchObject({ replayJournalEntries: [] });
+    expect(await prisma.tradeOption.findUnique({ where: { id: setup.id } })).not.toBeNull();
+    expect(await prisma.replaySession.findUniqueOrThrow({ where: { id: sibling.id }, include: {
+      progress: true, drawings: true, journal: { include: { entries: true } }, commands: true,
+      projections: { include: { account: { include: { orders: true, fills: true, trades: true, positionLots: true, equityPoints: true } }, contexts: true, checkpoints: true } },
+    } })).toEqual(siblingState);
+    expect(await prisma.marketDataset.findUniqueOrThrow({ where: { id: "shared" } })).toEqual(market);
+    expect(await prisma.marketBar.findMany({ where: { datasetId: "shared" }, orderBy: { sequence: "asc" } })).toEqual(bars);
+    expect((await sessionGET(new Request("http://localhost/api/session"), { params: Promise.resolve({ sessionId: session.id }) })).status).toBe(404);
+    expect((await (await sessionsGET(new Request("http://localhost/api/sessions"), context)).json()).sessions.map((item: { id: string }) => item.id)).not.toContain(session.id);
+    expect(await prisma.$queryRawUnsafe("PRAGMA foreign_key_check")).toEqual([]);
+  });
+  it("rejects malformed, stale and correction-locked deletion requests and deletes an empty training session", async () => {
+    const session = await create("LIVE_REPLAY");
+    for (const body of [{}, { expectedVersion: 0 }, { expectedVersion: "1" }, { expectedVersion: 1, datasetId: "shared" }]) {
+      expect((await remove(session.id, body)).status).toBe(400);
+    }
+    expect((await remove(session.id, { expectedVersion: 2 })).status).toBe(409);
+    const job = await createCorrection(session.id, { requestId: "delete-lock", type: "REWIND", targetSequence: -1, expectedVersion: session.version });
+    const blocked = await remove(session.id, { expectedVersion: session.version });
+    expect(blocked.status).toBe(409); expect((await blocked.json()).code).toBe("CORRECTION_PENDING");
+    expect(await prisma.replaySession.findUnique({ where: { id: session.id } })).not.toBeNull();
+    await cancelCorrection(session.id, job.id);
+    const training = await create("TRAINING");
+    expect((await remove(training.id, { expectedVersion: training.version })).status).toBe(200);
+    expect((await remove(training.id, { expectedVersion: training.version })).status).toBe(404);
+  });
+  it("makes the journal session DELETE remove the owned archived session instead of archiving, rejecting other owners", async () => {
+    const session = await create("TRAINING"), sibling = await create("TRAINING"); await account(session);
+    const journal = await prisma.replayJournalSession.findUniqueOrThrow({ where: { replaySessionId: session.id } });
+    const routeContext = { params: Promise.resolve({ id: "shared", sessionId: journal.id }) };
+    expect((await journalSessionDELETE(request(sibling, "DELETE", { expectedVersion: sibling.version }), routeContext)).status).toBe(404);
+    const archived = await sessionPATCH(new Request("http://localhost/api/session", { method: "PATCH", headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ expectedVersion: (await loadReplayScope(session.id)).version, status: "ARCHIVED" }) }), { params: Promise.resolve({ sessionId: session.id }) });
+    expect(archived.status).toBe(200);
+    expect((await journalSessionDELETE(request(session, "DELETE", { expectedVersion: 1 }), routeContext)).status).toBe(409);
+    expect((await journalSessionDELETE(request(session, "DELETE", { expectedVersion: (await loadReplayScope(session.id)).version }), routeContext)).status).toBe(200);
+    expect(await prisma.replaySession.findUnique({ where: { id: session.id } })).toBeNull();
+    expect(await prisma.replaySession.findUnique({ where: { id: sibling.id } })).not.toBeNull();
+  });
+  it.each(["ACTIVE", "ARCHIVED"])("renames a %s session and its journal without changing trading state", async (status) => {
+    const session = await create("TRAINING"); await account(session); await advance(session);
+    await order(session, "BUY", 1); await advance(session);
+    await order(session, "SELL", 1, true); await advance(session);
+    const routeContext = { params: Promise.resolve({ sessionId: session.id }) };
+    const patch = (body: unknown) => sessionPATCH(new Request("http://localhost/api/session", {
+      method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body),
+    }), routeContext);
+    if (status === "ARCHIVED") expect((await patch({ expectedVersion: (await loadReplayScope(session.id)).version, status })).status).toBe(200);
+    const scope = await loadReplayScope(session.id);
+    const before = await snapshot(session.id);
+    const progress = await prisma.replayProgress.findUniqueOrThrow({ where: { replaySessionId: session.id } });
+    const projection = await prisma.replayProjection.findUniqueOrThrow({ where: { id: scope.projectionId } });
+    const entries = await prisma.replayJournalEntry.findMany({ where: { projectionId: scope.projectionId } });
+    const renamed = await patch({ expectedVersion: scope.version, name: "  午盘突破练习  " });
+    expect(renamed.status).toBe(200);
+    expect(await prisma.replaySession.findUniqueOrThrow({ where: { id: session.id } })).toMatchObject({ name: "午盘突破练习", status, version: scope.version + 1 });
+    expect(await prisma.replayJournalSession.findUniqueOrThrow({ where: { replaySessionId: session.id } })).toMatchObject({ name: "午盘突破练习" });
+    expect(await snapshot(session.id)).toEqual(before);
+    expect(await prisma.replayProgress.findUniqueOrThrow({ where: { replaySessionId: session.id } })).toEqual(progress);
+    expect(await prisma.replayProjection.findUniqueOrThrow({ where: { id: scope.projectionId } })).toEqual(projection);
+    expect(await prisma.replayJournalEntry.findMany({ where: { projectionId: scope.projectionId } })).toEqual(entries);
+    expect((await patch({ expectedVersion: scope.version, name: "过期名称" })).status).toBe(409);
+    expect((await patch({ expectedVersion: scope.version + 1, name: " " })).status).toBe(400);
+    expect((await patch({ expectedVersion: scope.version + 1, name: "名".repeat(101) })).status).toBe(400);
+    if (status === "ARCHIVED") {
+      const blocked = await orderPOST(request(session, "POST", { side: "BUY", type: "MARKET", quantity: 1, expectedVersion: before!.session.version }), context);
+      expect(blocked.status).toBe(409); expect((await blocked.json()).code).toBe("SESSION_ARCHIVED");
+      expect((await patch({ expectedVersion: scope.version + 1, riskPreferences: { riskAmount: 100 } })).status).toBe(409);
+    }
+  });
+  it("renames a session without a journal and retains its name while a correction is pending", async () => {
+    const session = await create("LIVE_REPLAY");
+    const patch = async (name: string) => sessionPATCH(new Request("http://localhost/api/session", {
+      method: "PATCH", headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ expectedVersion: (await loadReplayScope(session.id)).version, name }),
+    }), { params: Promise.resolve({ sessionId: session.id }) });
+    expect((await patch("独立会话名称")).status).toBe(200);
+    expect(await prisma.replayJournalSession.count({ where: { replaySessionId: session.id } })).toBe(0);
+    const job = await createCorrection(session.id, { requestId: "rename-lock", type: "REWIND", targetSequence: -1, expectedVersion: (await loadReplayScope(session.id)).version });
+    const blocked = await patch("纠错中改名");
+    expect(blocked.status).toBe(409); expect((await blocked.json()).code).toBe("CORRECTION_PENDING");
+    expect((await prisma.replaySession.findUniqueOrThrow({ where: { id: session.id } })).name).toBe("独立会话名称");
+    await cancelCorrection(session.id, job.id);
+  });
+  it("lists active, archived and empty sessions while isolating each journal, statistics and export", async () => {
+    const active = await create("TRAINING"), archived = await create("LIVE_REPLAY");
+    const empty = await create("TRAINING"), emptyArchived = await create("TRAINING");
+    for (const session of [active, archived]) {
+      await account(session); await advance(session);
+      await order(session, session === active ? "BUY" : "SELL", 1); await advance(session);
+      await order(session, session === active ? "SELL" : "BUY", 1, true); await advance(session);
+    }
+    for (const session of [archived, emptyArchived]) {
+      const response = await sessionPATCH(new Request("http://localhost/api/session", {
+        method: "PATCH", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ expectedVersion: (await loadReplayScope(session.id)).version, status: "ARCHIVED" }),
+      }), { params: Promise.resolve({ sessionId: session.id }) });
+      expect(response.status).toBe(200);
+    }
+    await prisma.marketDataset.create({ data: {
+      id: "journal-other-market", name: "Other", symbol: "OTHER", timeframe: "1m", timezone: "UTC", sourceIntervalSeconds: 60,
+      barCount: 1, startTime: base, endTime: base,
+    } });
+    await prisma.marketBar.create({ data: { datasetId: "journal-other-market", sequence: 0, timestamp: base, open: 100, high: 102, low: 99, close: 101 } });
+    const foreign = await createReplaySession("journal-other-market", { name: "其他行情会话", mode: "TRAINING", timestamp: base.toISOString(), playbackRate: 1, displayIntervalSeconds: 60, displaySession: "ETH" });
+    const listed = await (await sessionsGET(new Request("http://localhost/api/sessions"), context)).json();
+    expect(listed.sessions).toEqual(expect.arrayContaining([
+      expect.objectContaining({ id: active.id, status: "ACTIVE", entryCount: 1 }),
+      expect.objectContaining({ id: archived.id, status: "ARCHIVED", entryCount: 1 }),
+      expect.objectContaining({ id: empty.id, status: "ACTIVE", entryCount: 0 }),
+      expect.objectContaining({ id: emptyArchived.id, status: "ARCHIVED", entryCount: 0 }),
+    ]));
+    expect(listed.sessions.map((session: { id: string }) => session.id)).not.toContain(foreign.id);
+    const beforeProgress = await prisma.replayProgress.findMany({ where: { replaySessionId: { in: [active.id, archived.id] } }, orderBy: { id: "asc" } });
+    for (const session of [active, archived]) {
+      const journal = await (await journalGET(request(session, "GET", undefined, "&scope=history"), context)).json();
+      expect(journal.items).toHaveLength(1);
+      expect(journal.items[0].direction).toBe(session === active ? "LONG" : "SHORT");
+      expect(journal.summary).toMatchObject({ tradeCount: 1, winningTradeCount: session === active ? 1 : 0, losingTradeCount: session === active ? 0 : 1 });
+      const journalId = journal.selectedSessionId;
+      const exportContext = { params: Promise.resolve({ id: "shared", sessionId: journalId }) };
+      const pdf = await (await pdfSnapshotGET(request(session, "GET"), exportContext)).json();
+      expect(pdf.entries).toHaveLength(1);
+      expect(pdf.entries[0].id).toBe(journal.items[0].id);
+      const excel = await excelGET(request(session, "GET"), exportContext);
+      expect(excel.status).toBe(200);
+      const zip = await JSZip.loadAsync(await excel.arrayBuffer());
+      const sheet = await zip.file("xl/worksheets/sheet1.xml")!.async("string");
+      expect(sheet).toContain(session === active ? "模拟训练" : "实盘重演");
+      const wrongOwner = session === active ? archived : active;
+      expect((await pdfSnapshotGET(request(wrongOwner, "GET"), exportContext)).status).toBe(404);
+    }
+    for (const session of [empty, emptyArchived]) {
+      const response = await journalGET(request(session, "GET", undefined, "&scope=history"), context);
+      expect(response.status).toBe(200); expect((await response.json()).items).toEqual([]);
+    }
+    expect(await prisma.replayProgress.findMany({ where: { replaySessionId: { in: [active.id, archived.id] } }, orderBy: { id: "asc" } })).toEqual(beforeProgress);
+  });
+  it("restores the target close before user actions and removes the replaced result", async () => {
     const session = await create("LIVE_REPLAY");
     await account(session); await advance(session); await order(session, "BUY", 2);
     const expected = await advance(session, 2);
@@ -163,14 +371,11 @@ describe("complete replay corrections", () => {
     expect(restored!.session).toEqual(expected!.session);
     expect(restored!.activeOrders).toEqual(expected!.activeOrders);
     expect(restored!.openLots).toEqual(expected!.openLots);
-    expect(await prisma.replayProjection.findUnique({ where: { id: session.activeProjectionId } })).toMatchObject({ status: "HISTORICAL" });
-    expect(await prisma.paperFill.count({ where: { session: { projectionId: session.activeProjectionId } } })).toBe(2);
+    expect(await prisma.replayProjection.findUnique({ where: { id: session.activeProjectionId } })).toBeNull();
+    expect(await prisma.paperFill.count({ where: { session: { projectionId: session.activeProjectionId } } })).toBe(0);
     expect(await prisma.paperFill.count({ where: { session: { projectionId: ready.targetProjectionId } } })).toBe(1);
-    const historical = await progressGET(request(session, "GET", undefined, `&viewProjectionId=${encodeURIComponent(session.activeProjectionId!)}`), context);
-    expect(historical.status).toBe(200);
-    const historicState = await historical.json();
-    expect(historicState.progress.currentSequence).toBe(3);
-    expect(historicState.snapshot.session.netQuantity).toBe(1);
+    expect(await prisma.replayProjection.count({ where: { replaySessionId: session.id } })).toBe(1);
+    expect(await prisma.replayCommand.count({ where: { replaySessionId: session.id, projections: { none: {} } } })).toBe(0);
     expect((await prisma.replayProgress.findUniqueOrThrow({ where: { replaySessionId: session.id } })).currentSequence).toBe(2);
     const rejected = await orderPOST(request(session, "POST", { side: "SELL", type: "MARKET", price: null, quantity: 1, expectedVersion: restored!.session.version }), context);
     expect(rejected.status).toBe(409);
@@ -191,7 +396,9 @@ describe("complete replay corrections", () => {
     const ready = await prisma.replayCorrectionJob.findUniqueOrThrow({ where: { id: job.id } });
     expect(ready.error).toBeNull(); expect(ready.status).toBe("READY");
     // Annotation changes during the preview are refreshed at commit.
-    await prisma.replayJournalEntry.update({ where: { id: originals[1].id }, data: { review: "确认前的新复盘" } });
+    const annotated = await entryPATCH(request(session, "PATCH", { review: "确认前的新复盘" }), { params: Promise.resolve({ id: "shared", entryId: originals[1].id }) });
+    expect(annotated.status).toBe(200);
+    expect(await prisma.replayJournalEntry.findFirst({ where: { projectionId: ready.targetProjectionId, logicalKey: originals[1].logicalKey } })).toMatchObject({ review: "后续交易复盘保留" });
     await commitCorrection(session.id, job.id);
     const corrected = await snapshot(session.id);
     expect(corrected!.stats.tradeCount).toBe(1);
@@ -200,14 +407,19 @@ describe("complete replay corrections", () => {
     expect(entries).toHaveLength(1);
     expect(entries[0]).toMatchObject({ logicalKey: originals[1].logicalKey, accountNo: originals[1].accountNo, no: originals[1].no,
       entryPrice: originals[1].entryPrice, exitPrice: originals[1].exitPrice, quantity: originals[1].quantity, review: "确认前的新复盘" });
-    expect(await prisma.replayJournalEntry.count({ where: { projectionId: session.activeProjectionId } })).toBe(2);
+    expect(await prisma.replayJournalEntry.count({ where: { projectionId: session.activeProjectionId } })).toBe(0);
+    expect(await prisma.replayProjection.count({ where: { replaySessionId: session.id } })).toBe(1);
+    expect(await prisma.paperTradingSession.count({ where: { journalSession: { replaySessionId: session.id } } })).toBe(1);
+    expect(await prisma.replayCommand.count({ where: { replaySessionId: session.id, projections: { none: {} } } })).toBe(0);
     expect((await prisma.replayProgress.findUniqueOrThrow({ where: { replaySessionId: session.id } })).currentSequence).toBe(4);
-    const oldJournal = await journalGET(request(session, "GET", undefined, `&scope=history&viewProjectionId=${encodeURIComponent(session.activeProjectionId!)}`), context);
-    expect((await oldJournal.json()).pagination.totalItems).toBe(2);
+    const current = { ...session, activeProjectionId: ready.targetProjectionId };
+    const currentJournal = await journalGET(request(current, "GET", undefined, "&scope=history"), context);
+    expect((await currentJournal.json()).pagination.totalItems).toBe(1);
     const journal = await prisma.replayJournalSession.findUniqueOrThrow({ where: { replaySessionId: session.id } });
-    const oldExport = await pdfSnapshotGET(request(session, "GET", undefined, `&viewProjectionId=${encodeURIComponent(session.activeProjectionId!)}`), { params: Promise.resolve({ id: "shared", sessionId: journal.id }) });
-    const exported = await oldExport.json();
-    expect(exported.entries).toHaveLength(2); expect(exported.session.name).toContain("实盘重演"); expect(exported.session.name).toContain("回放撮合");
+    const currentExport = await pdfSnapshotGET(request(current, "GET"), { params: Promise.resolve({ id: "shared", sessionId: journal.id }) });
+    const exported = await currentExport.json();
+    expect(exported.entries).toHaveLength(1); expect(exported.session.name).toContain("实盘重演"); expect(exported.session.name).toContain("回放撮合");
+    expect(exported.session.name).not.toContain("版本");
     expect(exported.endSequence).toBe(4);
   });
   it("leaves the visible state unchanged on cancellation or history conflicts", async () => {
@@ -217,6 +429,8 @@ describe("complete replay corrections", () => {
     await runReplayCorrection(job.id); await cancelCorrection(session.id, job.id);
     expect((await loadReplayScope(session.id)).projectionId).toBe(session.activeProjectionId);
     expect(await snapshot(session.id)).toEqual(original);
+    expect(await prisma.replayProjection.count({ where: { replaySessionId: session.id } })).toBe(1);
+    expect((await readCorrection(session.id, job.id)).targetProjectionId).toBeNull();
     const next = await createCorrection(session.id, { requestId: "history-conflict", type: "REWIND", targetSequence: 0, expectedVersion: (await loadReplayScope(session.id)).version });
     await runReplayCorrection(next.id);
     await prisma.marketDataset.update({ where: { id: "shared" }, data: { historyVersion: { increment: 1 } } });
@@ -240,6 +454,8 @@ describe("complete replay corrections", () => {
     expect((await prisma.replaySession.findUniqueOrThrow({ where: { id: session.id } })).pendingCorrectionId).toBeNull();
     expect((await loadReplayScope(session.id)).projectionId).toBe(session.activeProjectionId);
     expect(await snapshot(session.id)).toEqual(original);
+    expect(await prisma.replayProjection.count({ where: { replaySessionId: session.id } })).toBe(1);
+    expect((await readCorrection(session.id, job.id)).targetProjectionId).toBeNull();
     await expect(commitCorrection(session.id, job.id)).rejects.toMatchObject({ code: "CORRECTION_NOT_READY" });
   });
   it("allows past-only location for training and future location for live replay without moving either cursor", async () => {
@@ -337,6 +553,28 @@ describe("complete replay corrections", () => {
     await commitCorrection(session.id, next.id);
     expect((await snapshot(session.id))!.session.netQuantity).toBe(0);
     expect((await snapshot(session.id))!.activeOrders).toHaveLength(0);
+    expect(await prisma.replayProjection.count({ where: { replaySessionId: session.id } })).toBe(1);
+    expect(await prisma.replayCommand.count({ where: { replaySessionId: session.id, projections: { none: {} } } })).toBe(0);
+    const head = (await loadReplayScope(session.id)).projectionId;
+    expect(await commitCorrection(session.id, job.id)).toEqual({ ok: true, projectionId: head });
+    expect((await loadReplayScope(session.id)).projectionId).toBe(head);
+  });
+  it("rolls back the entire replacement if old-result cleanup fails", async () => {
+    const session = await create("LIVE_REPLAY"); await account(session); await advance(session, 3);
+    const original = await snapshot(session.id);
+    const job = await createCorrection(session.id, { requestId: "atomic-replace", type: "REWIND", targetSequence: 0, expectedVersion: (await loadReplayScope(session.id)).version });
+    await runReplayCorrection(job.id);
+    await prisma.$executeRawUnsafe(`CREATE TRIGGER reject_result_cleanup BEFORE DELETE ON ReplayProjection
+      WHEN OLD.id = '${session.activeProjectionId}' BEGIN SELECT RAISE(ABORT, 'test cleanup failure'); END`);
+    try {
+      await expect(commitCorrection(session.id, job.id)).rejects.toThrow();
+      expect((await loadReplayScope(session.id)).projectionId).toBe(session.activeProjectionId);
+      expect(await snapshot(session.id)).toEqual(original);
+      expect((await readCorrection(session.id, job.id)).status).toBe("READY");
+    } finally { await prisma.$executeRawUnsafe("DROP TRIGGER reject_result_cleanup"); }
+    await commitCorrection(session.id, job.id);
+    expect(await prisma.replayProjection.count({ where: { replaySessionId: session.id } })).toBe(1);
+    expect((await prisma.replayProgress.findUniqueOrThrow({ where: { replaySessionId: session.id } })).currentSequence).toBe(0);
   });
   it("preserves orders created and cancelled on the checkpoint bar", async () => {
     const session = await create("LIVE_REPLAY"); await account(session); await advance(session);

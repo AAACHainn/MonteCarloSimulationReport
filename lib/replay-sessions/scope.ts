@@ -92,15 +92,9 @@ export function withReplaySessionRoute<P extends { id: string }>(
       const sessionId = url.searchParams.get("replaySessionId");
       const inherited = getReplayScope();
       if (!sessionId && !inherited) throw new ReplaySessionError("SESSION_REQUIRED", 409, copy.replaySessions.required);
-      let scope = inherited ?? await loadReplayScope(sessionId!, datasetId);
+      const scope = inherited ?? await loadReplayScope(sessionId!, datasetId);
       if (scope.datasetId !== datasetId || (sessionId && scope.id !== sessionId)) {
         throw new ReplaySessionError("SESSION_NOT_FOUND", 404, copy.replaySessions.missing);
-      }
-      const viewProjectionId = url.searchParams.get("viewProjectionId");
-      if (!options.write && viewProjectionId && viewProjectionId !== scope.projectionId) {
-        const projection = await prisma.replayProjection.findFirst({ where: { id: viewProjectionId, replaySessionId: scope.id, status: "HISTORICAL" }, select: { id: true } });
-        if (!projection) throw new ReplaySessionError("PROJECTION_NOT_FOUND", 404, copy.replaySessions.missing);
-        scope = { ...scope, projectionId: projection.id, status: "ARCHIVED" };
       }
       return await runWithReplayScope(scope, async () => {
         if (options.write && !options.annotation) {

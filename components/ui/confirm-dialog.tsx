@@ -17,6 +17,7 @@ type ConfirmDialogProps = {
   confirmVariant?: "default" | "destructive";
   secondaryAction?: { label: string; onClick: () => void; variant?: "outline" | "destructive" };
   isLoading?: boolean;
+  error?: string | null;
   onCancel: () => void;
   onConfirm: () => void;
 };
@@ -30,6 +31,7 @@ export function ConfirmDialog({
   confirmVariant = "destructive",
   secondaryAction,
   isLoading = false,
+  error,
   onCancel,
   onConfirm,
 }: ConfirmDialogProps) {
@@ -63,6 +65,7 @@ export function ConfirmDialog({
             <p id={descriptionId} className="mt-1 text-sm leading-6 text-slate-600">
               {description}
             </p>
+            {error ? <p className="mt-2 text-sm text-red-700" role="alert">{error}</p> : null}
           </div>
           <button
             type="button"

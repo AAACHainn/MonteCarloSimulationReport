@@ -16,9 +16,7 @@ vi.mock("@/lib/db", () => ({
     replayJournalEntry: {
       findFirst: mocks.entryFindFirst,
       update: mocks.entryUpdate,
-      findUniqueOrThrow: mocks.entryUpdate,
     },
-    $transaction: async (callback: (tx: unknown) => unknown) => callback({ replayJournalEntry: { update: mocks.entryUpdate, findUniqueOrThrow: mocks.entryUpdate } }),
     tradeOption: { findFirst: mocks.optionFindFirst },
     tradeReason: { count: mocks.reasonCount },
   },
@@ -65,7 +63,7 @@ describe("replay journal Setup API", () => {
     expect(response.status).toBe(200);
     expect(mocks.entryFindFirst).toHaveBeenCalledWith({
       where: { id: "entry-1", journalSession: { datasetId: "dataset-1" } },
-      select: { id: true, logicalKey: true, journalSessionId: true },
+      select: { id: true },
     });
     expect(mocks.optionFindFirst).toHaveBeenCalledWith({
       where: { id: "setup-1", type: "STRATEGY", active: true },

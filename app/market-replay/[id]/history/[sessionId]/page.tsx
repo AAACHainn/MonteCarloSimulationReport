@@ -1,6 +1,5 @@
-import { ReplayProjectionPicker } from "@/components/market-replay/replay-projection-picker";
 import Link from "next/link";
-import { notFound, redirect } from "next/navigation";
+import { notFound } from "next/navigation";
 import { ArrowLeft } from "lucide-react";
 import { Breadcrumbs } from "@/components/breadcrumbs";
 import { HistoricalReplayClient } from "@/components/market-replay/historical-replay-client";
@@ -11,7 +10,7 @@ import { copy } from "@/lib/i18n";
 import { resolveDisplaySession } from "@/lib/market-replay/chart-sessions";
 import { serializeMarketDataset } from "@/lib/market-replay/serialize";
 import { formatInterval, type DisplaySession } from "@/lib/market-replay/types";
-import { listReplaySessions, replaySessionView } from "@/lib/replay-sessions/read";
+import { listReplaySessions } from "@/lib/replay-sessions/read";
 import { ReplaySessionProvider } from "@/components/market-replay/replay-session-context";
 
 export const dynamic = "force-dynamic";
@@ -21,7 +20,7 @@ export default async function HistoricalReplayPage({
   searchParams,
 }: {
   params: Promise<{ id: string; sessionId: string }>;
-  searchParams: Promise<{ trade?: string; projectionId?: string }>;
+  searchParams: Promise<{ trade?: string }>;
 }) {
   const { id, sessionId } = await params;
   const query = await searchParams;
@@ -39,18 +38,10 @@ export default async function HistoricalReplayPage({
     },
   });
   if (!session) notFound();
-  let replaySession = (await listReplaySessions(id)).find((item) => item.id === session.replaySessionId);
+  const replaySession = (await listReplaySessions(id)).find((item) => item.id === session.replaySessionId);
   if (!replaySession) notFound();
-  if (query.projectionId) { const view = await replaySessionView(replaySession, query.projectionId); if (!view) notFound(); replaySession = view; }
 
   const requestedTradeNo = Number(query.trade);
-  if (!query.projectionId && Number.isInteger(requestedTradeNo) && requestedTradeNo > 0) {
-    const current = await prisma.replayJournalEntry.findFirst({ where: { journalSessionId: session.id, projectionId: replaySession.activeProjectionId, accountNo: requestedTradeNo }, select: { id: true } });
-    if (!current) {
-      const previous = await prisma.replayJournalEntry.findFirst({ where: { journalSessionId: session.id, accountNo: requestedTradeNo, projection: { status: "HISTORICAL" } }, orderBy: { projection: { generation: "desc" } }, select: { projectionId: true } });
-      if (previous?.projectionId) redirect(`/market-replay/${id}/history/${sessionId}?trade=${requestedTradeNo}&projectionId=${encodeURIComponent(previous.projectionId)}`);
-    }
-  }
   const [bounds, requestedEntry, firstEntry] = await Promise.all([
     prisma.replayJournalEntry.aggregate({
       where: { journalSessionId: session.id, projectionId: replaySession.activeProjectionId },
@@ -79,6 +70,7 @@ export default async function HistoricalReplayPage({
       },
     }),
   ]);
+  if (Number.isInteger(requestedTradeNo) && requestedTradeNo > 0 && !requestedEntry) notFound();
   const entry = requestedEntry ?? firstEntry;
   const startSequence = bounds._min.openedSequence;
   const endSequence = bounds._max.closedSequence;
@@ -88,7 +80,7 @@ export default async function HistoricalReplayPage({
   const displaySession: DisplaySession = resolveDisplaySession(dataset, requestedDisplaySession)
     ? requestedDisplaySession
     : "ETH";
-  const historyHref = `/market-replay/${id}/trade-history?sessionId=${encodeURIComponent(replaySession.id)}${query.projectionId ? `&projectionId=${encodeURIComponent(query.projectionId)}` : ""}`;
+  const historyHref = `/market-replay/${id}/trade-history?sessionId=${encodeURIComponent(replaySession.id)}`;
   const title = session.name || copy.paperTrading.historicalReplayTitle(session.replayGeneration);
 
   return <ReplaySessionProvider session={{ ...replaySession, status: "ARCHIVED" }}><div className="relative left-1/2 flex h-[calc(100dvh-4.3125rem)] w-[calc(100vw-2rem)] max-w-none -translate-x-1/2 flex-col gap-3 overflow-hidden sm:w-[calc(100vw-3rem)]">
@@ -116,7 +108,6 @@ export default async function HistoricalReplayPage({
         </Button>
       </section>
     </div>
-    <ReplayProjectionPicker baseHref={`/market-replay/${id}/history/${sessionId}${query.trade ? `?trade=${encodeURIComponent(query.trade)}` : ""}`} />
     <div className="min-h-0 flex-1 overflow-hidden rounded-lg border bg-white shadow-sm">
       <HistoricalReplayClient
         key={`${session.id}:${replaySession.activeProjectionId}:${entry.accountNo}`}

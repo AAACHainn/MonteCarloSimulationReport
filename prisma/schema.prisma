@@ -495,8 +495,8 @@ model ReplayJournalEntry {
   @@index([setupOptionId])
 }
 
-// A replay session owns user intent; projections own derived trading results.
-// Correcting a session builds a sibling projection before changing the head.
+// A replay session keeps one current result and a temporary correction draft.
+// Confirmation replaces the current result; cancellation discards the draft.
 model ReplaySession {
   id                 String @id @default(cuid())
   datasetId          String
@@ -527,10 +527,8 @@ model ReplayProjection {
   replaySessionId String
   replaySession   ReplaySession @relation("SessionProjections", fields: [replaySessionId], references: [id], onDelete: Cascade)
   activeFor       ReplaySession? @relation("ActiveReplayProjection")
-  generation      Int
   status          String @default("BUILDING")
   historyVersion  Int
-  parentId        String?
   currentSequence Int
   account         PaperTradingSession?
   entries         ReplayJournalEntry[]
@@ -539,7 +537,7 @@ model ReplayProjection {
   checkpoints     ReplayCheckpoint[]
   createdAt       DateTime @default(now())
 
-  @@index([replaySessionId, generation])
+  @@unique([replaySessionId, status])
 }
 
 model ReplayCommand {
@@ -563,6 +561,7 @@ model ReplayProjectionCommand {
   command ReplayCommand @relation(fields: [commandId], references: [id], onDelete: Cascade)
 
   @@id([projectionId, commandId])
+  @@index([commandId])
 }
 
 model ReplayContextRun {

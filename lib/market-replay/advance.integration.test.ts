@@ -116,7 +116,7 @@ async function seed(
     }) });
   }
   const replay = await prisma.replaySession.create({ data: { datasetId: id, name: id, mode: "TRAINING", legacy: true } });
-  const projection = await prisma.replayProjection.create({ data: { replaySessionId: replay.id, generation: 1, status: "CURRENT", historyVersion: 1, currentSequence: start } });
+  const projection = await prisma.replayProjection.create({ data: { replaySessionId: replay.id, status: "CURRENT", historyVersion: 1, currentSequence: start } });
   await prisma.replaySession.update({ where: { id: replay.id }, data: { activeProjectionId: projection.id } });
   fixtureSessions.set(id, replay.id);
   await prisma.replayProgress.create({ data: {

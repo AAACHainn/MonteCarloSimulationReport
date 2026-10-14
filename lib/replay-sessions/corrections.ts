@@ -2,6 +2,7 @@ import { z } from "zod";
 import { prisma } from "@/lib/db";
 import { copy } from "@/lib/i18n";
 import { ReplaySessionError, loadReplayScope, runWithReplayScope, assertReplayWritable } from "./scope";
+import { pruneReplayResults } from "./prune-results";
 
 export const correctionSchema = z.object({
   requestId: z.string().min(1).max(120), expectedVersion: z.number().int().positive(),
@@ -57,11 +58,11 @@ export async function endCorrection(jobId: string, status: "FAILED" | "INTERRUPT
   return prisma.$transaction(async (tx) => {
     const job = await tx.replayCorrectionJob.findUnique({ where: { id: jobId } });
     if (!job || ["APPLIED", "CANCELLED", "FAILED", "INTERRUPTED"].includes(job.status)) return job;
-    const updated = await tx.replayCorrectionJob.update({ where: { id: jobId }, data: { status, error } });
-    if (job.targetProjectionId) await tx.replayProjection.update({ where: { id: job.targetProjectionId }, data: { status: "FAILED" } });
+    await tx.replayCorrectionJob.update({ where: { id: jobId }, data: { status, error } });
     await tx.replaySession.updateMany({ where: { id: job.replaySessionId, pendingCorrectionId: jobId }, data: { pendingCorrectionId: null, version: { increment: 1 } } });
-    return updated;
-  });
+    await pruneReplayResults(tx, job.replaySessionId);
+    return tx.replayCorrectionJob.findUniqueOrThrow({ where: { id: jobId } });
+  }, { timeout: 120_000 });
 }
 
 export async function readCorrection(sessionId: string, jobId: string) {
@@ -82,7 +83,7 @@ export async function commitCorrection(sessionId: string, jobId: string) {
       tx.replayCorrectionJob.findFirst({ where: { id: jobId, replaySessionId: sessionId } }),
     ]);
     if (!session || !job) throw new ReplaySessionError("JOB_NOT_FOUND", 404, copy.replaySessions.missing);
-    if (job.status === "APPLIED") return { ok: true, projectionId: job.targetProjectionId };
+    if (job.status === "APPLIED") return { ok: true, projectionId: session.activeProjectionId };
     if (session.mode !== "LIVE_REPLAY") throw new ReplaySessionError("MODE_NOT_ALLOWED", 403, copy.replaySessions.modeBlocked);
     if (job.status !== "READY" || !job.targetProjectionId || session.pendingCorrectionId !== job.id || session.activeProjectionId !== job.baseProjectionId || session.version !== job.expectedVersion || !session.progress) {
       throw new ReplaySessionError("CORRECTION_NOT_READY", 409, copy.replaySessions.correctionNotReady);
@@ -104,10 +105,10 @@ export async function commitCorrection(sessionId: string, jobId: string) {
       }
       cursor = entries.at(-1)!.id;
     }
-    await tx.replayProjection.update({ where: { id: job.baseProjectionId }, data: { status: "HISTORICAL" } });
-    await tx.replayProjection.update({ where: { id: job.targetProjectionId }, data: { status: "CURRENT" } });
     await tx.replaySession.update({ where: { id: sessionId }, data: { activeProjectionId: job.targetProjectionId, pendingCorrectionId: null, version: { increment: 1 } } });
-    await tx.replayProgress.update({ where: { id: session.progress.id }, data: { currentSequence: job.targetSequence, generation: projection.generation, syncVersion: 0, lastSyncRequestId: null, lastSyncResponse: null } });
+    await pruneReplayResults(tx, sessionId);
+    await tx.replayProjection.update({ where: { id: job.targetProjectionId }, data: { status: "CURRENT" } });
+    await tx.replayProgress.update({ where: { id: session.progress.id }, data: { currentSequence: job.targetSequence, generation: { increment: 1 }, syncVersion: 0, lastSyncRequestId: null, lastSyncResponse: null } });
     await tx.replayCorrectionJob.update({ where: { id: jobId }, data: { status: "APPLIED" } });
     return { ok: true, projectionId: job.targetProjectionId };
   }, { timeout: 120_000 });

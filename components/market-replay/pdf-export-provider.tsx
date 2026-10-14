@@ -15,7 +15,7 @@ import type { ReplayJournalFilters } from "@/lib/paper-trading/journal-filters";
 import { replaySessionUrl } from "./replay-session-context";
 
 const t = copy.paperTrading.pdf;
-type StartRequest = { datasetId: string; sessionId: string; replaySessionId?: string; viewProjectionId?: string; filters: ReplayJournalFilters; options: PdfOptions; preferences: PdfChartPreferences };
+type StartRequest = { datasetId: string; sessionId: string; replaySessionId?: string; filters: ReplayJournalFilters; options: PdfOptions; preferences: PdfChartPreferences };
 type Job = { request: StartRequest; snapshot: PdfSnapshot | null; pages: PdfChartPage[] | null; volume: number; controller: AbortController; font: ArrayBuffer | null; url: string | null; filename: string };
 type Status = { phase: "reading" | "planning" | "generating" | "ready" | "error" | "complete"; message: string; fatal?: boolean };
 const Context = createContext<{ active: boolean; start: (request: StartRequest) => void }>({ active: false, start: () => {} });
@@ -24,8 +24,8 @@ export const usePdfExport = () => useContext(Context);
 export class PdfExportError extends Error {
   constructor(message: string, public readonly fatal = false) { super(message); }
 }
-export async function fetchPdfSnapshot(datasetId: string, sessionId: string, filters: ReplayJournalFilters, signal: AbortSignal, replaySessionId?: string, viewProjectionId?: string): Promise<PdfSnapshot> {
-  const response = await fetch(replaySessionUrl(`/api/market-datasets/${encodeURIComponent(datasetId)}/paper-journal/sessions/${encodeURIComponent(sessionId)}/export-data?${replayFilterSearchParams(filters)}`, replaySessionId, viewProjectionId), { signal, cache: "no-store" });
+export async function fetchPdfSnapshot(datasetId: string, sessionId: string, filters: ReplayJournalFilters, signal: AbortSignal, replaySessionId?: string): Promise<PdfSnapshot> {
+  const response = await fetch(replaySessionUrl(`/api/market-datasets/${encodeURIComponent(datasetId)}/paper-journal/sessions/${encodeURIComponent(sessionId)}/export-data?${replayFilterSearchParams(filters)}`, replaySessionId), { signal, cache: "no-store" });
   const result = await response.json();
   if (!response.ok) throw new PdfExportError(result.error ?? t.failed, response.status === 404 || response.status === 409);
   return result;
@@ -82,7 +82,7 @@ export function PdfExportProvider({ children }: { children: ReactNode }) {
       if (!job.snapshot) {
         update(job, { phase: "reading", message: t.loading });
         const r = job.request;
-        job.snapshot = await fetchPdfSnapshot(r.datasetId, r.sessionId, r.filters, signal, r.replaySessionId, r.viewProjectionId);
+        job.snapshot = await fetchPdfSnapshot(r.datasetId, r.sessionId, r.filters, signal, r.replaySessionId);
       }
       signal.throwIfAborted();
       const snapshot = job.snapshot;

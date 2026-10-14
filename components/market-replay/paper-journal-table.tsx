@@ -2,13 +2,14 @@
 import { useDeleteReplayCycle } from "./replay-correction-context";
 import { useReplayFetch, useReplaySession, useReplaySessionUrl } from "./replay-session-context";
 
-import { useCallback, useEffect, useMemo, useRef, useState, type KeyboardEvent as ReactKeyboardEvent, type PointerEvent as ReactPointerEvent } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState, useTransition, type KeyboardEvent as ReactKeyboardEvent, type PointerEvent as ReactPointerEvent } from "react";
+import { useRouter } from "next/navigation";
 import { ChevronLeft, ChevronRight, Download, Loader2, Pencil, RotateCcw, Settings2, Trash2 } from "lucide-react";
 import Link from "next/link";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
-import { ConfirmDialog } from "@/components/ui/confirm-dialog";
 import { Dialog } from "@/components/ui/dialog";
+import { RenameDialog } from "@/components/ui/rename-dialog";
 import { ExpressionFilterPopover } from "@/components/ui/expression-filter-popover";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -49,6 +50,7 @@ import {
 } from "@/lib/paper-trading/journal-filters";
 import { journalColumns, type JournalColumnId } from "@/lib/paper-trading/journal-columns";
 import type { ReplayJournalEntryData, ReplayJournalSummary } from "@/lib/paper-trading/types";
+import type { ReplaySessionSummary } from "@/lib/replay-sessions/types";
 
 type JournalSessionSummary = {
   id: string;
@@ -122,13 +124,17 @@ export function PaperJournalTable({
   datasetId,
   scope,
   onFocus,
+  replaySessions,
 }: {
   datasetId: string;
   scope: "current" | "history";
   onFocus?: (entry: ReplayJournalEntryData) => void;
+  replaySessions?: Pick<ReplaySessionSummary, "id" | "name" | "mode" | "status" | "createdAt">[];
 }) {
   const fetch = useReplayFetch();
   const replaySession = useReplaySession();
+  const router = useRouter();
+  const [switchingSession, startSessionNavigation] = useTransition();
   const correction = useDeleteReplayCycle();
   const canDeleteCycle = Boolean(correction && replaySession?.mode === "LIVE_REPLAY" && replaySession.status === "ACTIVE");
   const scopedUrl = useReplaySessionUrl();
@@ -142,8 +148,6 @@ export function PaperJournalTable({
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [status, setStatus] = useState<string | null>(null);
-  const [deleteTarget, setDeleteTarget] = useState<string | null>(null);
-  const [deleting, setDeleting] = useState(false);
   const [renameOpen, setRenameOpen] = useState(false);
   const [renameDraft, setRenameDraft] = useState("");
   const [renameError, setRenameError] = useState<string | null>(null);
@@ -416,23 +420,6 @@ export function PaperJournalTable({
     () => sessions.find((session) => session.id === selectedSessionId) ?? null,
     [selectedSessionId, sessions],
   );
-
-  async function confirmDelete() {
-    if (!deleteTarget) return;
-    setDeleting(true);
-    try {
-      const response = await fetch(`/api/market-datasets/${datasetId}/paper-journal/sessions/${deleteTarget}`, { method: "DELETE" });
-      const data = await response.json().catch(() => null);
-      if (!response.ok) throw new Error(data?.error ?? copy.paperTrading.journalDeleteFailed);
-      setDeleteTarget(null);
-      setStatus(null);
-      await load({ take: pageSize });
-    } catch (cause) {
-      setError(cause instanceof Error ? cause.message : copy.paperTrading.journalDeleteFailed);
-    } finally {
-      setDeleting(false);
-    }
-  }
 
   function beginRename() {
     if (!selectedSession) return;
@@ -781,9 +768,31 @@ export function PaperJournalTable({
     ));
   }
 
-  if (loading && items.length === 0 && sessions.length === 0) return <div className="flex items-center gap-2 py-8 text-sm text-slate-500"><Loader2 className="h-4 w-4 animate-spin" />{copy.paperTrading.journalLoading}</div>;
-  if (error && items.length === 0 && sessions.length === 0) return <p className="py-6 text-sm text-red-600" role="alert">{error}</p>;
-  if (items.length === 0 && sessions.length === 0) return <p className="rounded-md border border-dashed p-6 text-center text-sm text-slate-500">{copy.paperTrading.noJournalEntries}</p>;
+  const sessionPicker = scope === "history" && replaySession && replaySessions ? <div className="w-full space-y-2 sm:max-w-xl" aria-busy={switchingSession}>
+    <Label htmlFor="replay-journal-session">{copy.paperTrading.journalSessionSelect}</Label>
+    <Select
+      value={replaySession.id}
+      onValueChange={(id) => {
+        if (id === replaySession.id) return;
+        startSessionNavigation(() => router.push(`/market-replay/${datasetId}/trade-history?sessionId=${encodeURIComponent(id)}`));
+      }}
+      disabled={loading || switchingSession || renaming || savingSetupIds.size > 0 || savingTradeReasonIds.size > 0 || savingReviewIds.size > 0}
+    >
+      <SelectTrigger id="replay-journal-session" className="w-full bg-white">
+        <SelectValue placeholder={copy.paperTrading.journalSessionSelectPlaceholder} />
+      </SelectTrigger>
+      <SelectContent className="max-w-[min(40rem,calc(100vw-2rem))]">
+        {replaySessions.map((session) => <SelectItem key={session.id} value={session.id}>
+          {session.id === replaySession.id ? selectedSession?.name ?? session.name : session.name} · {session.mode === "TRAINING" ? copy.replaySessions.training : copy.replaySessions.liveReplay} · {session.status === "ACTIVE" ? copy.replaySessions.active : copy.replaySessions.archived} · {new Date(session.createdAt).toLocaleString("zh-CN")}
+        </SelectItem>)}
+      </SelectContent>
+    </Select>
+    {switchingSession ? <p className="flex items-center gap-2 text-xs text-slate-500" role="status"><Loader2 className="h-4 w-4 animate-spin" aria-hidden="true" />{copy.paperTrading.journalSessionSwitching}</p> : null}
+  </div> : null;
+
+  if (loading && items.length === 0 && sessions.length === 0) return <div className="space-y-4">{sessionPicker}<div className="flex items-center gap-2 py-8 text-sm text-slate-500"><Loader2 className="h-4 w-4 animate-spin" />{copy.paperTrading.journalLoading}</div></div>;
+  if (error && items.length === 0 && sessions.length === 0) return <div className="space-y-4">{sessionPicker}<p className="py-6 text-sm text-red-600" role="alert">{error}</p></div>;
+  if (items.length === 0 && sessions.length === 0) return <div className="space-y-4">{sessionPicker}<p className="rounded-md border border-dashed p-6 text-center text-sm text-slate-500">{copy.paperTrading.noJournalEntries}</p></div>;
 
   const startRow = totalItems === 0 ? 0 : (page - 1) * pageSize + 1;
   const endRow = Math.min(page * pageSize, totalItems);
@@ -830,32 +839,10 @@ export function PaperJournalTable({
     ],
   };
 
-  return <div className="space-y-4" aria-busy={loading}>
+  return <div className="space-y-4" aria-busy={loading || switchingSession}>
     {scope === "history" && selectedSession ? <>
       <div className="flex flex-col gap-3 sm:flex-row sm:items-end sm:justify-between">
-        <div className="w-full space-y-2 sm:max-w-xl">
-          <Label htmlFor="replay-journal-session">{copy.paperTrading.journalSessionSelect}</Label>
-          <Select
-            value={selectedSession.id}
-            onValueChange={(value) => {
-              setStatus(null);
-              setSelectedSessionId(value);
-              setSummary(null);
-              setPage(1);
-              void load({ sessionId: value, requestedPage: 1, take: pageSize });
-            }}
-            disabled={loading || deleting}
-          >
-            <SelectTrigger id="replay-journal-session" className="w-full bg-white">
-              <SelectValue placeholder={copy.paperTrading.journalSessionSelectPlaceholder} />
-            </SelectTrigger>
-            <SelectContent className="max-w-[min(40rem,calc(100vw-2rem))]">
-              {sessions.map((session) => <SelectItem key={session.id} value={session.id}>
-                {session.name} · {new Date(session.createdAt).toLocaleString("zh-CN")}
-              </SelectItem>)}
-            </SelectContent>
-          </Select>
-        </div>
+        {sessionPicker}
         <div className="flex flex-wrap items-center gap-2">
           <Button asChild variant="outline" size="sm">
             <a href={scopedUrl(`/api/market-datasets/${datasetId}/paper-journal/sessions/${selectedSession.id}/export`)} download>
@@ -868,7 +855,7 @@ export function PaperJournalTable({
             <Settings2 className="h-4 w-4" aria-hidden="true" />
             {copy.paperTrading.setVisibleColumns}
           </Button>
-          {!replaySession || replaySession.status === "ACTIVE" ? <Button type="button" variant="outline" size="sm" onClick={beginRename} disabled={loading || deleting}>
+          {!replaySession || replaySession.status === "ACTIVE" ? <Button type="button" variant="outline" size="sm" onClick={beginRename} disabled={loading}>
             <Pencil className="h-4 w-4" aria-hidden="true" />
             {copy.paperTrading.renameJournalSession}
           </Button> : null}
@@ -878,9 +865,8 @@ export function PaperJournalTable({
         <span className="font-medium text-slate-800">{selectedSession.name}</span>
         <span className="tabular-nums">{new Date(selectedSession.createdAt).toLocaleString("zh-CN")}</span>
         <span>{selectedSession.entryCount} {copy.paperTrading.journalRows}</span>
-        <span>{replaySession?.status === "ARCHIVED" && !selectedSession.archivedAt ? copy.replaySessions.historicalVersion : selectedSession.archivedAt ? copy.paperTrading.journalArchived : copy.paperTrading.journalCurrent}</span>
+        <span>{selectedSession.archivedAt ? copy.paperTrading.journalArchived : copy.paperTrading.journalCurrent}</span>
         {replaySession ? <><span>{replaySession.mode === "TRAINING" ? copy.replaySessions.training : copy.replaySessions.liveReplay}</span><span>{copy.replaySessions.source}</span></> : null}
-        {!replaySession && selectedSession.archivedAt ? <Button type="button" variant="ghost" size="sm" className="ml-auto h-7 text-red-600" onClick={() => setDeleteTarget(selectedSession.id)}><Trash2 className="h-3.5 w-3.5" aria-hidden="true" />{copy.paperTrading.deleteJournalSession}</Button> : null}
       </div>
       {summary ? <Card className="shadow-none">
         <CardHeader className="p-4 pb-3">
@@ -1106,7 +1092,7 @@ export function PaperJournalTable({
               className="cursor-pointer font-medium text-blue-700 underline-offset-2 hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-600"
               onClick={() => onFocus(entry)}
             >{entry.no}</button> : <Link
-              href={`/market-replay/${datasetId}/history/${entry.journalSessionId}?trade=${entry.no}${replaySession?.status === "ARCHIVED" ? `&projectionId=${encodeURIComponent(replaySession.activeProjectionId)}` : ""}`}
+              href={`/market-replay/${datasetId}/history/${entry.journalSessionId}?trade=${entry.no}`}
               className="font-medium text-blue-700 underline-offset-2 hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-600"
               aria-label={copy.paperTrading.openHistoricalReplay(entry.no)}
             >{entry.no}</Link>}</td> : null}
@@ -1259,38 +1245,17 @@ export function PaperJournalTable({
       saving={reviewDialogEntryId ? savingReviewIds.has(reviewDialogEntryId) : false}
       error={reviewError}
     />
-    <Dialog
+    <RenameDialog
       open={renameOpen}
       title={copy.paperTrading.renameJournalSessionTitle}
       description={copy.paperTrading.renameJournalSessionDescription}
-      onClose={() => { if (!renaming) setRenameOpen(false); }}
-      className="max-w-md"
-    >
-      <form className="space-y-4" onSubmit={(event) => { event.preventDefault(); void renameSession(); }}>
-        <div className="space-y-2">
-          <Label htmlFor="replay-journal-session-name">{copy.paperTrading.journalSessionName}</Label>
-          <Input
-            id="replay-journal-session-name"
-            value={renameDraft}
-            onChange={(event) => setRenameDraft(event.target.value)}
-            placeholder={copy.paperTrading.journalSessionNamePlaceholder}
-            maxLength={80}
-            disabled={renaming}
-            aria-describedby={renameError ? "replay-journal-session-name-error" : undefined}
-            autoFocus
-          />
-          {renameError ? <p id="replay-journal-session-name-error" className="text-xs text-red-600" role="alert">{renameError}</p> : null}
-        </div>
-        <div className="flex justify-end gap-2 border-t pt-4">
-          <Button type="button" variant="outline" onClick={() => setRenameOpen(false)} disabled={renaming}>{copy.common.cancel}</Button>
-          <Button type="submit" disabled={renaming || !renameDraft.trim()}>
-            {renaming ? <Loader2 className="h-4 w-4 animate-spin" aria-hidden="true" /> : null}
-            {copy.paperTrading.saveJournalSessionName}
-          </Button>
-        </div>
-      </form>
-    </Dialog>
-    <ConfirmDialog open={deleteTarget !== null} title={copy.paperTrading.deleteJournalSessionTitle} description={copy.paperTrading.deleteJournalSessionConfirm} isLoading={deleting} onCancel={() => setDeleteTarget(null)} onConfirm={() => void confirmDelete()} />
+      label={copy.paperTrading.journalSessionName}
+      value={renameDraft} onChange={setRenameDraft} maxLength={80}
+      placeholder={copy.paperTrading.journalSessionNamePlaceholder}
+      error={renameError} isLoading={renaming}
+      confirmLabel={copy.paperTrading.saveJournalSessionName}
+      onCancel={() => setRenameOpen(false)} onConfirm={() => void renameSession()}
+    />
   </div>;
 }
 

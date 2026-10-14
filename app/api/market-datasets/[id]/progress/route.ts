@@ -22,10 +22,6 @@ async function handleGET(_request: Request, context: RouteContext) {
     let progress = await tx.replayProgress.findFirst({ where: progressWhere(id) });
     const snapshot = await getPaperSessionSnapshot(id, tx);
     const scope = getReplayScope();
-    const projection = scope ? await tx.replayProjection.findUnique({ where: { id: scope.projectionId } }) : null;
-    if (progress && scope?.status === "ARCHIVED" && projection) {
-      progress = { ...progress, currentSequence: projection.currentSequence, generation: projection.generation };
-    }
     // The account records which source bars were actually processed. Repair stale saves
     // produced by older clients without replaying fills or resetting the account.
     if (progress && snapshot && scope?.status !== "ARCHIVED" && progress.currentSequence !== snapshot.session.lastProcessedSequence) {

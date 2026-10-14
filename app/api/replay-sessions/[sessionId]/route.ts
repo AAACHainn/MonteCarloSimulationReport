@@ -2,8 +2,8 @@ import { NextResponse } from "next/server";
 import { z } from "zod";
 import { prisma } from "@/lib/db";
 import { getPaperSessionSnapshot } from "@/lib/paper-trading/serialize";
-import { loadReplayScope, runWithReplayScope, assertReplayWritable, markReplayMutation, replayErrorResponse } from "@/lib/replay-sessions/scope";
-import { archiveReplaySession, updateSessionPreferences } from "@/lib/replay-sessions/service";
+import { loadReplayScope, runWithReplayScope, replayErrorResponse } from "@/lib/replay-sessions/scope";
+import { archiveReplaySession, deleteReplaySession, deleteReplaySessionSchema, renameReplaySession, updateSessionPreferences } from "@/lib/replay-sessions/service";
 import { listReplaySessions } from "@/lib/replay-sessions/read";
 import { copy } from "@/lib/i18n";
 
@@ -33,12 +33,19 @@ export async function PATCH(request: Request, context: Context) {
       if (parsed.data.riskPreferences) return updateSessionPreferences(scope.id, parsed.data.expectedVersion, JSON.stringify(parsed.data.riskPreferences));
       await prisma.$transaction(async (tx) => {
         if (parsed.data.status) return archiveReplaySession(tx);
-        await assertReplayWritable(tx);
-        await tx.replaySession.update({ where: { id: scope.id }, data: { name: parsed.data.name } });
-        await tx.replayJournalSession.updateMany({ where: { replaySessionId: scope.id }, data: { name: parsed.data.name } });
-        await markReplayMutation(tx);
+        await renameReplaySession(tx, parsed.data.name!);
       });
     });
+    return NextResponse.json({ ok: true });
+  } catch (error) { return replayErrorResponse(error); }
+}
+
+export async function DELETE(request: Request, context: Context) {
+  try {
+    const parsed = deleteReplaySessionSchema.safeParse(await request.json().catch(() => null));
+    if (!parsed.success) return NextResponse.json({ error: copy.replaySessions.deleteInvalid }, { status: 400 });
+    const scope = await loadReplayScope((await context.params).sessionId);
+    await runWithReplayScope(scope, () => prisma.$transaction((tx) => deleteReplaySession(tx, parsed.data.expectedVersion)));
     return NextResponse.json({ ok: true });
   } catch (error) { return replayErrorResponse(error); }
 }

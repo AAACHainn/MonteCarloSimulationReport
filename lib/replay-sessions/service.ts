@@ -16,6 +16,8 @@ export const createReplaySessionSchema = replayStartSchema.extend({
 });
 export type CreateReplaySessionInput = z.infer<typeof createReplaySessionSchema>;
 
+export const deleteReplaySessionSchema = z.object({ expectedVersion: z.number().int().positive() }).strict();
+
 export async function createReplaySession(datasetId: string, input: CreateReplaySessionInput) {
   return prisma.$transaction(async (tx) => createSessionInTransaction(tx, datasetId, input));
 }
@@ -36,7 +38,7 @@ export async function createSessionInTransaction(tx: Prisma.TransactionClient, d
   if (!first) throw new ReplaySessionError("INVALID_START", 400, copy.marketReplay.invalidStart);
   const session = await tx.replaySession.create({ data: { datasetId, name: input.name, mode: input.mode } });
   const projection = await tx.replayProjection.create({ data: {
-    replaySessionId: session.id, generation: 1, status: "CURRENT", historyVersion: dataset.historyVersion,
+    replaySessionId: session.id, status: "CURRENT", historyVersion: dataset.historyVersion,
     currentSequence: first.sequence - 1,
   } });
   await tx.replaySession.update({ where: { id: session.id }, data: { activeProjectionId: projection.id } });
@@ -57,6 +59,33 @@ export async function archiveReplaySession(tx: Prisma.TransactionClient) {
   await assertReplayWritable(tx, false);
   await tx.replaySession.update({ where: { id: scope.id }, data: { status: "ARCHIVED", version: { increment: 1 } } });
   await tx.replayJournalSession.updateMany({ where: { replaySessionId: scope.id }, data: { archivedAt: new Date() } });
+}
+
+// Metadata management permits archives and revised market data while retaining
+// the same concurrency and correction lock as other session mutations.
+async function assertSessionMetadataWritable(tx: Prisma.TransactionClient) {
+  const scope = getReplayScope();
+  if (!scope) throw new ReplaySessionError("SESSION_REQUIRED", 409, copy.replaySessions.required);
+  const session = await tx.replaySession.findUnique({ where: { id: scope.id } });
+  if (!session || session.activeProjectionId !== scope.projectionId || session.version !== scope.version) {
+    throw new ReplaySessionError("SESSION_CONFLICT", 409, copy.replaySessions.conflict);
+  }
+  if (session.pendingCorrectionId) throw new ReplaySessionError("CORRECTION_PENDING", 409, copy.replaySessions.busy);
+  return scope;
+}
+
+export async function renameReplaySession(tx: Prisma.TransactionClient, name: string) {
+  const scope = await assertSessionMetadataWritable(tx);
+  await tx.replaySession.update({ where: { id: scope.id }, data: { name } });
+  await tx.replayJournalSession.updateMany({ where: { replaySessionId: scope.id }, data: { name } });
+  await markReplayMutation(tx);
+}
+
+export async function deleteReplaySession(tx: Prisma.TransactionClient, expectedVersion: number) {
+  const scope = await assertSessionMetadataWritable(tx);
+  if (scope.version !== expectedVersion) throw new ReplaySessionError("SESSION_CONFLICT", 409, copy.replaySessions.conflict);
+  // Session-owned records cascade; shared market data and other sessions remain intact.
+  await tx.replaySession.delete({ where: { id: scope.id } });
 }
 
 export async function restartReplaySession(input?: CreateReplaySessionInput) {

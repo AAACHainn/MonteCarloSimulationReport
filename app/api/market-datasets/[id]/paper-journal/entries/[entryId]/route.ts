@@ -1,4 +1,4 @@
-import { withReplaySessionRoute, journalScopeWhere, getReplayScope } from '@/lib/replay-sessions/scope';
+import { withReplaySessionRoute, journalScopeWhere, entryProjectionWhere, getReplayScope } from '@/lib/replay-sessions/scope';
 import { NextResponse } from "next/server";
 import { prisma } from "@/lib/db";
 import { copy } from "@/lib/i18n";
@@ -15,8 +15,8 @@ async function handlePATCH(request: Request, context: RouteContext) {
   }
 
   const entry = await prisma.replayJournalEntry.findFirst({
-    where: { id: entryId, journalSession: { datasetId: id, ...journalScopeWhere() } },
-    select: { id: true, logicalKey: true, journalSessionId: true },
+    where: { id: entryId, ...entryProjectionWhere(), journalSession: { datasetId: id, ...journalScopeWhere() } },
+    select: { id: true },
   });
   if (!entry) {
     return NextResponse.json({ error: copy.paperTrading.journalNotFound }, { status: 404 });
@@ -54,13 +54,7 @@ async function handlePATCH(request: Request, context: RouteContext) {
       setupOption: { select: { name: true } },
       tradeReasons: { select: { id: true, name: true }, orderBy: { name: "asc" } },
     } as const;
-  const updated = await prisma.$transaction(async (tx) => {
-    const versions = entry.logicalKey ? await tx.replayJournalEntry.findMany({
-      where: { journalSessionId: entry.journalSessionId, logicalKey: entry.logicalKey }, select: { id: true },
-    }) : [{ id: entry.id }];
-    for (const version of versions) await tx.replayJournalEntry.update({ where: { id: version.id }, data });
-    return tx.replayJournalEntry.findUniqueOrThrow({ where: { id: entry.id }, include });
-  });
+  const updated = await prisma.replayJournalEntry.update({ where: { id: entry.id }, data, include });
   return NextResponse.json(serializeReplayJournalEntry(updated));
 }
 

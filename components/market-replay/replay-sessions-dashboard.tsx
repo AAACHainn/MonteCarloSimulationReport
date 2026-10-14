@@ -1,9 +1,9 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { Archive, Loader2, Plus } from "lucide-react";
+import { Archive, Loader2, Pencil, Plus, Trash2 } from "lucide-react";
 import { ReplayStartDialog } from "./replay-start-dialog";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -12,6 +12,7 @@ import { Badge } from "@/components/ui/badge";
 import { Card, CardHeader, CardTitle, CardContent } from "@/components/ui/card";
 import { Alert, AlertDescription } from "@/components/ui/alert";
 import { ConfirmDialog } from "@/components/ui/confirm-dialog";
+import { RenameDialog } from "@/components/ui/rename-dialog";
 import { Select, SelectTrigger, SelectValue, SelectContent, SelectItem } from "@/components/ui/select";
 import { Table, TableHeader, TableRow, TableHead, TableBody, TableCell } from "@/components/ui/table";
 import { copy } from "@/lib/i18n";
@@ -31,6 +32,38 @@ export function ReplaySessionsDashboard({ dataset, initialSessions, initialCreat
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [archiveTarget, setArchiveTarget] = useState<ReplaySessionSummary | null>(null);
+  const [deleteTarget, setDeleteTarget] = useState<ReplaySessionSummary | null>(null);
+  const [deleteError, setDeleteError] = useState<string | null>(null);
+  const [renameTarget, setRenameTarget] = useState<ReplaySessionSummary | null>(null);
+  const [renameDraft, setRenameDraft] = useState("");
+  const [renameError, setRenameError] = useState<string | null>(null);
+  const [status, setStatus] = useState<string | null>(null);
+  useEffect(() => setSessions(initialSessions), [initialSessions]);
+
+  function beginRename(session: ReplaySessionSummary) {
+    setRenameTarget(session); setRenameDraft(session.name); setRenameError(null); setStatus(null); setError(null);
+  }
+  async function rename() {
+    if (!renameTarget || busy) return;
+    const name = renameDraft.trim();
+    if (!name || name.length > 100) { setRenameError(name ? t.nameTooLong : t.nameRequired); return; }
+    setBusy(true); setRenameError(null);
+    try {
+      const url = `/api/replay-sessions/${encodeURIComponent(renameTarget.id)}`;
+      const currentResponse = await fetch(url, { cache: "no-store" });
+      const current = await currentResponse.json();
+      if (!currentResponse.ok) throw new Error(current.error ?? t.renameFailed);
+      const response = await fetch(url, {
+        method: "PATCH", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ expectedVersion: current.session.version, name }),
+      });
+      const result = await response.json();
+      if (!response.ok) throw new Error(result.error ?? t.renameFailed);
+      setSessions((items) => items.map((session) => session.id === renameTarget.id ? { ...current.session, name, version: current.session.version + 1 } : session));
+      setRenameTarget(null); setStatus(t.renamed); router.refresh();
+    } catch (error) { setRenameError(error instanceof Error ? error.message : t.renameFailed); }
+    finally { setBusy(false); }
+  }
 
   async function create() {
     if (busy) return;
@@ -69,24 +102,51 @@ export function ReplaySessionsDashboard({ dataset, initialSessions, initialCreat
     } catch (error) { setError(error instanceof Error ? error.message : t.requestFailed); }
     finally { setBusy(false); }
   }
+  async function remove() {
+    if (!deleteTarget || busy) return;
+    setBusy(true); setDeleteError(null);
+    try {
+      const response = await fetch(`/api/replay-sessions/${encodeURIComponent(deleteTarget.id)}`, {
+        method: "DELETE", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ expectedVersion: deleteTarget.version }),
+      });
+      const result = await response.json();
+      if (!response.ok) {
+        // A concurrent replay or correction requires a refreshed list and a new confirmation.
+        if (response.status === 409 || response.status === 404) router.refresh();
+        throw new Error(result.error ?? t.deleteFailed);
+      }
+      setSessions((items) => items.filter((session) => session.id !== deleteTarget.id));
+      setDeleteTarget(null); setStatus(t.deleted); router.refresh();
+    } catch (error) { setDeleteError(error instanceof Error ? error.message : t.deleteFailed); }
+    finally { setBusy(false); }
+  }
   return <div className="space-y-6">
     <div className="flex items-center justify-between gap-4">
       <p className="text-sm text-slate-600">{t.source}</p>
-      <Button onClick={() => { setError(null); setCreateOpen(true); }} disabled={!dataset.sourceIntervalSeconds}><Plus className="h-4 w-4" />{t.create}</Button>
+      <Button onClick={() => { setError(null); setStatus(null); setCreateOpen(true); }} disabled={busy || !dataset.sourceIntervalSeconds}><Plus className="h-4 w-4" />{t.create}</Button>
     </div>
     {error && !createOpen ? <Alert className="border-red-200 bg-red-50" role="alert"><AlertDescription>{error}</AlertDescription></Alert> : null}
+    {status ? <Alert className="border-emerald-200 bg-emerald-50" role="status" aria-live="polite"><AlertDescription>{status}</AlertDescription></Alert> : null}
     <Card><CardHeader><CardTitle>{t.title}</CardTitle></CardHeader><CardContent>
       {sessions.length ? <Table><TableHeader><TableRow>
         <TableHead>{t.name}</TableHead><TableHead>{t.mode}</TableHead><TableHead>{t.progress}</TableHead>
         <TableHead className="text-right">{t.entries}</TableHead><TableHead />
       </TableRow></TableHeader><TableBody>{sessions.map((session) => <TableRow key={session.id}>
-        <TableCell><div className="font-medium">{session.name}</div><Badge className="mt-1">{session.status === "ACTIVE" ? t.active : t.archived}</Badge></TableCell>
+        <TableCell><div className="flex items-center gap-2"><span className="font-medium">{session.name}</span>
+          <Button type="button" variant="ghost" size="icon" disabled={busy || Boolean(session.pendingCorrectionId)} aria-label={t.renameLabel(session.name)} title={t.rename}
+            onClick={() => beginRename(session)}><Pencil className="h-4 w-4" aria-hidden="true" /></Button>
+        </div><Badge className="mt-1">{session.status === "ACTIVE" ? t.active : t.archived}</Badge>
+          {session.pendingCorrectionId ? <p className="mt-1 text-xs text-slate-600">{t.deleteCorrectionPending}</p> : null}
+        </TableCell>
         <TableCell>{session.mode === "TRAINING" ? t.training : t.liveReplay}</TableCell>
         <TableCell className="tabular-nums">{session.progress ? formatNumber(Math.max(0, session.progress.currentSequence - session.progress.startSequence + 1)) : copy.common.dash}</TableCell>
         <TableCell className="text-right tabular-nums">{formatNumber(session.entryCount)}</TableCell>
         <TableCell><div className="flex justify-end gap-2">
           <Button asChild variant="outline" size="sm"><Link href={`/market-replay/${dataset.id}?sessionId=${encodeURIComponent(session.id)}`}>{session.status === "ACTIVE" ? t.continue : t.view}</Link></Button>
-          {session.status === "ACTIVE" ? <Button variant="ghost" size="sm" onClick={() => setArchiveTarget(session)} disabled={busy || Boolean(session.pendingCorrectionId)}><Archive className="h-4 w-4" />{t.archive}</Button> : null}
+          {session.status === "ACTIVE" ? <Button variant="ghost" size="sm" onClick={() => { setStatus(null); setArchiveTarget(session); }} disabled={busy || Boolean(session.pendingCorrectionId)}><Archive className="h-4 w-4" />{t.archive}</Button> : null}
+          <Button type="button" variant="destructive" size="sm" aria-label={t.deleteLabel(session.name)} disabled={busy || Boolean(session.pendingCorrectionId)}
+            onClick={() => { setStatus(null); setError(null); setDeleteError(null); setDeleteTarget(session); }}><Trash2 className="h-4 w-4" aria-hidden="true" />{t.delete}</Button>
         </div></TableCell>
       </TableRow>)}</TableBody></Table> : <div className="rounded-md border border-dashed p-6 text-sm text-slate-600">{t.empty}</div>}
     </CardContent></Card>
@@ -101,5 +161,10 @@ export function ReplaySessionsDashboard({ dataset, initialSessions, initialCreat
     </ReplayStartDialog>
     <ConfirmDialog open={Boolean(archiveTarget)} title={t.archiveTitle} description={`${archiveTarget?.name ?? ""}：${t.archiveDescription}`}
       confirmLabel={t.archive} confirmVariant="default" isLoading={busy} onCancel={() => setArchiveTarget(null)} onConfirm={() => void archive()} />
+    <RenameDialog open={Boolean(renameTarget)} title={t.renameTitle} description={t.renameDescription} label={t.name}
+      value={renameDraft} onChange={(value) => { setRenameDraft(value); setRenameError(null); }} maxLength={100}
+      error={renameError} isLoading={busy} confirmLabel={t.saveName} onCancel={() => setRenameTarget(null)} onConfirm={() => void rename()} />
+    <ConfirmDialog open={Boolean(deleteTarget)} title={t.deleteTitle} description={t.deleteDescription(deleteTarget?.name ?? "")}
+      confirmLabel={t.delete} isLoading={busy} error={deleteError} onCancel={() => setDeleteTarget(null)} onConfirm={() => void remove()} />
   </div>;
 }

@@ -33,8 +33,7 @@ async function handleGET(_request: Request, context: RouteContext) {
       journalSession: { archivedAt: session.archivedAt },
     }));
     const scope = getReplayScope();
-    const projection = scope ? await prisma.replayProjection.findUniqueOrThrow({ where: { id: scope.projectionId } }) : null;
-    const caption = scope ? `${session.name} · ${scope.mode === "TRAINING" ? copy.replaySessions.training : copy.replaySessions.liveReplay} · ${copy.replaySessions.versionLabel(projection!.generation, projection!.status === "CURRENT")} · ${copy.replaySessions.source}` : undefined;
+    const caption = scope ? `${session.name} · ${scope.mode === "TRAINING" ? copy.replaySessions.training : copy.replaySessions.liveReplay} · ${copy.replaySessions.source}` : undefined;
     const workbook = await createReplayJournalExcel(entries, caption);
     const filename = replayJournalExcelFilename(session.name, session.id);
     const encodedFilename = encodeURIComponent(filename).replace(/[!'()*]/g, (character) => (

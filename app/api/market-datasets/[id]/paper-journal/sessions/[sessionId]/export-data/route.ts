@@ -28,7 +28,7 @@ async function handleGET(request: Request, context: { params: Promise<{ id: stri
   const all = records.session.entries.map((e) => serializeReplayJournalEntry({ ...e, journalSession: { archivedAt: records.session!.archivedAt } }));
   const entries = all.filter(compiled.test);
   const snapshot: PdfSnapshot = {
-    session: { id: records.session.id, name: getReplayScope() ? `${records.session.name} · ${getReplayScope()!.mode === "TRAINING" ? copy.replaySessions.training : copy.replaySessions.liveReplay} · ${copy.replaySessions.versionLabel(records.projection!.generation, records.projection!.status === "CURRENT")} · ${copy.replaySessions.source}` : records.session.name,
+    session: { id: records.session.id, name: getReplayScope() ? `${records.session.name} · ${getReplayScope()!.mode === "TRAINING" ? copy.replaySessions.training : copy.replaySessions.liveReplay} · ${copy.replaySessions.source}` : records.session.name,
       createdAt: records.session.createdAt.toISOString(), totalCount: all.length },
     dataset: serializeMarketDataset({ ...records.dataset, progress: null }),
     entries, summary: calculateReplayJournalSummary(entries), filters,

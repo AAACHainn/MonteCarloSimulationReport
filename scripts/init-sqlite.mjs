@@ -673,6 +673,12 @@ try {
     const reviewMigration = readFileSync(new URL("../prisma/migrations/20261013150000_preserve_replay_review_constraint/migration.sql", import.meta.url), "utf8");
     await prisma.$transaction(reviewMigration.replace(/^\s*--.*$/gm, "").split(";").map((s) => s.trim()).filter(Boolean).map((statement) => prisma.$executeRawUnsafe(statement)));
   }
+  const resultColumns = await prisma.$queryRawUnsafe('PRAGMA table_info("ReplayProjection")');
+  if (resultColumns.some((column) => column.name === "generation")) {
+    const resultMigration = readFileSync(new URL("../prisma/migrations/20261014120000_keep_current_replay_result/migration.sql", import.meta.url), "utf8");
+    await prisma.$transaction(resultMigration.replace(/^\s*--.*$/gm, "").split(";").map((s) => s.trim()).filter(Boolean).map((statement) => prisma.$executeRawUnsafe(statement)), { timeout: 120_000 });
+  }
+  await prisma.$executeRawUnsafe('CREATE INDEX IF NOT EXISTS "ReplayProjectionCommand_commandId_idx" ON "ReplayProjectionCommand"("commandId")');
 } finally {
   await prisma.$disconnect();
 }

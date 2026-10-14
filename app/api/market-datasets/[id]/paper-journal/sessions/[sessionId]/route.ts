@@ -1,5 +1,5 @@
 import { withReplaySessionRoute, journalScopeWhere, getReplayScope, assertReplayWritable, markReplayMutation } from '@/lib/replay-sessions/scope';
-import { archiveReplaySession } from '@/lib/replay-sessions/service';
+import { deleteReplaySession, deleteReplaySessionSchema } from '@/lib/replay-sessions/service';
 import { NextResponse } from "next/server";
 import { prisma } from "@/lib/db";
 import { copy } from "@/lib/i18n";
@@ -30,14 +30,16 @@ async function handlePATCH(request: Request, context: RouteContext) {
   return NextResponse.json(updated);
 }
 
-async function handleDELETE(_request: Request, context: RouteContext) {
+async function handleDELETE(request: Request, context: RouteContext) {
   const { id, sessionId } = await context.params;
+  const parsed = deleteReplaySessionSchema.safeParse(await request.json().catch(() => null));
+  if (!parsed.success) return NextResponse.json({ error: copy.replaySessions.deleteInvalid }, { status: 400 });
   const session = await prisma.replayJournalSession.findFirst({ where: { id: sessionId, datasetId: id, ...journalScopeWhere() } });
   if (!session) return NextResponse.json({ error: copy.paperTrading.journalNotFound }, { status: 404 });
-  await prisma.$transaction((tx) => archiveReplaySession(tx));
+  await prisma.$transaction((tx) => deleteReplaySession(tx, parsed.data.expectedVersion));
   return NextResponse.json({ ok: true });
 }
 
 export const PATCH = withReplaySessionRoute(handlePATCH, { write: true, annotation: false });
 
-export const DELETE = withReplaySessionRoute(handleDELETE, { write: true, annotation: false });
+export const DELETE = withReplaySessionRoute(handleDELETE, { write: true, annotation: true });

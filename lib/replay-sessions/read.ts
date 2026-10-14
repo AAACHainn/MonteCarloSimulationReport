@@ -25,16 +25,3 @@ export async function listReplaySessions(datasetId: string): Promise<ReplaySessi
     } : null,
   }));
 }
-
-export async function listReplayProjections(replaySessionId: string) {
-  const projections = await prisma.replayProjection.findMany({ where: { replaySessionId, status: { in: ["CURRENT", "HISTORICAL"] } },
-    orderBy: [{ generation: "desc" }, { createdAt: "desc" }], include: { _count: { select: { entries: true } } } });
-  return projections.map((projection) => ({ id: projection.id, generation: projection.generation, status: projection.status,
-    currentSequence: projection.currentSequence, entryCount: projection._count.entries, createdAt: projection.createdAt.toISOString() }));
-}
-export async function replaySessionView(session: ReplaySessionSummary, projectionId: string) {
-  const projection = await prisma.replayProjection.findFirst({ where: { id: projectionId, replaySessionId: session.id, status: { in: ["CURRENT", "HISTORICAL"] } }, include: { _count: { select: { entries: true } } } });
-  if (!projection) return null;
-  return { ...session, activeProjectionId: projection.id, status: "ARCHIVED" as const, entryCount: projection._count.entries,
-    progress: session.progress ? { ...session.progress, currentSequence: projection.currentSequence, generation: projection.generation } : null };
-}
