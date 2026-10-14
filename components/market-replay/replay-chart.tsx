@@ -84,6 +84,7 @@ import { isReplayDrawingDeleteShortcut, isReplayShortcutInputTarget } from "@/li
 import { chartRewindTarget, type ChartRewindRange, type ChartRewindTarget } from "@/lib/market-replay/chart-rewind";
 
 type DraftOrder = {
+  id: string;
   side: PaperSide;
   type: "LIMIT" | "STOP";
   entryPrice: number;
@@ -244,7 +245,7 @@ export function ReplayChart({
   candleCountdownEnabled = false, playbackActive = false, currentSourceTimestamp = null, sourceIntervalSeconds,
   readOnly = false,
   paperBusy, paperError, onSubmitOrder, onOrderPriceChange,
-  onCancelOrder, onClosePosition, onDraftActiveChange, onOpenPaperAccount, onVisibleSequenceRangeChange,
+  onCancelOrder, onClosePosition, onDraftActiveChange, onDraftIdentityChange, entryCheckOpen = false, onOpenPaperAccount, onVisibleSequenceRangeChange,
   onRewindToBar, rewindRange,
 }: {
   datasetId: string;
@@ -290,11 +291,13 @@ export function ReplayChart({
   readOnly?: boolean;
   paperBusy: boolean;
   paperError: string | null;
-  onSubmitOrder: (order: { side: PaperSide; type: "LIMIT" | "STOP"; quantity: number; riskAmount: number; price: number; stopLoss: number; takeProfit: number }) => Promise<boolean | OrderSubmitResult>;
+  onSubmitOrder: (order: { side: PaperSide; type: "LIMIT" | "STOP"; quantity: number; riskAmount: number; price: number; stopLoss: number; takeProfit: number }, draftId?: string) => Promise<boolean | OrderSubmitResult>;
   onOrderPriceChange: (orderId: string, update: OrderUpdate) => Promise<boolean>;
   onCancelOrder: (orderId: string) => Promise<boolean>;
   onClosePosition: () => Promise<boolean>;
   onDraftActiveChange: (active: boolean) => void;
+  onDraftIdentityChange?: (draftId: string | null) => void;
+  entryCheckOpen?: boolean;
   onOpenPaperAccount: () => void;
   onVisibleSequenceRangeChange?: (range: ReplayVisibleSequenceRange) => void;
   onRewindToBar?: (target: ChartRewindTarget) => void;
@@ -547,6 +550,11 @@ export function ReplayChart({
   useEffect(() => {
     onDraftActiveChange(Boolean(draft));
   }, [draft, onDraftActiveChange]);
+
+  const draftId = draft?.id ?? null;
+  useEffect(() => {
+    onDraftIdentityChange?.(draftId);
+  }, [draftId, onDraftIdentityChange]);
 
   useEffect(() => {
     if (paperSessionId === null && draft !== null) {
@@ -1554,6 +1562,7 @@ export function ReplayChart({
     if (!container || !interaction || !series) return;
     let dragging: { target: LineTarget; originalPrice: number; previewPrice: number } | null = null;
     const nearestLine = (y: number) => [...lineTargetsRef.current.values()]
+      .filter((target) => target.kind !== "draft" || (!entryCheckOpen && !paperBusy))
       .map((target) => ({ target, coordinate: series.priceToCoordinate(target.price) }))
       .filter((item) => item.coordinate !== null)
       .sort((a, b) => Math.abs(Number(a.coordinate) - y) - Math.abs(Number(b.coordinate) - y))[0];
@@ -1563,6 +1572,7 @@ export function ReplayChart({
       const y = event.clientY - container.getBoundingClientRect().top;
       const dragKey = (event.target as HTMLElement | null)?.closest<HTMLElement>("[data-line-drag-key]")?.dataset.lineDragKey;
       const directTarget = dragKey ? lineTargetsRef.current.get(dragKey) : undefined;
+      if (directTarget?.kind === "draft" && (entryCheckOpen || paperBusy)) return;
       const candidate = directTarget ? { target: directTarget, coordinate: series.priceToCoordinate(directTarget.price) } : nearestLine(y);
       if (!candidate || candidate.coordinate === null || (!directTarget && Math.abs(Number(candidate.coordinate) - y) > 8)) return;
       event.preventDefault(); setChartCursor("ns-resize"); setContextMenu(null);
@@ -1620,7 +1630,7 @@ export function ReplayChart({
       interaction.removeEventListener("pointerleave", leave); window.removeEventListener("keydown", key);
       setChartCursor("");
     };
-  }, [moveDraftLine, priceTickSize, setChartCursor, syncLineActionCoordinates]);
+  }, [entryCheckOpen, paperBusy, moveDraftLine, priceTickSize, setChartCursor, syncLineActionCoordinates]);
 
   function openContextMenu(event: ReactMouseEvent<HTMLDivElement>) {
     event.preventDefault();
@@ -1659,7 +1669,7 @@ export function ReplayChart({
   }
 
   function createDraft(side: PaperSide, type: "LIMIT" | "STOP") {
-    if (!paperSnapshot || !latest || !contextMenu || contextMenu.price <= 0) return;
+    if (entryCheckOpen || paperBusy || !paperSnapshot || !latest || !contextMenu || contextMenu.price <= 0) return;
     const rawDistance = latest.high > latest.low && Number.isFinite(latest.high - latest.low)
       ? latest.high - latest.low
       : contextMenu.price * 0.01;
@@ -1668,6 +1678,7 @@ export function ReplayChart({
     const stopLoss = snapPriceToTick(side === "BUY" ? contextMenu.price - distance : contextMenu.price + distance, priceTickSize);
     const targetR = defaultTargetR > 0 ? defaultTargetR : 2;
     setDraft({
+      id: crypto.randomUUID(),
       side, type, entryPrice: contextMenu.price, stopLoss,
       takeProfit: snapPriceToTick(targetPriceForR(side, contextMenu.price, stopLoss, targetR), priceTickSize),
       riskAmount, targetR, tpMode: "LINKED",
@@ -1731,12 +1742,12 @@ export function ReplayChart({
   }
 
   async function submitDraft() {
-    if (!draft || !draftSizing?.ok) return;
+    if (entryCheckOpen || paperBusy || !draft || !draftSizing?.ok) return;
     const success = await onSubmitOrder({
       side: draft.side, type: draft.type, quantity: draftSizing.value.quantity,
       riskAmount: draft.riskAmount, price: draft.entryPrice,
       stopLoss: draft.stopLoss, takeProfit: draft.takeProfit,
-    });
+    }, draft.id);
     if (success === true || success === "SUCCESS") {
       setDraft(null); setDraftError(null); setOrderTicketPosition(null);
     } else if (success !== "CANCELLED") setDraftError(copy.paperTrading.draftSubmitFailed);
@@ -1941,7 +1952,7 @@ export function ReplayChart({
             ) : null}
           </div>
           {onRewindToBar && contextMenu.rewindTarget ? <div className="mb-1 border-b pb-1">
-            <Button type="button" role="menuitem" variant="ghost" data-testid="context-rewind-to-bar" disabled={paperBusy}
+            <Button type="button" role="menuitem" variant="ghost" data-testid="context-rewind-to-bar" disabled={paperBusy || entryCheckOpen}
               className="w-full justify-start px-2 text-left text-slate-700" title={paperBusy ? copy.replaySessions.rewindWait : undefined}
               onClick={() => { const target = contextMenu.rewindTarget; setContextMenu(null); if (target) onRewindToBar(target); }}>
               <Undo2 className="h-4 w-4" aria-hidden="true" />{copy.replaySessions.rewindToBar}
@@ -1961,12 +1972,12 @@ export function ReplayChart({
           ) : !latest || currentPrice === null ? (
             <div className="flex gap-2 p-2 text-xs leading-5 text-amber-800"><ShieldAlert className="mt-0.5 h-4 w-4 shrink-0" />{copy.paperTrading.contextNoBar}</div>
           ) : contextEntryOrderTypes ? (
-            <div className="space-y-0.5 pt-1">
+            <fieldset disabled={entryCheckOpen || paperBusy} className="space-y-0.5 pt-1">
               {contextEntryOrderTypes.buy === "LIMIT" ? <button type="button" role="menuitem" data-testid="context-buy-limit" className="flex w-full items-center rounded-md px-2 py-2 text-left text-sm font-medium text-blue-700 hover:bg-blue-50" onClick={() => createDraft("BUY", "LIMIT")}>{copy.paperTrading.buyLimit}</button> : null}
               {contextEntryOrderTypes.sell === "LIMIT" ? <button type="button" role="menuitem" data-testid="context-sell-limit" className="flex w-full items-center rounded-md px-2 py-2 text-left text-sm font-medium text-orange-700 hover:bg-orange-50" onClick={() => createDraft("SELL", "LIMIT")}>{copy.paperTrading.sellLimit}</button> : null}
               {contextEntryOrderTypes.sell === "STOP" ? <button type="button" role="menuitem" data-testid="context-sell-stop" className="flex w-full items-center rounded-md px-2 py-2 text-left text-sm font-medium text-red-700 hover:bg-red-50" onClick={() => createDraft("SELL", "STOP")}>{copy.paperTrading.sellStop}</button> : null}
               {contextEntryOrderTypes.buy === "STOP" ? <button type="button" role="menuitem" data-testid="context-buy-stop" className="flex w-full items-center rounded-md px-2 py-2 text-left text-sm font-medium text-blue-700 hover:bg-blue-50" onClick={() => createDraft("BUY", "STOP")}>{copy.paperTrading.buyStop}</button> : null}
-            </div>
+            </fieldset>
           ) : null}
         </div>
       ) : null}
@@ -2022,9 +2033,9 @@ export function ReplayChart({
               </div>
               <p className="mt-1 text-[11px] text-slate-500">{copy.paperTrading.draftDescription}</p>
             </div>
-            <Button type="button" variant="ghost" size="icon" className="-mr-1 -mt-1 h-7 w-7 shrink-0 cursor-pointer" aria-label={copy.paperTrading.cancelDraft} onClick={() => { setDraft(null); setDraftError(null); setOrderTicketPosition(null); }}><X className="h-4 w-4" /></Button>
+            <Button type="button" variant="ghost" size="icon" disabled={entryCheckOpen || paperBusy} className="-mr-1 -mt-1 h-7 w-7 shrink-0 cursor-pointer" aria-label={copy.paperTrading.cancelDraft} onClick={() => { setDraft(null); setDraftError(null); setOrderTicketPosition(null); }}><X className="h-4 w-4" /></Button>
           </div>
-          <div className="space-y-3 p-3">
+          <fieldset disabled={entryCheckOpen || paperBusy} className="space-y-3 p-3">
             <div className="grid grid-cols-3 gap-2">
               <div><Label htmlFor="draft-entry" className="text-[10px] text-blue-700">ENTRY · {orderTypeLabel(draft.type)}</Label><Input id="draft-entry" data-testid="draft-entry" type="number" step={priceTickSize} className="mt-1 h-8 px-2 font-mono text-xs" value={draft.entryPrice} onChange={(event) => setDraftPrice("entryPrice", Number(event.target.value))} /></div>
               <div><Label htmlFor="draft-sl" className="text-[10px] text-red-700">SL</Label><Input id="draft-sl" data-testid="draft-sl" type="number" step={priceTickSize} className="mt-1 h-8 px-2 font-mono text-xs" value={draft.stopLoss} onChange={(event) => setDraftPrice("stopLoss", Number(event.target.value))} /></div>
@@ -2053,7 +2064,7 @@ export function ReplayChart({
               <Button type="button" variant="outline" size="sm" disabled={paperBusy} onClick={() => { setDraft(null); setDraftError(null); setOrderTicketPosition(null); }}>{copy.paperTrading.cancelDraft}</Button>
               <Button type="button" size="sm" data-testid="confirm-risk-order" disabled={paperBusy || !draftSizing?.ok} onClick={() => void submitDraft()}>{paperBusy ? <Loader2 className="h-4 w-4 animate-spin" /> : null}{paperBusy ? copy.paperTrading.submitting : paperSnapshot.session.trainingGate?.active && !isClosingOrder(paperSnapshot.session.netQuantity, draft.side, draftSizing?.ok ? draftSizing.value.quantity : 0) ? copy.trainingGate.selectStrategy : copy.paperTrading.confirmDraft}</Button>
             </div>
-          </div>
+          </fieldset>
         </div>
       ) : null}
     </div>

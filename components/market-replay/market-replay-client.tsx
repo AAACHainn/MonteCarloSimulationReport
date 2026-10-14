@@ -11,6 +11,7 @@ import Link from "next/link";
 import { TrainingGateConfigDialog, EntryCheckDialog } from "./training-gate-dialogs";
 import { defaultTrainingGate, isClosingOrder, type TrainingGateState } from "@/lib/paper-trading/training-gate";
 import type { GateApprovalInput, PaperOrderInput, OrderSubmitResult } from "@/lib/paper-trading/types";
+import { retainEntryCheckDraft, type EntryCheckDraft } from "@/lib/paper-trading/entry-check-draft";
 import { startTransition, useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { Breadcrumbs } from "@/components/breadcrumbs";
 import { BookOpen, ListTree, Loader2, Palette, RotateCcw, Ruler, Settings2, Trash2, TrendingUp, WalletCards, X } from "lucide-react";
@@ -298,7 +299,10 @@ export function MarketReplayClient({ dataset: initialDataset, initialJournalFocu
   const [gateBusy, setGateBusy] = useState(false);
   const [gateError, setGateError] = useState<string | null>(null);
   const [gateNotice, setGateNotice] = useState<string | null>(null);
-  const [checkingOrder, setCheckingOrder] = useState<PaperOrderInput | null>(null);
+  const [checkingOrder, setCheckingOrder] = useState<{ order: PaperOrderInput; draftId: string } | null>(null);
+  const [entryCheckDraft, setEntryCheckDraft] = useState<EntryCheckDraft | null>(null);
+  const chartDraftIdRef = useRef<string | null>(null);
+  const preparingEntryCheckRef = useRef(false);
   const checkResolverRef = useRef<((result: OrderSubmitResult) => void) | null>(null);
   const gateSeenRef = useRef<number | null>(null);
   useEffect(() => () => { checkResolverRef.current?.("CANCELLED"); }, []);
@@ -1814,7 +1818,7 @@ export function MarketReplayClient({ dataset: initialDataset, initialJournalFocu
   }, [latestReplayRef, loadWindow]);
 
   const togglePlayback = useCallback(async () => {
-    if (retrySyncBodyRef.current || correctionPending || dateForwarding || dateDialogOpen || dateDialogOpening || viewChangingRef.current) return;
+    if (checkingOrder || preparingEntryCheckRef.current || retrySyncBodyRef.current || correctionPending || dateForwarding || dateDialogOpen || dateDialogOpening || viewChangingRef.current) return;
     if ((journalReview || chartWindowDetachedRef.current) && !await returnToLiveWindow()) return;
     const current = latestReplayRef.current;
     if (!current || current.status === "finished") return;
@@ -1845,10 +1849,10 @@ export function MarketReplayClient({ dataset: initialDataset, initialJournalFocu
         }
       });
     }
-  }, [autoPausePlayback, flushVisible, journalReview, lastSyncStartedAtRef, latestReplayRef, pausePlayback, playPlayback, queueSave, recoverReplay, restorePlayback, returnToLiveWindow, suspendPlayback, correctionPending, dateDialogOpen, dateDialogOpening, dateForwarding]);
+  }, [checkingOrder, autoPausePlayback, flushVisible, journalReview, lastSyncStartedAtRef, latestReplayRef, pausePlayback, playPlayback, queueSave, recoverReplay, restorePlayback, returnToLiveWindow, suspendPlayback, correctionPending, dateDialogOpen, dateDialogOpening, dateForwarding]);
 
   const revealNextBar = useCallback(async (canStart: () => boolean = () => true) => {
-    if (!canStart() || retrySyncBodyRef.current || correctionPending || dateForwarding || dateDialogOpen || dateDialogOpening || viewChangingRef.current) return;
+    if (!canStart() || checkingOrder || preparingEntryCheckRef.current || retrySyncBodyRef.current || correctionPending || dateForwarding || dateDialogOpen || dateDialogOpening || viewChangingRef.current) return;
     if ((journalReview || chartWindowDetachedRef.current) && !await returnToLiveWindow()) return;
     const current = latestReplayRef.current;
     if (!current || current.status === "playing" || current.status === "finished") return;
@@ -1901,7 +1905,7 @@ export function MarketReplayClient({ dataset: initialDataset, initialJournalFocu
         if (processed < inBucket.length || inBucket.length < candidates.length) break;
       }
     }, canStart);
-  }, [dataset.sourceIntervalSeconds, dataset.startTime, displayMarketSession, fastForwardToNextVisibleBar, flushVisible, journalReview, latestReplayRef, marketCache, marketSession, paperMutationChainRef, processLocalBars, returnToLiveWindow, correctionPending, dateDialogOpen, dateDialogOpening, dateForwarding]);
+  }, [checkingOrder, dataset.sourceIntervalSeconds, dataset.startTime, displayMarketSession, fastForwardToNextVisibleBar, flushVisible, journalReview, latestReplayRef, marketCache, marketSession, paperMutationChainRef, processLocalBars, returnToLiveWindow, correctionPending, dateDialogOpen, dateDialogOpening, dateForwarding]);
 
   const enterJournalReview = useCallback(async (focus: JournalFocus) => {
     const current = latestReplayRef.current;
@@ -2404,14 +2408,26 @@ export function MarketReplayClient({ dataset: initialDataset, initialJournalFocu
     }));
   }
 
-  async function submitPaperOrder(order: PaperOrderInput): Promise<OrderSubmitResult> {
+  const onChartDraftChange = useCallback((draftId: string | null) => {
+    chartDraftIdRef.current = draftId;
+    setEntryCheckDraft((current) => current && current.draftId !== draftId ? null : current);
+  }, []);
+
+  async function submitPaperOrder(order: PaperOrderInput, draftId?: string): Promise<OrderSubmitResult> {
     const snapshot = paperSnapshotRef.current;
-    if (!snapshot || checkingOrder || checkResolverRef.current) return "CANCELLED";
+    if (!snapshot || checkingOrder || checkResolverRef.current || preparingEntryCheckRef.current) return "CANCELLED";
     const closing = order.reduceOnly || isClosingOrder(snapshot.session.netQuantity, order.side, order.quantity);
     if (replaySession?.mode === "TRAINING" && snapshot.session.trainingGate?.active && !closing) {
-      if (!await prepareSessionSwitch()) return "FAILED";
+      const fromChart = draftId !== undefined && chartDraftIdRef.current === draftId;
+      preparingEntryCheckRef.current = true;
+      try {
+        if (!await prepareSessionSwitch()) return "FAILED";
+        if (fromChart && chartDraftIdRef.current !== draftId) return "CANCELLED";
+      } finally { preparingEntryCheckRef.current = false; }
       setPaperError(null);
-      return new Promise<OrderSubmitResult>((resolve) => { checkResolverRef.current = resolve; setCheckingOrder({ ...order }); });
+      const checkDraftId = draftId ?? crypto.randomUUID();
+      setEntryCheckDraft((current) => retainEntryCheckDraft(current, checkDraftId));
+      return new Promise<OrderSubmitResult>((resolve) => { checkResolverRef.current = resolve; setCheckingOrder({ order: { ...order }, draftId: checkDraftId }); });
     }
     return await sendPaperOrder(order) ? "SUCCESS" : "FAILED";
   }
@@ -2423,9 +2439,10 @@ export function MarketReplayClient({ dataset: initialDataset, initialJournalFocu
   }
   async function confirmEntryCheck(approval: GateApprovalInput) {
     if (!checkingOrder || paperBusy) return false;
-    const success = await sendPaperOrder(checkingOrder, approval);
+    const success = await sendPaperOrder(checkingOrder.order, approval);
     if (success) {
       setCheckingOrder(null);
+      setEntryCheckDraft(null);
       const resolve = checkResolverRef.current; checkResolverRef.current = null; resolve?.("SUCCESS");
     }
     return success;
@@ -2526,12 +2543,12 @@ export function MarketReplayClient({ dataset: initialDataset, initialJournalFocu
         <div className="mt-1 flex flex-wrap items-center gap-4">
           <h1 className="shrink-0 text-xl font-semibold tracking-tight text-slate-950">{copy.marketReplay.replayTitle(dataset.symbol, dataset.timeframe)}</h1>
           <p className="min-w-0 truncate text-xs text-slate-500">{dataset.name} · {dataset.timezone}</p>
-          <div className="ml-auto flex min-w-0 flex-wrap items-center gap-2">{gateButton}<ReplaySessionSwitch beforeSwitch={prepareSessionSwitch} disabled={isLoading || Boolean(loadError) || !replay} /></div>
+          <div className="ml-auto flex min-w-0 flex-wrap items-center gap-2">{gateButton}<ReplaySessionSwitch beforeSwitch={prepareSessionSwitch} disabled={isLoading || Boolean(loadError) || !replay || Boolean(checkingOrder)} /></div>
         </div>
       </header> : null}
       {!webFullscreen ? gateNoticeBlock : null}
       {gateDialogOpen ? <TrainingGateConfigDialog gate={currentGate} busy={gateBusy} error={gateError} onClose={() => setGateDialogOpen(false)} onSave={saveGateConfig} /> : null}
-      {checkingOrder ? <EntryCheckDialog order={checkingOrder} busy={paperBusy} error={paperError} onClose={cancelEntryCheck} onConfirm={confirmEntryCheck} /> : null}
+      {checkingOrder ? <EntryCheckDialog order={checkingOrder.order} approval={entryCheckDraft?.draftId === checkingOrder.draftId ? entryCheckDraft.approval : null} onApprovalChange={(approval) => setEntryCheckDraft((current) => current?.draftId === checkingOrder.draftId ? { ...current, approval } : current)} busy={paperBusy} error={paperError} onClose={cancelEntryCheck} onConfirm={confirmEntryCheck} /> : null}
       {content}
     </div>;
   }
@@ -2784,6 +2801,8 @@ export function MarketReplayClient({ dataset: initialDataset, initialJournalFocu
             onCancelOrder={cancelPaperOrder}
             onClosePosition={closePaperPosition}
             onDraftActiveChange={setDraftActive}
+            onDraftIdentityChange={onChartDraftChange}
+            entryCheckOpen={Boolean(checkingOrder)}
             onOpenPaperAccount={() => setSettingsDialog("paper")}
             onVisibleSequenceRangeChange={handleVisibleSequenceRange}
             rewindRange={{ minSequence: replay.startSequence - 1, maxSequence: replay.currentSequence }}
@@ -2862,7 +2881,7 @@ export function MarketReplayClient({ dataset: initialDataset, initialJournalFocu
           dateForwarding={dateForwarding}
           dateForwardStatus={forwardProgress ? copy.replaySessions.forwardProgress(forwardProgress.current, forwardProgress.target) : copy.replaySessions.forwarding}
           onStopDateForward={() => { cancelForwardRef.current = true; }}
-          correctionPending={correctionPending || dateForwarding || dateDialogOpen || dateDialogOpening || switchSyncFailed || reviewReturning}
+          correctionPending={correctionPending || dateForwarding || dateDialogOpen || dateDialogOpening || switchSyncFailed || reviewReturning || Boolean(checkingOrder)}
           replay={replay}
           sourceIntervalSeconds={dataset.sourceIntervalSeconds}
           paperSnapshot={paperSnapshot}
@@ -2981,7 +3000,7 @@ export function MarketReplayClient({ dataset: initialDataset, initialJournalFocu
         onAddEma={addEma}
         emaError={emaError}
       />
-      <Dialog open={settingsDialog === "paper"} title={copy.marketReplay.accountSettings} description={copy.marketReplay.accountSettingsDescription} className="max-w-3xl" onClose={() => setSettingsDialog(null)}>
+      <Dialog open={settingsDialog === "paper" && !checkingOrder} keepMounted={settingsDialog === "paper"} title={copy.marketReplay.accountSettings} description={copy.marketReplay.accountSettingsDescription} className="max-w-3xl" onClose={() => setSettingsDialog(null)}>
         <div className="space-y-4">
           <PaperAccountStrip snapshot={paperSnapshot} />
           {journalReview ? null : <PaperTradingPanel priceTickSize={dataset.priceTickSize} snapshot={paperSnapshot} currentBar={currentBar} busy={paperBusy || correctionPending || dateForwarding} error={paperError} onCreate={createPaperAccount} onSubmit={submitPaperOrder} onCancel={cancelPaperOrder} onUpdate={updatePaperOrder} onCancelScope={cancelPaperScope} onClear={() => requestConfirmation("paper-clear")} />}

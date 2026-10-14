@@ -62,9 +62,11 @@ export const DialogResizeFrame = forwardRef<HTMLElement, {
   children: ReactNode;
   titleId: string;
   descriptionId?: string;
+  modal?: boolean;
+  resizable?: boolean;
   widthStorageKey?: string;
   heightStorageKey?: string;
-}>(({ children, titleId, descriptionId, widthStorageKey, heightStorageKey }, forwardedRef) => {
+}>(({ children, titleId, descriptionId, modal = true, resizable = true, widthStorageKey, heightStorageKey }, forwardedRef) => {
   const frameRef = useRef<HTMLDivElement>(null);
   const dragRef = useRef<ResizeDrag | null>(null);
   const explicitBoundsRef = useRef<DialogBounds | null>(null);
@@ -229,11 +231,11 @@ export const DialogResizeFrame = forwardRef<HTMLElement, {
       else if (forwardedRef) forwardedRef.current = element;
     }}
     role="dialog"
-    aria-modal="true"
+    aria-modal={modal}
     aria-labelledby={titleId}
     aria-describedby={descriptionId}
     tabIndex={-1}
-    className={cn("relative w-full max-w-2xl", interacting && "select-none")}
+    className={cn("pointer-events-auto relative w-full max-w-2xl", interacting && "select-none")}
     style={style}
     onMouseDown={(event) => event.stopPropagation()}
     onPointerDownCapture={startMove}
@@ -244,7 +246,7 @@ export const DialogResizeFrame = forwardRef<HTMLElement, {
     onKeyDown={moveWithKeyboard}
   >
     {children}
-    {handles.map(({ edge, className }) => {
+    {resizable ? handles.map(({ edge, className }) => {
       const isEdge = edge.length === 1;
       const horizontal = edge === "n" || edge === "s";
       return <div
@@ -262,7 +264,7 @@ export const DialogResizeFrame = forwardRef<HTMLElement, {
         onPointerDown={(event) => startDrag(edge, event)}
         onKeyDown={isEdge ? (event) => resizeWithKeyboard(edge, event) : undefined}
       />;
-    })}
+    }) : null}
   </div>;
 });
 DialogResizeFrame.displayName = "DialogResizeFrame";

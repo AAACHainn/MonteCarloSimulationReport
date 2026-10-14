@@ -14,7 +14,7 @@ export const OptionPopoverContent = React.forwardRef<
     sideOffset={sideOffset}
     collisionPadding={collisionPadding}
     className={cn(
-      "z-[200] flex max-h-[min(28rem,var(--radix-popover-content-available-height))] w-[28rem] max-w-[calc(100vw-2rem)] flex-col overflow-hidden rounded-md border bg-white p-2 text-slate-950 shadow-lg",
+      "z-[200] flex max-h-[var(--radix-popover-content-available-height)] w-[28rem] max-w-[calc(100vw-2rem)] flex-col overflow-hidden rounded-md border bg-white p-2 text-slate-950 shadow-lg",
       className,
     )}
     {...props}

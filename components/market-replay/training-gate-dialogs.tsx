@@ -1,5 +1,5 @@
 "use client";
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import Link from "next/link";
 import { Loader2 } from "lucide-react";
 import { Dialog } from "@/components/ui/dialog";
@@ -13,6 +13,7 @@ import { formatNumber } from "@/lib/format";
 import type { TrainingGateState } from "@/lib/paper-trading/training-gate";
 import type { GateApprovalInput, PaperOrderInput } from "@/lib/paper-trading/types";
 import type { ManagedStrategy } from "@/components/master-data/strategy-manager";
+import { reconcileEntryCheckApproval } from "@/lib/paper-trading/entry-check-draft";
 
 export function TrainingGateConfigDialog({ gate, busy, error, onClose, onSave }: {
   gate: TrainingGateState; busy: boolean; error: string | null; onClose: () => void;
@@ -35,13 +36,16 @@ export function TrainingGateConfigDialog({ gate, busy, error, onClose, onSave }:
   </Dialog>;
 }
 
-export function EntryCheckDialog({ order, busy, error, onClose, onConfirm }: {
+export function EntryCheckDialog({ order, approval, onApprovalChange, busy, error, onClose, onConfirm }: {
   order: PaperOrderInput; busy: boolean; error: string | null; onClose: () => void;
+  approval: GateApprovalInput | null; onApprovalChange: (approval: GateApprovalInput | null) => void;
   onConfirm: (approval: GateApprovalInput) => Promise<boolean>;
 }) {
   const [strategies, setStrategies] = useState<ManagedStrategy[]>([]);
-  const [selectedId, setSelectedId] = useState("");
-  const [checked, setChecked] = useState<string[]>([]);
+  const approvalRef = useRef(approval);
+  const onApprovalChangeRef = useRef(onApprovalChange);
+  approvalRef.current = approval;
+  onApprovalChangeRef.current = onApprovalChange;
   const [loading, setLoading] = useState(true);
   const [loadError, setLoadError] = useState<string | null>(null);
   const load = useCallback(async (signal?: AbortSignal) => {
@@ -51,22 +55,24 @@ export function EntryCheckDialog({ order, busy, error, onClose, onConfirm }: {
       const data = await response.json();
       if (!response.ok) throw new Error(copy.trainingGate.failed);
       if (signal?.aborted) return;
-      setStrategies(data.filter((option: ManagedStrategy & { type: string }) => option.type === "STRATEGY" && option.active && option.checklist.length));
-      setSelectedId(""); setChecked([]);
+      const available = data.filter((option: ManagedStrategy & { type: string }) => option.type === "STRATEGY" && option.active && option.checklist.length);
+      setStrategies(available);
+      onApprovalChangeRef.current(reconcileEntryCheckApproval(approvalRef.current, available));
     } catch (error) { if (!signal?.aborted) setLoadError(error instanceof Error ? error.message : copy.trainingGate.failed); }
     finally { if (!signal?.aborted) setLoading(false); }
   }, []);
   useEffect(() => { const controller = new AbortController(); void load(controller.signal); return () => controller.abort(); }, [load]);
   useEffect(() => { if (error !== copy.trainingGate.checklistChanged && error !== copy.trainingGate.invalidStrategy) return; const controller = new AbortController(); void load(controller.signal); return () => controller.abort(); }, [error, load]);
-  const selected = strategies.find((strategy) => strategy.id === selectedId);
-  const ready = selected && selected.checklist.length > 0 && checked.length === selected.checklist.length;
+  const selected = strategies.find((strategy) => strategy.id === approval?.strategyId);
+  const checked = approval?.checkedItemIds ?? [];
+  const ready = selected && selected.checklistVersion === approval?.checklistVersion && selected.checklist.length > 0 && selected.checklist.every((item) => checked.includes(item.id));
   const close = () => { if (!busy) onClose(); };
-  return <Dialog open title={copy.trainingGate.selectStrategy} description={copy.trainingGate.checkDescription} onClose={close}>
+  return <Dialog open modal={false} movable title={copy.trainingGate.selectStrategy} description={copy.trainingGate.checkDescription} onClose={close}>
     <div className="space-y-4" aria-busy={busy || loading}>
       <section className="rounded-md border bg-slate-50 p-3 text-sm"><h3 className="font-medium">{copy.trainingGate.orderSummary}</h3><p className="mt-2 tabular-nums">{order.side === "BUY" ? copy.paperTrading.buy : copy.paperTrading.sell} · {order.type === "MARKET" ? copy.paperTrading.market : order.type === "LIMIT" ? copy.paperTrading.limit : copy.paperTrading.stop} · {copy.paperTrading.quantity} {formatNumber(order.quantity)}</p><p className="mt-1 tabular-nums">{copy.paperTrading.orderPrice} {order.price == null ? copy.common.dash : formatNumber(order.price)} · {copy.paperTrading.stopLoss} {order.stopLoss == null ? copy.common.dash : formatNumber(order.stopLoss)} · {copy.paperTrading.takeProfit} {order.takeProfit == null ? copy.common.dash : formatNumber(order.takeProfit)}</p></section>
       {loading ? <p role="status" className="flex items-center gap-2 text-sm text-slate-500"><Loader2 className="h-4 w-4 animate-spin" />{copy.trainingGate.loadingStrategies}</p> : loadError ? <div><p role="alert" className="text-sm text-red-600">{loadError}</p><Button variant="outline" onClick={() => void load()}>{copy.trainingGate.retry}</Button></div> : !strategies.length ? <div className="space-y-3 rounded-md border border-dashed p-6"><p className="text-sm text-slate-600">{copy.trainingGate.noStrategies}</p><Button asChild variant="outline"><Link href="/master-data" target="_blank" rel="noopener noreferrer">{copy.trainingGate.configureStrategies}</Link></Button><Button variant="ghost" onClick={() => void load()}>{copy.trainingGate.retry}</Button></div> : <>
-        <div className="space-y-2"><Label htmlFor="gate-strategy">{copy.trainingGate.strategy}</Label><Select value={selectedId} onValueChange={(id) => { setSelectedId(id); setChecked([]); }} disabled={busy}><SelectTrigger id="gate-strategy"><SelectValue placeholder={copy.trainingGate.selectStrategy} /></SelectTrigger><SelectContent>{strategies.map((strategy) => <SelectItem value={strategy.id} key={strategy.id}>{strategy.name}</SelectItem>)}</SelectContent></Select></div>
-        {selected ? <section className="space-y-2"><h3 className="text-sm font-medium">{copy.trainingGate.checklist}</h3>{selected.checklist.map((item) => <CheckboxField key={item.id} disabled={busy} checked={checked.includes(item.id)} onChange={(value) => setChecked((items) => value ? [...items, item.id] : items.filter((id) => id !== item.id))}>{item.text}</CheckboxField>)}<p className="text-xs tabular-nums text-slate-500" role="status">{copy.trainingGate.checked(checked.length, selected.checklist.length)}</p></section> : null}
+        <div className="space-y-2"><Label htmlFor="gate-strategy">{copy.trainingGate.strategy}</Label><Select value={approval?.strategyId ?? ""} onValueChange={(id) => { const strategy = strategies.find((item) => item.id === id); if (strategy && id !== approval?.strategyId) onApprovalChange({ strategyId: id, checklistVersion: strategy.checklistVersion, checkedItemIds: [] }); }} disabled={busy}><SelectTrigger id="gate-strategy"><SelectValue placeholder={copy.trainingGate.selectStrategy} /></SelectTrigger><SelectContent onEscapeKeyDown={(event) => event.stopPropagation()}>{strategies.map((strategy) => <SelectItem value={strategy.id} key={strategy.id}>{strategy.name}</SelectItem>)}</SelectContent></Select></div>
+        {selected ? <section className="space-y-2"><h3 className="text-sm font-medium">{copy.trainingGate.checklist}</h3>{selected.checklist.map((item) => <CheckboxField key={item.id} disabled={busy} checked={checked.includes(item.id)} onChange={(value) => onApprovalChange({ strategyId: selected.id, checklistVersion: selected.checklistVersion, checkedItemIds: value ? [...new Set([...checked, item.id])] : checked.filter((id) => id !== item.id) })}>{item.text}</CheckboxField>)}<p className="text-xs tabular-nums text-slate-500" role="status">{copy.trainingGate.checked(checked.length, selected.checklist.length)}</p></section> : null}
       </>}
       {error ? <p role="alert" className="text-sm text-red-600">{error}</p> : null}
       <div className="flex justify-end gap-2 border-t pt-4"><Button variant="outline" disabled={busy} onClick={close}>{copy.common.cancel}</Button><Button disabled={busy || loading || !ready} onClick={() => { if (selected) void onConfirm({ strategyId: selected.id, checklistVersion: selected.checklistVersion, checkedItemIds: checked }); }}>{busy ? <Loader2 className="h-4 w-4 animate-spin" /> : null}{copy.paperTrading.confirmDraft}</Button></div>

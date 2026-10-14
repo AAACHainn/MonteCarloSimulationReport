@@ -13,13 +13,14 @@ export type SearchableSelectOption = { value: string; label: string; disabled?: 
 
 export function SearchableSelect({
   value, options, onValueChange, placeholder, selectedLabel, searchPlaceholder,
-  ariaLabel, disabled = false, busy = false, className,
+  ariaLabel, disabled = false, busy = false, className, selectedTooltip,
 }: {
   value: string;
   options: SearchableSelectOption[];
   onValueChange: (value: string) => void;
   placeholder: string;
   selectedLabel?: string;
+  selectedTooltip?: string;
   searchPlaceholder: string;
   ariaLabel: string;
   disabled?: boolean;
@@ -31,6 +32,7 @@ export function SearchableSelect({
   const searchRef = useRef<HTMLInputElement>(null);
   const listRef = useRef<HTMLDivElement>(null);
   const listId = useId();
+  const descriptionId = useId();
   const filteredOptions = useMemo(() => filterSelectOptions(options, query), [options, query]);
   const label = selectedLabel ?? options.find((option) => option.value === value)?.label ?? placeholder;
 
@@ -96,7 +98,8 @@ export function SearchableSelect({
         aria-label={ariaLabel}
         aria-busy={busy}
         disabled={disabled}
-        title={label}
+        title={selectedTooltip ?? label}
+        aria-describedby={selectedTooltip ? descriptionId : undefined}
         onKeyDown={(event) => {
           if (event.ctrlKey || event.metaKey || event.altKey || event.shiftKey) return;
           if (event.key === "ArrowDown" || event.key === "ArrowUp") {
@@ -113,6 +116,7 @@ export function SearchableSelect({
         <ChevronDown className="h-4 w-4 shrink-0 text-slate-500" aria-hidden="true" />
       </Button>
     </PopoverPrimitive.Trigger>
+    {selectedTooltip ? <span id={descriptionId} className="sr-only">{selectedTooltip}</span> : null}
     <PopoverPrimitive.Portal>
       <OptionPopoverContent
         onOpenAutoFocus={(event) => { event.preventDefault(); searchRef.current?.focus(); }}

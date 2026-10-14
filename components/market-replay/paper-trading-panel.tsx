@@ -37,7 +37,7 @@ type Props = {
   busy: boolean;
   error: string | null;
   onCreate: (config: { initialCapital: number; currency: string; commissionBps: number; slippageBps: number }) => Promise<boolean>;
-  onSubmit: (order: OrderInput) => Promise<OrderSubmitResult>;
+  onSubmit: (order: OrderInput, draftId?: string) => Promise<OrderSubmitResult>;
   onCancel: (orderId: string) => Promise<boolean>;
   onUpdate: (orderId: string, update: { price?: number; quantity?: number; stopLoss?: number | null; takeProfit?: number | null; riskAmount?: number | null }) => Promise<boolean>;
   onCancelScope: (scope: "ALL" | "BRACKET") => Promise<boolean>;
@@ -112,6 +112,7 @@ export function PaperTradingPanel({ priceTickSize, snapshot, currentBar, busy, e
   const [side, setSide] = useState<PaperSide>("BUY");
   const [type, setType] = useState<PaperOrderType>("MARKET");
   const [inputQuantity, setInputQuantity] = useState(1);
+  const draftIdRef = useRef<string | null>(null);
   if (!snapshot) {
     return (
       <Card className="h-fit">
@@ -138,7 +139,8 @@ export function PaperTradingPanel({ priceTickSize, snapshot, currentBar, busy, e
         <form className="space-y-3" onSubmit={(event) => {
           event.preventDefault(); const data = new FormData(event.currentTarget);
           const price = optionalNumber(data.get("price")); const stopLoss = optionalNumber(data.get("stopLoss")); const takeProfit = optionalNumber(data.get("takeProfit"));
-          void onSubmit({ side, type, quantity: Number(data.get("quantity")), price: price === null ? null : snapPriceToTick(price, priceTickSize), stopLoss: stopLoss === null ? null : snapPriceToTick(stopLoss, priceTickSize), takeProfit: takeProfit === null ? null : snapPriceToTick(takeProfit, priceTickSize) });
+          const draftId = draftIdRef.current ??= crypto.randomUUID();
+          void onSubmit({ side, type, quantity: Number(data.get("quantity")), price: price === null ? null : snapPriceToTick(price, priceTickSize), stopLoss: stopLoss === null ? null : snapPriceToTick(stopLoss, priceTickSize), takeProfit: takeProfit === null ? null : snapPriceToTick(takeProfit, priceTickSize) }, draftId).then((result) => { if (result === "SUCCESS" && draftIdRef.current === draftId) draftIdRef.current = null; });
         }}>
           <div className="grid grid-cols-2 gap-2"><Button type="button" variant={side === "BUY" ? "default" : "outline"} onClick={() => setSide("BUY")} className={side === "BUY" ? "bg-emerald-600 hover:bg-emerald-700" : ""}>{copy.paperTrading.buy}</Button><Button type="button" variant={side === "SELL" ? "destructive" : "outline"} onClick={() => setSide("SELL")}>{copy.paperTrading.sell}</Button></div>
           <div><Label htmlFor="paper-type">{copy.paperTrading.orderType}</Label><Select value={type} onValueChange={(value) => setType(value as PaperOrderType)}><SelectTrigger id="paper-type"><SelectValue /></SelectTrigger><SelectContent><SelectItem value="MARKET">{copy.paperTrading.market}</SelectItem><SelectItem value="LIMIT">{copy.paperTrading.limit}</SelectItem><SelectItem value="STOP">{copy.paperTrading.stop}</SelectItem></SelectContent></Select></div>

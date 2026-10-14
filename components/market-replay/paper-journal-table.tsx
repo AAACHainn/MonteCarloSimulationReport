@@ -49,7 +49,9 @@ import {
   type ReplayJournalFilters,
   type ReplayJournalOptionFilterKey,
 } from "@/lib/paper-trading/journal-filters";
-import { journalColumns, type JournalColumnId } from "@/lib/paper-trading/journal-columns";
+import { journalColumns, journalColumnsForContext, journalFieldValue, parseJournalVisibleColumns, type JournalColumnId } from "@/lib/paper-trading/journal-columns";
+import { journalSetupChecklist, journalSetupChecklistTitle } from "@/lib/paper-trading/journal-checklist";
+import type { StrategyChecklistItem } from "@/lib/paper-trading/training-gate";
 import type { ReplayJournalEntryData, ReplayJournalSummary } from "@/lib/paper-trading/types";
 import type { ReplaySessionSummary } from "@/lib/replay-sessions/types";
 
@@ -88,6 +90,7 @@ type TradeOption = {
   type: "INSTRUMENT" | "STRATEGY";
   name: string;
   active: boolean;
+  checklist?: StrategyChecklistItem[];
 };
 
 type TradeReason = {
@@ -99,7 +102,8 @@ const defaultVisibleColumnIds = journalColumns.map((column) => column.id);
 const defaultColumnWidths = Object.fromEntries(
   journalColumns.map((column) => [column.id, column.defaultWidth]),
 ) as Record<JournalColumnId, number>;
-const columnPreferenceKey = "replay-journal-visible-columns-v1";
+const columnPreferenceKey = "replay-journal-visible-columns-v2";
+const legacyColumnPreferenceKey = "replay-journal-visible-columns-v1";
 const columnWidthPreferenceKey = "replay-journal-column-widths-v1";
 const tableWidthPreferenceKey = "replay-journal-table-width-v1";
 const tableOffsetPreferenceKey = "replay-journal-table-offset-v1";
@@ -348,24 +352,9 @@ export function PaperJournalTable({
 
   useEffect(() => {
     const stored = window.localStorage.getItem(columnPreferenceKey);
-    if (stored) {
-      try {
-        const parsed: unknown = JSON.parse(stored);
-        if (Array.isArray(parsed)) {
-          const allowed = new Set<JournalColumnId>(defaultVisibleColumnIds);
-          const next = parsed.filter((value): value is JournalColumnId => typeof value === "string" && allowed.has(value as JournalColumnId));
-          if (next.length > 0) {
-            const migrated: JournalColumnId[] = next.includes("review")
-              ? next
-              : [...next, "review" as JournalColumnId];
-            setVisibleColumnIds(migrated);
-            setDraftVisibleColumnIds(migrated);
-          }
-        }
-      } catch {
-        window.localStorage.removeItem(columnPreferenceKey);
-      }
-    }
+    const migrated = parseJournalVisibleColumns(stored ?? window.localStorage.getItem(legacyColumnPreferenceKey), stored === null);
+    setVisibleColumnIds(migrated);
+    setDraftVisibleColumnIds(migrated);
     setColumnPreferencesLoaded(true);
 
     setColumnWidths(parseStoredJournalColumnWidths(
@@ -798,11 +787,9 @@ export function PaperJournalTable({
 
   const startRow = totalItems === 0 ? 0 : (page - 1) * pageSize + 1;
   const endRow = Math.min(page * pageSize, totalItems);
-  const scopedJournalColumns = scope === "history"
-    ? journalColumns
-    : journalColumns.filter((column) => column.id !== "review");
-  const visibleColumnSet = new Set(visibleColumnIds);
-  const visibleColumns = scopedJournalColumns.filter((column) => visibleColumnSet.has(column.id));
+  const scopedJournalColumns = journalColumnsForContext(scope, replaySession?.mode);
+  const visibleColumns = scopedJournalColumns.filter((column) => visibleColumnIds.includes(column.id));
+  const visibleColumnSet = new Set(visibleColumns.map((column) => column.id));
   const correctionColumnWidth = canDeleteCycle ? 80 : 0;
   const baseTableWidth = visibleColumns.reduce((total, column) => total + columnWidths[column.id], correctionColumnWidth);
   const visibleTableWidth = Math.max(baseTableWidth, tableViewportWidth, tableWidthPreference ?? 0);
@@ -1085,10 +1072,12 @@ export function PaperJournalTable({
             {canDeleteCycle ? <th className="border-b px-3 py-2 text-right">{copy.replaySessions.correction}</th> : null}
           </tr></thead>
           <tbody>{items.length === 0 && scope === "history" ? <tr>
-            <td colSpan={visibleColumnIds.length + Number(canDeleteCycle)} className="px-4 py-8 text-center text-sm text-slate-500">
+            <td colSpan={visibleColumns.length + Number(canDeleteCycle)} className="px-4 py-8 text-center text-sm text-slate-500">
               {hasActiveFilters ? copy.paperTrading.noFilteredJournalEntries : copy.paperTrading.noJournalEntries}
             </td>
-          </tr> : items.map((entry) => <tr key={entry.id} className="border-b last:border-b-0 hover:bg-slate-50">
+          </tr> : items.map((entry) => {
+            const checklist = journalSetupChecklist(entry, setupOptions);
+            return <tr key={entry.id} className="border-b last:border-b-0 hover:bg-slate-50">
             {visibleColumnSet.has("no") ? <td className="border-r px-3 py-2 last:border-r-0">{onFocus ? <button
               type="button"
               className="cursor-pointer font-medium text-blue-700 underline-offset-2 hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-600"
@@ -1109,6 +1098,7 @@ export function PaperJournalTable({
                   busy={savingSetupIds.has(entry.id)}
                   placeholder={copy.paperTrading.chooseSetup}
                   selectedLabel={entry.setupOption?.name ?? copy.paperTrading.chooseSetup}
+                  selectedTooltip={checklist ? journalSetupChecklistTitle(checklist) : undefined}
                   searchPlaceholder={copy.paperTrading.searchSetup}
                   ariaLabel={copy.paperTrading.editSetup(entry.no)}
                   className="h-8 min-w-0 max-w-full overflow-hidden border-transparent bg-transparent px-2 text-left shadow-none hover:border-slate-300 hover:bg-white data-[state=open]:border-blue-300 data-[state=open]:bg-white"
@@ -1123,6 +1113,7 @@ export function PaperJournalTable({
                 {entry.discipline ? <Button variant="ghost" size="sm" className="h-8 max-w-full" onClick={() => setDisciplineEntry(entry)}>{copy.trainingGate.snapshot}</Button> : null}
               </div>
             </td> : null}
+            {visibleColumnSet.has("checklistUsed") ? <td className="border-r px-3 py-2 text-left last:border-r-0">{journalFieldValue(entry, "checklistUsed")}</td> : null}
             {visibleColumnSet.has("reason") ? <td className="border-r p-1 text-left last:border-r-0">
               <MultiSelect
                 value={entry.tradeReasons.map((reason) => reason.id)}
@@ -1189,7 +1180,8 @@ export function PaperJournalTable({
               </div>
             </td> : null}
             {canDeleteCycle ? <td className="px-3 py-2 text-right"><Button type="button" variant="destructive" size="icon" disabled={loading || correction?.pending || !entry.cycleKey} aria-label={copy.replaySessions.deleteCycle} title={copy.replaySessions.deleteCycle} onClick={() => correction?.onDeleteCycle(entry)}><Trash2 className="h-4 w-4" aria-hidden="true" /></Button></td> : null}
-          </tr>)}</tbody>
+          </tr>;
+          })}</tbody>
         </table>
       </div>
     </section>

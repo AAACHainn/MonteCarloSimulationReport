@@ -7,8 +7,8 @@ import { CheckboxField } from "@/components/ui/checkbox-field";
 import { Label } from "@/components/ui/label";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { copy } from "@/lib/i18n";
-import { journalColumns } from "@/lib/paper-trading/journal-columns";
-import { defaultPdfFieldIds, parsePdfDetails, PDF_DETAIL_STORAGE_KEY } from "@/lib/paper-trading/pdf-settings";
+import { journalColumnsForContext } from "@/lib/paper-trading/journal-columns";
+import { parsePdfDetails, PDF_DETAIL_STORAGE_KEY } from "@/lib/paper-trading/pdf-settings";
 import type { ReplayJournalFilters } from "@/lib/paper-trading/journal-filters";
 import type { PdfSnapshot, PdfOptions } from "@/lib/paper-trading/pdf-types";
 import { displayIntervalOptions } from "@/lib/market-replay/display-interval";
@@ -21,6 +21,8 @@ const t = copy.paperTrading.pdf;
 export function PdfExportButton({ datasetId, sessionId, filters, loading, count }: { datasetId: string; sessionId: string; filters: ReplayJournalFilters; loading: boolean; count: number }) {
   const task = usePdfExport();
   const replaySession = useReplaySession();
+  const columns = journalColumnsForContext("history", replaySession?.mode);
+  const availableFieldIds = columns.filter((column) => column.id !== "no").map((column) => column.id);
   const [open, setOpen] = useState(false);
   const [snapshot, setSnapshot] = useState<PdfSnapshot | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -42,7 +44,7 @@ export function PdfExportButton({ datasetId, sessionId, filters, loading, count 
       let details = parsePdfDetails(null);
       try { details = parsePdfDetails(window.localStorage.getItem(PDF_DETAIL_STORAGE_KEY)); } catch { /* storage is optional */ }
       setSnapshot(data);
-      setOptions({ ...details, displayIntervalSeconds: source && isValidDisplayInterval(source, period) ? period : source ?? 300, displaySession: data.dataset.availableDisplaySessions.includes("RTH") ? "RTH" : "ETH" });
+      setOptions({ ...details, detailFieldIds: details.detailFieldIds.filter((id) => availableFieldIds.includes(id)), displayIntervalSeconds: source && isValidDisplayInterval(source, period) ? period : source ?? 300, displaySession: data.dataset.availableDisplaySessions.includes("RTH") ? "RTH" : "ETH" });
     } catch (cause) { if (!next.signal.aborted) setError(cause instanceof Error ? cause.message : t.failed); }
     finally { if (!next.signal.aborted) setReading(false); }
   }
@@ -85,12 +87,12 @@ export function PdfExportButton({ datasetId, sessionId, filters, loading, count 
           {options.includeDetails ? <div className="space-y-3">
             <p className="text-xs text-slate-500">{t.fieldHint}</p>
             <div className="flex flex-wrap gap-2">
-              <Button type="button" variant="ghost" size="sm" onClick={() => setOptions((o) => ({ ...o, detailFieldIds: [...defaultPdfFieldIds] }))}>{t.all}</Button>
+              <Button type="button" variant="ghost" size="sm" onClick={() => setOptions((o) => ({ ...o, detailFieldIds: [...availableFieldIds] }))}>{t.all}</Button>
               <Button type="button" variant="ghost" size="sm" onClick={() => setOptions((o) => ({ ...o, detailFieldIds: [] }))}>{t.clear}</Button>
-              <Button type="button" variant="ghost" size="sm" onClick={() => setOptions((o) => ({ ...o, ...parsePdfDetails(null) }))}>{t.reset}</Button>
+              <Button type="button" variant="ghost" size="sm" onClick={() => setOptions((o) => ({ ...o, includeDetails: true, detailFieldIds: [...availableFieldIds] }))}>{t.reset}</Button>
             </div>
             <div className="grid gap-2 sm:grid-cols-2">
-              {journalColumns.map((c) => <CheckboxField key={c.id} checked={c.id === "no" || options.detailFieldIds.includes(c.id)} disabled={c.id === "no"} onChange={(checked) => setOptions((o) => ({ ...o, detailFieldIds: defaultPdfFieldIds.filter((id) => id === c.id ? checked : o.detailFieldIds.includes(id)) }))}>{c.label}</CheckboxField>)}
+              {columns.map((c) => <CheckboxField key={c.id} checked={c.id === "no" || options.detailFieldIds.includes(c.id)} disabled={c.id === "no"} onChange={(checked) => setOptions((o) => ({ ...o, detailFieldIds: availableFieldIds.filter((id) => id === c.id ? checked : o.detailFieldIds.includes(id)) }))}>{c.label}</CheckboxField>)}
             </div>
           </div> : null}
         </> : null}
