@@ -37,6 +37,9 @@ import { PATCH as amendOrderPATCH } from "@/app/api/market-datasets/[id]/paper-s
 import { DELETE as cancelOrderDELETE } from "@/app/api/market-datasets/[id]/paper-session/orders/[orderId]/route";
 import { GET as sessionsGET } from "@/app/api/market-datasets/[id]/replay-sessions/route";
 import { GET as excelGET } from "@/app/api/market-datasets/[id]/paper-journal/sessions/[sessionId]/export/route";
+import { aggregateMarketBars } from "@/lib/market-replay/aggregation";
+import { chartRewindTarget } from "@/lib/market-replay/chart-rewind";
+import { formatUtcDateTime } from "@/lib/market-replay/display-timezone";
 
 let file = "";
 const base = new Date("2026-10-01T00:00:00Z");
@@ -352,6 +355,46 @@ describe("complete replay corrections", () => {
       expect(response.status).toBe(200); expect((await response.json()).items).toEqual([]);
     }
     expect(await prisma.replayProgress.findMany({ where: { replaySessionId: { in: [active.id, archived.id] } }, orderBy: { id: "asc" } })).toEqual(beforeProgress);
+  });
+  it.each([60, 300])("rewinds from a selected %s-second chart candle through preview, cancel and confirmation", async (displaySeconds) => {
+    const session = await create("LIVE_REPLAY"), sibling = await create("TRAINING");
+    await account(session); await account(sibling); await advance(session, 5);
+    const expected = await snapshot(session.id), siblingBefore = await snapshot(sibling.id);
+    // The order is entered after source candle 4; it triggers on candle 5.
+    await order(session, "BUY", 1); await advance(session);
+    await order(session, "SELL", 1, true); await advance(session);
+    const original = await snapshot(session.id);
+    expect(original!.stats.tradeCount).toBe(1);
+    const source = await prisma.marketBar.findMany({ where: { datasetId: "shared", sequence: { lte: 6 } }, orderBy: { sequence: "asc" } });
+    const bars = aggregateMarketBars({ bars: source.map((bar) => ({ ...bar, timestamp: bar.timestamp.toISOString() })),
+      sourceSeconds: 60, displaySeconds, currentSequence: 6, finalSequence: 7,
+      session: { mode: "TWENTY_FOUR_SEVEN", timezone: "UTC", openMinute: null, closeMinute: null, weekdays: [] } });
+    const target = chartRewindTarget(bars, displaySeconds === 60 ? 4 : 0, { minSequence: -1, maxSequence: 6 })!;
+    expect(target.sequence).toBe(4);
+    const located = await locateGET(new Request(`http://localhost/api/locate?sequence=${target.sequence}`), { params: Promise.resolve({ sessionId: session.id }) });
+    expect(located.status).toBe(200);
+    const point = await located.json();
+    expect(point.sequence).toBe(4);
+    expect(formatUtcDateTime(point.timestamp, -240)).toBe("2026/09/30 20:04:00");
+    for (const action of ["cancel", "commit"]) {
+      const job = await createCorrection(session.id, { requestId: `chart-${displaySeconds}-${action}`, type: "REWIND",
+        targetSequence: target.sequence, expectedVersion: (await loadReplayScope(session.id)).version });
+      await runReplayCorrection(job.id);
+      const preview = await readCorrection(session.id, job.id);
+      expect(preview.status).toBe("READY");
+      expect(preview.summary).toMatchObject({ beforeEntries: 1, afterEntries: 0, originalSequence: 6 });
+      expect(await snapshot(session.id)).toEqual(original);
+      if (action === "cancel") { await cancelCorrection(session.id, job.id); expect(await snapshot(session.id)).toEqual(original); }
+      else await commitCorrection(session.id, job.id);
+    }
+    const corrected = await snapshot(session.id);
+    expect(corrected!.session).toEqual(expected!.session);
+    expect(corrected!.activeOrders).toEqual(expected!.activeOrders);
+    expect(corrected!.openLots).toEqual(expected!.openLots);
+    expect(corrected!.stats.tradeCount).toBe(0);
+    expect((await prisma.replayProgress.findUniqueOrThrow({ where: { replaySessionId: session.id } })).currentSequence).toBe(4);
+    expect(await snapshot(sibling.id)).toEqual(siblingBefore);
+    expect(await prisma.marketBar.count({ where: { datasetId: "shared" } })).toBe(8);
   });
   it("restores the target close before user actions and removes the replaced result", async () => {
     const session = await create("LIVE_REPLAY");

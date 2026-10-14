@@ -4,11 +4,11 @@ import { useReplaySession } from "./replay-session-context";
 import { formatChartTick, chartCandleData as candle, chartVolumeData as volume } from "@/lib/market-replay/chart-data";
 
 import {
-  useCallback, useEffect, useMemo, useRef, useState,
+  useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState,
   type MouseEvent as ReactMouseEvent,
   type PointerEvent as ReactPointerEvent,
 } from "react";
-import { Grid2X2, GripHorizontal, Link2, Loader2, LogOut, RotateCcw, ShieldAlert, X } from "lucide-react";
+import { Grid2X2, GripHorizontal, Link2, Loader2, LogOut, RotateCcw, ShieldAlert, Undo2, X } from "lucide-react";
 import {
   CandlestickSeries, ColorType, createChart, CrosshairMode,
   HistogramSeries, type IChartApi, type IPriceLine, type ISeriesApi,
@@ -57,7 +57,7 @@ import {
 } from "@/lib/market-replay/chart-drawings";
 import { TrendLinePrimitive } from "@/lib/market-replay/trend-line-primitive";
 import { FibonacciRetracementPrimitive } from "@/lib/market-replay/fibonacci-retracement-primitive";
-import { formatUtcDateTime } from "@/lib/market-replay/display-timezone";
+import { formatUtcDateTime, formatUtcOffset } from "@/lib/market-replay/display-timezone";
 import { formatPriceForTick, priceDecimalsForTick, snapPriceToTick } from "@/lib/market-replay/price-ticks";
 import { ReplayTradeAnnotationPrimitive } from "@/lib/market-replay/trade-annotation-primitive";
 import { BarCountPrimitive } from "@/lib/market-replay/bar-count-primitive";
@@ -79,6 +79,7 @@ import {
 import type { PaperSessionSnapshot, PaperSide, ReplayTradeAnnotationData } from "@/lib/paper-trading/types";
 import { useReplayChartEma } from "./use-replay-chart-ema";
 import { isReplayDrawingDeleteShortcut, isReplayShortcutInputTarget } from "@/lib/market-replay/keyboard-shortcuts";
+import { chartRewindTarget, type ChartRewindRange, type ChartRewindTarget } from "@/lib/market-replay/chart-rewind";
 
 type DraftOrder = {
   side: PaperSide;
@@ -91,7 +92,7 @@ type DraftOrder = {
   tpMode: "LINKED" | "FREE";
 };
 
-type ContextMenuState = { x: number; y: number; price: number };
+type ContextMenuState = { x: number; y: number; price: number; rewindTarget: ChartRewindTarget | null };
 type AbrTooltipState = {
   left: number;
   top: number;
@@ -242,6 +243,7 @@ export function ReplayChart({
   readOnly = false,
   paperBusy, paperError, onSubmitOrder, onOrderPriceChange,
   onCancelOrder, onClosePosition, onDraftActiveChange, onOpenPaperAccount, onVisibleSequenceRangeChange,
+  onRewindToBar, rewindRange,
 }: {
   datasetId: string;
   priceTickSize: number;
@@ -293,6 +295,8 @@ export function ReplayChart({
   onDraftActiveChange: (active: boolean) => void;
   onOpenPaperAccount: () => void;
   onVisibleSequenceRangeChange?: (range: ReplayVisibleSequenceRange) => void;
+  onRewindToBar?: (target: ChartRewindTarget) => void;
+  rewindRange?: ChartRewindRange;
 }) {
   const replaySession = useReplaySession();
   const containerRef = useRef<HTMLDivElement | null>(null);
@@ -353,6 +357,7 @@ export function ReplayChart({
   const gridVisibleRef = useRef(gridVisible);
   gridVisibleRef.current = gridVisible;
   const [contextMenu, setContextMenu] = useState<ContextMenuState | null>(null);
+  const contextMenuRef = useRef<HTMLDivElement | null>(null);
   const [abrTooltip, setAbrTooltip] = useState<AbrTooltipState | null>(null);
   const [measurement, setMeasurement] = useState<MeasurementState | null>(null);
   const measurementRef = useRef<MeasurementState | null>(null);
@@ -575,6 +580,21 @@ export function ReplayChart({
     window.addEventListener("keydown", close);
     return () => window.removeEventListener("keydown", close);
   }, []);
+
+  useEffect(() => { setContextMenu(null); }, [datasetId, displayIntervalSeconds, displaySession]);
+  useLayoutEffect(() => {
+    if (!contextMenu) return;
+    const place = () => {
+      const menu = contextMenuRef.current, root = interactionRef.current;
+      if (!menu || !root) return;
+      const x = Math.max(8, Math.min(contextMenu.x, root.clientWidth - menu.offsetWidth - 8));
+      const y = Math.max(8, Math.min(contextMenu.y, root.clientHeight - menu.offsetHeight - 8));
+      setContextMenu((current) => current && (current.x !== x || current.y !== y) ? { ...current, x, y } : current);
+      if (!menu.contains(document.activeElement)) menu.querySelector<HTMLButtonElement>("[role='menuitem']:not(:disabled)")?.focus();
+    };
+    place(); window.addEventListener("resize", place);
+    return () => window.removeEventListener("resize", place);
+  }, [contextMenu]);
 
   // Keep the chart instance stable. Window data, display interval, volume visibility,
   // and drawing preferences must update the existing instance so pointer handlers never
@@ -1610,10 +1630,15 @@ export function ReplayChart({
     const rawPrice = series?.coordinateToPrice((event.clientY - root.top) as never);
     const price = snapPriceToTick(Number(rawPrice), priceTickSize);
     const fallback = currentPrice ?? 0;
+    const chart = chartRef.current;
+    const x = event.clientX - root.left, y = event.clientY - root.top;
+    const insidePane = chart && x >= 0 && x <= chart.timeScale().width() && y >= 0 && y <= (chart.panes()[0]?.getHeight() ?? 0);
+    const logical = insidePane ? chart.timeScale().coordinateToLogical(x as never) : null;
     setContextMenu({
       x: Math.max(8, Math.min(event.clientX - root.left, root.width - 228)),
       y: Math.max(8, Math.min(event.clientY - root.top, root.height - 264)),
       price: Number.isFinite(price) && price > 0 ? price : fallback,
+      rewindTarget: onRewindToBar && rewindRange ? chartRewindTarget(barsRef.current, logical === null ? null : Number(logical), rewindRange) : null,
     });
   }
 
@@ -1894,7 +1919,7 @@ export function ReplayChart({
       {!draft && paperSnapshot && latest ? <div className="pointer-events-none absolute bottom-3 left-3 rounded-md border border-slate-200 bg-white/90 px-2 py-1 text-[11px] text-slate-500 shadow-sm backdrop-blur">{copy.paperTrading.rightClickHint}</div> : null}
 
       {contextMenu ? (
-        <div data-context-menu role="menu" className="absolute z-40 max-h-[calc(100%-1rem)] w-[220px] max-w-[calc(100%-1rem)] overflow-y-auto rounded-lg border border-slate-200 bg-white p-1.5 shadow-xl" style={{ left: contextMenu.x, top: contextMenu.y }}>
+        <div ref={contextMenuRef} data-context-menu role="menu" className="absolute z-40 max-h-[calc(100%-1rem)] w-[220px] max-w-[calc(100%-1rem)] overflow-y-auto rounded-lg border border-slate-200 bg-white p-1.5 shadow-xl" style={{ left: contextMenu.x, top: contextMenu.y }}>
           <div className="mb-1 border-b pb-1">
             <button type="button" role="menuitem" data-testid="context-reset-chart-view" className="flex w-full items-center gap-2 rounded-md px-2 py-2 text-left text-sm font-medium text-slate-700 hover:bg-slate-100 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-600" onClick={resetChartView}>
               <RotateCcw className="h-4 w-4" />
@@ -1913,6 +1938,15 @@ export function ReplayChart({
               </Button>
             ) : null}
           </div>
+          {onRewindToBar && contextMenu.rewindTarget ? <div className="mb-1 border-b pb-1">
+            <Button type="button" role="menuitem" variant="ghost" data-testid="context-rewind-to-bar" disabled={paperBusy}
+              className="w-full justify-start px-2 text-left text-slate-700" title={paperBusy ? copy.replaySessions.rewindWait : undefined}
+              onClick={() => { const target = contextMenu.rewindTarget; setContextMenu(null); if (target) onRewindToBar(target); }}>
+              <Undo2 className="h-4 w-4" aria-hidden="true" />{copy.replaySessions.rewindToBar}
+            </Button>
+            <p className="px-2 pb-1 text-xs tabular-nums text-slate-600">{copy.replaySessions.rewindSelectedBar} · {formatUtcOffset(displayUtcOffsetMinutes)}<br />{formatUtcDateTime(contextMenu.rewindTarget.timestamp, displayUtcOffsetMinutes)}</p>
+            {paperBusy ? <p className="px-2 pb-1 text-xs text-slate-600">{copy.replaySessions.rewindWait}</p> : null}
+          </div> : null}
           <div className="border-b px-2 py-1.5">
             <p className="text-[10px] font-medium uppercase tracking-wide text-slate-400">{copy.paperTrading.contextPrice}</p>
             <p className="font-mono text-sm font-semibold text-slate-900">{formatPriceForTick(contextMenu.price, priceTickSize)}</p>

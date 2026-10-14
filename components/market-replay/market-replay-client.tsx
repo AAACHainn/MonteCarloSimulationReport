@@ -2506,7 +2506,7 @@ export function MarketReplayClient({ dataset: initialDataset, initialJournalFocu
           ? "fixed inset-0 z-40 flex h-dvh min-h-0 flex-col overflow-hidden bg-white"
           : "flex min-h-0 flex-1 flex-col overflow-hidden rounded-lg border bg-white shadow-sm"}
       >
-        {replaySession?.mode === "LIVE_REPLAY" ? <ReplayCorrectionDialog target={correctionTarget} timezone={dataset.timezone} beforeCreate={prepareSessionSwitch} onClose={() => setCorrectionTarget(null)} onPendingChange={setCorrectionPending} /> : null}
+        {replaySession?.mode === "LIVE_REPLAY" ? <ReplayCorrectionDialog target={correctionTarget} displayUtcOffsetMinutes={displayUtcOffsetMinutes} beforeCreate={prepareSessionSwitch} onClose={() => setCorrectionTarget(null)} onPendingChange={setCorrectionPending} /> : null}
         <div className="flex h-12 shrink-0 items-center gap-2 overflow-x-auto border-b px-3 [&>*]:shrink-0">
           <DisplayIntervalControls
             value={replay.displayIntervalSeconds}
@@ -2691,6 +2691,9 @@ export function MarketReplayClient({ dataset: initialDataset, initialJournalFocu
             onDraftActiveChange={setDraftActive}
             onOpenPaperAccount={() => setSettingsDialog("paper")}
             onVisibleSequenceRangeChange={handleVisibleSequenceRange}
+            rewindRange={{ minSequence: replay.startSequence - 1, maxSequence: replay.currentSequence }}
+            onRewindToBar={replaySession?.mode === "LIVE_REPLAY" && !replaySession.legacy && !journalReview
+              ? (target) => openCorrectionTarget({ type: "REWIND", sequence: target.sequence, chartTimestamp: target.timestamp }) : undefined}
           />
           {journalReview ? <div className="absolute left-1/2 top-3 z-50 flex -translate-x-1/2 items-center gap-3 rounded-md border border-violet-200 bg-white/95 px-3 py-2 text-sm text-violet-800 shadow-lg backdrop-blur"><span className="font-medium">{journalReview.no > 0 ? copy.paperTrading.journalReviewing(journalReview.no) : copy.replaySessions.viewingPast}</span><Button type="button" variant="outline" size="sm" className="h-7" onClick={() => void returnToLiveWindow()}>{copy.paperTrading.returnToLive}</Button></div> : null}
           {drawingError ? (
@@ -2765,10 +2768,8 @@ export function MarketReplayClient({ dataset: initialDataset, initialJournalFocu
           dateForwardStatus={forwardProgress ? copy.replaySessions.forwardProgress(forwardProgress.current, forwardProgress.target) : copy.replaySessions.forwarding}
           onStopDateForward={() => { cancelForwardRef.current = true; }}
           correctionPending={correctionPending || dateForwarding || dateDialogOpen || dateDialogOpening || switchSyncFailed || reviewReturning}
-          onRewind={replaySession?.mode === "LIVE_REPLAY" ? () => { const current = latestReplayRef.current; if (current) openCorrectionTarget({ type: "REWIND", sequence: barsRef.current.at(-2)?.lastSequence ?? Math.max(current.startSequence - 1, current.currentSequence - 1) }); } : undefined}
           replay={replay}
           sourceIntervalSeconds={dataset.sourceIntervalSeconds}
-          journalReview={Boolean(journalReview)}
           paperSnapshot={paperSnapshot}
           currentBar={currentBar}
           displayUtcOffsetMinutes={displayUtcOffsetMinutes}

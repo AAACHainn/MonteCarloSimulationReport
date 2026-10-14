@@ -1,6 +1,6 @@
 "use client";
 
-import { CalendarDays, ChevronLeft, ChevronRight, Maximize, Minimize, Pause, Play } from "lucide-react";
+import { CalendarDays, ChevronRight, Maximize, Minimize, Pause, Play } from "lucide-react";
 import { PaperTradingDetails } from "./paper-trading-panel";
 import { useReplayShortcuts } from "./use-replay-shortcuts";
 import { Button } from "@/components/ui/button";
@@ -14,7 +14,6 @@ import type { PaperSessionSnapshot, ReplayJournalEntryData } from "@/lib/paper-t
 type Props = {
   replay: ReplayState;
   sourceIntervalSeconds: number;
-  journalReview: boolean;
   paperSnapshot: PaperSessionSnapshot | null;
   currentBar: MarketBarData | null;
   displayUtcOffsetMinutes: number;
@@ -27,7 +26,6 @@ type Props = {
   onNext: () => void;
   onSpeedChange: (value: number) => void;
   onFocusJournalEntry: (entry: ReplayJournalEntryData) => void;
-  onRewind?: () => void;
   correctionPending?: boolean;
   onLocateDate?: () => void;
   dateForwarding?: boolean;
@@ -36,10 +34,10 @@ type Props = {
 };
 
 export function ReplayPlaybackBar({
-  replay, sourceIntervalSeconds, journalReview, paperSnapshot, currentBar,
+  replay, sourceIntervalSeconds, paperSnapshot, currentBar,
   displayUtcOffsetMinutes, revealedCount, replayCount, statusText,
   webFullscreen, onToggleWebFullscreen,
-  onToggle, onNext, onSpeedChange, onFocusJournalEntry, onRewind, correctionPending = false,
+  onToggle, onNext, onSpeedChange, onFocusJournalEntry, correctionPending = false,
   onLocateDate, dateForwarding = false, dateForwardStatus, onStopDateForward,
 }: Props) {
   const shortcuts = useReplayShortcuts();
@@ -63,7 +61,6 @@ export function ReplayPlaybackBar({
         <Button type="button" size="sm" variant="outline" className="h-9" title={copy.marketReplay.playbackShortcutHint(shortcuts.nextBar)} aria-keyshortcuts={shortcuts.nextBarAria} onClick={onNext} disabled={replay.status === "finished" || replay.status === "playing" || correctionPending}>
           <ChevronRight className="h-4 w-4" />{copy.marketReplay.nextBar}<kbd className="ml-1 hidden rounded border bg-white px-1.5 py-0.5 font-mono text-[10px] text-slate-500 lg:inline">{shortcuts.nextBar}</kbd>
         </Button>
-        {onRewind ? <Button type="button" variant="outline" size="sm" className="h-9" disabled={journalReview || correctionPending} onClick={onRewind}><ChevronLeft className="h-4 w-4" />{copy.replaySessions.rewind}</Button> : null}
         {onLocateDate ? <Button type="button" variant="outline" size="sm" className="h-9" disabled={correctionPending || dateForwarding} onClick={onLocateDate}><CalendarDays className="h-4 w-4" aria-hidden="true" />{copy.replaySessions.locateDate}</Button> : null}
         {dateForwarding ? <><span role="status" className="max-w-64 truncate text-xs tabular-nums text-slate-600" title={dateForwardStatus}>{dateForwardStatus}</span><Button type="button" size="sm" variant="outline" className="h-9" onClick={onStopDateForward}>{copy.replaySessions.forwardCancel}</Button></> : null}
         <PaperTradingDetails snapshot={paperSnapshot} onFocusJournalEntry={onFocusJournalEntry} />
