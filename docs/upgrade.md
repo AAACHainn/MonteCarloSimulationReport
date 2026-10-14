@@ -31,10 +31,11 @@
 
 拉取已确认的目标分支或提交；使用快进更新，遇到本地改动或分叉先保留并处理。记录最终提交；有多个后续提交时无需按功能逐次启动应用，但必须执行目标代码全部尚未应用的数据库迁移。
 
-本地 Node 安装参照 Dockerfile 使用 Node 22，并确认所用版本支持项目测试使用的 `node:sqlite`；pnpm 使用 `package.json` 指定的版本（本文基线为 11.4.0）。安装依赖并生成 Prisma Client：
+本地 Node 部署沿用目标机器现有的兼容版本，不固定 Node 主版本，也不要求与 Docker 基础镜像一致。Dockerfile 中的 Node 22 是容器构建的参考环境，不作为其他机器的版本限制。升级时记录实际 Node 版本，并在该版本下完成依赖安装、测试、生产构建和启动验收；确认所用版本支持项目测试使用的 `node:sqlite`。安装依赖并生成 Prisma Client：
 
 ```powershell
-corepack pnpm install --frozen-lockfile
+node --version
+corepack pnpm install --frozen-lockf
 corepack pnpm prisma generate
 ```
 
@@ -95,7 +96,7 @@ corepack pnpm run db:init-sqlite
 
 ### 本地 Node 的 start 模式
 
-迁移完成、配置正确后执行：
+直接使用当前终端 PATH 中的 Node，不需要切换到专门下载的 Node 22，也不依赖本机临时备份中的运行时。开发模式运行 `corepack pnpm dev`；生产模式在迁移完成、配置正确后执行：
 
 ```powershell
 corepack pnpm lint
@@ -104,7 +105,7 @@ corepack pnpm run build
 corepack pnpm start
 ```
 
-新代码必须重新构建，重启旧 `.next` 不会获得全部改动。测试和构建不要与操作正式库的服务并发；Windows 下 Prisma DLL 占用时确认并停止本项目相关进程后重试。隔离库试运行必须使用另一端口和数据库，避免覆盖或混用正式实例。
+新代码必须重新构建，重启旧 `.next` 不会获得全部改动。从开发模式切换到生产模式时，先停止开发服务，再重新构建并运行 `start`。测试和构建不要与操作正式库的服务并发；Windows 下 Prisma DLL 占用时确认并停止本项目相关进程后重试。隔离库试运行必须使用另一端口和数据库，避免覆盖或混用正式实例。
 
 ### Docker 部署的额外检查
 
