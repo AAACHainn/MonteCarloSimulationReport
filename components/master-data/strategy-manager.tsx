@@ -1,4 +1,5 @@
 "use client";
+import { createUuid } from "@/lib/uuid";
 import { useState } from "react";
 import { useRouter } from "next/navigation";
 import { ArrowDown, ArrowUp, Loader2, Pencil, Plus, Trash2 } from "lucide-react";
@@ -73,7 +74,7 @@ function StrategyEditor({ strategy, onClose, onSaved }: { strategy: ManagedStrat
           <Button variant="outline" size="icon" type="button" disabled={busy || index === 0} onClick={() => move(index, index - 1)} aria-label={copy.trainingGate.moveUp}><ArrowUp className="h-4 w-4" /></Button>
           <Button variant="outline" size="icon" type="button" disabled={busy || index === checklist.length - 1} onClick={() => move(index, index + 1)} aria-label={copy.trainingGate.moveDown}><ArrowDown className="h-4 w-4" /></Button>
           <Button variant="ghost" size="icon" type="button" disabled={busy} onClick={() => setChecklist((items) => items.filter((value) => value.id !== item.id))} aria-label={copy.trainingGate.removeItem}><Trash2 className="h-4 w-4 text-red-600" /></Button></div></div>)}
-        <Button variant="outline" type="button" disabled={busy || checklist.length >= 100} onClick={() => setChecklist((items) => [...items, { id: crypto.randomUUID(), text: "" }])}><Plus className="h-4 w-4" />{copy.trainingGate.addItem}</Button>
+        <Button variant="outline" type="button" disabled={busy || checklist.length >= 100} onClick={() => setChecklist((items) => [...items, { id: createUuid(), text: "" }])}><Plus className="h-4 w-4" />{copy.trainingGate.addItem}</Button>
       </div>
       {error ? <p role="alert" className="text-sm text-red-600">{error}</p> : null}
       <div className="flex justify-end gap-2 border-t pt-4"><Button type="button" variant="outline" disabled={busy} onClick={onClose}>{copy.common.cancel}</Button><Button type="submit" disabled={busy || !name.trim()}>{busy ? <Loader2 className="h-4 w-4 animate-spin" /> : null}{copy.masterData.options.save}</Button></div>

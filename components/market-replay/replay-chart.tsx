@@ -1,4 +1,5 @@
 "use client";
+import { createUuid } from "@/lib/uuid";
 import { useReplaySession } from "./replay-session-context";
 
 import { formatChartTick, chartCandleData as candle, chartVolumeData as volume } from "@/lib/market-replay/chart-data";
@@ -1678,7 +1679,7 @@ export function ReplayChart({
     const stopLoss = snapPriceToTick(side === "BUY" ? contextMenu.price - distance : contextMenu.price + distance, priceTickSize);
     const targetR = defaultTargetR > 0 ? defaultTargetR : 2;
     setDraft({
-      id: crypto.randomUUID(),
+      id: createUuid(),
       side, type, entryPrice: contextMenu.price, stopLoss,
       takeProfit: snapPriceToTick(targetPriceForR(side, contextMenu.price, stopLoss, targetR), priceTickSize),
       riskAmount, targetR, tpMode: "LINKED",

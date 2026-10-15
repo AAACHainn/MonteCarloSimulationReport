@@ -1,4 +1,5 @@
 "use client";
+import { createUuid } from "@/lib/uuid";
 
 import { dateTimeLocalValue, selectedTimeToTimestamp } from "@/lib/market-replay/start-time";
 import { useReplayFetch, useReplaySession } from "./replay-session-context";
@@ -279,7 +280,6 @@ export function MarketReplayClient({ dataset: initialDataset, initialJournalFocu
     syncCompletionRef,
     lastSyncStartedAtRef,
     syncLatencyMsRef,
-    syncRequestCounterRef,
     paperDeltaAccumulatorRef,
     commitConfirmedPaperSnapshot,
   } = useReplayAccountRuntime(paperSnapshot, setPaperSnapshot);
@@ -1235,9 +1235,7 @@ export function MarketReplayClient({ dataset: initialDataset, initialJournalFocu
       return false;
     }
     if (!retry) paperDeltaAccumulatorRef.current = createPaperDeltaAccumulator(current.currentSequence);
-    const requestId = typeof crypto !== "undefined" && "randomUUID" in crypto
-      ? crypto.randomUUID()
-      : `${Date.now()}-${++syncRequestCounterRef.current}`;
+    const requestId = createUuid();
     const requestBody: ReplaySyncRequest = retry?.body ?? {
       generation: current.generation,
       requestId,
@@ -1336,7 +1334,7 @@ export function MarketReplayClient({ dataset: initialDataset, initialJournalFocu
     });
     syncCompletionRef.current = operation;
     return operation;
-  }, [autoPausePlayback, capturePlaybackIntent, confirmedPaperSnapshotRef, dataset.dataVersion, dataset.historyVersion, dataset.id, getDisplayCache, isPlaybackIntentCurrent, lastSyncStartedAtRef, latestReplayRef, loadTradeAnnotations, paperDeltaAccumulatorRef, paperSessionLoadedRef, paperSessionLoadRef, paperSnapshotRef, recoverReplay, restorePlayback, setReplay, suspendPlayback, syncCompletionRef, syncLatencyMsRef, syncRequestCounterRef, syncingRef, fetch]);
+  }, [autoPausePlayback, capturePlaybackIntent, confirmedPaperSnapshotRef, dataset.dataVersion, dataset.historyVersion, dataset.id, getDisplayCache, isPlaybackIntentCurrent, lastSyncStartedAtRef, latestReplayRef, loadTradeAnnotations, paperDeltaAccumulatorRef, paperSessionLoadedRef, paperSessionLoadRef, paperSnapshotRef, recoverReplay, restorePlayback, setReplay, suspendPlayback, syncCompletionRef, syncLatencyMsRef, syncingRef, fetch]);
 
   const flushVisible = useCallback(async (keepalive = false) => {
     if (historyConflictRef.current) return false;
@@ -2425,7 +2423,7 @@ export function MarketReplayClient({ dataset: initialDataset, initialJournalFocu
         if (fromChart && chartDraftIdRef.current !== draftId) return "CANCELLED";
       } finally { preparingEntryCheckRef.current = false; }
       setPaperError(null);
-      const checkDraftId = draftId ?? crypto.randomUUID();
+      const checkDraftId = draftId ?? createUuid();
       setEntryCheckDraft((current) => retainEntryCheckDraft(current, checkDraftId));
       return new Promise<OrderSubmitResult>((resolve) => { checkResolverRef.current = resolve; setCheckingOrder({ order: { ...order }, draftId: checkDraftId }); });
     }

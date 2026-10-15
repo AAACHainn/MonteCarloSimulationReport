@@ -1,4 +1,5 @@
 "use client";
+import { createUuid } from "@/lib/uuid";
 import { useEffect, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import { Loader2 } from "lucide-react";
@@ -43,7 +44,7 @@ export function ReplayCorrectionDialog({ target, displayUtcOffsetMinutes, before
     if (!target) return;
     const controller = new AbortController();
     setOpen(true); setError(null); setJob(null); setJobId(null); setRewindPoint(null); setCycle(null); setConfirm(false);
-    requestId.current = crypto.randomUUID(); activeTarget.current = target;
+    requestId.current = createUuid(); activeTarget.current = target;
     const query = target.type === "REWIND" ? `/locate?sequence=${target.sequence}` : `/cycles?cycleKey=${encodeURIComponent(target.cycleKey)}`;
     setBusy(true);
     void (async () => {
@@ -97,10 +98,10 @@ export function ReplayCorrectionDialog({ target, displayUtcOffsetMinutes, before
       const latestResponse = await fetch(`/api/replay-sessions/${encodeURIComponent(session.id)}`, { cache: "no-store" });
       const latest = await latestResponse.json(); if (!latestResponse.ok) throw new Error(latest.error ?? t.requestFailed);
       if (latest.session.pendingCorrectionId) { setJobId(latest.session.pendingCorrectionId); onPendingChange(true); return; }
-      if (fallback !== undefined || job && terminal.has(job.status)) requestId.current = crypto.randomUUID();
+      if (fallback !== undefined || job && terminal.has(job.status)) requestId.current = createUuid();
       const response = await fetch(`/api/replay-sessions/${encodeURIComponent(session.id)}/corrections`, {
         method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({
-          requestId: requestId.current || (requestId.current = crypto.randomUUID()), expectedVersion: latest.session.version,
+          requestId: requestId.current || (requestId.current = createUuid()), expectedVersion: latest.session.version,
           type: selected.type, ...(selected.type === "REWIND" ? { targetSequence } : { cycleKey: selected.cycleKey }),
         }),
       });

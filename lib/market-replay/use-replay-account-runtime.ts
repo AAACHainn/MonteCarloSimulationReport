@@ -20,7 +20,6 @@ export function useReplayAccountRuntime(
   const syncCompletionRef = useRef<Promise<boolean>>(Promise.resolve(true));
   const lastSyncStartedAtRef = useRef(0);
   const syncLatencyMsRef = useRef(500);
-  const syncRequestCounterRef = useRef(0);
   const paperDeltaAccumulatorRef = useRef<PaperDeltaAccumulator>(createPaperDeltaAccumulator(-1));
 
   useEffect(() => { paperSnapshotRef.current = paperSnapshot; }, [paperSnapshot]);
@@ -47,7 +46,6 @@ export function useReplayAccountRuntime(
     syncCompletionRef,
     lastSyncStartedAtRef,
     syncLatencyMsRef,
-    syncRequestCounterRef,
     paperDeltaAccumulatorRef,
     commitPaperSnapshot,
     commitConfirmedPaperSnapshot,

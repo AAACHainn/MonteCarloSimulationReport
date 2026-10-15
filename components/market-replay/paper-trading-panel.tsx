@@ -1,4 +1,5 @@
 "use client";
+import { createUuid } from "@/lib/uuid";
 import { useReplayFetch } from "./replay-session-context";
 
 import { useEffect, useRef, useState, type PointerEvent as ReactPointerEvent } from "react";
@@ -139,7 +140,7 @@ export function PaperTradingPanel({ priceTickSize, snapshot, currentBar, busy, e
         <form className="space-y-3" onSubmit={(event) => {
           event.preventDefault(); const data = new FormData(event.currentTarget);
           const price = optionalNumber(data.get("price")); const stopLoss = optionalNumber(data.get("stopLoss")); const takeProfit = optionalNumber(data.get("takeProfit"));
-          const draftId = draftIdRef.current ??= crypto.randomUUID();
+          const draftId = draftIdRef.current ??= createUuid();
           void onSubmit({ side, type, quantity: Number(data.get("quantity")), price: price === null ? null : snapPriceToTick(price, priceTickSize), stopLoss: stopLoss === null ? null : snapPriceToTick(stopLoss, priceTickSize), takeProfit: takeProfit === null ? null : snapPriceToTick(takeProfit, priceTickSize) }, draftId).then((result) => { if (result === "SUCCESS" && draftIdRef.current === draftId) draftIdRef.current = null; });
         }}>
           <div className="grid grid-cols-2 gap-2"><Button type="button" variant={side === "BUY" ? "default" : "outline"} onClick={() => setSide("BUY")} className={side === "BUY" ? "bg-emerald-600 hover:bg-emerald-700" : ""}>{copy.paperTrading.buy}</Button><Button type="button" variant={side === "SELL" ? "destructive" : "outline"} onClick={() => setSide("SELL")}>{copy.paperTrading.sell}</Button></div>
