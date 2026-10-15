@@ -1109,9 +1109,8 @@ export function PaperJournalTable({
                   className="h-8 min-w-0 max-w-full overflow-hidden border-transparent bg-transparent px-2 text-left shadow-none hover:border-slate-300 hover:bg-white data-[state=open]:border-blue-300 data-[state=open]:bg-white"
                   options={[
                     { value: noSetupValue, label: copy.paperTrading.clearSetup },
-                    ...setupOptions.map((option) => ({
+                    ...setupOptions.filter((option) => option.active).map((option) => ({
                       value: option.id, label: option.name,
-                      disabled: !option.active && option.id !== entry.setupOptionId,
                     })),
                   ]}
                 />
