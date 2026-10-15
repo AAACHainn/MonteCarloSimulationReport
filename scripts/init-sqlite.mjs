@@ -685,6 +685,10 @@ try {
     if (!columns.some((item) => item.name === column)) await prisma.$executeRawUnsafe(statement);
   }
   await prisma.$executeRawUnsafe('CREATE INDEX IF NOT EXISTS "ReplayProjectionCommand_commandId_idx" ON "ReplayProjectionCommand"("commandId")');
+  const aiMigration = readFileSync(new URL("../prisma/migrations/20261015180000_add_ai_assistant/migration.sql", import.meta.url), "utf8");
+  for (const statement of aiMigration.replace(/^\s*--.*$/gm, "").split(";").map((s) => s.trim()).filter(Boolean)) {
+    await prisma.$executeRawUnsafe(statement.replace(/^CREATE TABLE /, "CREATE TABLE IF NOT EXISTS ").replace(/^CREATE UNIQUE INDEX /, "CREATE UNIQUE INDEX IF NOT EXISTS ").replace(/^CREATE INDEX /, "CREATE INDEX IF NOT EXISTS "));
+  }
 } finally {
   await prisma.$disconnect();
 }

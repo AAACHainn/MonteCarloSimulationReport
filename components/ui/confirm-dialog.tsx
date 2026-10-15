@@ -18,6 +18,7 @@ type ConfirmDialogProps = {
   secondaryAction?: { label: string; onClick: () => void; variant?: "outline" | "destructive" };
   isLoading?: boolean;
   error?: string | null;
+  layerClassName?: string;
   onCancel: () => void;
   onConfirm: () => void;
 };
@@ -32,6 +33,7 @@ export function ConfirmDialog({
   secondaryAction,
   isLoading = false,
   error,
+  layerClassName,
   onCancel,
   onConfirm,
 }: ConfirmDialogProps) {
@@ -43,7 +45,7 @@ export function ConfirmDialog({
   if (!open || !mounted) return null;
 
   return createPortal(
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/35 px-4 py-6 backdrop-blur-sm">
+    <div className={cn("fixed inset-0 z-50 flex items-center justify-center bg-slate-950/35 px-4 py-6 backdrop-blur-sm", layerClassName)}>
       <div
         ref={panelRef}
         tabIndex={-1}

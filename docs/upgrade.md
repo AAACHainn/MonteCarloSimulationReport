@@ -82,6 +82,7 @@ corepack pnpm run db:init-sqlite
 | `20261013150000_preserve_replay_review_constraint` | 保留交易复盘内容的数据库长度约束。 |
 | `20261014120000_keep_current_replay_result` | 每个独立会话（含归档）保留当前结果及有效临时预览，清除旧历史/失败结果及不再引用的操作；旧的结果版本不再提供恢复入口。 |
 | `20261014160000_add_training_gate` | 策略清单、版本、关卡状态及订单/交易检查快照；不追溯旧的已结束亏损，未平完批次按既有成交补齐累计净盈亏。 |
+| `20261015180000_add_ai_assistant` | 新增 AI 配置、聊天、快照、资源、运行、报告及复盘来源修订；不修改已有交易事实。初始化脚本同步支持。 |
 
 移除历史结果后相关表总行数可能减少，这是有明确范围的数据清理；应核对各会话保留的当前记录与归档会话，不能只比较所有版本的行数。交易连续显示编号、日期定位、菜单、会话重命名/删除与下拉高度等界面调整使用现有结构，无需单独手工重编号或清空记录。
 
@@ -93,6 +94,12 @@ corepack pnpm run db:init-sqlite
 - 从未配置行情连接的新安装，按 [行情同步说明](market-data-sync.md) 创建一次密钥并持久保存。
 - 副本演练与首次升级验收先设置 `MARKET_DATA_SYNC_ENABLED=0`；正式验收后再恢复原设置。不要为测试主动执行付费下载。
 - 本地 Node 部署需要在服务运行环境中传入配置；生产 Compose 已映射这两个变量。拉取代码不会自动复制另一台机器的环境变量。
+
+### AI 配置
+
+AI 使用独立的 `AI_ENCRYPTION_KEY`，保留原行情主密钥不变。本地可运行 `node scripts/setup-ai-key.mjs` 生成一次并保存在 `.env`，随后重启服务；已有有效配置不覆盖。备份更新后的环境配置、数据库及 `storage/ai/`，普通业务导出不包含密钥。详见 [AI 机器人说明](ai-assistant.md)。
+
+AI 普通聊天在窗口内运行，会话分析依赖独立 worker。升级前停止或等待这些活动任务；中断任务需要用户显式继续，不能自动重复未知计费状态的步骤。
 
 ### 本地 Node 的 start 模式
 
@@ -114,7 +121,7 @@ corepack pnpm start
 - `compose.yaml` 挂载源码并启动 `dev`，不是生产 start 部署。
 - `compose.prod.yaml` 当前引用 `sudongpojiaozi/monte-carlo-simulation-report:v0.1`，没有 `build` 配置；仅拉取仓库代码或执行 Compose 的 `up --build` 不会从最新源码生成该生产镜像。应构建并发布/指定包含目标提交的镜像，记录摘要，保留原数据卷。
 - `Dockerfile.prod` 启动命令自动执行 `prisma migrate deploy`。创建新容器前必须完成备份和迁移路径检查；同一 SQLite 数据库不同时启动旧新应用。
-- 本文核对时，生产 runner 仅复制 `.next`、`public`、`prisma` 和依赖等文件，**没有复制独立回退 worker 所需的 `scripts/replay-correction-worker.ts`、它引用的 `lib/` 及路径别名配置**。使用生产镜像前须补齐这些运行文件（或采用等价的 worker 构建产物），并实际验证子进程；仅首页 healthcheck 成功不能证明回退/周期删除可用。本文只记录这个部署缺口，没有修改 Dockerfile 或发布镜像。
+- AI 版本的生产 runner 已补充 `scripts/`、`lib/`、`tsconfig.json`，供回退与 AI 分析 worker 运行。仍需发布包含当前代码的镜像，并实测子进程、环境变量与持久化；仅首页 healthcheck 成功不能证明 worker 可用，本次未发布或实机验证 Docker 镜像。
 - 不使用删除命名卷的方式重建；若需要清理文件，由用户按项目约定处理，不能批量删除。
 
 ## 6. 升级验收

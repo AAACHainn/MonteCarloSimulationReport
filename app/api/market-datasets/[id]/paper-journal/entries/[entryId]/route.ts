@@ -5,6 +5,9 @@ import { copy } from "@/lib/i18n";
 import { serializeReplayJournalEntry } from "@/lib/paper-trading/journal";
 import { withReplayJournalDisplayNumbers } from "@/lib/paper-trading/journal-numbering";
 import { replayJournalEntryUpdateSchema } from "@/lib/validations";
+import { AiError } from "@/lib/ai/errors";
+import { readContext } from "@/lib/ai/context";
+import { logicalId } from "@/lib/replay-sessions/identity";
 
 type RouteContext = { params: Promise<{ id: string; entryId: string }> };
 
@@ -17,7 +20,7 @@ async function handlePATCH(request: Request, context: RouteContext) {
 
   const entry = await prisma.replayJournalEntry.findFirst({
     where: { id: entryId, ...entryProjectionWhere(), journalSession: { datasetId: id, ...journalScopeWhere() } },
-    select: { id: true },
+    select: { id: true, logicalKey: true, review: true },
   });
   if (!entry) {
     return NextResponse.json({ error: copy.paperTrading.journalNotFound }, { status: 404 });
@@ -55,7 +58,38 @@ async function handlePATCH(request: Request, context: RouteContext) {
       setupOption: { select: { name: true } },
       tradeReasons: { select: { id: true, name: true }, orderBy: { name: "asc" } },
     } as const;
-  const updated = await prisma.replayJournalEntry.update({ where: { id: entry.id }, data, include });
+  const scope = getReplayScope()!;
+  if (parsed.data.expectedProjectionId && parsed.data.expectedProjectionId !== scope.projectionId)
+    return NextResponse.json({ error: copy.ai.conflict }, { status: 409 });
+  if (parsed.data.aiSourceRunId) {
+    const source = await prisma.aiMessage.findFirst({ where: { runId: parsed.data.aiSourceRunId, role: "assistant", status: "COMPLETED" } });
+    const sourceContext = source?.contextId ? await readContext(source.contextId) : null;
+    if (!sourceContext || sourceContext.replaySessionId !== scope.id || sourceContext.projectionId !== scope.projectionId
+      || sourceContext.selectedEntryId !== entry.id || !source?.result)
+      return NextResponse.json({ error: copy.ai.conflict }, { status: 409 });
+  }
+  let updated;
+  try {
+    updated = await prisma.$transaction(async (tx) => {
+      const session = await tx.replaySession.findUnique({ where: { id: scope.id } });
+      if (!session || session.activeProjectionId !== scope.projectionId) throw new AiError("CONFLICT", copy.ai.conflict, 409);
+      if (parsed.data.review !== undefined) {
+        const changed = await tx.replayJournalEntry.updateMany({
+          where: { id: entry.id, projectionId: scope.projectionId, review: parsed.data.expectedReview ?? entry.review },
+          data: { review: parsed.data.review },
+        });
+        if (!changed.count) throw new AiError("CONFLICT", copy.ai.conflict, 409);
+        if (parsed.data.review !== entry.review) await tx.aiReviewRevision.create({ data: {
+          replaySessionId: scope.id, projectionId: scope.projectionId, logicalKey: entry.logicalKey ?? logicalId(entry.id),
+          content: parsed.data.review, sourceRunId: parsed.data.aiSourceRunId,
+        } });
+      }
+      return tx.replayJournalEntry.update({ where: { id: entry.id }, data, include });
+    });
+  } catch (error) {
+    if (error instanceof AiError) return NextResponse.json({ error: error.message }, { status: error.status });
+    throw error;
+  }
   const [numbered] = await withReplayJournalDisplayNumbers([updated]);
   return NextResponse.json(serializeReplayJournalEntry(numbered));
 }

@@ -2,6 +2,92 @@ generator client {
   provider = "prisma-client-js"
 }
 
+model AiSetting {
+  id        String   @id
+  value     String
+  version   Int      @default(1)
+  updatedAt DateTime @updatedAt
+}
+
+model AiConversation {
+  id          String      @id @default(cuid())
+  name        String
+  activeRunId String?     @unique
+  messages    AiMessage[]
+  createdAt   DateTime    @default(now())
+  updatedAt   DateTime    @updatedAt
+}
+
+model AiMessage {
+  id             String         @id @default(cuid())
+  conversationId String
+  conversation   AiConversation @relation(fields: [conversationId], references: [id], onDelete: Cascade)
+  runId          String?
+  role           String
+  status         String         @default("COMPLETED")
+  content        String
+  result         String?
+  contextId      String?
+  createdAt      DateTime       @default(now())
+  @@index([conversationId, createdAt, id])
+}
+
+model AiContext {
+  id        String   @id @default(cuid())
+  value     String
+  createdAt DateTime @default(now())
+}
+
+model AiAsset {
+  id        String   @id
+  mime      String
+  bytes     Int
+  contextId String?
+  chartHash String?
+  createdAt DateTime @default(now())
+}
+
+model AiRun {
+  id             String   @id
+  conversationId String
+  contextId      String?
+  task           String
+  status         String   @default("QUEUED")
+  snapshot       String
+  checkpoint     String   @default("[]")
+  calls          Int      @default(0)
+  usage          String   @default("[]")
+  error          String?
+  heartbeatAt    DateTime @default(now())
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
+  @@index([conversationId, createdAt])
+  @@index([status, heartbeatAt])
+}
+
+model AiAnalysis {
+  id              String   @id
+  runId           String   @unique
+  replaySessionId String
+  projectionId    String
+  contextId       String
+  content         String
+  result          String?
+  createdAt       DateTime @default(now())
+  @@index([replaySessionId, createdAt])
+}
+
+model AiReviewRevision {
+  id              String   @id @default(cuid())
+  replaySessionId String
+  logicalKey      String
+  projectionId    String
+  content         String
+  sourceRunId     String?
+  createdAt       DateTime @default(now())
+  @@index([replaySessionId, logicalKey, createdAt])
+}
+
 datasource db {
   provider = "sqlite"
   url      = env("DATABASE_URL")

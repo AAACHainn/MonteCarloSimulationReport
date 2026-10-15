@@ -34,7 +34,9 @@
     "react": "^19.0.0",
     "react-day-picker": "^10.0.1",
     "react-dom": "^19.0.0",
+    "react-markdown": "^10.1.0",
     "recharts": "^2.15.3",
+    "remark-gfm": "^4.0.1",
     "tailwind-merge": "^2.6.0",
     "tsx": "^4.20.5",
     "zod": "^3.25.67"

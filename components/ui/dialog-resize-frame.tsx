@@ -66,7 +66,9 @@ export const DialogResizeFrame = forwardRef<HTMLElement, {
   resizable?: boolean;
   widthStorageKey?: string;
   heightStorageKey?: string;
-}>(({ children, titleId, descriptionId, modal = true, resizable = true, widthStorageKey, heightStorageKey }, forwardedRef) => {
+  defaultWidth?: number;
+  defaultHeight?: number;
+}>(({ children, titleId, descriptionId, modal = true, resizable = true, widthStorageKey, heightStorageKey, defaultWidth, defaultHeight }, forwardedRef) => {
   const frameRef = useRef<HTMLDivElement>(null);
   const dragRef = useRef<ResizeDrag | null>(null);
   const explicitBoundsRef = useRef<DialogBounds | null>(null);
@@ -78,8 +80,8 @@ export const DialogResizeFrame = forwardRef<HTMLElement, {
 
   useLayoutEffect(() => {
     try {
-      const savedWidth = widthStorageKey ? parseDialogDimension(window.localStorage.getItem(widthStorageKey)) : null;
-      const savedHeight = heightStorageKey ? parseDialogDimension(window.localStorage.getItem(heightStorageKey)) : null;
+      const savedWidth = (widthStorageKey ? parseDialogDimension(window.localStorage.getItem(widthStorageKey)) : null) ?? defaultWidth ?? null;
+      const savedHeight = (heightStorageKey ? parseDialogDimension(window.localStorage.getItem(heightStorageKey)) : null) ?? defaultHeight ?? null;
       const limits = dialogSizeLimits(viewport());
       setPreferredSize({
         width: savedWidth === null ? null : Math.min(limits.maximumWidth, Math.max(limits.minimumWidth, savedWidth)),
@@ -88,7 +90,7 @@ export const DialogResizeFrame = forwardRef<HTMLElement, {
     } catch {
       setPreferredSize({ width: null, height: null });
     }
-  }, [heightStorageKey, widthStorageKey]);
+  }, [heightStorageKey, widthStorageKey, defaultWidth, defaultHeight, currentViewport?.width, currentViewport?.height]);
 
   useLayoutEffect(() => {
     const frame = frameRef.current;

@@ -13,7 +13,7 @@ import { copy } from "@/lib/i18n";
 import { limitReview, reviewLength, type ReviewTemplate } from "@/lib/paper-trading/review-templates";
 import { reviewTemplateRenameSchema, reviewTemplateSchema } from "@/lib/validations";
 
-export function ReviewEditorDialog({ open, no, value, initialValue, saving, error, onChange, onSave, onClose }: {
+export function ReviewEditorDialog({ open, no, value, initialValue, saving, error, onChange, onSave, onClose, onAi, aiOpen }: {
   open: boolean;
   no: number;
   value: string;
@@ -23,6 +23,8 @@ export function ReviewEditorDialog({ open, no, value, initialValue, saving, erro
   onChange: (value: string) => void;
   onSave: () => void;
   onClose: () => void;
+  onAi?: (templateId?: string) => void;
+  aiOpen?: boolean;
 }) {
   const templatesAbortRef = useRef<AbortController | null>(null);
   const [templates, setTemplates] = useState<ReviewTemplate[]>([]);
@@ -175,7 +177,7 @@ export function ReviewEditorDialog({ open, no, value, initialValue, saving, erro
   }
 
   return <>
-    <Dialog open={open} title={copy.paperTrading.reviewDialogTitle(no)} description={copy.paperTrading.reviewDialogDescription}
+    <Dialog open={open} title={copy.paperTrading.reviewDialogTitle(no)} description={copy.paperTrading.reviewDialogDescription} modal={!aiOpen}
       resizable widthStorageKey="replay-review-dialog-width-v1" heightStorageKey="replay-review-dialog-height-v1"
       onClose={requestClose}>
       <form className="flex min-h-full flex-col gap-4" onSubmit={(event) => { event.preventDefault(); if (!managementBusy && !nameOpen && !deletingTemplate && !closeConfirmationOpen) onSave(); }}>
@@ -212,6 +214,7 @@ export function ReviewEditorDialog({ open, no, value, initialValue, saving, erro
         </div>
         {status ? <p className="text-xs text-emerald-700" role="status" aria-live="polite">{status}</p> : null}
         <div className="flex shrink-0 flex-wrap justify-end gap-2 border-t pt-4">
+          {onAi ? <Button type="button" variant="outline" disabled={managementBusy} onClick={() => onAi(selectedTemplateId || undefined)}>{copy.ai.toAi}</Button> : null}
           <Button type="button" variant="outline" onClick={openNameDialog} disabled={saving || !value.trim()}>{copy.paperTrading.saveReviewTemplate}</Button>
           <Button type="button" variant="outline" onClick={requestClose} disabled={managementBusy}>{copy.common.cancel}</Button>
           <Button type="submit" disabled={saving}>{saving ? <Loader2 className="h-4 w-4 animate-spin" aria-hidden="true" /> : null}{copy.paperTrading.saveReview}</Button>

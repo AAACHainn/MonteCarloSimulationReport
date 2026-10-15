@@ -328,6 +328,9 @@ export const replayJournalEntryUpdateSchema = z.object({
     .refine((values) => new Set(values).size === values.length)
     .optional(),
   review: z.string().refine((value) => reviewLength(value) <= MAX_REVIEW_LENGTH, copy.paperTrading.reviewTooLong).optional(),
+  expectedReview: z.string().optional(),
+  expectedProjectionId: z.string().optional(),
+  aiSourceRunId: z.string().optional(),
 }).refine(
   (value) => value.setupOptionId !== undefined || value.tradeReasonIds !== undefined || value.review !== undefined,
 );

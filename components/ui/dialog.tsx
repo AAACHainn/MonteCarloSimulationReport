@@ -22,10 +22,14 @@ type DialogProps = {
   resizable?: boolean;
   widthStorageKey?: string;
   heightStorageKey?: string;
+  headerActions?: ReactNode;
+  layerClassName?: string;
+  defaultWidth?: number;
+  defaultHeight?: number;
   onClose: () => void;
 };
 
-export function Dialog({ open, title, description, children, className, contentClassName, modal = true, keepMounted = false, movable = false, resizable = false, widthStorageKey, heightStorageKey, onClose }: DialogProps) {
+export function Dialog({ open, title, description, children, className, contentClassName, modal = true, keepMounted = false, movable = false, resizable = false, widthStorageKey, heightStorageKey, headerActions, layerClassName, defaultWidth, defaultHeight, onClose }: DialogProps) {
   const panelRef = useRef<HTMLElement>(null);
   const framed = movable || resizable;
   const { mounted, titleId, descriptionId } = useDialogLifecycle(open, panelRef, onClose, { modal });
@@ -55,6 +59,7 @@ export function Dialog({ open, title, description, children, className, contentC
             <h2 id={titleId} className="text-lg font-semibold text-slate-950">{title}</h2>
             {description ? <p id={descriptionId} className="mt-1 text-sm text-slate-600">{description}</p> : null}
           </div>
+          {headerActions}
           <button type="button" onClick={onClose} className="rounded-md p-1.5 text-slate-500 hover:bg-slate-100 hover:text-slate-900 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring" aria-label="关闭">
             <X className="h-4 w-4" />
           </button>
@@ -64,8 +69,8 @@ export function Dialog({ open, title, description, children, className, contentC
   );
 
   return createPortal(
-    <div aria-hidden={!open || undefined} className={cn("fixed inset-0 z-50 flex items-center justify-center p-4", modal ? "bg-slate-950/35 backdrop-blur-sm" : "pointer-events-none", !open && "hidden")} onMouseDown={modal ? onClose : undefined}>
-      {framed ? <DialogResizeFrame ref={panelRef} modal={modal} resizable={resizable} titleId={titleId} descriptionId={description ? descriptionId : undefined} widthStorageKey={widthStorageKey} heightStorageKey={heightStorageKey}>
+    <div aria-hidden={!open || undefined} className={cn("fixed inset-0 z-50 flex items-center justify-center p-4", layerClassName, modal ? "bg-slate-950/35 backdrop-blur-sm" : "pointer-events-none", !open && "hidden")} onMouseDown={modal ? onClose : undefined}>
+      {framed ? <DialogResizeFrame ref={panelRef} modal={modal} resizable={resizable} titleId={titleId} descriptionId={description ? descriptionId : undefined} widthStorageKey={widthStorageKey} heightStorageKey={heightStorageKey} defaultWidth={defaultWidth} defaultHeight={defaultHeight}>
         {panel}
       </DialogResizeFrame> : panel}
     </div>,

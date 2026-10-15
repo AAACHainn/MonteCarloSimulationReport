@@ -1,6 +1,7 @@
 "use client";
 import { useDeleteReplayCycle } from "./replay-correction-context";
 import { useReplayFetch, useReplaySession, useReplaySessionUrl } from "./replay-session-context";
+import { useAiAssistant } from "@/components/ai/assistant-provider";
 
 import { useCallback, useEffect, useMemo, useRef, useState, useTransition, type KeyboardEvent as ReactKeyboardEvent, type PointerEvent as ReactPointerEvent } from "react";
 import { useRouter } from "next/navigation";
@@ -138,6 +139,8 @@ export function PaperJournalTable({
 }) {
   const fetch = useReplayFetch();
   const replaySession = useReplaySession();
+  const ai = useAiAssistant();
+  const reviewAiSourcesRef = useRef<Record<string, string>>({});
   const router = useRouter();
   const [switchingSession, startSessionNavigation] = useTransition();
   const correction = useDeleteReplayCycle();
@@ -171,6 +174,20 @@ export function PaperJournalTable({
   const [reviewDialogEntryId, setReviewDialogEntryId] = useState<string | null>(null);
   const [reviewDialogDraft, setReviewDialogDraft] = useState("");
   const [reviewDialogInitialValue, setReviewDialogInitialValue] = useState("");
+  useEffect(() => {
+    if (!ai) return;
+    ai.registerEditor((payload) => {
+      if (!replaySession || payload.replaySessionId !== replaySession.id || payload.projectionId !== replaySession.activeProjectionId) return false;
+      const entry = items.find((e) => e.id === payload.entryId);
+      if (!entry) return false;
+      const current = reviewDialogEntryId === entry.id ? reviewDialogDraft : reviewDrafts[entry.id] ?? entry.review;
+      if (current !== payload.originalDraft) return false;
+      reviewAiSourcesRef.current[entry.id] = payload.sourceRunId;
+      setReviewDialogInitialValue(current); setReviewDialogEntryId(entry.id); setReviewDialogDraft(payload.draft); setReviewError(null);
+      return true;
+    });
+    return () => ai.registerEditor(null);
+  }, [ai, items, replaySession, reviewDialogEntryId, reviewDialogDraft, reviewDrafts]);
   const [visibleColumnsOpen, setVisibleColumnsOpen] = useState(false);
   const [visibleColumnIds, setVisibleColumnIds] = useState<JournalColumnId[]>(defaultVisibleColumnIds);
   const [draftVisibleColumnIds, setDraftVisibleColumnIds] = useState<JournalColumnId[]>(defaultVisibleColumnIds);
@@ -557,16 +574,16 @@ export function PaperJournalTable({
       const response = await fetch(replayJournalEntryApiHref(datasetId, entry.id), {
         method: "PATCH",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ review }),
+        body: JSON.stringify({ review, expectedReview: previousReview, expectedProjectionId: replaySession?.activeProjectionId, aiSourceRunId: reviewAiSourcesRef.current[entry.id] }),
       });
       const data = await response.json() as ReplayJournalEntryData & { error?: string };
       if (!response.ok) throw new Error(data.error ?? copy.paperTrading.reviewUpdateFailed);
       setItems((current) => current.map((item) => item.id === entry.id ? { ...item, review: data.review } : item));
       if (announce) setStatus(copy.paperTrading.reviewSaved);
       return true;
-    } catch {
+    } catch (cause) {
       setItems((current) => current.map((item) => item.id === entry.id ? { ...item, review: previousReview } : item));
-      setReviewError(copy.paperTrading.reviewUpdateFailed);
+      setReviewError(cause instanceof Error ? cause.message : copy.paperTrading.reviewUpdateFailed);
       return false;
     } finally {
       setSavingReviewIds((current) => {
@@ -838,6 +855,9 @@ export function PaperJournalTable({
       <div className="flex flex-col gap-3 sm:flex-row sm:items-end sm:justify-between">
         {sessionPicker}
         <div className="flex flex-wrap items-center gap-2">
+          {ai && replaySession ? <Button variant="outline" size="sm" disabled={loading} onClick={() => void ai.attach({
+            replaySessionId: replaySession.id, projectionId: replaySession.activeProjectionId, depth: "quick", images: false,
+          }).catch(() => undefined)}>{copy.ai.summarize}</Button> : null}
           <Button asChild variant="outline" size="sm">
             <a href={scopedUrl(`/api/market-datasets/${datasetId}/paper-journal/sessions/${selectedSession.id}/export`)} download>
               <Download className="h-4 w-4" aria-hidden="true" />
@@ -1246,6 +1266,13 @@ export function PaperJournalTable({
       onClose={() => setReviewDialogEntryId(null)}
       saving={reviewDialogEntryId ? savingReviewIds.has(reviewDialogEntryId) : false}
       error={reviewError}
+      aiOpen={ai?.open}
+      onAi={ai && replaySession ? (templateId) => {
+        if (!reviewDialogEntryId) return;
+        void ai.attach({ replaySessionId: replaySession.id, projectionId: replaySession.activeProjectionId,
+          entryId: reviewDialogEntryId, templateId, draft: reviewDialogDraft, depth: "quick", images: true,
+        }).catch(() => undefined);
+      } : undefined}
     />
     <RenameDialog
       open={renameOpen}

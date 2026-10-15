@@ -4,7 +4,7 @@ import { marketBarBlockSizeForMultiplier } from "./history";
 import type { AggregatedMarketBarData, TradingSessionConfig } from "./types";
 import type { PdfWindow } from "@/lib/paper-trading/pdf-types";
 
-type Options = { datasetId: string; anchorSequence: number; direction: "forward" | "backward"; count: number; warmupCount: number; endSequence: number; sourceSeconds: number; displaySeconds: number; session: TradingSessionConfig };
+type Options = { datasetId: string; anchorSequence: number; direction: "forward" | "backward"; count: number; warmupCount: number; endSequence: number; finalSequence?: number; sourceSeconds: number; displaySeconds: number; session: TradingSessionConfig };
 const select = { sequence: true, timestamp: true, open: true, high: true, low: true, close: true, volume: true } as const;
 
 /** Read only existing summaries, and stream uncovered rows in bounded chunks. */
@@ -48,7 +48,7 @@ async function bucketBar(o: Options, start: number, end: number) {
     }
     if (combined) segments.push(combined);
   }
-  return aggregateMarketSegments({ segments: segments.sort((a, b) => a.firstSequence - b.firstSequence), sourceSeconds: o.sourceSeconds, displaySeconds: o.displaySeconds, session: o.session, currentSequence: o.endSequence, finalSequence: o.endSequence })[0] ?? null;
+  return aggregateMarketSegments({ segments: segments.sort((a, b) => a.firstSequence - b.firstSequence), sourceSeconds: o.sourceSeconds, displaySeconds: o.displaySeconds, session: o.session, currentSequence: o.endSequence, finalSequence: o.finalSequence ?? o.endSequence })[0] ?? null;
 }
 
 /** Walk real buckets via the timestamp index, jumping closures and data gaps. */

@@ -1,26 +1,33 @@
 import { replayRouteBusinessScope } from "@/test-utils/replay-route-business-scope";
 vi.mock("@/lib/replay-sessions/scope", async (importOriginal) => ({
   ...await importOriginal<typeof import("@/lib/replay-sessions/scope")>(), ...replayRouteBusinessScope,
+  getReplayScope: () => ({ id: "session-1", datasetId: "dataset-1", projectionId: "projection-1", mode: "TRAINING", version: 1 }),
 }));
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 const mocks = vi.hoisted(() => ({
   entryFindFirst: vi.fn(),
   entryUpdate: vi.fn(),
+  entryUpdateMany: vi.fn(),
   optionFindFirst: vi.fn(),
   reasonCount: vi.fn(),
 }));
 
-vi.mock("@/lib/db", () => ({
-  prisma: {
+vi.mock("@/lib/db", () => {
+  const client = {
     replayJournalEntry: {
       findFirst: mocks.entryFindFirst,
       update: mocks.entryUpdate,
+      updateMany: mocks.entryUpdateMany,
     },
     tradeOption: { findFirst: mocks.optionFindFirst },
     tradeReason: { count: mocks.reasonCount },
-  },
-}));
+    replaySession: { findUnique: async () => ({ activeProjectionId: "projection-1" }) },
+    aiReviewRevision: { create: async () => ({ id: "revision-1" }) },
+    $queryRaw: async () => [{ id: "entry-1", displayNo: 1 }],
+  };
+  return { prisma: { ...client, $transaction: async (work: (tx: typeof client) => Promise<unknown>) => work(client) } };
+});
 
 import { PATCH } from "./route";
 
@@ -51,7 +58,8 @@ function record(setupOptionId: string | null, setupName: string | null) {
 
 beforeEach(() => {
   vi.clearAllMocks();
-  mocks.entryFindFirst.mockResolvedValue({ id: "entry-1" });
+  mocks.entryFindFirst.mockResolvedValue({ id: "entry-1", logicalKey: "entry-1", review: "等待回踩确认后入场" });
+  mocks.entryUpdateMany.mockResolvedValue({ count: 1 });
   mocks.optionFindFirst.mockResolvedValue({ id: "setup-1" });
   mocks.reasonCount.mockResolvedValue(2);
   mocks.entryUpdate.mockResolvedValue(record("setup-1", "Opening Range Breakout"));
@@ -63,7 +71,7 @@ describe("replay journal Setup API", () => {
     expect(response.status).toBe(200);
     expect(mocks.entryFindFirst).toHaveBeenCalledWith({
       where: { id: "entry-1", journalSession: { datasetId: "dataset-1" } },
-      select: { id: true },
+      select: { id: true, logicalKey: true, review: true },
     });
     expect(mocks.optionFindFirst).toHaveBeenCalledWith({
       where: { id: "setup-1", type: "STRATEGY", active: true },
