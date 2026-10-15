@@ -23,7 +23,7 @@ import { ReviewEditorDialog } from "@/components/market-replay/review-editor-dia
 import { MAX_REVIEW_LENGTH, limitReview, reviewLength } from "@/lib/paper-trading/review-templates";
 import { formatNumber, formatPercent } from "@/lib/format";
 import { copy } from "@/lib/i18n";
-import { replayJournalTradeHref } from "@/lib/paper-trading/journal-links";
+import { replayJournalEntryApiHref, replayJournalTradeHref } from "@/lib/paper-trading/journal-links";
 import { formatInterval } from "@/lib/market-replay/types";
 import { utcDateParts } from "@/lib/market-replay/display-timezone";
 import {
@@ -473,7 +473,7 @@ export function PaperJournalTable({
     setSavingSetupIds((current) => new Set(current).add(entry.id));
 
     try {
-      const response = await fetch(`/api/market-datasets/${datasetId}/paper-journal/entries/${entry.id}`, {
+      const response = await fetch(replayJournalEntryApiHref(datasetId, entry.id), {
         method: "PATCH",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ setupOptionId }),
@@ -513,7 +513,7 @@ export function PaperJournalTable({
     setSavingTradeReasonIds((current) => new Set(current).add(entry.id));
 
     try {
-      const response = await fetch(`/api/market-datasets/${datasetId}/paper-journal/entries/${entry.id}`, {
+      const response = await fetch(replayJournalEntryApiHref(datasetId, entry.id), {
         method: "PATCH",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ tradeReasonIds }),
@@ -554,7 +554,7 @@ export function PaperJournalTable({
     setItems((current) => current.map((item) => item.id === entry.id ? { ...item, review } : item));
     setSavingReviewIds((current) => new Set(current).add(entry.id));
     try {
-      const response = await fetch(`/api/market-datasets/${datasetId}/paper-journal/entries/${entry.id}`, {
+      const response = await fetch(replayJournalEntryApiHref(datasetId, entry.id), {
         method: "PATCH",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ review }),

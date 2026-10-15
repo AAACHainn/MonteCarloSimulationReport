@@ -26,6 +26,7 @@ import { applySpeculativeAdvance, paperStateFingerprint } from "@/lib/paper-trad
 import { createPaperDeltaAccumulator, recordPaperAdvance, buildPaperReplayDelta } from "@/lib/market-replay/client-sync";
 import { serializeSourceBar } from "@/lib/market-replay/dataset";
 import { logicalId } from "./identity";
+import { replayJournalEntryApiHref } from "@/lib/paper-trading/journal-links";
 
 let databaseFile = "";
 let serial = 0;
@@ -75,6 +76,41 @@ async function place(sessionId: string, input: Record<string, unknown> = {}) {
 const approval = (s: { id: string; checklistVersion: number }, checkedItemIds = ["trend", "risk"]) => ({ strategyId: s.id, checklistVersion: s.checklistVersion, checkedItemIds });
 
 describe("training gate APIs and persistence", () => {
+  it.each([
+    ["TRAINING", false], ["TRAINING", true], ["LIVE_REPLAY", false], ["LIVE_REPLAY", true],
+  ] as const)("saves annotations through encoded journal URLs in %s (archived=%s) without changing trading state", async (mode, archived) => {
+    const session = await setup(mode), s = await strategy();
+    await place(session.id); await advance(session.id);
+    await place(session.id, { side: "SELL", reduceOnly: true }); await advance(session.id);
+    const scope = await loadReplayScope(session.id);
+    const entry = await prisma.replayJournalEntry.findFirstOrThrow({ where: { projectionId: scope.projectionId } });
+    expect(entry.id).toContain("%3A");
+    if (archived) await prisma.replaySession.update({ where: { id: session.id }, data: { status: "ARCHIVED" } });
+    const before = await snapshot(session.id);
+    const progress = await prisma.replayProgress.findUniqueOrThrow({ where: { replaySessionId: session.id } });
+    const reason = await prisma.tradeReason.create({ data: { name: `URL-${session.id}`, normalizedName: `url-${session.id}` } });
+    const apply = async (url: URL, body: unknown) => journalPATCH(new Request(url, {
+      method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body),
+    }), ctx(session.datasetId, { entryId: decodeURIComponent(url.pathname.split("/").at(-1)!) }));
+    const broken = new URL(`/api/market-datasets/${session.datasetId}/paper-journal/entries/${entry.id}?replaySessionId=${session.id}`, "http://localhost");
+    expect((await apply(broken, { setupOptionId: s.id })).status).toBe(404);
+    const url = new URL(replayJournalEntryApiHref(session.datasetId, entry.id), "http://localhost");
+    url.searchParams.set("replaySessionId", session.id);
+    for (const body of [{ setupOptionId: s.id }, { tradeReasonIds: [reason.id] }, { review: "保存 Setup 后补充复盘" }, { setupOptionId: null }]) {
+      const response = await apply(url, body);
+      expect(response.status).toBe(200);
+      expect((await response.json()).id).toBe(entry.id);
+    }
+    const updated = await prisma.replayJournalEntry.findUniqueOrThrow({ where: { id: entry.id }, include: { tradeReasons: true } });
+    expect(updated).toEqual({ ...entry, review: "保存 Setup 后补充复盘", setupOptionId: null, tradeReasons: [reason] });
+    expect(await snapshot(session.id)).toEqual(before);
+    expect(await prisma.replayProgress.findUniqueOrThrow({ where: { replaySessionId: session.id } })).toEqual(progress);
+    const other = await setup(mode);
+    url.searchParams.set("replaySessionId", other.id);
+    expect((await apply(url, { setupOptionId: s.id })).status).toBe(404);
+    expect((await prisma.replayJournalEntry.findUniqueOrThrow({ where: { id: entry.id } })).setupOptionId).toBeNull();
+  });
+
   it("enforces strategy, checklist completeness/version and locked configuration", async () => {
     const session = await setup(), s = await strategy();
     expect((await start(session.id, 3)).status).toBe(200);

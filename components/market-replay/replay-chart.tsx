@@ -9,13 +9,14 @@ import {
   type MouseEvent as ReactMouseEvent,
   type PointerEvent as ReactPointerEvent,
 } from "react";
-import { Grid2X2, GripHorizontal, Link2, Loader2, LogOut, RotateCcw, ShieldAlert, Undo2, X } from "lucide-react";
+import { EyeOff, Grid2X2, GripHorizontal, Link2, Loader2, LogOut, RotateCcw, ShieldAlert, Undo2, X } from "lucide-react";
 import {
   CandlestickSeries, ColorType, createChart, CrosshairMode,
   HistogramSeries, type IChartApi, type IPriceLine, type ISeriesApi,
   type Time, TickMarkType,
 } from "lightweight-charts";
 import { Button } from "@/components/ui/button";
+import { Alert } from "@/components/ui/alert";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { isClosingOrder } from "@/lib/paper-trading/training-gate";
@@ -83,6 +84,7 @@ import type { PaperSessionSnapshot, PaperSide, ReplayTradeAnnotationData } from 
 import { useReplayChartEma } from "./use-replay-chart-ema";
 import { isReplayDrawingDeleteShortcut, isReplayShortcutInputTarget } from "@/lib/market-replay/keyboard-shortcuts";
 import { chartRewindTarget, type ChartRewindRange, type ChartRewindTarget } from "@/lib/market-replay/chart-rewind";
+import { chartBarsBeforeHiddenBoundary, chartHiddenSeriesData, chartHideAfterTarget, type ChartHideAfter } from "@/lib/market-replay/chart-hide-after";
 
 type DraftOrder = {
   id: string;
@@ -96,7 +98,7 @@ type DraftOrder = {
   tpMode: "LINKED" | "FREE";
 };
 
-type ContextMenuState = { x: number; y: number; price: number; rewindTarget: ChartRewindTarget | null };
+type ContextMenuState = { x: number; y: number; price: number; rewindTarget: ChartRewindTarget | null; hideAfter: ChartHideAfter | null };
 type AbrTooltipState = {
   left: number;
   top: number;
@@ -305,6 +307,12 @@ export function ReplayChart({
   rewindRange?: ChartRewindRange;
 }) {
   const replaySession = useReplaySession();
+  const visibilityScope = `${datasetId}:${replaySession?.id ?? ""}:${paperSnapshot?.session.id ?? ""}:${readOnly}`;
+  const [hiddenBoundary, setHiddenBoundary] = useState<{ scope: string; target: ChartHideAfter } | null>(null);
+  const hiddenAfter = hiddenBoundary?.scope === visibilityScope ? hiddenBoundary.target : null;
+  const visibleBars = useMemo(() => chartBarsBeforeHiddenBoundary(bars, hiddenAfter, displayIntervalSeconds, displaySession), [bars, hiddenAfter, displayIntervalSeconds, displaySession]);
+  const visibleWarmupBars = useMemo(() => chartBarsBeforeHiddenBoundary(warmupBars, hiddenAfter, displayIntervalSeconds, displaySession), [warmupBars, hiddenAfter, displayIntervalSeconds, displaySession]);
+  useEffect(() => { setHiddenBoundary(null); }, [visibilityScope]);
   const containerRef = useRef<HTMLDivElement | null>(null);
   const interactionRef = useRef<HTMLDivElement | null>(null);
   const orderTicketRef = useRef<HTMLDivElement | null>(null);
@@ -320,11 +328,13 @@ export function ReplayChart({
   const trendLinePrimitiveRef = useRef<TrendLinePrimitive | null>(null);
   const fibonacciPrimitiveRef = useRef<FibonacciRetracementPrimitive | null>(null);
   const lastDataRef = useRef<AggregatedMarketBarData[]>([]);
+  const lastHiddenAfterRef = useRef<ChartHideAfter | null>(null);
   const lastDataIntervalRef = useRef(displayIntervalSeconds);
   const lastDataSessionRef = useRef(displaySession);
   const displaySessionRef = useRef(displaySession);
   displaySessionRef.current = displaySession;
-  const barsRef = useRef(bars);
+  const barsRef = useRef(visibleBars);
+  const timelineBarsRef = useRef(bars);
   const drawingSessionRef = useRef(barCountSession);
   const requestedDrawingSessionRef = useRef(barCountSession);
   requestedDrawingSessionRef.current = barCountSession;
@@ -378,8 +388,8 @@ export function ReplayChart({
   const [draftError, setDraftError] = useState<string | null>(null);
   const [lineActions, setLineActions] = useState<LineAction[]>([]);
   const hasVolume = useMemo(() => [...warmupBars, ...bars].some((bar) => bar.volume !== null), [bars, warmupBars]);
-  const warmupBarsRef = useRef(warmupBars);
-  warmupBarsRef.current = warmupBars;
+  const warmupBarsRef = useRef(visibleWarmupBars);
+  warmupBarsRef.current = visibleWarmupBars;
   const abrLengthRef = useRef(abrLength);
   abrLengthRef.current = abrLength;
   const latest = bars.at(-1);
@@ -518,7 +528,8 @@ export function ReplayChart({
 
   const syncVisibleSequenceRange = useCallback(() => {
     const chart = chartRef.current;
-    const currentBars = barsRef.current;
+    // Paging reports the original timeline, even while part of it is visually hidden.
+    const currentBars = timelineBarsRef.current;
     const range = chart?.timeScale().getVisibleLogicalRange();
     if (!range || !currentBars.length) return;
     const fromIndex = Math.max(0, Math.min(currentBars.length - 1, Math.floor(range.from)));
@@ -747,7 +758,8 @@ export function ReplayChart({
     const nextDisplaySession = displaySessionRef.current;
     const previous = lastDataRef.current;
     const next = bars;
-    barsRef.current = next;
+    barsRef.current = visibleBars;
+    timelineBarsRef.current = next;
     displayIntervalSecondsRef.current = nextDisplayIntervalSeconds;
     drawingSessionRef.current = requestedDrawingSessionRef.current;
     const volumeSeries = volumeRef.current;
@@ -756,7 +768,7 @@ export function ReplayChart({
     const samePrefix = previous.length > 0 && next.length >= previous.length
       && previous[0].timestamp === next[0]?.timestamp
       && previous.at(-1)?.timestamp === next[previous.length - 1]?.timestamp;
-    if (samePrefix) {
+    if (samePrefix && !hiddenAfter && !lastHiddenAfterRef.current) {
       const range = chart.timeScale().getVisibleLogicalRange();
       const previousLastIndex = previous.length - 1;
       for (const bar of next.slice(Math.max(0, previous.length - 1))) {
@@ -780,8 +792,15 @@ export function ReplayChart({
           nextDisplayIntervalSeconds,
         })
         : null;
-      series.setData(next.map(candle));
-      volumeSeries?.setData(next.filter((bar) => bar.volume !== null).map((bar) => volume(bar)));
+      // Whitespace retains the original time axis and viewport without exposing prices.
+      if (hiddenAfter) {
+        const masked = chartHiddenSeriesData(next, visibleBars);
+        series.setData(masked.candles);
+        volumeSeries?.setData(masked.volumes);
+      } else {
+        series.setData(next.map(candle));
+        volumeSeries?.setData(next.filter((bar) => bar.volume !== null).map((bar) => volume(bar)));
+      }
       if (mappedTimelineRange) {
         chart.timeScale().setVisibleLogicalRange(mappedTimelineRange);
       } else if (range && previousLastInNext >= 0) {
@@ -805,12 +824,13 @@ export function ReplayChart({
       volumeSeries.priceScale().applyOptions({ autoScale: false });
     }
     lastDataRef.current = next;
+    lastHiddenAfterRef.current = hiddenAfter;
     lastDataIntervalRef.current = nextDisplayIntervalSeconds;
     lastDataSessionRef.current = nextDisplaySession;
     requestAnimationFrame(syncVisibleSequenceRange);
     requestAnimationFrame(syncMeasurementCoordinates);
     requestAnimationFrame(syncDrawingPrimitive);
-  }, [bars, readOnly, syncDrawingPrimitive, syncMeasurementCoordinates, syncVisibleSequenceRange]);
+  }, [bars, visibleBars, hiddenAfter, readOnly, syncDrawingPrimitive, syncMeasurementCoordinates, syncVisibleSequenceRange]);
 
   useEffect(() => {
     if (focusSequence === null) return;
@@ -825,34 +845,34 @@ export function ReplayChart({
   useEffect(() => {
     tradeAnnotationPrimitiveRef.current?.setData({
       entries: tradeAnnotationsVisible ? tradeAnnotations : [],
-      bars,
+      bars: visibleBars,
     });
-  }, [bars, tradeAnnotations, tradeAnnotationsVisible]);
+  }, [visibleBars, tradeAnnotations, tradeAnnotationsVisible]);
 
   useEffect(() => {
     barCountPrimitiveRef.current?.setData({
-      bars,
+      bars: visibleBars,
       displaySession,
       displayIntervalSeconds,
       session: barCountSession,
       config: barCountConfig,
     });
-  }, [barCountConfig, barCountSession, bars, displayIntervalSeconds, displaySession]);
+  }, [barCountConfig, barCountSession, visibleBars, displayIntervalSeconds, displaySession]);
 
   useEffect(() => {
     candleCountdownPrimitiveRef.current?.setData({
-      bars,
+      bars: visibleBars,
       currentSourceTimestamp,
-      enabled: candleCountdownEnabled,
+      enabled: candleCountdownEnabled && !hiddenAfter,
       playing: playbackActive,
       sourceIntervalSeconds: sourceIntervalSeconds ?? displayIntervalSeconds,
     });
-  }, [bars, candleCountdownEnabled, currentSourceTimestamp, displayIntervalSeconds, playbackActive, sourceIntervalSeconds]);
+  }, [visibleBars, hiddenAfter, candleCountdownEnabled, currentSourceTimestamp, displayIntervalSeconds, playbackActive, sourceIntervalSeconds]);
 
   useReplayChartEma({
     chartRef,
-    bars,
-    warmupBars,
+    bars: visibleBars,
+    warmupBars: visibleWarmupBars,
     enabled: emaEnabled,
     indicators: emaIndicators,
     chartKey: priceTickSize,
@@ -1635,9 +1655,8 @@ export function ReplayChart({
 
   function openContextMenu(event: ReactMouseEvent<HTMLDivElement>) {
     event.preventDefault();
-    if (readOnly) return;
     if (drawingToolRef.current || drawingDraftRef.current || drawingPreviewRef.current) return;
-    if ((event.target as HTMLElement).closest("[data-order-ticket],[data-context-menu],[data-line-action]")) return;
+    if ((event.target as HTMLElement).closest("[data-order-ticket],[data-context-menu],[data-line-action],[data-hidden-bars-notice]")) return;
     const series = candleRef.current;
     const root = event.currentTarget.getBoundingClientRect();
     const rawPrice = series?.coordinateToPrice((event.clientY - root.top) as never);
@@ -1647,11 +1666,14 @@ export function ReplayChart({
     const x = event.clientX - root.left, y = event.clientY - root.top;
     const insidePane = chart && x >= 0 && x <= chart.timeScale().width() && y >= 0 && y <= (chart.panes()[0]?.getHeight() ?? 0);
     const logical = insidePane ? chart.timeScale().coordinateToLogical(x as never) : null;
+    const hideAfter = chartHideAfterTarget(barsRef.current, logical === null ? null : Number(logical), displayIntervalSeconds, displaySession);
+    if (readOnly && !hideAfter) return;
     setContextMenu({
       x: Math.max(8, Math.min(event.clientX - root.left, root.width - 228)),
       y: Math.max(8, Math.min(event.clientY - root.top, root.height - 264)),
       price: Number.isFinite(price) && price > 0 ? price : fallback,
       rewindTarget: onRewindToBar && rewindRange ? chartRewindTarget(barsRef.current, logical === null ? null : Number(logical), rewindRange) : null,
+      hideAfter,
     });
   }
 
@@ -1804,7 +1826,15 @@ export function ReplayChart({
         className="h-full min-h-[240px] w-full overflow-hidden bg-white"
         aria-label={copy.marketReplay.chartAriaLabel}
         data-bar-count={bars.length}
+        data-visible-bar-count={visibleBars.length}
       />
+
+      {hiddenAfter ? <Alert data-hidden-bars-notice role="status" aria-live="polite"
+        className="absolute bottom-3 left-3 z-30 flex w-auto max-w-[calc(100%-1.5rem)] flex-wrap items-center gap-2 bg-white/95 px-3 py-2 shadow-lg backdrop-blur">
+        <span className="flex items-center gap-2 font-medium text-slate-700"><EyeOff className="h-4 w-4 shrink-0" aria-hidden="true" />{copy.marketReplay.subsequentBarsHidden}</span>
+        <Button type="button" variant="outline" size="sm" className="min-h-10 sm:min-h-8" data-testid="restore-subsequent-bars" aria-label={copy.marketReplay.restoreSubsequentBars}
+          onClick={() => { setHiddenBoundary(null); setAbrTooltip(null); }}>{copy.marketReplay.restoreSubsequentBars}</Button>
+      </Alert> : null}
 
       {tradeAnnotationsVisible && tradeAnnotationsTruncated ? (
         <div className="pointer-events-none absolute right-3 top-3 z-20 rounded-md bg-amber-50/95 px-2 py-1 text-[11px] text-amber-800 shadow-sm backdrop-blur">
@@ -1934,6 +1964,12 @@ export function ReplayChart({
 
       {contextMenu ? (
         <div ref={contextMenuRef} data-context-menu role="menu" className="absolute z-40 max-h-[calc(100%-1rem)] w-[220px] max-w-[calc(100%-1rem)] overflow-y-auto rounded-lg border border-slate-200 bg-white p-1.5 shadow-xl" style={{ left: contextMenu.x, top: contextMenu.y }}>
+          {contextMenu.hideAfter ? <Button type="button" role="menuitem" variant="ghost" data-testid="context-hide-subsequent-bars"
+            className="w-full justify-start px-2 text-left font-medium text-slate-700"
+            onClick={() => { const target = contextMenu.hideAfter; if (target) setHiddenBoundary({ scope: visibilityScope, target }); setContextMenu(null); setAbrTooltip(null); }}>
+            <EyeOff className="h-4 w-4" aria-hidden="true" />{copy.marketReplay.hideSubsequentBars}
+          </Button> : null}
+          {!readOnly ? <>
           <div className="mb-1 border-b pb-1">
             <button type="button" role="menuitem" data-testid="context-reset-chart-view" className="flex w-full items-center gap-2 rounded-md px-2 py-2 text-left text-sm font-medium text-slate-700 hover:bg-slate-100 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-600" onClick={resetChartView}>
               <RotateCcw className="h-4 w-4" />
@@ -1980,6 +2016,7 @@ export function ReplayChart({
               {contextEntryOrderTypes.buy === "STOP" ? <button type="button" role="menuitem" data-testid="context-buy-stop" className="flex w-full items-center rounded-md px-2 py-2 text-left text-sm font-medium text-blue-700 hover:bg-blue-50" onClick={() => createDraft("BUY", "STOP")}>{copy.paperTrading.buyStop}</button> : null}
             </fieldset>
           ) : null}
+          </> : null}
         </div>
       ) : null}
 
