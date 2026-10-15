@@ -1,8 +1,9 @@
 import { describe, expect, it } from "vitest";
 import { planPdfCharts, pdfVolumeCount, type PdfWindowReader } from "./pdf-planner";
 import { pdfBars, pdfEntry } from "./pdf-test-fixtures";
-import { parsePdfDetails, defaultPdfFieldIds, replayFilterSearchParams } from "./pdf-settings";
-import { createEmptyReplayJournalFilters } from "./journal-filters";
+import { parsePdfDetails, defaultPdfFieldIds, replayFilterSearchParams, describePdfFilters } from "./pdf-settings";
+import { createEmptyReplayJournalFilters, readReplayJournalFilters } from "./journal-filters";
+import { copy } from "@/lib/i18n";
 
 function reader(count = 1200, stride = 1): PdfWindowReader {
   const bars = pdfBars(count, stride);
@@ -54,6 +55,15 @@ describe("PDF chart planning", () => {
   });
 });
 describe("PDF detail and filter settings", () => {
+  it("preserves checklist selections in export queries and describes them in Chinese", () => {
+    const filters = createEmptyReplayJournalFilters();
+    filters.checklistUsed = ["YES", "NO"];
+    const params = replayFilterSearchParams(filters);
+    expect(params.getAll("checklistUsed")).toEqual(["YES", "NO"]);
+    expect(readReplayJournalFilters(params)).toEqual(filters);
+    expect(describePdfFilters(filters, [])).toBe(`${copy.paperTrading.checklistUsed}: ${copy.paperTrading.checklistYes}、${copy.paperTrading.checklistNo}`);
+  });
+
   it("keeps empty or disabled detail selections and normalizes order", () => {
     expect(parsePdfDetails(null).detailFieldIds).toEqual(defaultPdfFieldIds);
     expect(parsePdfDetails(JSON.stringify({ includeDetails: false, detailFieldIds: [] }))).toEqual({ includeDetails: false, detailFieldIds: [] });

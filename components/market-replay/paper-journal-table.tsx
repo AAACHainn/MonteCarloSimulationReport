@@ -241,6 +241,7 @@ export function PaperJournalTable({
         }
         for (const value of appliedFiltersRef.current.directions) params.append("directions", value);
         for (const value of appliedFiltersRef.current.setupOptionIds) params.append("setupOptionIds", value);
+        for (const value of appliedFiltersRef.current.checklistUsed) params.append("checklistUsed", value);
         for (const value of appliedFiltersRef.current.tradeReasonIds) params.append("tradeReasonIds", value);
         for (const value of appliedFiltersRef.current.results) params.append("results", value);
       }
@@ -816,6 +817,10 @@ export function PaperJournalTable({
     setupOptionIds: [
       ...(hasEntriesWithoutSetup ? [{ value: NO_SETUP_FILTER_VALUE, label: copy.paperTrading.clearSetup }] : []),
       ...setupFilterOptions,
+    ],
+    checklistUsed: [
+      { value: "YES", label: copy.paperTrading.checklistYes },
+      { value: "NO", label: copy.paperTrading.checklistNo },
     ],
     tradeReasonIds: [
       ...(hasEntriesWithoutTradeReason ? [{ value: NO_TRADE_REASON_FILTER_VALUE, label: copy.paperTrading.noTradeReason }] : []),

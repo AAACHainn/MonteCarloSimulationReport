@@ -1,4 +1,5 @@
 import type { ReplayJournalEntryData } from "./types";
+import { journalUsedChecklist } from "./journal-checklist";
 import { compileRExpressionFilter, type RExpressionFilter } from "../trade-journal/r-expression-filter";
 
 export const replayJournalExpressionFilterKeys = [
@@ -11,10 +12,11 @@ export const replayJournalExpressionFilterKeys = [
 ] as const;
 
 export type ReplayJournalExpressionFilterKey = (typeof replayJournalExpressionFilterKeys)[number];
-export type ReplayJournalOptionFilterKey = "directions" | "setupOptionIds" | "tradeReasonIds" | "results";
+export type ReplayJournalOptionFilterKey = "directions" | "setupOptionIds" | "checklistUsed" | "tradeReasonIds" | "results";
 export type ReplayJournalFilters = Record<ReplayJournalExpressionFilterKey, string> & {
   directions: ReplayJournalEntryData["direction"][];
   setupOptionIds: string[];
+  checklistUsed: ("YES" | "NO")[];
   tradeReasonIds: string[];
   results: ReplayJournalEntryData["result"][];
 };
@@ -32,6 +34,7 @@ export function createEmptyReplayJournalFilters(): ReplayJournalFilters {
     actualRiskRr: "",
     directions: [],
     setupOptionIds: [],
+    checklistUsed: [],
     tradeReasonIds: [],
     results: [],
   };
@@ -43,6 +46,8 @@ export function readReplayJournalFilters(searchParams: URLSearchParams): ReplayJ
   filters.directions = unique(searchParams.getAll("directions"))
     .filter((value): value is ReplayJournalEntryData["direction"] => value === "LONG" || value === "SHORT");
   filters.setupOptionIds = unique(searchParams.getAll("setupOptionIds").map((value) => value.trim()).filter(Boolean));
+  filters.checklistUsed = unique(searchParams.getAll("checklistUsed"))
+    .filter((value): value is "YES" | "NO" => value === "YES" || value === "NO");
   filters.tradeReasonIds = unique(searchParams.getAll("tradeReasonIds").map((value) => value.trim()).filter(Boolean));
   filters.results = unique(searchParams.getAll("results"))
     .filter((value): value is ReplayJournalEntryData["result"] => value === "W" || value === "L" || value === "BE");
@@ -63,6 +68,8 @@ export function compileReplayJournalFilters(filters: ReplayJournalFilters) {
       if (filters.directions.length > 0 && !filters.directions.includes(entry.direction)) return false;
       const setupValue = entry.setupOptionId ?? NO_SETUP_FILTER_VALUE;
       if (filters.setupOptionIds.length > 0 && !filters.setupOptionIds.includes(setupValue)) return false;
+      const checklistValue = journalUsedChecklist(entry) ? "YES" : "NO";
+      if (filters.checklistUsed.length > 0 && !filters.checklistUsed.includes(checklistValue)) return false;
       if (filters.tradeReasonIds.length > 0) {
         const matchesEmpty = entry.tradeReasons.length === 0
           && filters.tradeReasonIds.includes(NO_TRADE_REASON_FILTER_VALUE);
@@ -89,6 +96,7 @@ export function countActiveReplayJournalFilters(filters: ReplayJournalFilters) {
   return replayJournalExpressionFilterKeys.filter((key) => filters[key].trim() !== "").length
     + Number(filters.directions.length > 0)
     + Number(filters.setupOptionIds.length > 0)
+    + Number(filters.checklistUsed.length > 0)
     + Number(filters.tradeReasonIds.length > 0)
     + Number(filters.results.length > 0);
 }

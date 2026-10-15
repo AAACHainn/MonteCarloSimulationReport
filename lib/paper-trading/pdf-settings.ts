@@ -16,7 +16,7 @@ export function parsePdfDetails(value: string | null): { includeDetails: boolean
 export function replayFilterSearchParams(filters: ReplayJournalFilters) {
   const params = new URLSearchParams();
   for (const key of replayJournalExpressionFilterKeys) if (filters[key].trim()) params.set(key, filters[key].trim());
-  for (const key of ["directions", "setupOptionIds", "tradeReasonIds", "results"] as const)
+  for (const key of ["directions", "setupOptionIds", "checklistUsed", "tradeReasonIds", "results"] as const)
     for (const value of filters[key]) params.append(key, value);
   return params;
 }
@@ -27,6 +27,7 @@ export function describePdfFilters(filters: ReplayJournalFilters, entries: Repla
     if (!c.optionFilterKey || !filters[c.optionFilterKey].length) continue;
     const values = filters[c.optionFilterKey].map((v) => {
       if (c.optionFilterKey === "directions") return v === "LONG" ? copy.paperTrading.long : copy.paperTrading.short;
+      if (c.optionFilterKey === "checklistUsed") return v === "YES" ? copy.paperTrading.checklistYes : copy.paperTrading.checklistNo;
       if (c.optionFilterKey === "setupOptionIds") return v === NO_SETUP_FILTER_VALUE ? copy.common.dash : entries.find((e) => e.setupOptionId === v)?.setupOption?.name ?? v;
       if (c.optionFilterKey === "tradeReasonIds") return v === NO_TRADE_REASON_FILTER_VALUE ? copy.common.dash : entries.flatMap((e) => e.tradeReasons).find((r) => r.id === v)?.name ?? v;
       return v;
