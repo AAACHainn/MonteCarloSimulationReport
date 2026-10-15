@@ -1,9 +1,7 @@
 import { copy } from "@/lib/i18n";
 import { endpointUrls, revealKey } from "./config";
 import { AiError } from "./errors";
-import { LIMITS, outputJsonSchema, type Capability, type Endpoint } from "./schema";
-import { deflateSync } from "node:zlib";
-import { randomInt } from "node:crypto";
+import { LIMITS, outputJsonSchema, type Endpoint } from "./schema";
 
 export type ModelMessage = { role: "system" | "user" | "assistant"; content: string | Array<{ type: "text"; text: string } | { type: "image_url"; image_url: { url: string } }> };
 export type Usage = { input: number | null; output: number | null };
@@ -90,39 +88,12 @@ export async function generate(
     signal.throwIfAborted(); throw new AiError("NETWORK", copy.ai.interrupted, 502);
   }
 }
-export async function probe(endpoint: Endpoint, model: string, capability: Capability) {
-  const tool = { type: "function", function: { name: "connection_probe", description: "Temporary read-only connectivity probe.", parameters: { type: "object", properties: { ok: { type: "boolean" } }, required: ["ok"], additionalProperties: false } } };
-  const text = capability === "tools" ? 'Call connection_probe with {"ok":true}.' : capability === "structured" ? 'Return JSON {"ok":true}.' : capability === "vision" ? "Identify the solid color in this image. Reply with only the English color name." : "Reply OK.";
-  const blue = randomInt(2) === 1;
-  const pixel = colorProbeImage(blue);
+export async function testConnection(endpoint: Endpoint, model: string) {
   const data = await boundedJson(await fetch(endpointUrls(endpoint).chat, {
     method: "POST", redirect: "error", headers: requestHeaders(endpoint), signal: AbortSignal.timeout(30000),
-    body: JSON.stringify({ model, stream: false, [endpoint.tokenParameter ?? "max_tokens"]: 100, messages: [{ role: "user", content: capability === "vision" ? [{ type: "text", text }, { type: "image_url", image_url: { url: pixel } }] : text }],
-      ...(capability === "tools" ? { tools: [tool], tool_choice: { type: "function", function: { name: "connection_probe" } } } : {}),
-      ...(capability === "structured" ? { response_format: { type: "json_schema", json_schema: { name: "probe", strict: true, schema: { type: "object", properties: { ok: { type: "boolean" } }, required: ["ok"], additionalProperties: false } } } } : {}),
-    }),
+    body: JSON.stringify({ model, stream: false, [endpoint.tokenParameter ?? "max_tokens"]: 100, messages: [{ role: "user", content: "Reply OK." }] }),
   }));
-  const choice = data.choices?.[0], message = choice?.message;
-  if (choice?.finish_reason !== (capability === "tools" ? "tool_calls" : "stop")) throw new AiError("PROBE", copy.ai.incomplete);
-  if (capability === "tools") {
-    const calls = message?.tool_calls;
-    const args = calls?.length === 1 ? JSON.parse(calls[0].function.arguments) : null;
-    if (calls?.length !== 1 || calls[0].function?.name !== "connection_probe" || !calls[0].id || args?.ok !== true || Object.keys(args).length !== 1) throw new AiError("PROBE", copy.ai.remote);
-  } else if (capability === "structured") {
-    if (JSON.parse(message?.content).ok !== true) throw new AiError("PROBE", copy.ai.remote);
-  } else if (!message?.content || (capability === "vision" && !String(message.content).toLowerCase().includes(blue ? "blue" : "red"))) throw new AiError("PROBE", copy.ai.incomplete);
-}
-function colorProbeImage(blue: boolean) {
-  function chunk(type: string, data: Buffer) {
-    const body = Buffer.concat([Buffer.from(type), data]), size = Buffer.alloc(4), crc = Buffer.alloc(4);
-    size.writeUInt32BE(data.length);
-    let value = 0xffffffff;
-    for (const byte of body) { value ^= byte; for (let bit = 0; bit < 8; bit++) value = value & 1 ? (value >>> 1) ^ 0xedb88320 : value >>> 1; }
-    crc.writeUInt32BE((value ^ 0xffffffff) >>> 0);
-    return Buffer.concat([size, body, crc]);
-  }
-  const header = Buffer.alloc(13); header.writeUInt32BE(16, 0); header.writeUInt32BE(16, 4); header[8] = 8; header[9] = 2;
-  const raw = Buffer.alloc(16 * 49);
-  for (let row = 0; row < 16; row++) for (let col = 0; col < 16; col++) raw[row * 49 + 1 + col * 3 + (blue ? 2 : 0)] = 255;
-  return "data:image/png;base64," + Buffer.concat([Buffer.from([137, 80, 78, 71, 13, 10, 26, 10]), chunk("IHDR", header), chunk("IDAT", deflateSync(raw)), chunk("IEND", Buffer.alloc(0))]).toString("base64");
+  // This checks access to the selected model, without inferring image, tool or schema capabilities.
+  // A reasoning model may consume the small output budget before producing visible text.
+  if (data.error || !Array.isArray(data.choices) || !data.choices[0]?.message) throw new AiError("CONNECTION", copy.ai.connectionFailed, 502);
 }

@@ -85,9 +85,9 @@ export async function saveSettings(input: unknown, expectedVersion: number) {
 export function resolveModel(settings: AiSettings, task: SkillKey) {
   const skill = settings.skills[task];
   if (!skill.enabled) throw new AiError("DISABLED", copy.ai.disabled);
-  const endpoint = settings.endpoints.find((e) => e.id === (skill.endpointId || settings.activeEndpointId));
+  const endpoint = settings.endpoints.find((e) => e.id === settings.activeEndpointId);
   if (!endpoint) throw new AiError("UNCONFIGURED", copy.ai.unconfigured);
-  if (skill.model && !skill.endpointId) throw new AiError("MODEL_SCOPE", copy.ai.invalid);
-  const model = skill.model || endpoint.defaultModel;
+  const model = endpoint.defaultModel;
+  if (!model) throw new AiError("MODEL_REQUIRED", copy.ai.modelRequired);
   return { endpoint, model, prompt: skill.prompt };
 }

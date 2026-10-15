@@ -17,9 +17,9 @@ export const DEFAULT_PROMPTS: Record<SkillKey, string> = {
 };
 export function defaultSettings(): AiSettings {
   return { schemaVersion: 1, activeEndpointId: "", endpoints: [], skills: {
-    globalAssistant: { enabled: true, prompt: DEFAULT_PROMPTS.globalAssistant, endpointId: "", model: "" },
-    chartReading: { enabled: true, prompt: DEFAULT_PROMPTS.chartReading, endpointId: "", model: "" },
-    reviewDraft: { enabled: true, prompt: DEFAULT_PROMPTS.reviewDraft, endpointId: "", model: "" },
-    sessionReview: { enabled: true, prompt: DEFAULT_PROMPTS.sessionReview, endpointId: "", model: "" },
+    globalAssistant: { enabled: true, prompt: DEFAULT_PROMPTS.globalAssistant },
+    chartReading: { enabled: true, prompt: DEFAULT_PROMPTS.chartReading },
+    reviewDraft: { enabled: true, prompt: DEFAULT_PROMPTS.reviewDraft },
+    sessionReview: { enabled: true, prompt: DEFAULT_PROMPTS.sessionReview },
   } };
 }

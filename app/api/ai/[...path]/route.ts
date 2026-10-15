@@ -7,8 +7,8 @@ import { ensureAiStorage, readSettings, saveSettings, publicSettings, endpointUr
 import { createContext, readContext, checkCurrentContext, isContextStale } from "@/lib/ai/context";
 import { saveAsset, readAsset } from "@/lib/ai/assets";
 import { createRun, cancelRun, executeRun, recoverRuns, resumeRun, retryRun, startAnalysisWorker } from "@/lib/ai/runs";
-import { boundedJson, requestHeaders, probe } from "@/lib/ai/provider";
-import { capabilityKeys, contextRequestSchema, runRequestSchema, LIMITS } from "@/lib/ai/schema";
+import { boundedJson, requestHeaders, testConnection } from "@/lib/ai/provider";
+import { contextRequestSchema, runRequestSchema, LIMITS } from "@/lib/ai/schema";
 import { DEFAULT_PROMPTS } from "@/lib/ai/prompts";
 
 export const runtime = "nodejs";
@@ -29,20 +29,16 @@ async function handle(request: Request, { params }: Context) {
       return json(await saveSettings(body.value, body.version));
     }
     if (kind === "endpoint-action" && request.method === "POST") {
-      const input = z.object({ id: z.string(), action: z.enum(["models", "test"]), model: z.string().max(160), capability: z.enum(capabilityKeys).optional() }).parse(await readBody(request));
+      const input = z.object({ id: z.string(), action: z.enum(["models", "test"]), model: z.string().trim().max(160).default("") }).parse(await readBody(request));
       const config = await readSettings(), endpoint = config.value.endpoints.find((e) => e.id === input.id);
       if (!endpoint) throw new AiError("ENDPOINT", copy.ai.unconfigured);
       if (input.action === "models") {
         const data = await boundedJson(await fetch(endpointUrls(endpoint).models, { redirect: "error", headers: requestHeaders(endpoint), signal: AbortSignal.timeout(30000) }));
-        return json({ models: z.array(z.object({ id: z.string().max(160) })).max(2000).parse(data.data).map((m) => m.id).slice(0, 100) });
+        return json({ models: [...new Set(z.array(z.object({ id: z.string().trim().min(1).max(160) })).max(2000).parse(data.data).map((m) => m.id))].slice(0, 100) });
       }
-      const capability = input.capability ?? "text";
-      let status: "SUPPORTED" | "FAILED" = "SUPPORTED";
-      try { await probe(endpoint, input.model, capability); } catch { status = "FAILED"; }
-      endpoint.capabilities[input.model] = { ...endpoint.capabilities[input.model], [capability]: status };
-      const saved = await prisma.aiSetting.updateMany({ where: { id: "config", version: config.version }, data: { value: JSON.stringify(config.value), version: { increment: 1 } } });
-      if (!saved.count) throw new AiError("CONFLICT", copy.ai.conflict, 409);
-      return json({ status, value: publicSettings(config.value), version: config.version + 1 });
+      if (!input.model) throw new AiError("MODEL_REQUIRED", copy.ai.modelRequired);
+      try { await testConnection(endpoint, input.model); return json({ status: "CONNECTED" }); }
+      catch (error) { return json({ status: "FAILED", message: error instanceof AiError ? error.message : copy.ai.connectionFailed }); }
     }
     if (kind === "options" && request.method === "GET") {
       const sessions = await prisma.replaySession.findMany({ where: { activeProjectionId: { not: null } }, orderBy: { createdAt: "desc" }, take: 200, select: { id: true, name: true, activeProjectionId: true, mode: true, dataset: { select: { symbol: true } } } });

@@ -18,7 +18,7 @@ import { formatNumber, formatPercent } from "@/lib/format";
 import type { AiSettings, SkillKey } from "@/lib/ai/schema";
 import type { ContextValue } from "@/lib/ai/context";
 import { aiApi } from "./api";
-import { AiSettingsDialog } from "./settings-dialog";
+import { AI_SETTINGS_CHANGED_EVENT } from "./settings-events";
 import { AiContextPicker, type AttachInput } from "./context-picker";
 import { captureContextCharts } from "./capture";
 
@@ -65,7 +65,7 @@ const ContextSources = memo(function ContextSources({ context }: { context: Fixe
   </details>;
 });
 export function AiAssistantProvider({ children }: { children: ReactNode }) {
-  const [open, setOpen] = useState(false), [settingsOpen, setSettingsOpen] = useState(false), [pickerOpen, setPickerOpen] = useState(false);
+  const [open, setOpen] = useState(false), [pickerOpen, setPickerOpen] = useState(false);
   const [conversations, setConversations] = useState<Conversation[]>([]), [conversationId, setConversationId] = useState("");
   const [messages, setMessages] = useState<Message[]>([]), [context, setContext] = useState<FixedContext | null>(null);
   const [drafts, setDrafts] = useState<Record<string, string>>({}), [assets, setAssets] = useState<string[]>([]);
@@ -85,6 +85,19 @@ export function AiAssistantProvider({ children }: { children: ReactNode }) {
   const loadConfig = useCallback(async () => {
     try { const data = await aiApi<{ value: AiSettings }>("settings"); setConfig(data.value); } catch (e) { setError(e instanceof Error ? e.message : copy.ai.failed); }
   }, []);
+  useEffect(() => {
+    if (!open) return;
+    const refresh = () => { void loadConfig(); };
+    const storage = (event: StorageEvent) => { if (event.key === AI_SETTINGS_CHANGED_EVENT) refresh(); };
+    window.addEventListener("focus", refresh);
+    window.addEventListener(AI_SETTINGS_CHANGED_EVENT, refresh);
+    window.addEventListener("storage", storage);
+    return () => {
+      window.removeEventListener("focus", refresh);
+      window.removeEventListener(AI_SETTINGS_CHANGED_EVENT, refresh);
+      window.removeEventListener("storage", storage);
+    };
+  }, [open, loadConfig]);
   const loadChats = useCallback(async () => {
     const data = await aiApi<Conversation[]>("conversations"); setConversations(data); return data;
   }, []);
@@ -217,15 +230,15 @@ export function AiAssistantProvider({ children }: { children: ReactNode }) {
     } catch (e) { setError(e instanceof Error ? e.message : copy.ai.failed); }
     finally { setBusy(false); }
   }
-  const effective = config?.skills[task], endpoint = config?.endpoints.find((e) => e.id === (effective?.endpointId || config.activeEndpointId));
+  const endpoint = config?.endpoints.find((e) => e.id === config.activeEndpointId);
   const sendDraft = drafts[conversationId] ?? "";
   const assistantValue = useMemo(() => ({ open, attach, registerEditor }), [open, attach, registerEditor]);
   return <Assistant.Provider value={assistantValue}>
     {children}
     <Button className="fixed bottom-5 right-5 z-[60] h-12 w-12 rounded-lg shadow-lg" size="icon" aria-label={copy.ai.open} onClick={() => setOpen(true)}><Bot className="h-6 w-6" aria-hidden="true" /></Button>
-    <Dialog open={open} keepMounted modal={false} movable resizable defaultWidth={800} defaultHeight={720} title={copy.ai.title} description={endpoint ? endpoint.name + " · " + (effective?.model || endpoint.defaultModel) : copy.ai.unconfigured}
+    <Dialog open={open} keepMounted modal={false} movable resizable defaultWidth={800} defaultHeight={720} title={copy.ai.title} description={endpoint ? endpoint.name + " · " + endpoint.defaultModel : copy.ai.unconfigured}
       layerClassName="z-[60]" contentClassName="flex min-h-0 flex-1 flex-col p-0" widthStorageKey="ai-window-width-v1" heightStorageKey="ai-window-height-v1"
-      headerActions={<><Button size="icon" variant="ghost" aria-label={copy.ai.settings} onClick={() => setSettingsOpen(true)}><Settings className="h-4 w-4" /></Button><Button size="icon" variant="ghost" aria-label={copy.ai.minimize} onClick={() => setOpen(false)}><Minus className="h-4 w-4" /></Button></>}
+      headerActions={<><Button asChild size="icon" variant="ghost"><Link href="/settings/ai" target="_blank" rel="noopener noreferrer" aria-label={copy.ai.openSettings}><Settings className="h-4 w-4" aria-hidden="true" /></Link></Button><Button size="icon" variant="ghost" aria-label={copy.ai.minimize} onClick={() => setOpen(false)}><Minus className="h-4 w-4" aria-hidden="true" /></Button></>}
       onClose={() => void close()}>
       <div className="flex min-h-0 flex-1 flex-col" onKeyDown={(e) => { if (e.key !== "Escape" && e.key !== "Tab") e.stopPropagation(); }}>
         <div className="flex shrink-0 flex-wrap items-center gap-2 border-b p-3">
@@ -292,7 +305,7 @@ export function AiAssistantProvider({ children }: { children: ReactNode }) {
             onPaste={(e) => { if (e.clipboardData.files.length) { e.preventDefault(); void upload(e.clipboardData.files); } }}
             onKeyDown={(e) => { if (e.key === "Enter" && !e.shiftKey && !e.nativeEvent.isComposing && e.keyCode !== 229) { e.preventDefault(); void send(); } }} />
           <div className="flex flex-wrap items-center justify-between gap-2">
-            <div className="flex gap-2"><Button size="icon" variant="outline" aria-label={copy.ai.attachImage} disabled={busy || assets.length >= 6} onClick={() => fileInput.current?.click()}><Paperclip className="h-4 w-4" /></Button><Button variant="ghost" size="sm" onClick={() => setSettingsOpen(true)}>{copy.ai.settings}</Button></div>
+            <Button size="icon" variant="outline" aria-label={copy.ai.attachImage} disabled={busy || assets.length >= 6} onClick={() => fileInput.current?.click()}><Paperclip className="h-4 w-4" /></Button>
             <input ref={fileInput} type="file" className="hidden" accept="image/png,image/jpeg,image/webp" multiple onChange={(e) => { if (e.target.files) void upload(e.target.files); e.target.value = ""; }} />
             {activeRunId || busy ? <Button variant="outline" onClick={() => void stop()}><Square className="h-4 w-4" />{copy.ai.stop}</Button> : <Button disabled={!sendDraft.trim() || !endpoint} onClick={() => void send()}><Send className="h-4 w-4" />{copy.ai.send}</Button>}
           </div>
@@ -300,7 +313,6 @@ export function AiAssistantProvider({ children }: { children: ReactNode }) {
         </div>
       </div>
     </Dialog>
-    <AiSettingsDialog open={settingsOpen} onClose={() => setSettingsOpen(false)} onSaved={() => void loadConfig()} />
     <AiContextPicker open={pickerOpen} initialSessionId={context?.replaySessionId} onClose={() => setPickerOpen(false)} onAttach={attach} />
     <ConfirmDialog open={Boolean(confirmation)} title={confirmation === "clear" ? copy.ai.clear : copy.ai.delete}
       description={confirmation === "clear" ? copy.ai.clearConfirm : copy.ai.deleteConfirm} layerClassName="z-[90]"

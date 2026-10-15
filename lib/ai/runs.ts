@@ -41,8 +41,6 @@ export async function createRun(input: RunInput) {
   const chartAssets = input.contextId ? await prisma.aiAsset.findMany({ where: { contextId: input.contextId, chartHash: { not: null } }, orderBy: { createdAt: "asc" } }) : [];
   const includeCharts = input.chartImages || context?.depth === "full";
   const selectedCharts = includeCharts && context ? context.charts.map((c) => chartAssets.find((a) => a.chartHash === c.hash)).filter((a): a is NonNullable<typeof a> => Boolean(a)) : [];
-  if ((assets.length || selectedCharts.length) && resolved.endpoint.capabilities[resolved.model]?.vision !== "SUPPORTED")
-    throw new AiError("VISION_REQUIRED", copy.ai.visionRequired);
   if (includeCharts && selectedCharts.length !== context?.charts.length) throw new AiError("CHARTS_MISSING", copy.ai.capturing);
   const unitCount = context ? context.selectedEntryId ? Math.max(1, context.charts.length) : context.depth === "full" ? context.charts.length : Math.ceil(context.entries.length / LIMITS.batchEntries) : 1;
   const estimate = JSON.stringify(contextText(context)).length + unitCount * (resolved.prompt.length + EVIDENCE_RULES.length + input.question.length)

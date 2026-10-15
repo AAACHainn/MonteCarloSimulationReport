@@ -1,5 +1,5 @@
 import Link from "next/link";
-import { ArrowRight, BarChart3, ChartCandlestick, Database, History, NotebookTabs, Tags } from "lucide-react";
+import { ArrowRight, BarChart3, ChartCandlestick, Database, History, NotebookTabs, Settings, Tags } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { copy } from "@/lib/i18n";
@@ -40,6 +40,12 @@ const actions = [
     icon: History,
     title: copy.home.openHistory,
     body: copy.home.openHistoryBody,
+  },
+  {
+    href: "/settings/ai",
+    icon: Settings,
+    title: copy.ai.settings,
+    body: copy.ai.settingsDescription,
   },
 ];
 

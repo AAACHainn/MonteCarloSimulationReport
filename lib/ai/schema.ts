@@ -2,8 +2,6 @@ import { z } from "zod";
 
 export const skillKeys = ["globalAssistant", "chartReading", "reviewDraft", "sessionReview"] as const;
 export type SkillKey = typeof skillKeys[number];
-export const capabilityKeys = ["text", "vision", "tools", "structured"] as const;
-export type Capability = typeof capabilityKeys[number];
 export const capabilitySchema = z.enum(["UNKNOWN", "SUPPORTED", "UNSUPPORTED", "FAILED"]);
 export const endpointSchema = z.object({
   id: z.string().min(1).max(100),
@@ -14,7 +12,7 @@ export const endpointSchema = z.object({
   modelsUrl: z.string().trim().max(2000).default(""),
   tokenParameter: z.enum(["max_tokens", "max_completion_tokens"]).optional(),
   models: z.array(z.string().trim().min(1).max(160)).max(100).default([]),
-  defaultModel: z.string().trim().min(1).max(160),
+  defaultModel: z.string().trim().max(160),
   apiKey: z.string().max(4096).optional(),
   clearApiKey: z.boolean().optional(),
   encryptedKey: z.string().optional(),
@@ -23,7 +21,6 @@ export const endpointSchema = z.object({
 export type Endpoint = z.infer<typeof endpointSchema>;
 export const skillSchema = z.object({
   enabled: z.boolean(), prompt: z.string().max(16000),
-  endpointId: z.string().max(100).default(""), model: z.string().max(160).default(""),
 });
 export const settingsSchema = z.object({
   schemaVersion: z.literal(1), activeEndpointId: z.string().max(100),

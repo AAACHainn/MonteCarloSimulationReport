@@ -11,14 +11,14 @@ vi.mock("@/lib/db", async () => {
 });
 import { prisma } from "@/lib/db";
 import { defaultSettings } from "./prompts";
-import { saveSettings, readSettings, publicSettings, endpointUrls, protectKey, revealKey } from "./config";
+import { saveSettings, readSettings, publicSettings, endpointUrls, protectKey, revealKey, resolveModel } from "./config";
 import { createContext, readContext, sessionMetrics } from "./context";
 import { createRun, executeRun, cancelRun, recoverRuns, retryRun, validatedResult, resumeRun } from "./runs";
 import { generate, sseData } from "./provider";
 import { createReplaySession } from "@/lib/replay-sessions/service";
 import { PATCH as updateEntry } from "@/app/api/market-datasets/[id]/paper-journal/entries/[entryId]/route";
 import { POST as aiPOST, GET as aiGET } from "@/app/api/ai/[...path]/route";
-import { type RunInput } from "./schema";
+import { skillKeys, type RunInput } from "./schema";
 let file = "", sessionId = "", projectionId = "", entryId = "";
 const base = new Date("2026-10-01T00:00:00Z");
 beforeAll(async () => {
@@ -94,6 +94,74 @@ describe("AI configuration and transport boundaries", () => {
     await expect(saveSettings(next.value, old.version)).rejects.toMatchObject({ code: "CONFIG_CONFLICT" });
     next.value.endpoints[0].clearApiKey = true; await saveSettings(next.value, next.version);
     expect((await readSettings()).value.endpoints[0].encryptedKey).toBeUndefined();
+  });
+  it("fetches models before a default is selected and prevents unconfigured model calls", async () => {
+    await configure();
+    const saved = await readSettings();
+    saved.value.endpoints[0].defaultModel = "";
+    saved.value.endpoints[0].models = [];
+    await saveSettings(saved.value, saved.version);
+    const mock = vi.fn().mockResolvedValue(Response.json({ data: [{ id: "model-a" }, { id: "model-b" }, { id: "model-a" }] }));
+    vi.stubGlobal("fetch", mock);
+    const response = await aiPOST(new Request("http://localhost/api/ai/endpoint-action", { method: "POST", headers: { Origin: "http://localhost", "Content-Type": "application/json" }, body: JSON.stringify({ id: "local", action: "models" }) }), { params: Promise.resolve({ path: ["endpoint-action"] }) });
+    expect(response.status).toBe(200);
+    expect(await response.json()).toEqual({ models: ["model-a", "model-b"] });
+    expect(mock).toHaveBeenCalledWith("http://localhost:9999/v1/models", expect.any(Object));
+    await expect(makeRun()).rejects.toMatchObject({ code: "MODEL_REQUIRED" });
+    expect(mock).toHaveBeenCalledTimes(1);
+  });
+  it("uses the global endpoint and model for every skill and ignores legacy overrides on read and save", async () => {
+    await configure();
+    const old = await readSettings();
+    const legacy = { ...old.value, skills: { ...old.value.skills }, endpoints: [...old.value.endpoints, { ...old.value.endpoints[0], id: "other", name: "Other", defaultModel: "other-model" }] };
+    for (const key of skillKeys) Object.assign(legacy.skills[key], { endpointId: "removed-endpoint", model: "hidden-model" });
+    await prisma.aiSetting.update({ where: { id: "config" }, data: { value: JSON.stringify(legacy) } });
+    const read = await readSettings();
+    for (const key of skillKeys) {
+      expect(read.value.skills[key]).toEqual({ enabled: true, prompt: old.value.skills[key].prompt });
+      expect(resolveModel(read.value, key)).toMatchObject({ endpoint: { id: "local" }, model: "test", prompt: old.value.skills[key].prompt });
+    }
+    const saved = await saveSettings({ ...legacy, activeEndpointId: "other" }, read.version);
+    const stored = JSON.parse((await prisma.aiSetting.findUniqueOrThrow({ where: { id: "config" } })).value);
+    for (const key of skillKeys) {
+      expect(resolveModel(saved.value, key)).toMatchObject({ endpoint: { id: "other" }, model: "other-model" });
+      expect(stored.skills[key]).toEqual({ enabled: true, prompt: old.value.skills[key].prompt });
+    }
+    const run = await makeRun();
+    expect(JSON.parse(run.snapshot)).toMatchObject({ endpoint: { id: "other" }, model: "other-model" });
+    await cancelRun(run.id);
+    saved.value.skills.chartReading.enabled = false;
+    expect(() => resolveModel(saved.value, "chartReading")).toThrow();
+  });
+  it("tests connection with one text request without probing or changing capabilities", async () => {
+    const saved = await configure();
+    const mock = vi.fn().mockResolvedValue(Response.json({ choices: [{ message: { role: "assistant", content: null, reasoning_content: "thinking" }, finish_reason: "length" }] }));
+    vi.stubGlobal("fetch", mock);
+    const response = await aiPOST(new Request("http://localhost/api/ai/endpoint-action", { method: "POST", headers: { Origin: "http://localhost", "Content-Type": "application/json" }, body: JSON.stringify({ id: "local", action: "test", model: "test" }) }), { params: Promise.resolve({ path: ["endpoint-action"] }) });
+    expect(await response.json()).toEqual({ status: "CONNECTED" });
+    expect(mock).toHaveBeenCalledTimes(1);
+    const request = mock.mock.calls[0][1];
+    expect(JSON.parse(request.body)).toEqual({ model: "test", stream: false, max_tokens: 100, messages: [{ role: "user", content: "Reply OK." }] });
+    expect(request.headers.Authorization).toBe("Bearer private-test-key");
+    const after = await readSettings();
+    expect(after.version).toBe(saved.version);
+    expect(after.value.endpoints[0].capabilities).toEqual({});
+  });
+  it("reports connection failures safely and requires a selected model before testing", async () => {
+    await configure();
+    const request = (model: string) => aiPOST(new Request("http://localhost/api/ai/endpoint-action", { method: "POST", headers: { Origin: "http://localhost", "Content-Type": "application/json" }, body: JSON.stringify({ id: "local", action: "test", model }) }), { params: Promise.resolve({ path: ["endpoint-action"] }) });
+    const mock = vi.fn(); vi.stubGlobal("fetch", mock);
+    expect((await request("")).status).toBe(400);
+    expect(mock).not.toHaveBeenCalled();
+    mock.mockResolvedValueOnce(Response.json({ error: { message: "private-test-key" } }, { status: 401 }));
+    const unauthorized = await request("test");
+    expect(await unauthorized.json()).toEqual({ status: "FAILED", message: expect.any(String) });
+    mock.mockResolvedValueOnce(Response.json({}));
+    const malformed = await request("test");
+    expect(await malformed.json()).toEqual({ status: "FAILED", message: expect.any(String) });
+    mock.mockRejectedValueOnce(new Error("private-test-key"));
+    const failed = await request("test");
+    expect(await failed.text()).not.toContain("private-test-key");
   });
   it("decodes split UTF-8, multiline SSE and rejects truncated or unfinished responses", async () => {
     const encoded = new TextEncoder().encode("data: 中文\r\n\r\n");
@@ -202,14 +270,16 @@ describe("run lifecycle and session analysis", () => {
     const adopt = await aiPOST(new Request("http://localhost/api/ai/adopt/" + message.id, { method: "POST", headers: { Origin: "http://localhost" } }), { params: Promise.resolve({ path: ["adopt", message.id] }) });
     expect(adopt.status).toBe(409);
   });
-  it("does not charge on missing vision capability or on a forged image scope", async () => {
+  it("allows images without capability tests while rejecting a forged image scope before calling the model", async () => {
     const ctx = await createContext({ replaySessionId: sessionId, projectionId, entryId, depth: "quick" });
     const chat = await prisma.aiConversation.create({ data: { name: "vision" } });
     const fetchMock = vi.fn(); vi.stubGlobal("fetch", fetchMock);
     const asset = await prisma.aiAsset.create({ data: { id: randomUUID(), mime: "image/png", bytes: 100, contextId: "other", chartHash: "other" } });
     await expect(createRun({ conversationId: chat.id, contextId: ctx.id, task: "reviewDraft", question: "看图", chartImages: false, assetIds: [asset.id], requestId: randomUUID() })).rejects.toMatchObject({ code: "ASSET_SCOPE" });
     const manual = await prisma.aiAsset.create({ data: { id: randomUUID(), mime: "image/png", bytes: 100 } });
-    await expect(createRun({ conversationId: chat.id, task: "chartReading", question: "看图", chartImages: false, assetIds: [manual.id], requestId: randomUUID() })).rejects.toMatchObject({ code: "VISION_REQUIRED" });
+    const run = await createRun({ conversationId: chat.id, task: "chartReading", question: "看图", chartImages: false, assetIds: [manual.id], requestId: randomUUID() });
+    expect(JSON.parse(run.snapshot).assetIds).toEqual([manual.id]);
+    await cancelRun(run.id);
     expect(fetchMock).not.toHaveBeenCalled();
   });
   it("keeps failed attempts and reuses completed extraction checkpoints on explicit resume", async () => {
