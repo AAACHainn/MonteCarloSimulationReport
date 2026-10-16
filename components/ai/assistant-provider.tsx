@@ -434,7 +434,7 @@ export function AiAssistantProvider({ children }: { children: ReactNode }) {
           <div className="flex items-center justify-between gap-2">
             <Button size="icon" variant="ghost" aria-label={copy.ai.attachImage} disabled={busy || Boolean(activeRunId) || assets.length >= 6} onClick={() => fileInput.current?.click()}><Paperclip className="h-4 w-4" aria-hidden="true" /></Button>
             <input ref={fileInput} type="file" className="hidden" accept="image/png,image/jpeg,image/webp" multiple onChange={(e) => { if (e.target.files) void upload(e.target.files); e.target.value = ""; }} />
-            <div className="flex items-center gap-3"><span className="hidden text-xs text-slate-500 sm:inline">{copy.ai.sendHint}</span>{activeRunId || busy ? <Button variant="outline" onClick={() => void stop()}><Square className="h-4 w-4" aria-hidden="true" />{copy.ai.stop}</Button> : <Button disabled={loadingChat || !sendDraft.trim() || !endpoint} onClick={() => void send()}><Send className="h-4 w-4" aria-hidden="true" />{copy.ai.send}</Button>}</div>
+            <div className="flex items-center gap-3"><span className="hidden text-xs text-slate-500 sm:inline">{copy.ai.sendHint}</span>{activeRunId || busy ? <Button variant="destructive" onClick={() => void stop()}><Square className="h-4 w-4" aria-hidden="true" />{copy.ai.stop}</Button> : <Button disabled={loadingChat || !sendDraft.trim() || !endpoint} onClick={() => void send()}><Send className="h-4 w-4" aria-hidden="true" />{copy.ai.send}</Button>}</div>
           </div>
           </div>
           <p id="ai-composer-hint" className="text-xs leading-5 text-slate-500">{copy.ai.autoSendHint}</p>
