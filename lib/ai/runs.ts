@@ -21,6 +21,7 @@ import { resolveLimits, type AiLimits, type BudgetBlock } from "./limits";
 import { budgetError } from "./budget";
 import { requestedCharts, type ImageRequest } from "./chart-images-contract";
 import { chartAnnotationMapping, chartImageDescription } from "./chart-image-evidence";
+import { retainInterruptedImageReply } from "./display-images";
 
 type RunSnapshot = { endpoint: Endpoint; model: string; prompt: string; question: string; assetIds: string[]; chartAssetIds: string[]; estimatedChars: number; historyBefore?: string; reference?: string; response?: ResponseDetails; executionMode?: "tools-v1" | "fixed-v1"; scopeSecret?: string; toolSchemaVersion?: string; adapterVersion?: string; contextHash?: string; routing?: PlanningRecord; limits?: AiLimits; budgetExceeded?: BudgetBlock; imageRequest?: ImageRequest };
 type Checkpoint = { content: string; usage: Usage; stage?: string; coverage?: CoverageBatch }[];
@@ -32,6 +33,7 @@ export async function recoverRuns() {
     const changed = await tx.aiRun.updateMany({ where: { id: run.id, status: { in: ["RUNNING", "QUEUED"] }, heartbeatAt: { lt: cutoff } }, data: { status: "INTERRUPTED", error: copy.ai.interrupted } });
     if (changed.count) await tx.aiConversation.updateMany({ where: { id: run.conversationId, activeRunId: run.id }, data: { activeRunId: null } });
   });
+  for (const run of stale) await retainInterruptedImageReply(run.id);
 }
 export async function createRun(input: RunInput) {
   await ensureAiStorage(); await recoverRuns();
@@ -92,6 +94,7 @@ export async function cancelRun(id: string) {
     prisma.aiRunStep.updateMany({ where: { runId: id, phase: "CAPTURE", status: { in: ["REQUESTED", "CAPTURING"] } }, data: { status: "CANCELLED" } }),
     prisma.aiConversation.updateMany({ where: { id: run.conversationId, activeRunId: id }, data: { activeRunId: null } }),
   ]);
+  await retainInterruptedImageReply(id);
 }
 export async function retryRun(id: string, overrides?: Partial<AiLimits>) {
   const original = await prisma.aiRun.findUnique({ where: { id } });
@@ -351,6 +354,7 @@ export async function executeRun(id: string, emit: (event: unknown) => void = ()
       prisma.aiRun.updateMany({ where: { id, status: "RUNNING" }, data: { status, error: message, snapshot: JSON.stringify(snapshot) } }),
       prisma.aiConversation.updateMany({ where: { activeRunId: id }, data: { activeRunId: null } }),
     ]);
+    await retainInterruptedImageReply(id);
     emit({ type: "error", error: message });
   } finally { clearInterval(poll); localControllers.delete(id); }
 }

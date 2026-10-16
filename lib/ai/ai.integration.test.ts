@@ -33,6 +33,8 @@ import { entryLotId, fifoRowId } from "@/lib/paper-trading/journal-identity";
 import { prepareAssistant, type AssistantDecision } from "./assistant-plan";
 import { relevantHistory } from "./history";
 import { DEFAULT_LIMITS, outputCharLimit } from "./limits";
+import { executeDisplayImages, loadDisplayedImages, retainInterruptedImageReply } from "./display-images";
+import type { DisplayedImage } from "./display-images-contract";
 let file = "", sessionId = "", projectionId = "", entryId = "";
 const base = new Date("2026-10-01T00:00:00Z");
 beforeAll(async () => {
@@ -109,6 +111,80 @@ async function withCaptureBrowser<T>(runId: string, action: () => Promise<T>) {
   })();
   try { return await action(); } finally { stopped = true; await pump; }
 }
+describe("AI reply image attachments", () => {
+  const apiContext = (path: string[]) => ({ params: Promise.resolve({ path }) });
+  const toolResult = (message: { content: string | Array<{ type: string; text: string }> }) => JSON.parse(typeof message.content === "string" ? message.content : message.content.find((p) => p.type === "text")!.text);
+  it.each(["generic", "deepseek"] as const)("publishes selected images before the answer, deduplicates and restores history (%s)", async (adapterProfile) => {
+    await configure(); const settings = await readSettings(); settings.value.endpoints[0].adapterProfile = adapterProfile; await saveSettings(settings.value, settings.version);
+    const context = await createContext({ replaySessionId: sessionId, projectionId, entryId, timeframes: ["5m", "1h"] });
+    const run = await makeRun(context.id, "globalAssistant", "tools-v1");
+    const events: Array<{ type: string; images?: DisplayedImage[] }> = [];
+    const mock = vi.fn().mockImplementation(async (_url, options) => {
+      const request = JSON.parse(options.body), round = mock.mock.calls.length;
+      if (round === 1) return toolResponse([{ id: "read-images", name: "get_chart_images", args: { chartRef: null, timeframes: null, cursor: null } }]);
+      const result = toolResult(request.messages.find((m: { tool_call_id: string }) => m.tool_call_id === "read-images"));
+      const images = result.data.charts.map((chart: { image: { assetRef: string }; variantRef: string }) => ({ assetRef: chart.image.assetRef,
+        sourceRef: result.sources.find((r: { variantRef: string; evidenceKind: string }) => r.variantRef === chart.variantRef && r.evidenceKind === "CHART_IMAGE").sourceRef }));
+      if (round === 2) return toolResponse([{ id: "publish-images", name: "display_images", args: { images: [...images, images[0]] } }]);
+      if (round === 3) return toolResponse([{ id: "repeat-images", name: "display_images", args: { images: [images[0]] } }]);
+      expect(request.messages.filter((m: { tool_call_id: string }) => ["publish-images", "repeat-images"].includes(m.tool_call_id)).every((m: Parameters<typeof toolResult>[0]) => toolResult(m).ok)).toBe(true);
+      return streamResponse("已附上两个周期的图表。");
+    });
+    vi.stubGlobal("fetch", mock);
+    await withCaptureBrowser(run.id, () => executeRun(run.id, (event) => events.push(event as typeof events[number])));
+    expect((await prisma.aiRun.findUniqueOrThrow({ where: { id: run.id } })).status).toBe("COMPLETED");
+    const images = (await loadDisplayedImages([run.id])).get(run.id)!;
+    expect(images).toHaveLength(2); expect(images.map((image) => image.timeframe)).toEqual(["5m", "1h"]);
+    expect(events.findIndex((event) => event.type === "images_updated" && event.images?.length === 2)).toBeLessThan(events.findIndex((event) => event.type === "delta"));
+    const history = await (await aiGET(new Request(`http://localhost/api/ai/conversations/${run.conversationId}`), apiContext(["conversations", run.conversationId]))).json();
+    expect(history.messages.find((m: { role: string }) => m.role === "assistant").images).toEqual(images);
+    expect(history.messages.find((m: { role: string }) => m.role === "user").images).toEqual([]);
+    const state = await (await aiGET(new Request(`http://localhost/api/ai/runs/${run.id}`), apiContext(["runs", run.id]))).json();
+    expect(state.images).toEqual(images); expect(JSON.stringify(state)).not.toContain("data:image");
+    const download = await aiGET(new Request(`http://localhost/api/ai/assets/${images[0].assetId}?download=1`), apiContext(["assets", images[0].assetId]));
+    expect(download.headers.get("content-disposition")).toContain("attachment;"); expect(download.headers.get("content-type")).toBe("image/png");
+    expect(new Uint8Array(await download.arrayBuffer()).slice(0, 4)).toEqual(new Uint8Array([137, 80, 78, 71]));
+  });
+
+  it("requires a matching successful image receipt from this run and verifies saved content", async () => {
+    const context = await createContext({ replaySessionId: sessionId, projectionId, entryId, timeframes: ["5m"] });
+    const scope = { id: "display-scope", secret: "display-secret", context }, signal = new AbortController().signal;
+    const chart = await executeChartTool(scope, context.id, { chartRef: null, timeframes: null, cursor: null }, signal, [], captureFixture(context.id));
+    const args = { images: chart.images.map((image) => ({ assetRef: image.assetId, sourceRef: image.sourceRef })) };
+    const call = { runId: scope.id, name: "get_chart_images", status: "COMPLETED", contractVersion: "2", result: JSON.stringify(chart.result) };
+    for (const calls of [[], [{ ...call, runId: "other-run" }], [{ ...call, status: "FAILED" }]]) {
+      const rejected = await executeDisplayImages(scope, context.id, args, calls, signal);
+      expect(rejected.ok).toBe(false); expect(rejected.error?.code).toBe("NOT_FOUND_IN_SCOPE");
+    }
+    expect((await executeDisplayImages(scope, context.id, { images: [{ ...args.images[0], sourceRef: "source:invented" }] }, [call], signal)).ok).toBe(false);
+    expect((await executeDisplayImages(scope, context.id, { images: [{ ...args.images[0], url: "https://example.com/image.png" }] }, [call], signal)).error?.code).toBe("INVALID_ARGUMENTS");
+    expect((await executeDisplayImages(scope, context.id, args, [call], signal)).ok).toBe(true);
+    await prisma.aiAsset.update({ where: { id: args.images[0].assetRef }, data: { contentHash: "0".repeat(64) } });
+    expect((await executeDisplayImages(scope, context.id, args, [call], signal)).error?.code).toBe("IMAGE_UNAVAILABLE");
+  });
+
+  it("retains a cancelled image reply in chat history without duplicating or resurrecting cleared messages", async () => {
+    await configure(); const context = await createContext({ replaySessionId: sessionId, projectionId, entryId, timeframes: ["5m"] });
+    const run = await makeRun(context.id, "globalAssistant", "tools-v1");
+    const mock = vi.fn().mockImplementation(async (_url, options) => {
+      if (mock.mock.calls.length === 1) return toolResponse([{ id: "read", name: "get_chart_images", args: { chartRef: null, timeframes: null, cursor: null } }]);
+      if (mock.mock.calls.length === 2) {
+        const result = toolResult(JSON.parse(options.body).messages.find((m: { role: string }) => m.role === "tool"));
+        return toolResponse([{ id: "show", name: "display_images", args: { images: [{ assetRef: result.data.charts[0].image.assetRef, sourceRef: result.sources.find((r: { evidenceKind: string }) => r.evidenceKind === "CHART_IMAGE").sourceRef }] } }]);
+      }
+      await cancelRun(run.id); return streamResponse("此回答不应保存为成功");
+    }); vi.stubGlobal("fetch", mock);
+    await withCaptureBrowser(run.id, () => executeRun(run.id));
+    await retainInterruptedImageReply(run.id);
+    const replies = await prisma.aiMessage.findMany({ where: { runId: run.id, role: "assistant" } });
+    expect(replies).toHaveLength(1); expect(replies[0].status).toBe("CANCELLED");
+    expect((await loadDisplayedImages([run.id])).get(run.id)).toHaveLength(1);
+    const clear = await aiPOST(new Request(`http://localhost/api/ai/conversations/${run.conversationId}/clear`, { method: "POST", headers: { Origin: "http://localhost" } }), apiContext(["conversations", run.conversationId, "clear"]));
+    expect(clear.status).toBe(200); await retainInterruptedImageReply(run.id);
+    expect(await prisma.aiMessage.count({ where: { conversationId: run.conversationId } })).toBe(0);
+  });
+});
+
 describe("configurable per-run limits and usage API", () => {
   it.each([{ maxModelCalls: 9, maxToolCalls: 16, expected: 9 }, { maxModelCalls: 10, maxToolCalls: 2, expected: 3 }])("uses configured model/tool counts with a reserved closing answer (%j)", async ({ maxModelCalls, maxToolCalls, expected }) => {
     await configure(); const ctx = await createContext({ replaySessionId: sessionId, projectionId, entryId, depth: "quick" });

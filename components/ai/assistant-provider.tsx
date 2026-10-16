@@ -31,12 +31,13 @@ import { resolveLimits, aiLimitsSchema, type AiLimits } from "@/lib/ai/limits";
 import type { BudgetView } from "@/lib/ai/budget";
 import { useChartCaptures } from "./use-chart-captures";
 import { requestedCharts } from "@/lib/ai/chart-images-contract";
+import { displayedImageSchema, mergeDisplayedImages, type DisplayedImage } from "@/lib/ai/display-images-contract";
 
 type FixedContext = ContextValue & { id: string };
 type Conversation = { id: string; name: string; activeRunId: string | null };
-type Message = { id: string; role: string; content: string; contextId: string | null; result: string | null; runId: string | null; reference?: string; createdAt: string; response?: ResponseDetails | null; reads?: ReadEvent[]; budget?: BudgetView };
-type Run = { id: string; status: string; task: string; contextId: string | null; error: string | null; endpoint: string; model: string; completedBatches: number; reference?: string; response?: ResponseDetails | null; reads?: ReadEvent[]; budget?: BudgetView };
-type LiveResponse = { chat: string; runId: string; text: string; reasoning: string; startedAt: string; reasoningMs?: number; response?: ResponseDetails; reads?: ReadEvent[] };
+type Message = { id: string; role: string; content: string; contextId: string | null; result: string | null; runId: string | null; reference?: string; createdAt: string; response?: ResponseDetails | null; reads?: ReadEvent[]; budget?: BudgetView; images?: DisplayedImage[] };
+type Run = { id: string; status: string; task: string; contextId: string | null; error: string | null; endpoint: string; model: string; completedBatches: number; reference?: string; response?: ResponseDetails | null; reads?: ReadEvent[]; budget?: BudgetView; images?: DisplayedImage[] };
+type LiveResponse = { chat: string; runId: string; text: string; reasoning: string; startedAt: string; reasoningMs?: number; response?: ResponseDetails; reads?: ReadEvent[]; images?: DisplayedImage[] };
 export type AdoptPayload = { entryId: string; projectionId: string; replaySessionId: string; originalDraft: string; draft: string; sourceRunId: string };
 type AssistantContext = {
   open: boolean;
@@ -237,6 +238,13 @@ export function AiAssistantProvider({ children }: { children: ReactNode }) {
           const line = buffer.slice(0, index); buffer = buffer.slice(index + 1); if (!line) continue;
           const event = JSON.parse(line);
           if (event.type === "model_step_start") { pending = ""; pendingReasoning = ""; value = { ...value, text: "", reasoning: "", reasoningMs: undefined, response: undefined }; }
+          if (event.type === "images_updated") {
+            const images = displayedImageSchema.array().max(12).safeParse(event.images);
+            if (images.success) {
+              value = { ...value, images: mergeDisplayedImages(value.images ?? [], images.data) };
+              if (currentChat.current === chatId) setStream(value);
+            }
+          }
           if (["tool_started", "tool_completed", "tool_failed"].includes(event.type)) {
             value = { ...value, reads: [...(value.reads ?? []).filter((r) => r.toolCallId !== event.toolCallId), { ...event, status: event.type === "tool_completed" ? "COMPLETED" : event.type === "tool_failed" ? "FAILED" : "RUNNING" }] };
             if (currentChat.current === chatId) setStream(value);
@@ -393,7 +401,7 @@ export function AiAssistantProvider({ children }: { children: ReactNode }) {
               { icon: <ChartNoAxesCombined className="h-4 w-4 shrink-0" aria-hidden="true" />, text: copy.ai.suggestReport },
             ].map((item) => <Button key={item.text} variant="outline" className="h-auto min-h-10 justify-start whitespace-normal py-2 text-left text-slate-700" disabled={busy} onClick={() => { setDrafts((s) => ({ ...s, [conversationId]: item.text })); document.getElementById("ai-input")?.focus(); }}>{item.icon}{item.text}</Button>)}</div>
           </div> : null}
-          {messages.map((m) => <AiMessageCard key={m.id} role={m.role} text={m.content} createdAt={m.createdAt} reference={m.reference} response={m.response} reads={m.reads} budget={m.budget}>
+          {messages.map((m) => <AiMessageCard key={m.id} role={m.role} text={m.content} createdAt={m.createdAt} reference={m.reference} response={m.response} reads={m.reads} budget={m.budget} images={m.images}>
             <div className="flex flex-wrap gap-2">
               <Button variant="ghost" size="sm" onClick={() => void navigator.clipboard.writeText(m.content).then(() => setStatus(copy.ai.copied))}><Copy className="h-4 w-4" />{copy.ai.copy}</Button>
               {m.contextId ? <Button variant="ghost" size="sm" onClick={() => viewSources(m.contextId!)}>{copy.ai.sources}</Button> : null}
@@ -406,9 +414,9 @@ export function AiAssistantProvider({ children }: { children: ReactNode }) {
               {m.role === "user" ? <Button variant="ghost" size="sm" disabled={busy || Boolean(activeRunId)} onClick={() => { if (m.runId) void retry(m.runId); }}>{copy.ai.retry}</Button> : null}
             </div>
           </AiMessageCard>)}
-          {stream?.chat === conversationId && !messages.some((m) => m.role === "assistant" && m.runId === stream.runId) ? <AiMessageCard text={stream.text} createdAt={stream.startedAt} reasoning={stream.reasoning} reasoningMs={stream.response?.reasoningMs ?? stream.reasoningMs} response={stream.response} reads={stream.reads} budget={run?.id === stream.runId ? run.budget : undefined} live={!stream.response} /> : null}
-          {activeRunId && stream?.chat !== conversationId ? <AiMessageCard text="" reads={run?.reads} budget={run?.budget} live><p role="status" className="text-xs text-slate-600">{run?.task === "sessionReview" ? copy.ai.processedBatches(run.completedBatches) : copy.ai.running}</p></AiMessageCard> : null}
-          {!activeRunId && run && ["FAILED", "CANCELLED", "INTERRUPTED"].includes(run.status) ? <AiMessageCard text="" createdAt={run.response?.startedAt} response={run.response} reads={run.reads} budget={run.budget}><p className="text-xs text-slate-600">{copy.ai.unfinishedAnswer}</p><Button variant="outline" disabled={busy || loadingChat} onClick={() => adjustLimits(run)}>{run.task === "sessionReview" ? copy.ai.adjustAndContinue : copy.ai.adjustAndRetry}</Button></AiMessageCard> : null}
+          {stream?.chat === conversationId && !messages.some((m) => m.role === "assistant" && m.runId === stream.runId) ? <AiMessageCard text={stream.text} createdAt={stream.startedAt} reasoning={stream.reasoning} reasoningMs={stream.response?.reasoningMs ?? stream.reasoningMs} response={stream.response} reads={stream.reads} images={mergeDisplayedImages(stream.images ?? [], run?.id === stream.runId ? run.images ?? [] : [])} budget={run?.id === stream.runId ? run.budget : undefined} live={!stream.response} /> : null}
+          {activeRunId && stream?.chat !== conversationId ? <AiMessageCard text="" reads={run?.reads} budget={run?.budget} images={run?.images} live><p role="status" className="text-xs text-slate-600">{run?.task === "sessionReview" ? copy.ai.processedBatches(run.completedBatches) : copy.ai.running}</p></AiMessageCard> : null}
+          {!activeRunId && run && ["FAILED", "CANCELLED", "INTERRUPTED"].includes(run.status) ? <AiMessageCard text="" createdAt={run.response?.startedAt} response={run.response} reads={run.reads} images={messages.some((m) => m.role === "assistant" && m.runId === run.id) ? [] : run.images} budget={run.budget}><p className="text-xs text-slate-600">{copy.ai.unfinishedAnswer}</p><Button variant="outline" disabled={busy || loadingChat} onClick={() => adjustLimits(run)}>{run.task === "sessionReview" ? copy.ai.adjustAndContinue : copy.ai.adjustAndRetry}</Button></AiMessageCard> : null}
           {run?.task === "sessionReview" && ["INTERRUPTED", "FAILED", "CANCELLED", "INVALID_RESULT"].includes(run.status) ? <div className="space-y-2"><p className="text-xs text-slate-500">{copy.ai.continuingHint}</p><Button variant="outline" disabled={busy || Boolean(activeRunId)} onClick={() => void retry(run.id, undefined, true)}>{copy.ai.continue}</Button></div> : null}
         </div>
         <div className="max-h-[60dvh] shrink-0 space-y-3 overflow-y-auto border-t bg-slate-50 p-3">

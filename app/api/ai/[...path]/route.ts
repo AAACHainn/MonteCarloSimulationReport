@@ -15,6 +15,7 @@ import { assistantPlanRequest, prepareAssistant } from "@/lib/ai/assistant-plan"
 import { limitsOverrideSchema } from "@/lib/ai/limits";
 import { budgetView } from "@/lib/ai/budget";
 import { listChartCaptures, claimChartCapture, finishChartCapture } from "@/lib/ai/chart-captures";
+import { loadDisplayedImages } from "@/lib/ai/display-images";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -82,7 +83,12 @@ async function handle(request: Request, { params }: Context) {
         const input = z.object({ dataUrl: z.string(), contextId: z.string().optional(), chartHash: z.string().optional() }).strict().parse(await readBody(request, 6 * 1024 * 1024));
         return json(await saveAsset(input.dataUrl, input.contextId, input.chartHash));
       }
-      if (id) { const asset = await readAsset(id); return new Response(new Uint8Array(asset.bytes), { headers: { "Content-Type": asset.mime, "Cache-Control": "private, max-age=3600", "X-Content-Type-Options": "nosniff" } }); }
+      if (id) {
+        const asset = await readAsset(id);
+        const extension = asset.mime === "image/jpeg" ? "jpg" : asset.mime === "image/webp" ? "webp" : "png";
+        return new Response(new Uint8Array(asset.bytes), { headers: { "Content-Type": asset.mime, "Cache-Control": "private, max-age=3600", "X-Content-Type-Options": "nosniff",
+          ...(query.get("download") === "1" ? { "Content-Disposition": `attachment; filename="chart-${id}.${extension}"` } : {}) } });
+      }
     }
     if (kind === "conversations") {
       await recoverRuns();
@@ -98,10 +104,12 @@ async function handle(request: Request, { params }: Context) {
         });
         const runs = await prisma.aiRun.findMany({ where: { id: { in: messages.flatMap((m) => m.runId ? [m.runId] : []) } }, select: { id: true, snapshot: true, task: true, calls: true, usage: true } });
         const calls = await prisma.aiToolCall.findMany({ where: { runId: { in: runs.map((r) => r.id) } }, orderBy: [{ stepNo: "asc" }, { toolIndex: "asc" }], select: { runId: true, toolCallId: true, name: true, status: true, stepNo: true, toolIndex: true, errorCode: true } });
+        const images = await loadDisplayedImages(runs.map((r) => r.id));
         return json({ conversation, messages: messages.map((message) => {
           const run = runs.find((r) => r.id === message.runId), snapshot = run ? JSON.parse(run.snapshot) : null;
           return { ...message, reference: snapshot ? snapshot.endpoint.name + " · " + snapshot.model + " · " + (snapshot.reference ?? "") : "",
             response: message.role === "assistant" ? snapshot?.response ?? null : null,
+            images: message.role === "assistant" && message.runId ? images.get(message.runId) ?? [] : [],
             budget: message.role === "assistant" && run ? budgetView(run, calls.filter((c) => c.runId === run.id).length) : undefined,
             reads: message.role === "assistant" ? calls.filter((c) => c.runId === message.runId).map((c) => ({ ...c, eventNo: c.stepNo * 10 + c.toolIndex * 2 + 2 })) : [] };
         }) });
@@ -158,10 +166,11 @@ async function handle(request: Request, { params }: Context) {
       await recoverRuns();
       const fresh = await prisma.aiRun.findUniqueOrThrow({ where: { id } }), snap = JSON.parse(fresh.snapshot);
       const calls = await prisma.aiToolCall.findMany({ where: { runId: id }, orderBy: [{ stepNo: "asc" }, { toolIndex: "asc" }], select: { toolCallId: true, name: true, status: true, stepNo: true, toolIndex: true, errorCode: true } });
+      const images = (await loadDisplayedImages([id])).get(id) ?? [];
       return json({ id, task: fresh.task, status: fresh.status, contextId: fresh.contextId, error: fresh.error, calls: fresh.calls,
         totalCalls: fresh.calls + (snap.routing && !snap.routing.reused ? 1 : 0),
         completedBatches: JSON.parse(fresh.checkpoint).filter((p: { stage?: string }) => !p.stage).length, usage: JSON.parse(fresh.usage), estimatedChars: snap.estimatedChars,
-        endpoint: snap.endpoint.name, model: snap.model, reference: snap.reference, response: snap.response ?? null,
+        endpoint: snap.endpoint.name, model: snap.model, reference: snap.reference, response: snap.response ?? null, images,
         budget: budgetView(fresh, calls.length),
         reads: calls.map((c) => ({ ...c, eventNo: c.stepNo * 10 + c.toolIndex * 2 + 2 })),
       });

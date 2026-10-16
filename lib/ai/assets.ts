@@ -41,5 +41,7 @@ export async function assetDataUrl(id: string, signal?: AbortSignal) {
 export async function readAsset(id: string) {
   const row = await prisma.aiAsset.findUnique({ where: { id } });
   if (!row) throw new AiError("ASSET_MISSING", copy.ai.missing, 404);
-  return { bytes: await readFile(assetPath(id)), mime: row.mime };
+  const bytes = await readFile(assetPath(id));
+  if (bytes.length !== row.bytes || (row.contentHash && createHash("sha256").update(bytes).digest("hex") !== row.contentHash)) throw new AiError("ASSET_MISMATCH", copy.ai.invalid);
+  return { bytes, mime: row.mime };
 }

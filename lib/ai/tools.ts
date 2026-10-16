@@ -6,6 +6,7 @@ import type { ToolDefinition } from "./provider";
 import { chartArguments, chartDirectory } from "./chart-tools";
 import { statisticsArguments, executeStatisticsTool } from "./statistics-tools";
 import type { ImageRequest } from "./chart-images-contract";
+import { displayImagesArguments } from "./display-images-contract";
 
 export const TOOL_VERSION = "2";
 export type Receipt = {
@@ -55,6 +56,8 @@ export function toolFailure(scope: ToolScope, code: string, message = code): Too
     BUDGET_EXCEEDED: "Stop requesting tools and summarize only the evidence already read.", STATISTICS_UNAVAILABLE: "This snapshot lacks verifiable accounting inputs; do not fabricate zero statistics or infer currency.",
     MULTIPLE_IMAGES_NOT_REQUESTED: "Use the current timeframe by default. Multiple periods require an explicit user request.",
     CHART_READ_BUDGET: "Chart rendering reached its bounded market-read budget, independently of model Token limits.",
+    IMAGE_UNAVAILABLE: "The saved image is missing or cannot be verified. Do not claim it was attached; retrieve a valid image first.",
+    IMAGE_DISPLAY_LIMIT: "A reply can attach at most 12 distinct images. Select the most relevant images already attached.",
     CORRUPT_RECORD: "The stored section is present but cannot be verified; do not treat it as blank.", TOOL_UNAVAILABLE: "The bounded read failed; use the other returned evidence and state this gap." };
   const suggestedArguments = code === "INVALID_CURSOR" ? { cursor: null } : code === "RESULT_TOO_LARGE" ? { limit: 10 } : null;
   return envelopeSchema.parse({ ok: false, scopeId: scope.id, data: null, sources: [], coverage: {}, nextCursor: null, warnings: [], error: { code, recoverable: !["CANCELLED", "STALE_CONTEXT", "BUDGET_EXCEEDED"].includes(code), message: message === code ? guidance[code] ?? code : message, suggestedArguments } });
@@ -95,6 +98,7 @@ export function toolDefinitions(scope: ToolScope): ToolDefinition[] {
     ...(!scope.context.selectedEntryId ? [["list_trade_records", "定位本会话 FIFO 日志行与支持/反例；筛选结果是未扣费价差，不是持仓净收益。", listArguments]] : []),
     ...(!scope.context.selectedEntryId ? [["get_session_statistics", "读取程序计算的完整持仓扣费总体指标，或未扣费 FIFO Setup/方向组；不提供 Setup 净额排名。", statisticsArguments]] : []),
     ...(scope.context.chartAccess || scope.context.chartPlans?.length ? [["get_chart_images", "获取图表图片，必要时由浏览器生成并上传。chartRef/timeframes 为 null 时默认当前图表及当前周期；仅在用户明确要求时获取多个周期。返回真实图片及说明，不返回逐根行情。cursor=null 从第一页开始。", chartArguments]] : []),
+    ...(scope.context.chartAccess || scope.context.chartPlans?.length ? [["display_images", "将本次 get_chart_images 成功取得的图片附到当前聊天回复。用户要求发图、展示或比较图片时调用；仅看图分析无需展示所有图片。每次 1–4 张，每条回复最多 12 张。assetRef 和对应 CHART_IMAGE sourceRef 必须来自本次真实工具结果；不接受图片 URL。", displayImagesArguments]] : []),
   ] as Array<[string, string, z.ZodTypeAny]>;
   return definitions.map(([name, description, schema]) => ({ type: "function", function: { name, description, parameters: jsonSchema(schema) } }));
 }
