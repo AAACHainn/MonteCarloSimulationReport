@@ -14,6 +14,7 @@ import { reviewFactsHash } from "@/lib/ai/review-baseline";
 import { assistantPlanRequest, prepareAssistant } from "@/lib/ai/assistant-plan";
 import { limitsOverrideSchema } from "@/lib/ai/limits";
 import { budgetView } from "@/lib/ai/budget";
+import { listChartCaptures, claimChartCapture, finishChartCapture } from "@/lib/ai/chart-captures";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -25,6 +26,17 @@ async function handle(request: Request, { params }: Context) {
     const query = new URL(request.url).searchParams;
     await ensureAiStorage();
     if (request.method !== "GET") assertOrigin(request);
+    if (kind === "captures") {
+      if (!id && request.method === "GET") {
+        const runIds = z.array(z.string().min(1).max(160)).max(30).parse((query.get("runIds") ?? "").split(",").filter(Boolean));
+        return json(await listChartCaptures(runIds));
+      }
+      if (id && action === "claim" && request.method === "POST") return json(await claimChartCapture(id));
+      if (id && request.method === "POST") {
+        const input = z.object({ lease: z.string().uuid(), dataUrl: z.string().optional(), failed: z.boolean().optional(), heartbeat: z.boolean().optional() }).strict().parse(await readBody(request, 6 * 1024 * 1024));
+        return json(await finishChartCapture(id, input.lease, input));
+      }
+    }
     if (kind === "assistant-plan" && request.method === "POST") return json(await prepareAssistant(assistantPlanRequest.parse(await readBody(request)), request.signal));
     if (kind === "page-context" && request.method === "GET") {
       const session = await prisma.replaySession.findUnique({ where: { id: query.get("sessionId") ?? "" }, select: { dataset: { select: { id: true, startTime: true, timezone: true } } } });

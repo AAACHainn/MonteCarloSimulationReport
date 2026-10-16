@@ -8,6 +8,7 @@ import { copy } from "@/lib/i18n";
 
 import { useDialogLifecycle } from "@/components/ui/use-dialog-lifecycle";
 import { DialogResizeFrame } from "@/components/ui/dialog-resize-frame";
+import { Button } from "@/components/ui/button";
 
 type DialogProps = {
   open: boolean;
@@ -59,10 +60,12 @@ export function Dialog({ open, title, description, children, className, contentC
             <h2 id={titleId} className="text-lg font-semibold text-slate-950">{title}</h2>
             {description ? <p id={descriptionId} className="mt-1 text-sm text-slate-600">{description}</p> : null}
           </div>
-          {headerActions}
-          <button type="button" onClick={onClose} className="rounded-md p-1.5 text-slate-500 hover:bg-slate-100 hover:text-slate-900 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring" aria-label="关闭">
-            <X className="h-4 w-4" />
-          </button>
+          <div className="flex shrink-0 items-center gap-2">
+            {headerActions}
+            <Button type="button" size="icon" variant="ghost" onClick={onClose} className="text-slate-500" aria-label={copy.common.close}>
+              <X className="h-4 w-4" aria-hidden="true" />
+            </Button>
+          </div>
         </header>
         <div className={cn("min-h-0 flex-1 overflow-y-auto p-5", contentClassName)}>{children}</div>
       </section>

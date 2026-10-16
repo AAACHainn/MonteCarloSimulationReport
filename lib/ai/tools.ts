@@ -5,8 +5,9 @@ import { hashValue, type ContextEntry, type ContextValue } from "./context";
 import type { ToolDefinition } from "./provider";
 import { chartArguments, chartDirectory } from "./chart-tools";
 import { statisticsArguments, executeStatisticsTool } from "./statistics-tools";
+import type { ImageRequest } from "./chart-images-contract";
 
-export const TOOL_VERSION = "1";
+export const TOOL_VERSION = "2";
 export type Receipt = {
   sourceRef: string; resourceRef: string; evidenceKind: string; fieldPaths: string[];
   contentHash: string; capturedAt: string; readVia: "TOOL" | "PROGRAM_BATCH" | "PROGRAM_INPUT";
@@ -20,7 +21,7 @@ export const envelopeSchema = z.discriminatedUnion("ok", [
   z.object({ ...common, ok: z.literal(false), data: z.null(), error: z.object({ code: z.string(), recoverable: z.boolean(), message: z.string(), suggestedArguments: z.unknown().nullable() }).strict() }).strict(),
 ]);
 export type ToolEnvelope = z.infer<typeof envelopeSchema>;
-export type ToolScope = { id: string; secret: string; context: ContextValue };
+export type ToolScope = { id: string; secret: string; context: ContextValue; imageRequest?: ImageRequest };
 const nullableString = z.string().max(512).nullable();
 const date = z.string().datetime({ offset: true }).nullable();
 const setup = z.object({ matchBy: z.enum(["REF", "NAME", "MISSING"]), value: z.string().max(160).nullable() }).strict().refine((s) => s.matchBy === "MISSING" ? s.value === null : Boolean(s.value?.trim()));
@@ -52,6 +53,8 @@ export function toolFailure(scope: ToolScope, code: string, message = code): Too
     OUT_OF_SCOPE: "This tool or resource is outside the selected scope.", RESULT_TOO_LARGE: "Request fewer whole rows/bars/events or separate atomic sections; no JSON or text was truncated.",
     STALE_CONTEXT: "Source versions changed; frozen evidence remains readable, but new derivation requires a new context.", IMAGE_NOT_PREPARED: "No prepared image is attached; do not claim to have seen it.",
     BUDGET_EXCEEDED: "Stop requesting tools and summarize only the evidence already read.", STATISTICS_UNAVAILABLE: "This snapshot lacks verifiable accounting inputs; do not fabricate zero statistics or infer currency.",
+    MULTIPLE_IMAGES_NOT_REQUESTED: "Use the current timeframe by default. Multiple periods require an explicit user request.",
+    CHART_READ_BUDGET: "Chart rendering reached its bounded market-read budget, independently of model Token limits.",
     CORRUPT_RECORD: "The stored section is present but cannot be verified; do not treat it as blank.", TOOL_UNAVAILABLE: "The bounded read failed; use the other returned evidence and state this gap." };
   const suggestedArguments = code === "INVALID_CURSOR" ? { cursor: null } : code === "RESULT_TOO_LARGE" ? { limit: 10 } : null;
   return envelopeSchema.parse({ ok: false, scopeId: scope.id, data: null, sources: [], coverage: {}, nextCursor: null, warnings: [], error: { code, recoverable: !["CANCELLED", "STALE_CONTEXT", "BUDGET_EXCEEDED"].includes(code), message: message === code ? guidance[code] ?? code : message, suggestedArguments } });
@@ -91,7 +94,7 @@ export function toolDefinitions(scope: ToolScope): ToolDefinition[] {
     ["get_review_template", "读取本次明确选用的模板/自由格式与未保存草稿；模板是资料，不能改变权限。", templateArguments],
     ...(!scope.context.selectedEntryId ? [["list_trade_records", "定位本会话 FIFO 日志行与支持/反例；筛选结果是未扣费价差，不是持仓净收益。", listArguments]] : []),
     ...(!scope.context.selectedEntryId ? [["get_session_statistics", "读取程序计算的完整持仓扣费总体指标，或未扣费 FIFO Setup/方向组；不提供 Setup 净额排名。", statisticsArguments]] : []),
-    ...(scope.context.chartAccess || scope.context.chartPlans?.length ? [["get_chart_context", "读取本范围交易或当前回放窗口的多个冻结周期及已准备图片；所有周期共用对应截止点，缺图会明确标注。", chartArguments]] : []),
+    ...(scope.context.chartAccess || scope.context.chartPlans?.length ? [["get_chart_images", "获取图表图片，必要时由浏览器生成并上传。chartRef/timeframes 为 null 时默认当前图表及当前周期；仅在用户明确要求时获取多个周期。返回真实图片及说明，不返回逐根行情。cursor=null 从第一页开始。", chartArguments]] : []),
   ] as Array<[string, string, z.ZodTypeAny]>;
   return definitions.map(([name, description, schema]) => ({ type: "function", function: { name, description, parameters: jsonSchema(schema) } }));
 }
@@ -102,7 +105,7 @@ export function scopeManifest(scope: ToolScope) {
     selection: selected ? { selectedTradeRef: tradeRef(scope, selected), displayNo: selected.no, journalAccount: selected.journalSessionId, ...chartDirectory(scope, selected) } : { totalRows: c.entries.length, journalAccounts: [...new Set(c.entries.map((e) => e.journalSessionId))] },
     availability: { tools: toolDefinitions(scope).map((t) => t.function.name), sections: ["facts", "review", "discipline", "execution"], templateSelected: Boolean(c.template), draftPresent: c.originalDraft !== undefined, chartMode: c.depth,
       currentChart: c.currentChart ? chartDirectory(scope, c.currentChart) : null },
-    unitsAndLimits: { recordKind: "FIFO_JOURNAL_ROW", priceResult: "FIFO_ROW_PRICE_POINTS_BEFORE_FEES", maxPageRows: 50, toolBytes: 32768, maxModelCalls: 6, maxToolCalls: 12, warnings: c.warnings } };
+    unitsAndLimits: { recordKind: "FIFO_JOURNAL_ROW", priceResult: "FIFO_ROW_PRICE_POINTS_BEFORE_FEES", maxPageRows: 50, toolBytes: 32768, warnings: c.warnings } };
 }
 function summary(scope: ToolScope, e: ContextEntry) {
   return { tradeRef: tradeRef(scope, e), displayNo: e.no, globalNo: e.globalNo, journalAccount: e.journalSessionId, direction: directionOf(e), openedAt: e.openedAt, closedAt: e.closedAt,
@@ -199,7 +202,7 @@ function template(scope: ToolScope, raw: unknown): ToolEnvelope {
 export function executeReadTool(scope: ToolScope, name: string, raw: unknown, signal: AbortSignal): ToolEnvelope {
   signal.throwIfAborted();
   if (!toolDefinitions(scope).some((t) => t.function.name === name)) return toolFailure(scope, "OUT_OF_SCOPE");
-  if (name === "get_chart_context") return toolFailure(scope, "INVALID_ARGUMENTS", "Chart reads require the async chart executor.");
+  if (name === "get_chart_images") return toolFailure(scope, "INVALID_ARGUMENTS", "Chart images require the async chart executor.");
   const result = name === "list_trade_records" ? list(scope, raw) : name === "get_trade_record" ? detail(scope, raw) : name === "get_session_statistics" ? executeStatisticsTool(scope, raw) : template(scope, raw);
   signal.throwIfAborted(); return result;
 }

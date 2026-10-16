@@ -22,9 +22,13 @@ import { POST as aiPOST, GET as aiGET } from "@/app/api/ai/[...path]/route";
 import { skillKeys, type RunInput } from "./schema";
 import { executeReadTool, emptyFilters, scopeManifest, tradeRef, type ToolScope } from "./tools";
 import { generateTurn } from "./provider";
-import { executeChartTool, chartRef } from "./chart-tools";
+import { executeChartTool, chartRef, chartDirectory } from "./chart-tools";
 import { coverageLedger } from "./program-evidence";
-import { saveAsset } from "./assets";
+import { saveAsset, storeChartAsset } from "./assets";
+import { listChartCaptures, claimChartCapture, finishChartCapture, requestChartImage } from "./chart-captures";
+import { chartWarmupCount } from "./chart-images-contract";
+import { toolDefinitions } from "./tools";
+import { defaultChartPreferences } from "./chart-contract";
 import { entryLotId, fifoRowId } from "@/lib/paper-trading/journal-identity";
 import { prepareAssistant, type AssistantDecision } from "./assistant-plan";
 import { relevantHistory } from "./history";
@@ -89,6 +93,21 @@ function toolResponse(calls: Array<{ id: string; name: string; args: unknown }>,
     ...calls.map((c, index) => ({ choices: [{ delta: { tool_calls: [{ index, id: c.id, type: "function", function: { name: c.name, arguments: JSON.stringify(c.args) } }] } }] })),
     { choices: [{ delta: {}, finish_reason: "tool_calls" }] }];
   return new Response(chunks.map((c) => "data: " + JSON.stringify(c) + "\r\n\r\n").join("") + "data: [DONE]\r\n\r\n");
+}
+const capturePng = "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+jL1cAAAAASUVORK5CYII=";
+const captureFixture = (contextId: string) => async (_variantId: string, chart: import("./context").ContextChart) => storeChartAsset(capturePng, contextId, chart.hash);
+async function withCaptureBrowser<T>(runId: string, action: () => Promise<T>) {
+  let stopped = false;
+  const pump = (async () => {
+    while (!stopped) {
+      for (const task of await listChartCaptures([runId])) {
+        const job = await claimChartCapture(task.id);
+        await finishChartCapture(job.id, job.lease, { dataUrl: capturePng });
+      }
+      await new Promise((resolve) => setTimeout(resolve, 20));
+    }
+  })();
+  try { return await action(); } finally { stopped = true; await pump; }
 }
 describe("configurable per-run limits and usage API", () => {
   it.each([{ maxModelCalls: 9, maxToolCalls: 16, expected: 9 }, { maxModelCalls: 10, maxToolCalls: 2, expected: 3 }])("uses configured model/tool counts with a reserved closing answer (%j)", async ({ maxModelCalls, maxToolCalls, expected }) => {
@@ -166,7 +185,7 @@ describe("configurable per-run limits and usage API", () => {
   });
 });
 describe("automatic assistant intent and page scope", () => {
-  const decision = (value: Partial<AssistantDecision>): AssistantDecision => ({ task: "globalAssistant", target: "current", tradeNo: null, timeframes: [], needsTemplate: false, fullCharts: false, ...value });
+  const decision = (value: Partial<AssistantDecision>): AssistantDecision => ({ task: "globalAssistant", target: "current", tradeNo: null, timeframes: [], needsTemplate: false, fullCharts: false, needsChartImages: false, multipleCharts: false, ...value });
   async function plan(value: Partial<AssistantDecision>, page?: { entryId?: string; draft?: string; templateId?: string; includeCurrentChart?: boolean }, question = "分析这里") {
     await configure();
     const chat = await prisma.aiConversation.create({ data: { name: "auto" } });
@@ -207,10 +226,10 @@ describe("automatic assistant intent and page scope", () => {
       if (count++ === 0) return toolResponse([{ id: "auto-list", name: "list_trade_records", args: { filters: { ...emptyFilters, displayNo: 1 }, cursor: null, limit: 10 } }]);
       const list = JSON.parse(body.messages.find((m: { tool_call_id?: string }) => m.tool_call_id === "auto-list").content);
       if (count === 2) return toolResponse([{ id: "auto-detail", name: "get_trade_record", args: { tradeRef: list.data.records[0].tradeRef, sections: ["facts"], cursor: null, limit: null } },
-        { id: "auto-chart", name: "get_chart_context", args: { chartRef: list.data.records[0].chartRef, timeframes: ["5m"], cursor: null, limit: 80, includeImage: false } }]);
+        { id: "auto-chart", name: "get_chart_images", args: { chartRef: list.data.records[0].chartRef, timeframes: ["5m"], cursor: null } }]);
       return streamResponse("已在本会话定位第1笔，并读取事实和截至平仓的图表数据。");
     }));
-    await executeRun(run.id);
+    await withCaptureBrowser(run.id, () => executeRun(run.id));
     expect((await prisma.aiRun.findUniqueOrThrow({ where: { id: run.id } })).status).toBe("COMPLETED");
     expect(await prisma.aiToolCall.count({ where: { runId: run.id, status: "COMPLETED" } })).toBe(3);
   });
@@ -246,13 +265,13 @@ describe("automatic assistant intent and page scope", () => {
     const { result } = await plan({ task: "chartReading", timeframes: ["5m", "1h"] }, { includeCurrentChart: true }, "比较当前5m和1h走势");
     const context = result.context!, scope = { id: "auto-charts", secret: "auto-charts", context }, signal = new AbortController().signal;
     expect(context.currentChart).toBeTruthy(); expect(result.prepareImages).toBe(true);
-    const current = await executeChartTool(scope, context.id, { chartRef: chartRef(scope, context.currentChart!), timeframes: ["5m", "1h"], cursor: null, limit: 80, includeImage: false }, signal, []);
+    const current = await executeChartTool(scope, context.id, { chartRef: chartRef(scope, context.currentChart!), timeframes: ["5m", "1h"], cursor: null }, signal, [], captureFixture(context.id));
     expect(current.result.ok).toBe(true); expect(JSON.stringify(current)).not.toContain("98765432");
     const fresh = await createContext({ replaySessionId: sessionId, projectionId, depth: "quick", chartAccess: true });
-    const lazyScope = { ...scope, context: fresh };
-    const raw = { chartRef: chartRef(lazyScope, fresh.entries[0]), timeframes: ["1h"], cursor: null, limit: 80, includeImage: false };
+    const lazyScope = { ...scope, context: fresh, imageRequest: { multiple: true, timeframes: [] } };
+    const raw = { chartRef: chartRef(lazyScope, fresh.entries[0]), timeframes: ["1h"], cursor: null };
     expect(fresh.charts).toHaveLength(0);
-    const read = await executeChartTool(lazyScope, fresh.id, raw, signal, []);
+    const read = await executeChartTool(lazyScope, fresh.id, raw, signal, [], captureFixture(fresh.id));
     expect(read.result.ok).toBe(true); expect(JSON.stringify(read)).not.toContain("98765432");
     await prisma.marketDataset.update({ where: { id: "market" }, data: { dataVersion: { increment: 1 } } });
     try { expect((await executeChartTool(lazyScope, fresh.id, { ...raw, timeframes: ["15m"] }, signal, [])).result.error?.code).toBe("STALE_CONTEXT"); }
@@ -370,6 +389,186 @@ describe("A: scoped read tools and persisted protocol", () => {
   });
 });
 describe("B: frozen multi-period charts", () => {
+  it("only warms up visible indicators and retains a bounded maximum", () => {
+    const prefs = defaultChartPreferences(0);
+    prefs.emaEnabled = true;
+    prefs.emaIndicators = [20, 60, 200].map((length) => ({ id: String(length), length, color: "#000000", lineWidth: 1, lineStyle: "SOLID", visible: length === 20 }));
+    expect(chartWarmupCount(prefs)).toBe(60);
+    prefs.emaIndicators[2].visible = true; expect(chartWarmupCount(prefs)).toBe(600);
+    prefs.emaIndicators[2].length = 1000; expect(chartWarmupCount(prefs)).toBe(1000);
+    prefs.emaEnabled = false; expect(chartWarmupCount(prefs)).toBe(0);
+  });
+  it("prepares requested chart images independently of the answer mode and publishes only the image tool", async () => {
+    await configure(); const chat = await prisma.aiConversation.create({ data: { name: "image-intent" } });
+    vi.stubGlobal("fetch", vi.fn().mockResolvedValue(streamResponse(JSON.stringify({ task: "globalAssistant", target: "current", tradeNo: null, timeframes: [], needsTemplate: false, fullCharts: false, needsChartImages: true, multipleCharts: false }))));
+    const result = await prepareAssistant({ conversationId: chat.id, question: "你可以调用工具生成图片查看当前图表吗？", page: { replaySessionId: sessionId, projectionId, depth: "quick", chartAccess: true, includeCurrentChart: true } }, new AbortController().signal);
+    expect(result.task).toBe("globalAssistant"); expect(result.prepareImages).toBe(true); expect(result.imageRequest).toEqual({ multiple: false, timeframes: [] });
+    const scope = { id: "images", secret: "images", context: result.context! };
+    expect(toolDefinitions(scope).map((d) => d.function.name)).toContain("get_chart_images");
+    expect(toolDefinitions(scope).map((d) => d.function.name)).not.toContain("get_chart_context");
+    const rejected = await executeChartTool(scope, result.context!.id, { chartRef: null, timeframes: ["1m", "5m"], cursor: null }, new AbortController().signal, [], captureFixture(result.context!.id));
+    expect(rejected.result.ok).toBe(false);
+  });
+  it("delivers three newly captured periods through persisted browser requests without sending OHLC arrays", async () => {
+    await configure(); const context = await createContext({ replaySessionId: sessionId, projectionId, includeCurrentChart: true, chartAccess: true, timeframes: ["1m", "5m", "15m"] });
+    const run = await makeRun(context.id, "globalAssistant", "tools-v1");
+    const mock = vi.fn().mockImplementation(async (_url, options) => {
+      const body = JSON.parse(options.body);
+      if (mock.mock.calls.length === 1) return toolResponse([{ id: "new-images", name: "get_chart_images", args: { chartRef: null, timeframes: null, cursor: null } }]);
+      const imageParts = body.messages.flatMap((m: { content: unknown }) => Array.isArray(m.content) ? m.content.filter((p) => p.type === "image_url") : []);
+      expect(imageParts).toHaveLength(3); expect(imageParts.every((p: { image_url: { url: string } }) => p.image_url.url.startsWith("data:image/png;base64,"))).toBe(true);
+      const result = JSON.parse(body.messages.find((m: { role: string }) => m.role === "tool").content);
+      expect(result.data.charts.map((c: { timeframe: string }) => c.timeframe)).toEqual(["1m", "5m", "15m"]);
+      expect(JSON.stringify(result)).not.toMatch(/"(?:bars|warmupBars|open|high|low|close|volume)":/);
+      return streamResponse("三张固定范围图片已读取");
+    }); vi.stubGlobal("fetch", mock);
+    await withCaptureBrowser(run.id, () => executeRun(run.id));
+    expect((await prisma.aiRun.findUniqueOrThrow({ where: { id: run.id } })).status).toBe("COMPLETED");
+    const tasks = await prisma.aiRunStep.findMany({ where: { runId: run.id, phase: "CAPTURE" } });
+    expect(tasks).toHaveLength(3); expect(tasks.every((t) => t.stepNo < 0 && t.status === "READY")).toBe(true);
+  });
+  it("keeps the same window and prepared image when one period is requested alone or with another", async () => {
+    const context = await createContext({ replaySessionId: sessionId, projectionId, entryId, depth: "quick", timeframes: ["5m", "1h"] });
+    const assets = await Promise.all(context.charts.map((c) => saveAsset(capturePng, context.id, c.hash)));
+    const scope = { id: "stable-images", secret: "stable", context }, signal = new AbortController().signal;
+    const one = await executeChartTool(scope, context.id, { chartRef: null, timeframes: ["5m"], cursor: null }, signal, assets.map((a) => a.id));
+    const two = await executeChartTool(scope, context.id, { chartRef: null, timeframes: ["5m", "1h"], cursor: null }, signal, assets.map((a) => a.id));
+    expect(one.images[0]).toEqual(two.images[0]);
+    expect(one.result.ok && (one.result.data.charts as Array<{ windowHash: string }>)[0].windowHash).toBe(two.result.ok && (two.result.data.charts as Array<{ windowHash: string }>)[0].windowHash);
+    expect(await prisma.aiChartVariant.count({ where: { contextId: context.id } })).toBe(2);
+  });
+  it("sends a frozen current-chart annotation list to the browser with captions, legends and real trade mappings", async () => {
+    await configure(); const c = await createContext({ replaySessionId: sessionId, projectionId, includeCurrentChart: true, chartAccess: true, timeframes: ["1m", "5m"] });
+    const run = await makeRun(c.id, "globalAssistant", "tools-v1"), signal = new AbortController().signal;
+    await prisma.aiRun.update({ where: { id: run.id }, data: { status: "RUNNING" } });
+    const scope = { id: run.id, secret: "annotations", context: c };
+    const waiting = executeChartTool(scope, c.id, { chartRef: null, timeframes: null, cursor: null }, signal, [], (id, ch) => requestChartImage(run.id, c.id, id, ch, signal, () => undefined));
+    let taskId = ""; await vi.waitFor(async () => { const tasks = await listChartCaptures([run.id]); expect(tasks).toHaveLength(1); taskId = tasks[0].id; });
+    const job = await claimChartCapture(taskId);
+    expect(job.chart.entryId).toBe("current-replay-chart");
+    expect(job.chart.annotations?.entries.map((e) => e.id)).toEqual([entryId]);
+    expect(job.chart.annotations?.entries[0]).toMatchObject({ no: c.entries[0].no, openedSequence: 1, closedSequence: 3 });
+    expect(job.context.entries).toEqual([]);
+    await finishChartCapture(job.id, job.lease, { dataUrl: capturePng });
+    const output = await withCaptureBrowser(run.id, () => waiting);
+    expect(output.images).toHaveLength(2);
+    expect(output.result.ok && output.result.data).toMatchObject({ subject: { kind: "CURRENT_CHART", tradeRef: null },
+      annotationLegend: { risk: expect.stringContaining("持仓结束后"), exit: expect.stringContaining("不能据此判断") },
+      annotationMapping: [{ chartNo: c.entries[0].no, displayNo: c.entries[0].no, globalNo: c.entries[0].globalNo, journalAccount: c.entries[0].journalSessionId, tradeRef: tradeRef(scope, c.entries[0]) }] });
+    const charts = output.result.ok ? output.result.data.charts as Array<{ caption: string; annotationNumbers: number[] }> : [];
+    expect(charts.every((ch) => Boolean(ch.caption) && ch.annotationNumbers[0] === c.entries[0].no)).toBe(true);
+    expect(JSON.stringify(output)).not.toMatch(/"(?:bars|warmupBars|open|high|low|close|volume)":/);
+    await cancelRun(run.id);
+  });
+  it("reconstructs old unannotated images under a new identity without overwriting historical assets", async () => {
+    const c = await createContext({ replaySessionId: sessionId, projectionId, includeCurrentChart: true, chartAccess: true });
+    c.charts = c.charts.map((ch) => ({ ...ch, annotations: undefined, hash: "legacy:" + ch.hash }));
+    const { id, ...value } = c;
+    await prisma.aiContext.update({ where: { id }, data: { value: JSON.stringify(value) } });
+    const previous = await saveAsset(capturePng, id, c.charts[0].hash), capture = vi.fn(captureFixture(id));
+    const output = await executeChartTool({ id: "legacy-images", secret: "legacy", context: c }, id, { chartRef: null, timeframes: null, cursor: null }, new AbortController().signal, [previous.id], capture);
+    expect(output.images).toHaveLength(1); expect(output.images[0].assetId).not.toBe(previous.id); expect(capture).toHaveBeenCalledTimes(1);
+    expect(capture.mock.calls[0][1].annotations?.entries.map((e) => e.id)).toEqual([entryId]);
+    expect(await prisma.aiAsset.findUnique({ where: { id: previous.id } })).toMatchObject({ chartHash: c.charts[0].hash });
+  });
+  it("keeps four periods and the bounded annotation mapping within the tool result limit", async () => {
+    const c = await createContext({ replaySessionId: sessionId, projectionId, includeCurrentChart: true, chartAccess: true, timeframes: ["1m", "5m", "15m", "1h"] });
+    c.entries = Array.from({ length: 105 }, (_, i) => ({ ...c.entries[0], id: "annotation-" + i, no: i + 1, globalNo: i + 1, logicalKey: "annotation-key-" + i }));
+    const output = await executeChartTool({ id: "many-annotations", secret: "many", context: c }, c.id, { chartRef: null, timeframes: null, cursor: null }, new AbortController().signal, [], captureFixture(c.id));
+    expect(output.images).toHaveLength(4); expect(output.result.ok && output.result.data.annotationMapping).toHaveLength(100);
+    expect(output.result.coverage.annotationsComplete).toBe(false); expect(output.result.warnings).toHaveLength(4);
+    expect(Buffer.byteLength(JSON.stringify(output.result))).toBeLessThanOrEqual(32768);
+  });
+  it("completes multi-period pagination when the longer period has already ended", async () => {
+    const datasetId = "image-pagination", count = 430;
+    await prisma.marketDataset.create({ data: { id: datasetId, name: datasetId, symbol: "PAGE", timeframe: "1m", timezone: "UTC", sourceIntervalSeconds: 60, barCount: count, startTime: base, endTime: new Date(+base + (count - 1) * 60000) } });
+    await prisma.marketBar.createMany({ data: Array.from({ length: count }, (_, sequence) => ({ datasetId, sequence, timestamp: new Date(+base + sequence * 60000), open: 100, high: 102, low: 99, close: 101 })) });
+    const session = await createReplaySession(datasetId, { name: datasetId, mode: "TRAINING", timestamp: base.toISOString(), playbackRate: 1, displayIntervalSeconds: 60, displaySession: "ETH" });
+    await prisma.replayProjection.update({ where: { id: session.activeProjectionId! }, data: { currentSequence: count - 1 } });
+    const journal = await prisma.replayJournalSession.create({ data: { datasetId, replaySessionId: session.id, replayGeneration: 1, initialCapital: 10000, currency: "USD", commissionBps: 0, slippageBps: 0 } });
+    const original = await prisma.replayJournalEntry.findUniqueOrThrow({ where: { id: entryId } });
+    const entry = await prisma.replayJournalEntry.create({ data: { ...original, id: "pagination-entry", logicalKey: "pagination-entry", projectionId: session.activeProjectionId!, journalSessionId: journal.id, openedSequence: 0, openedAt: base, closedSequence: count - 1, closedAt: new Date(+base + (count - 1) * 60000), displayIntervalSeconds: 60 } });
+    const context = await createContext({ replaySessionId: session.id, projectionId: session.activeProjectionId!, entryId: entry.id, timeframes: ["1m", "5m"] });
+    const scope = { id: "pagination-images", secret: "pagination", context }, signal = new AbortController().signal;
+    let cursor: string | null = null;
+    for (let page = 0; page < 3; page++) {
+      const output = await executeChartTool(scope, context.id, { chartRef: null, timeframes: null, cursor }, signal, [], captureFixture(context.id));
+      expect(output.result.ok).toBe(true); expect(output.result.coverage.imagesComplete).toBe(true);
+      expect(output.result.coverage.complete).toBe(page === 2); expect(output.images).toHaveLength(page ? 1 : 2);
+      const charts = output.result.ok ? output.result.data.charts as Array<{ coverage: { visibleBars: number }; actualSourceRange: number[] }> : [];
+      expect(charts[0].coverage.visibleBars).toBe(page === 2 ? 30 : 200);
+      expect(charts[0].actualSourceRange).toEqual([page * 200, Math.min(count - 1, (page + 1) * 200 - 1)]);
+      if (!page) expect(charts[1].coverage.visibleBars).toBe(86);
+      if (page) expect(output.result.ok && (output.result.data.charts as Array<{ imageStatus: string }>)[1].imageStatus).toBe("NO_MORE_IMAGES");
+      cursor = output.result.nextCursor;
+    }
+    expect(cursor).toBeNull();
+    const current = await createContext({ replaySessionId: session.id, projectionId: session.activeProjectionId!, includeCurrentChart: true, chartAccess: true, timeframes: ["1m", "5m"], chartWindow: { fromSequence: 230, toSequence: 429, displayIntervalSeconds: 60, displaySession: "ETH" } });
+    const currentScope = { ...scope, context: current, imageRequest: { multiple: false, timeframes: [] as string[] } };
+    expect(chartDirectory(currentScope, current.currentChart!).maxBarsPerImage).toBe(200);
+    const single = await executeChartTool(currentScope, current.id, { chartRef: null, timeframes: null, cursor: null }, signal, [], captureFixture(current.id));
+    expect(single.images).toHaveLength(1);
+    expect(single.result.ok && (single.result.data.charts as Array<{ coverage: { visibleBars: number }; actualSourceRange: number[] }>)[0]).toMatchObject({ coverage: { visibleBars: 200 }, actualSourceRange: [230, 429] });
+    const multi = await executeChartTool({ ...currentScope, imageRequest: { multiple: true, timeframes: ["1m", "5m"] } }, current.id, { chartRef: null, timeframes: null, cursor: null }, signal, [], captureFixture(current.id));
+    expect(multi.images).toHaveLength(2);
+    expect(multi.result.ok && (multi.result.data.charts as Array<{ coverage: { visibleBars: number }; actualSourceRange: number[] }>)[0]).toMatchObject({ coverage: { visibleBars: 200 }, actualSourceRange: [230, 429] });
+  });
+  it("reclaims a lost browser lease, rejects stale completions, and makes completion idempotent", async () => {
+    await configure(); const context = await createContext({ replaySessionId: sessionId, projectionId, entryId, depth: "quick" });
+    const run = await makeRun(context.id, "globalAssistant", "tools-v1"); await prisma.aiRun.update({ where: { id: run.id }, data: { status: "RUNNING" } });
+    const waiting = executeChartTool({ id: run.id, secret: "lease", context }, context.id, { chartRef: null, timeframes: null, cursor: null }, new AbortController().signal, [], (id, chart) => requestChartImage(run.id, context.id, id, chart, new AbortController().signal, () => undefined));
+    let taskId = "";
+    await vi.waitFor(async () => { const tasks = await listChartCaptures([run.id]); expect(tasks).toHaveLength(1); taskId = tasks[0].id; });
+    const first = await claimChartCapture(taskId); await expect(claimChartCapture(taskId)).rejects.toMatchObject({ code: "CAPTURE_EXPIRED" });
+    const saved = await prisma.aiRunStep.findUniqueOrThrow({ where: { id: taskId } }), state = JSON.parse(saved.payload);
+    await prisma.aiRunStep.update({ where: { id: taskId }, data: { payload: JSON.stringify({ ...state, leaseUntil: Date.now() - 1 }) } });
+    const second = await claimChartCapture(taskId); expect(second.lease).not.toBe(first.lease);
+    await expect(finishChartCapture(taskId, first.lease, { dataUrl: capturePng })).rejects.toMatchObject({ code: "CAPTURE_EXPIRED" });
+    const completed = await finishChartCapture(taskId, second.lease, { dataUrl: capturePng });
+    expect(await finishChartCapture(taskId, second.lease, { dataUrl: capturePng })).toEqual(completed);
+    expect((await waiting).images).toHaveLength(1); expect((await prisma.aiRun.findUniqueOrThrow({ where: { id: run.id } })).calls).toBe(0);
+    await cancelRun(run.id);
+  });
+  it("rejects an upload after cancellation and never turns the cancelled request ready", async () => {
+    await configure(); const context = await createContext({ replaySessionId: sessionId, projectionId, entryId, depth: "quick" });
+    const run = await makeRun(context.id, "globalAssistant", "tools-v1"); await prisma.aiRun.update({ where: { id: run.id }, data: { status: "RUNNING" } });
+    const waiting = executeChartTool({ id: run.id, secret: "cancel", context }, context.id, { chartRef: null, timeframes: null, cursor: null }, new AbortController().signal, [], (id, chart) => requestChartImage(run.id, context.id, id, chart, new AbortController().signal, () => undefined));
+    let taskId = ""; await vi.waitFor(async () => { const tasks = await listChartCaptures([run.id]); expect(tasks).toHaveLength(1); taskId = tasks[0].id; });
+    const job = await claimChartCapture(taskId); await cancelRun(run.id);
+    await expect(finishChartCapture(taskId, job.lease, { dataUrl: capturePng })).rejects.toMatchObject({ code: "CAPTURE_EXPIRED" });
+    expect((await waiting).images).toHaveLength(0); expect((await prisma.aiRunStep.findUniqueOrThrow({ where: { id: taskId } })).status).toBe("CANCELLED");
+    expect(await prisma.aiAsset.count({ where: { contextId: context.id } })).toBe(0);
+  });
+  it("expires a capture request without a browser and reports the image-specific timeout", async () => {
+    await configure(); const context = await createContext({ replaySessionId: sessionId, projectionId, entryId, depth: "quick" });
+    const run = await makeRun(context.id, "globalAssistant", "tools-v1"); await prisma.aiRun.update({ where: { id: run.id }, data: { status: "RUNNING" } });
+    const waiting = executeChartTool({ id: run.id, secret: "expire", context }, context.id, { chartRef: null, timeframes: null, cursor: null }, new AbortController().signal, [], (id, chart) => requestChartImage(run.id, context.id, id, chart, new AbortController().signal, () => undefined));
+    let taskId = ""; await vi.waitFor(async () => { const tasks = await listChartCaptures([run.id]); expect(tasks).toHaveLength(1); taskId = tasks[0].id; });
+    const task = await prisma.aiRunStep.findUniqueOrThrow({ where: { id: taskId } });
+    await prisma.aiRunStep.update({ where: { id: taskId }, data: { payload: JSON.stringify({ ...JSON.parse(task.payload), deadline: Date.now() - 1 }) } });
+    await expect(claimChartCapture(taskId)).rejects.toMatchObject({ code: "CAPTURE_EXPIRED" });
+    expect((await waiting).result.error?.code).toBe("CHART_CAPTURE_TIMEOUT");
+    expect((await prisma.aiRunStep.findUniqueOrThrow({ where: { id: taskId } })).status).toBe("EXPIRED"); await cancelRun(run.id);
+  });
+  it("retains successful images when another period cannot be rendered", async () => {
+    const context = await createContext({ replaySessionId: sessionId, projectionId, entryId, depth: "quick", timeframes: ["5m", "1h"] });
+    const output = await executeChartTool({ id: "partial-image", secret: "partial", context }, context.id, { chartRef: null, timeframes: null, cursor: null }, new AbortController().signal, [], async (id, chart) => {
+      if (chart.intervalSeconds === 3600) throw new Error("capture unavailable"); return captureFixture(context.id)(id, chart);
+    });
+    expect(output.images).toHaveLength(1); expect(output.result.ok).toBe(true); expect(output.result.coverage.imagesComplete).toBe(false);
+    expect(output.result.warnings).toContain("1h:CHART_CAPTURE_FAILED"); expect(JSON.stringify(output)).not.toContain('"bars"');
+  });
+  it("keeps earlier images after the shared capture deadline without starting more waits", async () => {
+    const context = await createContext({ replaySessionId: sessionId, projectionId, entryId, timeframes: ["1m", "5m", "15m"] });
+    const signal = new AbortController().signal;
+    const output = await executeChartTool({ id: "capture-deadline", secret: "deadline", context }, context.id, { chartRef: null, timeframes: null, cursor: null }, signal, [], async (id, chart) => {
+      if (chart.intervalSeconds === 60) return captureFixture(context.id)(id, chart);
+      return requestChartImage("expired-batch", context.id, id, chart, signal, () => undefined, Date.now() - 1);
+    });
+    expect(output.result.ok).toBe(true); expect(output.images).toHaveLength(1); expect(output.result.coverage.imagesComplete).toBe(false);
+    expect(output.result.warnings).toEqual(["5m:CHART_CAPTURE_TIMEOUT", "15m:CHART_CAPTURE_TIMEOUT"]);
+    expect(await prisma.aiRunStep.count({ where: { runId: "expired-batch" } })).toBe(0);
+  });
   it.each(["generic", "deepseek"] as const)("delivers distinct prepared images with complete tool-result matching (%s)", async (adapterProfile) => {
     await configure(); const settings = await readSettings(); settings.value.endpoints[0].adapterProfile = adapterProfile; await saveSettings(settings.value, settings.version);
     const c = await createContext({ replaySessionId: sessionId, projectionId, entryId, depth: "quick", draft: "", timeframes: ["5m", "1h"] });
@@ -381,10 +580,15 @@ describe("B: frozen multi-period charts", () => {
       const request = JSON.parse(options.body);
       if (mock.mock.calls.length === 1) {
         const manifest = JSON.parse(request.messages.at(-1).content).scopeManifest;
-        return toolResponse([{ id: "images", name: "get_chart_context", args: { chartRef: manifest.selection.chartRef, timeframes: ["5m", "1h"], includeImage: true, cursor: null, limit: 120 } }]);
+        return toolResponse([{ id: "images", name: "get_chart_images", args: { chartRef: manifest.selection.chartRef, timeframes: ["5m", "1h"], cursor: null } }]);
       }
       const results = request.messages.filter((m: { role: string }) => m.role === "tool");
       expect(results).toHaveLength(1); expect(results[0].tool_call_id).toBe("images");
+      const content = results[0].content;
+      const evidence = JSON.parse(typeof content === "string" ? content : content.find((part: { type: string }) => part.type === "text").text);
+      expect(evidence.data.annotationLegend.entry).toContain("LMT");
+      expect(evidence.data.annotationMapping).toMatchObject([{ displayNo: c.entries[0].no, globalNo: c.entries[0].globalNo, tradeRef: expect.stringMatching(/^trade:/) }]);
+      expect(evidence.data.charts.every((ch: { caption?: string; annotationNumbers: number[] }) => Boolean(ch.caption) && ch.annotationNumbers.includes(c.entries[0].no))).toBe(true);
       const imageMessages = request.messages.filter((m: { content: unknown }) => Array.isArray(m.content) && m.content.some((p: { type: string }) => p.type === "image_url"));
       expect(imageMessages.every((m: { role: string }) => m.role === (adapterProfile === "deepseek" ? "tool" : "user"))).toBe(true);
       expect(imageMessages.flatMap((m: { content: Array<{ type: string }> }) => m.content.filter((p) => p.type === "image_url"))).toHaveLength(2);
@@ -397,17 +601,20 @@ describe("B: frozen multi-period charts", () => {
   });
   it("normalizes 60m/1h, preserves the shared cutoff and reports unprepared images truthfully", async () => {
     const c = await createContext({ replaySessionId: sessionId, projectionId, entryId, depth: "quick", timeframes: ["5m", "1h"] });
-    const scope: ToolScope = { id: "chart-run", secret: "chart-secret", context: c }, signal = new AbortController().signal;
-    const raw = { chartRef: chartRef(scope, c.entries[0]), timeframes: ["5m", "60m", "1h"], cursor: null, limit: 120, includeImage: true };
-    const response = await executeChartTool(scope, c.id, raw, signal, []);
+    const scope: ToolScope = { id: "chart-run", secret: "chart-secret", context: c, imageRequest: { multiple: true, timeframes: [] } }, signal = new AbortController().signal;
+    const raw = { chartRef: chartRef(scope, c.entries[0]), timeframes: ["5m", "60m", "1h"], cursor: null };
+    const missing = await executeChartTool(scope, c.id, raw, signal, []);
+    expect(missing.result.error?.code).toBe("IMAGE_NOT_PREPARED");
+    const response = await executeChartTool(scope, c.id, raw, signal, [], captureFixture(c.id));
     expect(response.result.ok).toBe(true);
-    const charts = response.result.ok ? response.result.data.charts as Array<{ timeframe: string; cutoffSequence: number; bars: Array<{ lastSequence: number; status: string }>; imageStatus: string; windowHash: string }> : [];
+    const charts = response.result.ok ? response.result.data.charts as Array<{ timeframe: string; cutoffSequence: number; imageStatus: string; windowHash: string }> : [];
     expect(charts.map((ch) => ch.timeframe)).toEqual(["5m", "1h"]);
-    expect(charts.every((ch) => ch.cutoffSequence === 3 && ch.bars.every((b) => b.lastSequence <= 3 && b.status === "FORMING"))).toBe(true);
+    expect(charts.every((ch) => ch.cutoffSequence === 3 && ch.imageStatus === "READY")).toBe(true);
     expect(new Set(charts.map((ch) => ch.windowHash)).size).toBe(2);
-    expect(charts.every((ch) => ch.imageStatus === "IMAGE_NOT_PREPARED")).toBe(true);
-    expect(response.result.sources.every((s) => !s.imageAttached)).toBe(true);
+    expect(JSON.stringify(response)).not.toContain('"bars"');
     expect(JSON.stringify(response)).not.toContain("98765432");
+    const variants = await prisma.aiChartVariant.findMany({ where: { contextId: c.id } });
+    expect(variants.every((v) => JSON.parse(v.value).window.bars.every((b: { lastSequence: number; status: string }) => b.lastSequence <= 3 && b.status === "FORMING"))).toBe(true);
     for (const timeframes of [[], ["1s"], ["1m", "5m", "15m", "1h", "4h"]]) expect((await executeChartTool(scope, c.id, { ...raw, timeframes }, signal, [])).result.ok).toBe(false);
     const before = await prisma.aiChartVariant.count({ where: { contextId: c.id } });
     await executeChartTool(scope, c.id, raw, signal, []);
@@ -415,7 +622,7 @@ describe("B: frozen multi-period charts", () => {
     await prisma.marketDataset.update({ where: { id: c.datasetId }, data: { dataVersion: { increment: 1 } } });
     try {
       expect((await executeChartTool(scope, c.id, { ...raw, timeframes: ["15m"] }, signal, [])).result.error?.code).toBe("STALE_CONTEXT");
-      expect((await executeChartTool(scope, c.id, raw, signal, [])).result.ok).toBe(true);
+      expect((await executeChartTool(scope, c.id, raw, signal, [], captureFixture(c.id))).result.ok).toBe(true);
     } finally { await prisma.marketDataset.update({ where: { id: c.datasetId }, data: { dataVersion: c.dataVersion } }); }
   });
 });

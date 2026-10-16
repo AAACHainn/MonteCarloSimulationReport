@@ -1354,6 +1354,7 @@ export const dictionaries = {
     },
     common: {
       none: "无",
+      close: "关闭",
       searchOptions: "搜索选项…",
       clearSearch: "清空搜索",
       noSearchResults: "没有匹配的选项。",
@@ -1455,7 +1456,7 @@ export const dictionaries = {
     simulations: {} as Record<string, unknown>,
     report: {} as Record<string, unknown>,
     api: {} as Record<string, unknown>,
-    common: { none: "None", dash: "-", confirm: "Confirm", cancel: "Cancel" },
+    common: { none: "None", close: "Close", dash: "-", confirm: "Confirm", cancel: "Cancel" },
   },
 } as const;
 
@@ -1466,6 +1467,17 @@ const aiLimitLabels = {
   outputChars: "响应字符保护", protocolBytes: "响应与工具记录大小保护",
 };
 export const copy = { ...dictionaries[defaultLocale], ai: {
+  chartAnnotationLegend: {
+    number: "n) 是图中交易标注编号。按 annotationMapping 的 chartNo 对应日志显示编号 displayNo、内部全局编号 globalNo、账户 journalAccount 和可读取的 tradeRef；chartRef 仅为图表引用，不是交易编号。同一交易的标注同色，颜色循环用于区分交易，不表示买卖或盈亏。",
+    entry: "LMT=限价委托，MKT=市价委托，STP=止损委托，?=委托类型未记录；B=做多入场，S=做空入场。STP 表示入场委托类型，不表示退出原因。",
+    risk: "iRisk 标在入场时记录的初始止损价，未记录时不画。aRisk 标在入场价按方向扣/加实际最大不利变动后的价位；它是持仓结束后的统计，标在入场柱附近不表示当时已知，也不表示不利极值发生在该柱。",
+    exit: "TP/SL/BE 按该日志行未扣费价差结果的盈利/亏损/持平生成，标在退出价和退出柱；不能据此判断真实止盈单或止损单触发。准确退出原因须查交易执行事实。",
+    position: "短虚线的锚点表示事件价格，文字会为避免重叠而移位；事件映射到所属聚合 K 线。annotationNumbers 指本图纳入的交易，长交易分页可能只出现该交易的部分标记。仅包含固定截止点前已结束且属于本次范围的交易；手动画线、手绘框和 DOM 标签未包含。",
+  },
+  preparingChartImages: "正在准备图表图片…",
+  captureExpired: "图表图片任务已失效，请重新发送或重试。",
+  captureFailed: "图表图片生成失败，可保持页面可见后重试。",
+  captureTimeout: "等待图表图片超时，请保持页面可见后重试。",
   limits: "用量与上限", adjustLimits: "调整上限", temporaryLimits: "本聊天临时上限", temporaryActive: "已使用临时上限",
   limitsHint: "新运行使用这些默认值；聊天内可临时调整。输出 Token 包括服务计入输出的思考内容，仍受所选模型自身限制。",
   temporaryLimitsHint: "仅用于本聊天后续请求，刷新页面后恢复全局设置。正在运行的请求使用启动时的上限。",
@@ -1508,7 +1520,7 @@ export const copy = { ...dictionaries[defaultLocale], ai: {
   unsupportedTimeframe: "所提周期不适用于当前行情源，请使用不小于源周期且为其整数倍的系统支持周期。",
   tradeNumber: (n: number) => "第 " + n + " 笔交易",
   followingPage: "自动关联当前页面，发送时固定资料",
-  followingChart: "关联当前可见图表，最多 80 根，不含手动画线",
+  followingChart: "关联当前可见图表，最多 200 根，不含手动画线",
   pinnedContext: "已指定资料，后续提问沿用此范围",
   chatContext: "沿用此聊天上次的资料范围",
   autoContextHint: "进入回放会话后自动关联，也可直接提问",
@@ -1542,7 +1554,7 @@ export const copy = { ...dictionaries[defaultLocale], ai: {
   readFailed: "读取失败",
   readRunning: "读取中",
   readUnknown: "读取资料",
-  readNames: { list_trade_records: "定位交易", get_trade_record: "读取交易", get_review_template: "读取模板", get_chart_context: "读取图表", get_session_statistics: "核对统计" },
+  readNames: { list_trade_records: "定位交易", get_trade_record: "读取交易", get_review_template: "读取模板", get_chart_context: "读取图表（历史）", get_chart_images: "获取图表图片", get_session_statistics: "核对统计" },
   title: "AI 机器人", settings: "AI 配置", models: "大模型", skills: "技能",
   openSettings: "AI 配置（新标签页）", settingsEyebrow: "模型与复盘助手", settingsDescription: "统一配置模型服务和复盘技能。所有技能使用当前启用的端点与默认模型。",
   loadingSettings: "正在读取 AI 配置…", reloadSettings: "重新加载配置", changesDiscarded: "已取消未保存的更改。",
@@ -1609,7 +1621,7 @@ export const copy = { ...dictionaries[defaultLocale], ai: {
   continuingHint: "继续使用原模型和资料快照，从已完成的批次接着分析。",
   coverage: "分析范围", missingData: "待补资料", candidateRules: "候选规则（待后续验证）",
   supports: "支持交易", counterexamples: "反例交易", validation: "验证动作",
-  freeform: "未指定模板，使用自由格式。", noCharts: "本次为文字与结构化行情分析，未审阅全部交易图表。",
+  freeform: "未指定模板，使用自由格式。", noCharts: "本次仅按需查看所选图表图片，不代表审阅全部交易图表。",
   noHistory: "历史原始截图未保存；图表由本次固定数据重建。",
   sourceChanged: "此报告基于历史快照，当前会话结果或复盘已改变。",
   chars: (n: number) => n.toLocaleString("zh-CN") + " 字",

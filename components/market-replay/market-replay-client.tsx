@@ -94,6 +94,7 @@ import type {
   ReplayTradeAnnotationData,
 } from "@/lib/paper-trading/types";
 import { createDeterministicEventIdFactory } from "@/lib/paper-trading/deterministic-id";
+import { paperOrderUrl } from "@/lib/paper-trading/order-url";
 import { advancePaperTrading } from "@/lib/paper-trading/engine";
 import { applySpeculativeAdvance, paperCheckpointFingerprint } from "@/lib/paper-trading/speculative";
 import {
@@ -2489,14 +2490,14 @@ export function MarketReplayClient({ dataset: initialDataset, initialJournalFocu
 
   async function updatePaperOrder(orderId: string, update: { price?: number; quantity?: number; stopLoss?: number | null; takeProfit?: number | null; riskAmount?: number | null }) {
     if (!paperSnapshotRef.current) return false;
-    return mutatePaper(`/api/market-datasets/${dataset.id}/paper-session/orders/${orderId}`, (version) => ({
+    return mutatePaper(paperOrderUrl(dataset.id, orderId), (version) => ({
       method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ ...update, expectedVersion: version }),
     }));
   }
 
   async function cancelPaperOrder(orderId: string) {
     if (!paperSnapshotRef.current) return false;
-    return mutatePaper(`/api/market-datasets/${dataset.id}/paper-session/orders/${orderId}`, (version) => ({
+    return mutatePaper(paperOrderUrl(dataset.id, orderId), (version) => ({
       method: "DELETE", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ expectedVersion: version }),
     }));
   }

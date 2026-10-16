@@ -19,8 +19,10 @@ import { relevantHistory } from "./history";
 import { readPlan, forgetPlan, type PlanningRecord } from "./planning-record";
 import { resolveLimits, type AiLimits, type BudgetBlock } from "./limits";
 import { budgetError } from "./budget";
+import { requestedCharts, type ImageRequest } from "./chart-images-contract";
+import { chartAnnotationMapping, chartImageDescription } from "./chart-image-evidence";
 
-type RunSnapshot = { endpoint: Endpoint; model: string; prompt: string; question: string; assetIds: string[]; chartAssetIds: string[]; estimatedChars: number; historyBefore?: string; reference?: string; response?: ResponseDetails; executionMode?: "tools-v1" | "fixed-v1"; scopeSecret?: string; toolSchemaVersion?: string; adapterVersion?: string; contextHash?: string; routing?: PlanningRecord; limits?: AiLimits; budgetExceeded?: BudgetBlock };
+type RunSnapshot = { endpoint: Endpoint; model: string; prompt: string; question: string; assetIds: string[]; chartAssetIds: string[]; estimatedChars: number; historyBefore?: string; reference?: string; response?: ResponseDetails; executionMode?: "tools-v1" | "fixed-v1"; scopeSecret?: string; toolSchemaVersion?: string; adapterVersion?: string; contextHash?: string; routing?: PlanningRecord; limits?: AiLimits; budgetExceeded?: BudgetBlock; imageRequest?: ImageRequest };
 type Checkpoint = { content: string; usage: Usage; stage?: string; coverage?: CoverageBatch }[];
 const localControllers = new Map<string, AbortController>();
 export async function recoverRuns() {
@@ -44,6 +46,8 @@ export async function createRun(input: RunInput) {
   const limits = resolveLimits(routing?.limits ?? settings.value.limits, input.limits);
   if (routing?.limits && hashValue(limits) !== hashValue(routing.limits)) throw new AiError("PLAN_EXPIRED", copy.ai.planExpired, 409);
   const context = input.contextId ? await readContext(input.contextId) : null;
+  const decision = routing?.decision as { multipleCharts?: boolean; timeframes?: string[] } | undefined;
+  const imageRequest: ImageRequest = { multiple: Boolean(decision?.multipleCharts || (decision?.timeframes?.length ?? context?.imageTimeframes?.length ?? 0) > 1), timeframes: decision?.timeframes ?? context?.imageTimeframes ?? [] };
   if (context) await checkCurrentContext(context);
   if (input.executionMode !== "fixed-v1" && context?.originalDraft !== undefined && Array.from(context.originalDraft).length > 2000) throw new AiError("DRAFT_TOO_LONG", copy.ai.draftTooLong);
   if ((input.task === "reviewDraft" && !context?.selectedEntryId) || (input.task === "sessionReview" && (!context || context.selectedEntryId)))
@@ -53,8 +57,9 @@ export async function createRun(input: RunInput) {
     || assets.reduce((n, a) => n + a.bytes, 0) > LIMITS.totalImageBytes) throw new AiError("ASSET_SCOPE", copy.ai.tooLarge);
   const chartAssets = input.contextId ? await prisma.aiAsset.findMany({ where: { contextId: input.contextId, chartHash: { not: null } }, orderBy: { createdAt: "asc" } }) : [];
   const includeCharts = input.chartImages || context?.depth === "full";
-  const selectedCharts = includeCharts && context ? context.charts.map((c) => chartAssets.find((a) => a.chartHash === c.hash)).filter((a): a is NonNullable<typeof a> => Boolean(a)) : [];
-  if (includeCharts && selectedCharts.length !== context?.charts.length) throw new AiError("CHARTS_MISSING", copy.ai.capturing);
+  const wantedCharts = context ? requestedCharts(context, imageRequest) : [];
+  const selectedCharts = includeCharts ? wantedCharts.map((c) => chartAssets.find((a) => a.chartHash === c.hash)).filter((a): a is NonNullable<typeof a> => Boolean(a)) : [];
+  if (includeCharts && selectedCharts.length !== wantedCharts.length) throw new AiError("CHARTS_MISSING", copy.ai.capturing);
   const unitCount = context ? context.selectedEntryId ? Math.max(1, context.charts.length) : context.depth === "full" ? context.charts.length : Math.ceil(context.entries.length / LIMITS.batchEntries) : 1;
   const estimate = (routing?.estimatedChars ?? 0) + JSON.stringify(contextText(context)).length + unitCount * (resolved.prompt.length + EVIDENCE_RULES.length + input.question.length)
     + selectedCharts.length * 4000 + limits.inputChars;
@@ -62,7 +67,7 @@ export async function createRun(input: RunInput) {
   if (input.task === "sessionReview" && unitCount + 1 + (routing ? 1 : 0) > limits.maxAnalysisCalls) throw budgetError("maxAnalysisCalls", unitCount + 1 + (routing ? 1 : 0), limits.maxAnalysisCalls);
   const snapshot: RunSnapshot = { ...resolved, question: input.question, assetIds: input.assetIds, chartAssetIds: selectedCharts.map((a) => a.id), estimatedChars: routing?.estimatedChars ?? 0, routing, limits,
     executionMode: context && input.executionMode !== "fixed-v1" ? "tools-v1" : "fixed-v1", scopeSecret: randomUUID(),
-    toolSchemaVersion: "1", adapterVersion: (resolved.endpoint.adapterProfile ?? "generic") + ":1", contextHash: context ? hashValue(context) : undefined,
+    toolSchemaVersion: "2", imageRequest, adapterVersion: (resolved.endpoint.adapterProfile ?? "generic") + ":2", contextHash: context ? hashValue(context) : undefined,
     reference: context ? context.sessionName + " · " + context.symbol + " · " + context.asOfTime + " · " + (context.selectedEntryId ? context.entries[0].sourceId : copy.ai.wholeSession) : copy.ai.noContext,
   };
   const created = await prisma.$transaction(async (tx) => {
@@ -84,6 +89,7 @@ export async function cancelRun(id: string) {
   if (!run) return;
   await prisma.$transaction([
     prisma.aiRun.updateMany({ where: { id, status: { in: ["RUNNING", "QUEUED"] } }, data: { status: "CANCELLED", error: copy.ai.stopped } }),
+    prisma.aiRunStep.updateMany({ where: { runId: id, phase: "CAPTURE", status: { in: ["REQUESTED", "CAPTURING"] } }, data: { status: "CANCELLED" } }),
     prisma.aiConversation.updateMany({ where: { id: run.conversationId, activeRunId: id }, data: { activeRunId: null } }),
   ]);
 }
@@ -94,6 +100,7 @@ export async function retryRun(id: string, overrides?: Partial<AiLimits>) {
   if (original.contextId) await checkCurrentContext(await readContext(original.contextId));
   delete snapshot.response;
   delete snapshot.budgetExceeded;
+  snapshot.toolSchemaVersion = "2";
   snapshot.limits = resolveLimits(snapshot.limits, overrides);
   if (snapshot.routing) snapshot.routing = { ...snapshot.routing, reused: true };
   const retryId = randomUUID();
@@ -128,7 +135,7 @@ export async function resumeRun(id: string, overrides?: Partial<AiLimits>) {
     if (!run || run.task !== "sessionReview" || !["INTERRUPTED", "FAILED", "CANCELLED", "INVALID_RESULT"].includes(run.status)) throw new AiError("INVALID", copy.ai.invalid);
     const claimed = await tx.aiConversation.updateMany({ where: { id: run.conversationId, activeRunId: null }, data: { activeRunId: id } });
     if (!claimed.count) throw new AiError("BUSY", copy.ai.busy, 409);
-    const snapshot: RunSnapshot = JSON.parse(run.snapshot); snapshot.limits = resolveLimits(snapshot.limits, overrides); delete snapshot.budgetExceeded; delete snapshot.response;
+    const snapshot: RunSnapshot = JSON.parse(run.snapshot); snapshot.limits = resolveLimits(snapshot.limits, overrides); snapshot.toolSchemaVersion = "2"; delete snapshot.budgetExceeded; delete snapshot.response;
     await tx.aiRun.update({ where: { id }, data: { status: "QUEUED", error: null, heartbeatAt: new Date(), snapshot: JSON.stringify(snapshot) } });
     return run;
   });
@@ -152,8 +159,8 @@ function contextText(context: ContextValue | null) {
     })),
     events: relevantEvents,
     executionLimitations: selected && !relevantEvents.length ? ["NOT_RELIABLY_LINKED"] : [],
-    charts: context.charts.map((c) => ({ sourceId: c.sourceId, fields: ["openTime", "firstSequence", "lastSequence", "open", "high", "low", "close", "volume", "status"],
-      bars: c.window.bars.map((b) => [b.timestamp, b.firstSequence, b.lastSequence, b.open, b.high, b.low, b.close, b.volume, b.status]) })),
+    charts: context.charts.map((c) => ({ sourceId: c.sourceId, timeframeSeconds: c.intervalSeconds, visibleBars: c.window.bars.length, origin: "BROWSER_RECONSTRUCTED", ...chartImageDescription(c) })),
+    ...(context.charts.length ? { annotationLegend: copy.ai.chartAnnotationLegend, annotationMapping: chartAnnotationMapping(context, context.charts, (e) => e.sourceId) } : {}),
   };
 }
 export function validatedResult(task: string, text: string, context: ContextValue | null, receipts?: Receipt[]) {
@@ -191,7 +198,7 @@ export async function executeRun(id: string, emit: (event: unknown) => void = ()
     const run = await prisma.aiRun.findUniqueOrThrow({ where: { id } }), config: RunSnapshot = JSON.parse(run.snapshot);
     config.chartAssetIds ??= [];
     const context = run.contextId ? await readContext(run.contextId) : null;
-    if (config.executionMode === "tools-v1" && (config.toolSchemaVersion !== "1" || !config.scopeSecret || config.contextHash !== hashValue(context))) throw new AiError("STALE_CONTEXT", copy.ai.conflict);
+    if (config.executionMode === "tools-v1" && (!["1", "2"].includes(config.toolSchemaVersion ?? "") || !config.scopeSecret || config.contextHash !== hashValue(context))) throw new AiError("STALE_CONTEXT", copy.ai.conflict);
     const checkpoint: Checkpoint = JSON.parse(run.checkpoint), usages: Usage[] = JSON.parse(run.usage);
     let calls = run.calls, totalChars = config.estimatedChars;
     async function call(payload: unknown, imageIds: string[], stream = false, json = false, history: ModelMessage[] = []) {
@@ -250,7 +257,7 @@ export async function executeRun(id: string, emit: (event: unknown) => void = ()
     if (context && config.executionMode === "tools-v1" && run.task !== "sessionReview") {
       const history = await relevantHistory(run.conversationId, context, id, config.historyBefore ? new Date(config.historyBefore) : undefined);
       const references = history.map((m) => ({ role: "user" as const, content: "HISTORICAL_REFERENCE_ONLY (not current evidence):\n" + m.content }));
-      const loop = await toolLoop(id, { id, secret: config.scopeSecret!, context }, config, signal, emit, references);
+      const loop = await toolLoop(id, { id, secret: config.scopeSecret!, context, imageRequest: config.imageRequest }, config, signal, emit, references);
       answer = loop.answer; receipts = loop.receipts; canAdopt = loop.canAdopt;
     } else if (context && (run.task === "sessionReview" || (context.selectedEntryId && context.charts.length > 1))) {
       const units: Array<{ entries: ContextValue["entries"]; charts: ContextValue["charts"] }> = [];
@@ -296,7 +303,7 @@ export async function executeRun(id: string, emit: (event: unknown) => void = ()
         summaries = reduced; if (++level > 6) throw new AiError("SUMMARY_SIZE", copy.ai.summaryTooLarge);
       }
       if (config.executionMode === "tools-v1") {
-        const scope = { id, secret: config.scopeSecret!, context };
+        const scope = { id, secret: config.scopeSecret!, context, imageRequest: config.imageRequest };
         const coverage = coverageLedger(context, checkpoint.flatMap((p) => p.coverage ? [p.coverage] : []));
         if (!coverage.complete) throw new AiError("INCOMPLETE_COVERAGE", copy.ai.invalidResult);
         const overall = executeReadTool(scope, "get_session_statistics", { view: "overall", cursor: null, limit: null }, signal);

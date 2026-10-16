@@ -1,5 +1,7 @@
 import { hashValue, type ContextValue } from "./context";
 import { executeReadTool, sourceReceipt, tradeRef, type Receipt, type ToolScope } from "./tools";
+import { copy } from "@/lib/i18n";
+import { chartAnnotationMapping, chartImageDescription } from "./chart-image-evidence";
 export type CoverageBatch = { entryKeys: string[]; reviewedKeys: string[]; chartHashes: string[]; imageHashes: string[]; receipts: Receipt[]; inputHash: string };
 export function programBatch(scope: ToolScope, entries: ContextValue["entries"], charts: ContextValue["charts"], imageHashes: string[], signal: AbortSignal) {
   const receipts: Receipt[] = [];
@@ -10,16 +12,19 @@ export function programBatch(scope: ToolScope, entries: ContextValue["entries"],
     return { ...result.data, sources: result.sources.map((r) => r.sourceRef) };
   });
   const chartData = charts.map((chart) => {
-    const data = { variantRef: chart.variantRef, intervalSeconds: chart.intervalSeconds ?? scope.context.display.displayIntervalSeconds, windowHash: chart.hash, bars: chart.window.bars,
+    const data = { variantRef: chart.variantRef, intervalSeconds: chart.intervalSeconds ?? scope.context.display.displayIntervalSeconds, windowHash: chart.hash, visibleBars: chart.window.bars.length,
+      ...chartImageDescription(chart),
       imageAttached: imageHashes.includes(chart.hash), endSequence: chart.window.bars.at(-1)?.lastSequence };
-    receipts.push({ ...sourceReceipt(scope, chart.sourceId, "CHART_DATA", ["bars"], data, "PROGRAM_BATCH"), variantRef: chart.variantRef, imageAttached: false });
+    receipts.push({ ...sourceReceipt(scope, chart.sourceId, "CHART_METADATA", ["timeframe", "window"], { ...data, annotationLegend: copy.ai.chartAnnotationLegend,
+      annotationMapping: chartAnnotationMapping(scope.context, [chart], (e) => tradeRef(scope, e)) }, "PROGRAM_BATCH"), variantRef: chart.variantRef, imageAttached: false });
     if (data.imageAttached) receipts.push({ ...sourceReceipt(scope, chart.sourceId, "CHART_IMAGE", ["image"], chart.hash, "PROGRAM_BATCH"), variantRef: chart.variantRef, imageAttached: true });
     return { ...data, sources: receipts.filter((r) => r.resourceRef === chart.sourceId).map((r) => r.sourceRef) };
   });
   const selectedTemplate = scope.context.template ? executeReadTool(scope, "get_review_template", {}, signal) : null;
   const template = selectedTemplate ? { ...selectedTemplate, sources: selectedTemplate.sources.map((r) => ({ ...r, readVia: "PROGRAM_BATCH" as const })) } : null;
   if (template) receipts.push(...template.sources);
-  const payload = { records, charts: chartData, ...(template ? { template } : {}) };
+  const payload = { records, charts: chartData, ...(charts.length ? { annotationLegend: copy.ai.chartAnnotationLegend,
+    annotationMapping: chartAnnotationMapping(scope.context, charts, (e) => tradeRef(scope, e)) } : {}), ...(template ? { template } : {}) };
   const coverage: CoverageBatch = { entryKeys: entries.map((e) => e.logicalKey), reviewedKeys: entries.filter((e) => e.review.trim()).map((e) => e.logicalKey), chartHashes: charts.map((ch) => ch.hash), imageHashes, receipts, inputHash: hashValue(payload) };
   return { payload, coverage };
 }

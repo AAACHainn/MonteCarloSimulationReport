@@ -24,11 +24,19 @@ import type { StatisticInput } from "./statistics-v1";
 import { entryLotId, isFifoRowExit } from "@/lib/paper-trading/journal-identity";
 import { withReplayJournalDisplayNumbers } from "@/lib/paper-trading/journal-numbering";
 
+import { AI_CHART_MAX_BARS, chartWarmupCount, selectChartAnnotations, type ChartAnnotations } from "./chart-images-contract";
+
 export const hashValue = (value: unknown) => createHash("sha256").update(JSON.stringify(value)).digest("hex");
 export type ContextEntry = ReplayJournalEntryData & { sourceId: string; logicalKey: string; href: string; reviewOrigin: string; reviewSourceRunId?: string | null; disciplineStatus?: "PRESENT" | "NOT_RECORDED" | "CORRUPT"; disciplineContentHash?: string };
-export type ContextChart = { hash: string; sourceId: string; entryId: string; window: PdfWindow; intervalSeconds?: number; preferencesHash?: string; variantRef?: string; sourceTimes?: Record<string, string> };
+export type ContextChart = { hash: string; sourceId: string; entryId: string; window: PdfWindow; intervalSeconds?: number; preferencesHash?: string; variantRef?: string; sourceTimes?: Record<string, string>; annotations?: ChartAnnotations };
 export type ChartPlan = { entryId: string; intervalSeconds: number; fromSequence: number; endSequence: number; historyAvailable: number };
 export type ChartSubject = Pick<ContextEntry, "id" | "logicalKey" | "displayIntervalSeconds" | "closedAt">;
+export function annotatedChart(context: ContextValue, chart: ContextChart): ContextChart {
+  const annotations = selectChartAnnotations(context, chart);
+  const hash = hashValue({ entryId: chart.entryId, displaySeconds: chart.intervalSeconds ?? context.display.displayIntervalSeconds,
+    displaySession: context.display.displaySession, window: chart.window, preferencesHash: chart.preferencesHash ?? hashValue(context.chartPreferences), rendererVersion: 2, annotations });
+  return { ...chart, hash, sourceId: "chart:" + hash, variantRef: "variant:" + hash, annotations };
+}
 export async function chartSourceTimes(datasetId: string, window: PdfWindow) {
   const rows = await prisma.marketBar.findMany({ where: { datasetId, sequence: { in: [...new Set(window.bars.flatMap((b) => [b.firstSequence, b.lastSequence]))] } }, take: 400, select: { sequence: true, timestamp: true } });
   return Object.fromEntries(rows.map((row) => [String(row.sequence), row.timestamp.toISOString()]));
@@ -48,6 +56,7 @@ export type ContextValue = {
   warnings: string[];
   chartPlans?: ChartPlan[]; chartPreferences?: PdfChartPreferences;
   statisticInput?: StatisticInput;
+  imageTimeframes?: string[];
   chartAccess?: boolean;
   currentChart?: ChartSubject;
   chartWindow?: z.infer<typeof pageChartWindowSchema>;
@@ -170,7 +179,7 @@ export async function createContext(input: z.input<typeof contextRequestSchema>)
       let anchor = chartPlans.find((p) => p.entryId === entry.id && p.intervalSeconds === initialSeconds)!.fromSequence;
       while (anchor <= entry.closedSequence) {
         if (charts.length >= LIMITS.chartsPerContext) throw new AiError("CHART_LIMIT", copy.ai.tooLarge);
-        const window = await readExportWindow({ ...base, anchorSequence: anchor, direction: "forward", count: Math.floor(80 / initialIntervals.length), warmupCount: chartPreferences.emaEnabled ? Math.min(1000, Math.max(0, ...chartPreferences.emaIndicators.map((e) => e.length * 3))) : 0 });
+        const window = await readExportWindow({ ...base, anchorSequence: anchor, direction: "forward", count: AI_CHART_MAX_BARS, warmupCount: chartWarmupCount(chartPreferences) });
         if (!window.bars.length) break;
         const preferencesHash = hashValue(chartPreferences);
         const hash = hashValue({ entryId: entry.id, displaySeconds: initialSeconds, displaySession, window, preferencesHash, rendererVersion: 1 });
@@ -191,7 +200,7 @@ export async function createContext(input: z.input<typeof contextRequestSchema>)
       closedAt: (chartCutoff?.timestamp ?? dataset.startTime).toISOString() };
     for (const intervalSeconds of displayIntervalOptions(dataset.sourceIntervalSeconds, displaySeconds)) {
       const before = await planExportWindow({ datasetId: dataset.id, sourceSeconds: dataset.sourceIntervalSeconds, displaySeconds: intervalSeconds,
-        session: tradingSession, endSequence, anchorSequence: endSequence, count: Math.floor(80 / Math.max(1, new Set(input.timeframes?.map(parseSourceInterval)).size)), budget: { rows: 25000, queries: 3000 } });
+        session: tradingSession, endSequence, anchorSequence: endSequence, count: AI_CHART_MAX_BARS, budget: { rows: 25000, queries: 3000 } });
       chartPlans.push({ entryId: currentChart.id, intervalSeconds, fromSequence: intervalSeconds === displaySeconds ? Math.max(before.fromSequence, input.chartWindow?.fromSequence ?? 0) : before.fromSequence, endSequence, historyAvailable: Math.max(0, before.count - 1) });
     }
     const intervals = input.timeframes?.map(parseSourceInterval) ?? [displaySeconds];
@@ -199,8 +208,8 @@ export async function createContext(input: z.input<typeof contextRequestSchema>)
     for (const intervalSeconds of [...new Set(intervals)] as number[]) {
       const plan = chartPlans.find((p) => p.entryId === currentChart!.id && p.intervalSeconds === intervalSeconds)!;
       const window = await readExportWindow({ datasetId: dataset.id, sourceSeconds: dataset.sourceIntervalSeconds, displaySeconds: intervalSeconds, session: tradingSession,
-        anchorSequence: plan.fromSequence, endSequence, finalSequence: endSequence + 1, direction: "forward", count: Math.floor(80 / intervals.length),
-        warmupCount: chartPreferences.emaEnabled ? Math.min(1000, Math.max(0, ...chartPreferences.emaIndicators.map((e) => e.length * 3))) : 0 });
+        anchorSequence: plan.fromSequence, endSequence, finalSequence: endSequence + 1, direction: "forward", count: AI_CHART_MAX_BARS,
+        warmupCount: chartWarmupCount(chartPreferences) });
       if (window.bars.length) {
         const preferencesHash = hashValue(chartPreferences), hash = hashValue({ entryId: currentChart.id, displaySeconds: intervalSeconds, displaySession, window, preferencesHash, rendererVersion: 1 });
         charts.push({ hash, sourceId: "chart:" + hash, entryId: currentChart.id, window, intervalSeconds, preferencesHash, variantRef: "variant:" + hash, sourceTimes: await chartSourceTimes(dataset.id, window) });
@@ -221,11 +230,12 @@ export async function createContext(input: z.input<typeof contextRequestSchema>)
     template: fixed.template, entries, charts, events, metrics: sessionMetrics(fixed.trades, entries),
     sourceHash: hashValue(entries.map((e) => [e.logicalKey, e.review, e.setupOptionId, e.tradeReasons])),
     display: { displayIntervalSeconds: displaySeconds, displaySession, session: tradingSession },
-    chartPlans, chartPreferences, chartAccess: input.chartAccess, currentChart, chartWindow: input.chartWindow,
+    chartPlans, chartPreferences, imageTimeframes: input.timeframes, chartAccess: input.chartAccess, currentChart, chartWindow: input.chartWindow,
     ...(!input.entryId && fixed.account ? { statisticInput: { specVersion: "1" as const, currency: fixed.account.currency, endSequence: fixed.session.activeProjection!.currentSequence,
       trades: fixed.trades.map((t) => ({ ...t, status: t.status as "CLOSED" | "OPEN" })) } } : {}),
     warnings: [copy.ai.noHistory, ...(!events.length ? [copy.ai.noEvents] : []), ...(input.depth === "quick" && !input.entryId ? [copy.ai.noCharts] : [])],
   };
+  value.charts = charts.map((chart) => annotatedChart(value, chart));
   const row = await prisma.aiContext.create({ data: { value: JSON.stringify(value) } });
   return { id: row.id, ...value };
 }

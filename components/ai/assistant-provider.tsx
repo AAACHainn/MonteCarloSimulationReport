@@ -29,6 +29,8 @@ import { useAiPageScope } from "./page-context";
 import { AiLimitsFields } from "./limits-fields";
 import { resolveLimits, aiLimitsSchema, type AiLimits } from "@/lib/ai/limits";
 import type { BudgetView } from "@/lib/ai/budget";
+import { useChartCaptures } from "./use-chart-captures";
+import { requestedCharts } from "@/lib/ai/chart-images-contract";
 
 type FixedContext = ContextValue & { id: string };
 type Conversation = { id: string; name: string; activeRunId: string | null };
@@ -159,6 +161,7 @@ export function AiAssistantProvider({ children }: { children: ReactNode }) {
     try { localStorage.setItem("ai-chat-scope-v1:" + conversationId, JSON.stringify({ mode: scopeMode, contextId: scopeMode === "pinned" ? context?.id : undefined })); } catch { /* Optional UI preference. */ }
   }, [conversationId, scopeMode, context, loadingChat]);
   const activeRunId = conversations.find((c) => c.id === conversationId)?.activeRunId;
+  const capturingRun = useChartCaptures(conversations.flatMap((c) => c.activeRunId ? [c.activeRunId] : []));
   useEffect(() => {
     if (!activeRunId || !conversationId) return;
     let cancelled = false;
@@ -287,7 +290,7 @@ export function AiAssistantProvider({ children }: { children: ReactNode }) {
       let includeImages = false;
       if (plan.context?.charts.length && (plan.prepareImages || (scopeMode === "pinned" && chartImages))) {
         setStatus(copy.ai.capturing);
-        await captureContextCharts(plan.context, controller.signal); includeImages = true; setChartImages(true);
+        await captureContextCharts({ ...plan.context, charts: requestedCharts(plan.context, plan.imageRequest ?? { multiple: false, timeframes: [] }) }, controller.signal); includeImages = true; setChartImages(true);
       }
       controller.signal.throwIfAborted(); setStatus(copy.ai.starting);
       const value = await aiApi<{ id: string; task: string }>("runs", "POST", { conversationId: chatId, contextId: plan.context?.id, task: plan.task, planId: plan.planId, question, assetIds: assets, limits,
@@ -420,10 +423,11 @@ export function AiAssistantProvider({ children }: { children: ReactNode }) {
           {clarification ? <div className="rounded-md border border-amber-200 bg-amber-50 p-3 text-sm text-amber-800" role="status"><p>{clarification}</p><Button variant="ghost" className="mt-1 px-0 text-blue-700" onClick={() => setPickerOpen(true)}>{copy.ai.chooseOtherContext}</Button></div> : null}
           {error ? <p role="alert" className="rounded-md border border-red-200 bg-red-50 p-3 text-sm text-red-700">{error}</p> : null}
           {status ? <p role="status" aria-live="polite" className="flex items-center gap-2 text-xs text-slate-600">{busy ? <Loader2 className="h-4 w-4 animate-spin motion-reduce:animate-none" aria-hidden="true" /> : null}{status}</p> : null}
+          {capturingRun && capturingRun === activeRunId ? <p role="status" className="flex items-center gap-2 text-xs text-slate-600"><Loader2 className="h-4 w-4 animate-spin motion-reduce:animate-none" aria-hidden="true" />{copy.ai.preparingChartImages}</p> : null}
           {assets.length ? <div className="flex max-h-24 gap-2 overflow-x-auto">{assets.map((id) => <Button key={id} variant="outline" className="h-auto p-1" aria-label={copy.ai.removeImage} onClick={() => setAssets((s) => s.filter((a) => a !== id))}><Image unoptimized width={96} height={64} className="h-16 max-w-24 object-contain" src={"/api/ai/assets/" + id} alt={copy.ai.imageHint} /></Button>)}</div> : null}
-          <div className="rounded-lg border border-slate-200 bg-white p-2 focus-within:border-blue-300">
+          <div className="space-y-2">
           <Label htmlFor="ai-input" className="sr-only">{copy.ai.title}</Label>
-          <Textarea id="ai-input" rows={3} maxLength={8000} value={sendDraft} disabled={loadingChat} placeholder={copy.ai.placeholder} className="min-h-20 max-h-40 resize-y border-0 shadow-none focus-visible:ring-inset" aria-describedby="ai-composer-hint"
+          <Textarea id="ai-input" rows={3} maxLength={8000} value={sendDraft} disabled={loadingChat} placeholder={copy.ai.placeholder} className="min-h-20 max-h-40 resize-y" aria-describedby="ai-composer-hint"
             onChange={(e) => setDrafts((s) => ({ ...s, [conversationId]: e.target.value }))}
             onPaste={(e) => { if (e.clipboardData.files.length) { e.preventDefault(); void upload(e.clipboardData.files); } }}
             onKeyDown={(e) => { if (e.key === "Enter" && !e.shiftKey && !e.nativeEvent.isComposing && e.keyCode !== 229) { e.preventDefault(); void send(); } }} />

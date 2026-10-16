@@ -9,7 +9,8 @@ import type { TradingSessionConfig } from "@/lib/market-replay/types";
 import { priceDecimalsForTick } from "@/lib/market-replay/price-ticks";
 import { copy } from "@/lib/i18n";
 import type { PdfChartPreferences, PdfChartPage, PdfOptions, PdfWindow } from "../paper-trading/pdf-types";
-import type { ReplayJournalEntryData, ReplayTradeAnnotationData } from "../paper-trading/types";
+import type { ReplayTradeAnnotationData } from "../paper-trading/types";
+import { chartSnapshotCaption } from "./chart-snapshot-caption";
 
 function aborted() { return new DOMException("Aborted", "AbortError"); }
 export function waitForVisible(signal: AbortSignal): Promise<void> {
@@ -64,7 +65,7 @@ export function createChartSnapshotRenderer(
     indicator, series: chart.addSeries(LineSeries, { ...emaSeriesStyleOptions(indicator), lineWidth: Math.min(4, indicator.lineWidth + 1) as 2 | 3 | 4, priceLineVisible: false, lastValueVisible: false }),
   })) : [];
   return {
-    async capture(window: PdfWindow, page: PdfChartPage, entries: ReplayJournalEntryData[], signal: AbortSignal) {
+    async capture(window: PdfWindow, page: PdfChartPage, entries: ReplayTradeAnnotationData[], signal: AbortSignal) {
       signal.throwIfAborted();
       const bars = window.bars.filter((b) => b.lastSequence <= page.toSequence);
       if (bars.length !== page.count || bars[0]?.firstSequence !== page.fromSequence || bars.at(-1)?.lastSequence !== page.toSequence)
@@ -99,7 +100,7 @@ export function createChartSnapshotRenderer(
       try {
         const blob = await new Promise<Blob>((resolve, reject) => output.toBlob((value) => value ? resolve(value) : reject(new Error(copy.paperTrading.pdf.failed)), "image/png"));
         signal.throwIfAborted();
-        return { png: await blob.arrayBuffer(), caption: bars.some((b) => b.status !== "COMPLETE") ? copy.paperTrading.pdf.incomplete : copy.paperTrading.pdf.chartLegend };
+        return { png: await blob.arrayBuffer(), caption: chartSnapshotCaption({ bars }) };
       } finally { source.width = 0; source.height = 0; output.width = 0; output.height = 0; }
     },
     remove() { chart.remove(); },

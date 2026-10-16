@@ -20,11 +20,13 @@ import { prisma } from "@/lib/db";
 import { POST as advanceRoutePOST } from "@/app/api/market-datasets/[id]/replay/advance/route";
 import { POST as syncPOSTRoute } from "@/app/api/market-datasets/[id]/replay/sync/route";
 import { POST as resetPOSTRoute } from "@/app/api/market-datasets/[id]/replay/reset/route";
+import { PATCH as orderPATCHRoute, DELETE as orderDELETERoute } from "@/app/api/market-datasets/[id]/paper-session/orders/[orderId]/route";
 import { GET as progressGETRoute, PUT as progressPUTRoute } from "@/app/api/market-datasets/[id]/progress/route";
 import { advancePaperTrading } from "@/lib/paper-trading/engine";
 import { getPaperSessionSnapshot as rawGetPaperSessionSnapshot, serializePaperSession, serializePaperOrder } from "@/lib/paper-trading/serialize";
 import { serializeSourceBar } from "./dataset";
 import { createDeterministicEventIdFactory } from "@/lib/paper-trading/deterministic-id";
+import { paperOrderUrl } from "@/lib/paper-trading/order-url";
 import type { PaperFillData, PaperEquityPointData, PaperSessionSnapshot } from "@/lib/paper-trading/types";
 import { GET as windowGET } from "@/app/api/market-datasets/[id]/bars/window/route";
 import { GET as chunksGET } from "@/app/api/market-datasets/[id]/bars/chunks/route";
@@ -58,6 +60,8 @@ function fixtureRoute<P extends { id: string }>(handler: (request: Request, cont
 const POST = fixtureRoute(advanceRoutePOST);
 const syncPOST = fixtureRoute(syncPOSTRoute);
 const resetPOST = fixtureRoute(resetPOSTRoute);
+const orderPATCH = fixtureRoute(orderPATCHRoute);
+const orderDELETE = fixtureRoute(orderDELETERoute);
 const progressGET = fixtureRoute(progressGETRoute);
 const progressPUT = fixtureRoute(progressPUTRoute);
 async function getPaperSessionSnapshot(id: string) {
@@ -303,6 +307,54 @@ describe("replay advance with real SQLite", () => {
     expect(persistedProtective.map((order) => logicalId(order.id))).toEqual(
       orders.filter((order) => order.isProtective).map((order) => order.id).sort(),
     );
+  });
+
+  it.each(["BUY", "SELL"] as const)("persists %s protective line moves and cancellation through URL-decoded routes", async (side) => {
+    const id = `protective-line-${side}`;
+    await seed(id, 1, 5);
+    const account = await prisma.paperTradingSession.findFirstOrThrow({ where: { datasetId: id } });
+    await seedOrder({
+      id: "entry", sessionId: account.id, side, type: "MARKET", quantity: 2,
+      stopLoss: side === "BUY" ? 95 : 105, takeProfit: side === "BUY" ? 110 : 90,
+      createdSequence: -1, activeFromSequence: 0,
+    });
+    const entrySync = await syncPOST(syncRequest(await clientSyncBody(id, 0, "entry")), context(id));
+    expect(entrySync.status).toBe(200);
+    let snapshot = (await getPaperSessionSnapshot(id))!;
+    const stop = snapshot.activeOrders.find((order) => order.type === "STOP")!;
+    const target = snapshot.activeOrders.find((order) => order.type === "LIMIT")!;
+    expect(stop.id).toContain("%3A");
+    expect(target.id).toContain("%3A");
+
+    const sendOrderRequest = async (orderId: string, price?: number) => {
+      const url = new URL(paperOrderUrl(id, orderId), "http://localhost");
+      const orderContext = { params: Promise.resolve({ id, orderId: decodeURIComponent(url.pathname.split("/").at(-1)!) }) };
+      const input = new Request(url, {
+        method: price === undefined ? "DELETE" : "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ ...(price === undefined ? {} : { price }), expectedVersion: snapshot.session.version }),
+      });
+      const response = await (price === undefined ? orderDELETE : orderPATCH)(input, orderContext);
+      expect(response.status).toBe(200);
+      snapshot = (await response.json()).snapshot;
+    };
+    const stopPrice = side === "BUY" ? 97 : 103;
+    const targetPrice = side === "BUY" ? 107 : 93;
+    await sendOrderRequest(stop.id, stopPrice);
+    await sendOrderRequest(target.id, targetPrice);
+    expect(snapshot.activeOrders).toEqual(expect.arrayContaining([
+      expect.objectContaining({ id: stop.id, price: stopPrice, quantity: 2, ocoGroupId: stop.ocoGroupId, activeFromSequence: 1 }),
+      expect.objectContaining({ id: target.id, price: targetPrice, quantity: 2, ocoGroupId: target.ocoGroupId, activeFromSequence: 1 }),
+    ]));
+
+    const nextSync = await syncPOST(syncRequest(await clientSyncBody(id, 1, "after-move")), context(id));
+    expect(nextSync.status).toBe(200);
+    snapshot = (await getPaperSessionSnapshot(id))!;
+    expect(snapshot.activeOrders.find((order) => order.id === stop.id)?.price).toBe(stopPrice);
+    expect(snapshot.activeOrders.find((order) => order.id === target.id)?.price).toBe(targetPrice);
+    await sendOrderRequest(target.id);
+    expect(snapshot.activeOrders.map((order) => order.id)).toEqual([stop.id]);
+    expect(snapshot.recentOrders.find((order) => order.id === target.id)).toMatchObject({ status: "CANCELLED", cancelReason: "USER_CANCELLED" });
   });
 
   it("ignores database-only order metadata on the sync after creating protective orders", async () => {
