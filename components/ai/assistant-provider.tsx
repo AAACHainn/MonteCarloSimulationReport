@@ -1,4 +1,5 @@
 "use client";
+import { createUuid } from "@/lib/uuid";
 import { createContext, memo, useCallback, useContext, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { Settings, Minus, Plus, Pencil, Trash2, Eraser, Paperclip, Send, Square, Copy, MoreHorizontal, History, Bot, Layers, ChevronDown, Loader2, MessageSquare, FileText, ChartNoAxesCombined } from "lucide-react";
 import Image from "next/image";
@@ -302,7 +303,7 @@ export function AiAssistantProvider({ children }: { children: ReactNode }) {
       }
       controller.signal.throwIfAborted(); setStatus(copy.ai.starting);
       const value = await aiApi<{ id: string; task: string }>("runs", "POST", { conversationId: chatId, contextId: plan.context?.id, task: plan.task, planId: plan.planId, question, assetIds: assets, limits,
-        chartImages: includeImages, executionMode: fixedMode ? "fixed-v1" : "tools-v1", requestId: crypto.randomUUID() });
+        chartImages: includeImages, executionMode: fixedMode ? "fixed-v1" : "tools-v1", requestId: createUuid() });
       if (controller.signal.aborted) { await aiApi("runs/" + value.id, "DELETE"); await loadChats(); return; }
       setDrafts((s) => ({ ...s, [originalChat]: s[originalChat]?.trim() === question ? "" : s[originalChat] ?? "", [chatId]: s[chatId]?.trim() === question ? "" : s[chatId] ?? "" })); setAssets([]); setStatus("");
       scrollToLatest.current = true; await loadMessages(chatId); await loadChats();

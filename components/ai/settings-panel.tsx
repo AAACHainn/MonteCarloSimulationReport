@@ -1,4 +1,5 @@
 "use client";
+import { createUuid } from "@/lib/uuid";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { Eraser, Eye, Plus, RefreshCw, Trash2, Zap, Loader2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
@@ -130,7 +131,7 @@ export function AiSettingsPanel() {
           </Card>)}
           {!value.endpoints.length ? <p className="rounded-lg border border-dashed p-6 text-sm text-slate-600">{copy.ai.unconfigured}</p> : null}
           <Button variant="outline" disabled={busy || value.endpoints.length >= 12} onClick={() => {
-            const id = crypto.randomUUID();
+            const id = createUuid();
             setValue((s) => ({ ...s, activeEndpointId: s.activeEndpointId || id, endpoints: [...s.endpoints, { id, name: copy.ai.endpoint, protocol: "chat-completions", baseUrl: "http://localhost:11434/v1", chatUrl: "", modelsUrl: "", defaultModel: "", models: [], capabilities: {} }] }));
           }}><Plus className="h-4 w-4" />{copy.ai.addEndpoint}</Button>
         </> : tab === "limits" ? <Card><CardHeader><CardTitle>{copy.ai.limits}</CardTitle></CardHeader><CardContent className="space-y-4">
