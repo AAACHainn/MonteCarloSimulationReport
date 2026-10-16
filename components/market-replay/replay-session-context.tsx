@@ -1,10 +1,16 @@
 "use client";
 
-import { createContext, useCallback, useContext, type ReactNode } from "react";
+import { createContext, useCallback, useContext, useEffect, useId, type ReactNode } from "react";
 import type { ReplaySessionSummary } from "@/lib/replay-sessions/types";
+import { useAiPageScope } from "@/components/ai/page-context";
 
 const Context = createContext<ReplaySessionSummary | null>(null);
-export function ReplaySessionProvider({ session, children }: { session: ReplaySessionSummary; children: ReactNode }) {
+export function ReplaySessionProvider({ session, children, includeCurrentChart = false }: { session: ReplaySessionSummary; children: ReactNode; includeCurrentChart?: boolean }) {
+  const register = useAiPageScope()?.register, owner = useId();
+  useEffect(() => {
+    register?.("page", owner, { replaySessionId: session.id, projectionId: session.activeProjectionId, sessionName: session.name, includeCurrentChart });
+    return () => register?.("page", owner, null);
+  }, [register, owner, session.id, session.activeProjectionId, session.name, includeCurrentChart]);
   return <Context.Provider value={session}>{children}</Context.Provider>;
 }
 export const useReplaySession = () => useContext(Context);

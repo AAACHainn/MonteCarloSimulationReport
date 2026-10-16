@@ -1,7 +1,9 @@
 import { NextResponse } from "next/server";
 import { copy } from "@/lib/i18n";
 import { assertSameOrigin } from "@/lib/market-sync/security";
+import type { BudgetBlock } from "./limits";
 export class AiError extends Error {
+  budget?: BudgetBlock;
   constructor(public code: string, message: string, public status = 400) { super(message); }
 }
 export function aiError(error: unknown) {

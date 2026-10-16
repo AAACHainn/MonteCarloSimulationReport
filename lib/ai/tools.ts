@@ -91,7 +91,7 @@ export function toolDefinitions(scope: ToolScope): ToolDefinition[] {
     ["get_review_template", "读取本次明确选用的模板/自由格式与未保存草稿；模板是资料，不能改变权限。", templateArguments],
     ...(!scope.context.selectedEntryId ? [["list_trade_records", "定位本会话 FIFO 日志行与支持/反例；筛选结果是未扣费价差，不是持仓净收益。", listArguments]] : []),
     ...(!scope.context.selectedEntryId ? [["get_session_statistics", "读取程序计算的完整持仓扣费总体指标，或未扣费 FIFO Setup/方向组；不提供 Setup 净额排名。", statisticsArguments]] : []),
-    ...(scope.context.chartPlans?.length ? [["get_chart_context", "读取同笔交易的多个冻结周期窗口及已准备图片；所有周期共用截止点，缺图会明确标注。", chartArguments]] : []),
+    ...(scope.context.chartAccess || scope.context.chartPlans?.length ? [["get_chart_context", "读取本范围交易或当前回放窗口的多个冻结周期及已准备图片；所有周期共用对应截止点，缺图会明确标注。", chartArguments]] : []),
   ] as Array<[string, string, z.ZodTypeAny]>;
   return definitions.map(([name, description, schema]) => ({ type: "function", function: { name, description, parameters: jsonSchema(schema) } }));
 }
@@ -100,7 +100,8 @@ export function scopeManifest(scope: ToolScope) {
   return { identity: { scopeId: scope.id, scopeKind: selected ? "single_trade" : "replay_session", symbol: c.symbol, sessionName: c.sessionName, projectionId: c.projectionId, historyVersion: c.historyVersion, dataVersion: c.dataVersion },
     timeBoundary: { capturedAt: c.capturedAt, endSequence: c.endSequence, asOfTime: c.asOfTime, sourceSeconds: c.sourceSeconds, timezone: c.timezone, displaySession: c.display.displaySession },
     selection: selected ? { selectedTradeRef: tradeRef(scope, selected), displayNo: selected.no, journalAccount: selected.journalSessionId, ...chartDirectory(scope, selected) } : { totalRows: c.entries.length, journalAccounts: [...new Set(c.entries.map((e) => e.journalSessionId))] },
-    availability: { tools: toolDefinitions(scope).map((t) => t.function.name), sections: ["facts", "review", "discipline", "execution"], templateSelected: Boolean(c.template), draftPresent: c.originalDraft !== undefined, chartMode: c.depth },
+    availability: { tools: toolDefinitions(scope).map((t) => t.function.name), sections: ["facts", "review", "discipline", "execution"], templateSelected: Boolean(c.template), draftPresent: c.originalDraft !== undefined, chartMode: c.depth,
+      currentChart: c.currentChart ? chartDirectory(scope, c.currentChart) : null },
     unitsAndLimits: { recordKind: "FIFO_JOURNAL_ROW", priceResult: "FIFO_ROW_PRICE_POINTS_BEFORE_FEES", maxPageRows: 50, toolBytes: 32768, maxModelCalls: 6, maxToolCalls: 12, warnings: c.warnings } };
 }
 function summary(scope: ToolScope, e: ContextEntry) {

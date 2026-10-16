@@ -19,13 +19,16 @@ import { generate, sseData } from "./provider";
 import { createReplaySession } from "@/lib/replay-sessions/service";
 import { PATCH as updateEntry } from "@/app/api/market-datasets/[id]/paper-journal/entries/[entryId]/route";
 import { POST as aiPOST, GET as aiGET } from "@/app/api/ai/[...path]/route";
-import { LIMITS, skillKeys, type RunInput } from "./schema";
+import { skillKeys, type RunInput } from "./schema";
 import { executeReadTool, emptyFilters, scopeManifest, tradeRef, type ToolScope } from "./tools";
 import { generateTurn } from "./provider";
 import { executeChartTool, chartRef } from "./chart-tools";
 import { coverageLedger } from "./program-evidence";
 import { saveAsset } from "./assets";
 import { entryLotId, fifoRowId } from "@/lib/paper-trading/journal-identity";
+import { prepareAssistant, type AssistantDecision } from "./assistant-plan";
+import { relevantHistory } from "./history";
+import { DEFAULT_LIMITS, outputCharLimit } from "./limits";
 let file = "", sessionId = "", projectionId = "", entryId = "";
 const base = new Date("2026-10-01T00:00:00Z");
 beforeAll(async () => {
@@ -87,6 +90,227 @@ function toolResponse(calls: Array<{ id: string; name: string; args: unknown }>,
     { choices: [{ delta: {}, finish_reason: "tool_calls" }] }];
   return new Response(chunks.map((c) => "data: " + JSON.stringify(c) + "\r\n\r\n").join("") + "data: [DONE]\r\n\r\n");
 }
+describe("configurable per-run limits and usage API", () => {
+  it.each([{ maxModelCalls: 9, maxToolCalls: 16, expected: 9 }, { maxModelCalls: 10, maxToolCalls: 2, expected: 3 }])("uses configured model/tool counts with a reserved closing answer (%j)", async ({ maxModelCalls, maxToolCalls, expected }) => {
+    await configure(); const ctx = await createContext({ replaySessionId: sessionId, projectionId, entryId, depth: "quick" });
+    const chat = await prisma.aiConversation.create({ data: { name: "tool-limits" } });
+    const run = await createRun({ conversationId: chat.id, contextId: ctx.id, task: "globalAssistant", question: "继续查询", executionMode: "tools-v1", requestId: randomUUID(), assetIds: [], chartImages: false,
+      limits: { maxModelCalls, maxToolCalls, inputChars: 128000, maxInputChars: 1000000 } });
+    const mock = vi.fn().mockImplementation(async (_url, options) => JSON.parse(options.body).tool_choice === "none" ? streamResponse("按已读范围回答") : toolResponse([{ id: "configured-" + mock.mock.calls.length, name: "get_review_template", args: {} }]));
+    vi.stubGlobal("fetch", mock); await executeRun(run.id);
+    expect((await prisma.aiRun.findUniqueOrThrow({ where: { id: run.id } })).status).toBe("COMPLETED"); expect(mock).toHaveBeenCalledTimes(expected);
+    expect(await prisma.aiToolCall.count({ where: { runId: run.id } })).toBe(expected - 1);
+  });
+  it("saves defaults, freezes overrides and retries an input-limited question with higher limits and the original scope/model", async () => {
+    await configure(); const settings = await readSettings();
+    settings.value.limits = { ...DEFAULT_LIMITS, outputTokens: 2048 };
+    settings.value.skills.globalAssistant.prompt = "原任务提示：" + "x".repeat(12000);
+    await saveSettings(settings.value, settings.version);
+    const chat = await prisma.aiConversation.create({ data: { name: "limits" } });
+    const run = await createRun({ conversationId: chat.id, task: "globalAssistant", question: "原来的问题", assetIds: [], chartImages: false, requestId: randomUUID(), limits: { outputTokens: 512, inputChars: 8000 } });
+    const updated = await readSettings(); updated.value.limits = { ...DEFAULT_LIMITS, outputTokens: 4096 }; updated.value.endpoints[0].defaultModel = "changed";
+    await saveSettings(updated.value, updated.version);
+    const mock = vi.fn().mockImplementation(async () => streamResponse("完成原问题")); vi.stubGlobal("fetch", mock);
+    await executeRun(run.id); expect(mock).not.toHaveBeenCalled();
+    const failed = await aiGET(new Request("http://localhost/api/ai/runs/" + run.id), { params: Promise.resolve({ path: ["runs", run.id] }) });
+    expect(await failed.json()).toMatchObject({ status: "FAILED", budget: { limits: { outputTokens: 512, inputChars: 8000 }, totalTokens: null, blocked: { resource: "inputChars", limit: 8000 } } });
+    const response = await aiPOST(new Request("http://localhost/api/ai/runs/" + run.id + "/retry", { method: "POST", headers: { Origin: "http://localhost" }, body: JSON.stringify({ limits: { inputChars: 32000, outputTokens: 8192 } }) }), { params: Promise.resolve({ path: ["runs", run.id, "retry"] }) });
+    expect(response.status).toBe(200); const retry = await response.json();
+    await executeRun(retry.id);
+    const request = JSON.parse(mock.mock.calls[0][1].body);
+    expect(request.max_tokens).toBe(8192); expect(request.model).toBe("test"); expect(JSON.stringify(request.messages)).toContain("原来的问题");
+    const result = await aiGET(new Request("http://localhost/api/ai/conversations/" + chat.id), { params: Promise.resolve({ path: ["conversations", chat.id] }) });
+    const messages = (await result.json()).messages;
+    expect(messages.find((m: { role: string }) => m.role === "assistant")).toMatchObject({ budget: { totalTokens: 15, lastUsage: { input: 10, output: 5 }, limits: { outputTokens: 8192, inputChars: 32000 } } });
+    expect((await readSettings()).value.limits?.outputTokens).toBe(4096);
+    await expect(retryRun(run.id, { inputChars: 7999 })).rejects.toThrow();
+  });
+  it("freezes planning limits across global edits and accounts for routing only once", async () => {
+    await configure(); const chat = await prisma.aiConversation.create({ data: { name: "planning-limits" } }), question = "什么是回撤？";
+    vi.stubGlobal("fetch", vi.fn().mockResolvedValue(streamResponse(JSON.stringify({ task: "globalAssistant", target: "none", tradeNo: null, timeframes: [], needsTemplate: false, fullCharts: false }))));
+    const plan = await prepareAssistant({ conversationId: chat.id, question, limits: { outputTokens: 8192 } }, new AbortController().signal);
+    const settings = await readSettings(); settings.value.limits = { ...DEFAULT_LIMITS, outputTokens: 2048 }; await saveSettings(settings.value, settings.version);
+    const input: RunInput = { conversationId: chat.id, question, task: plan.task, planId: plan.planId, chartImages: false, assetIds: [], requestId: randomUUID() };
+    await expect(createRun({ ...input, limits: { outputTokens: 4096 } })).rejects.toMatchObject({ code: "PLAN_EXPIRED" });
+    const run = await createRun(input);
+    const mock = vi.fn().mockImplementation(async () => streamResponse("解释回撤")); vi.stubGlobal("fetch", mock);
+    await executeRun(run.id); expect(JSON.parse(mock.mock.calls[0][1].body).max_tokens).toBe(8192);
+    const result = await aiGET(new Request("http://localhost/api/ai/runs/" + run.id), { params: Promise.resolve({ path: ["runs", run.id] }) });
+    expect(await result.json()).toMatchObject({ budget: { modelCalls: 2, totalTokens: 30, limits: { outputTokens: 8192 } } });
+    const retry = await retryRun(run.id); await executeRun(retry.id);
+    const retried = await aiGET(new Request("http://localhost/api/ai/runs/" + retry.id), { params: Promise.resolve({ path: ["runs", retry.id] }) });
+    expect(await retried.json()).toMatchObject({ budget: { modelCalls: 1, totalTokens: 15 } });
+  });
+  it("preserves usage and the precise output cap of a failed tool round, then adjusts it on retry", async () => {
+    await configure(); const ctx = await createContext({ replaySessionId: sessionId, projectionId, entryId, depth: "quick" });
+    const run = await makeRun(ctx.id, "globalAssistant", "tools-v1");
+    vi.stubGlobal("fetch", vi.fn().mockResolvedValue(streamResponse("部分", "length", true, "实际思考")));
+    await executeRun(run.id);
+    const failed = await prisma.aiRun.findUniqueOrThrow({ where: { id: run.id } });
+    expect(JSON.parse(failed.usage)).toEqual([{ input: 10, output: 5 }]);
+    expect(JSON.parse(failed.snapshot)).toMatchObject({ budgetExceeded: { resource: "outputTokens", limit: 4096 }, response: { usage: { input: 10, output: 5 }, outputTokenLimit: 4096 } });
+    const retry = await retryRun(run.id, { outputTokens: 16384 });
+    expect(JSON.parse(retry.snapshot).budgetExceeded).toBeUndefined(); expect(JSON.parse(retry.snapshot).limits.outputTokens).toBe(16384);
+    await cancelRun(retry.id);
+  });
+  it("raises limits on resume without resetting completed batches or cumulative counters", async () => {
+    await configure(); const ctx = await createContext({ replaySessionId: sessionId, projectionId, depth: "quick" });
+    const run = await makeRun(ctx.id, "sessionReview", "tools-v1"); await cancelRun(run.id);
+    await prisma.aiRun.update({ where: { id: run.id }, data: { calls: 7, usage: JSON.stringify([{ input: 123, output: 4 }]), checkpoint: '[{"content":"已完成批次","usage":{"input":123,"output":4}}]', snapshot: JSON.stringify({ ...JSON.parse(run.snapshot), estimatedChars: 51000, budgetExceeded: { resource: "maxAnalysisCalls", used: 751, limit: 750 } }) } });
+    await resumeRun(run.id, { maxAnalysisCalls: 1000, outputTokens: 8192 });
+    const resumed = await prisma.aiRun.findUniqueOrThrow({ where: { id: run.id } });
+    expect(resumed).toMatchObject({ status: "QUEUED", calls: 7, contextId: ctx.id });
+    expect(JSON.parse(resumed.snapshot)).toMatchObject({ estimatedChars: 51000, limits: { maxAnalysisCalls: 1000, outputTokens: 8192 } });
+    expect(JSON.parse(resumed.snapshot).budgetExceeded).toBeUndefined(); expect(resumed.checkpoint).toContain("已完成批次"); expect(JSON.parse(resumed.usage)).toEqual([{ input: 123, output: 4 }]);
+    await cancelRun(run.id);
+  });
+});
+describe("automatic assistant intent and page scope", () => {
+  const decision = (value: Partial<AssistantDecision>): AssistantDecision => ({ task: "globalAssistant", target: "current", tradeNo: null, timeframes: [], needsTemplate: false, fullCharts: false, ...value });
+  async function plan(value: Partial<AssistantDecision>, page?: { entryId?: string; draft?: string; templateId?: string; includeCurrentChart?: boolean }, question = "分析这里") {
+    await configure();
+    const chat = await prisma.aiConversation.create({ data: { name: "auto" } });
+    vi.stubGlobal("fetch", vi.fn().mockResolvedValue(streamResponse(JSON.stringify(decision(value)))));
+    return { chat, result: await prepareAssistant({ conversationId: chat.id, question, page: {
+      replaySessionId: sessionId, projectionId, depth: "quick", chartAccess: true, includeCurrentChart: false, ...page,
+    } }, new AbortController().signal) };
+  }
+  it("uses the live editor's explicitly empty draft and selected template, then validates adoption without saving", async () => {
+    const template = await prisma.replayReviewTemplate.create({ data: { name: "auto-template", normalizedName: "auto-template", content: "计划\n执行\n改进" } });
+    const { chat, result } = await plan({ task: "reviewDraft" }, { entryId, draft: "", templateId: template.id }, "按当前模板整理复盘正文");
+    expect(result.task).toBe("reviewDraft"); expect(result.context?.originalDraft).toBe(""); expect(result.context?.template?.id).toBe(template.id);
+    const run = await createRun({ conversationId: chat.id, contextId: result.context!.id, task: result.task, question: "整理正文", assetIds: [], chartImages: false, requestId: randomUUID() });
+    let count = 0;
+    vi.stubGlobal("fetch", vi.fn().mockImplementation(async (_url, options) => {
+      const body = JSON.parse(options.body);
+      if (!count++) return toolResponse([
+        { id: "auto-facts", name: "get_trade_record", args: { tradeRef: JSON.parse(body.messages.at(-1).content).scopeManifest.selection.selectedTradeRef, sections: ["facts"], cursor: null, limit: null } },
+        { id: "auto-template", name: "get_review_template", args: {} },
+      ]);
+      const facts = body.messages.find((m: { tool_call_id?: string }) => m.tool_call_id === "auto-facts");
+      return streamResponse(JSON.stringify({ draft: "根据事实生成的待保存草稿", analysis: "", sources: [JSON.parse(facts.content).sources[0].sourceRef], missing: [] }));
+    }));
+    await executeRun(run.id);
+    const message = await prisma.aiMessage.findFirstOrThrow({ where: { runId: run.id, role: "assistant" } });
+    expect(message.status).toBe("COMPLETED");
+    const response = await aiPOST(new Request("http://localhost/api/ai/adopt/" + message.id, { method: "POST", headers: { origin: "http://localhost" } }), { params: Promise.resolve({ path: ["adopt", message.id] }) });
+    expect(response.status).toBe(200); expect((await response.json()).originalDraft).toBe("");
+    expect((await prisma.replayJournalEntry.findUniqueOrThrow({ where: { id: entryId } })).review).toBe("原始复盘");
+  });
+  it("keeps numbered trade questions in the current session, allowing autonomous list, detail and chart reads", async () => {
+    const { chat, result } = await plan({ target: "trade_number", tradeNo: 1 }, undefined, "为什么第1笔这样执行？");
+    const context = result.context!; expect(context.selectedEntryId).toBeUndefined();
+    const run = await createRun({ conversationId: chat.id, contextId: context.id, task: result.task, question: "解释第1笔", assetIds: [], chartImages: false, requestId: randomUUID() });
+    let count = 0;
+    vi.stubGlobal("fetch", vi.fn().mockImplementation(async (_url, options) => {
+      const body = JSON.parse(options.body);
+      if (count++ === 0) return toolResponse([{ id: "auto-list", name: "list_trade_records", args: { filters: { ...emptyFilters, displayNo: 1 }, cursor: null, limit: 10 } }]);
+      const list = JSON.parse(body.messages.find((m: { tool_call_id?: string }) => m.tool_call_id === "auto-list").content);
+      if (count === 2) return toolResponse([{ id: "auto-detail", name: "get_trade_record", args: { tradeRef: list.data.records[0].tradeRef, sections: ["facts"], cursor: null, limit: null } },
+        { id: "auto-chart", name: "get_chart_context", args: { chartRef: list.data.records[0].chartRef, timeframes: ["5m"], cursor: null, limit: 80, includeImage: false } }]);
+      return streamResponse("已在本会话定位第1笔，并读取事实和截至平仓的图表数据。");
+    }));
+    await executeRun(run.id);
+    expect((await prisma.aiRun.findUniqueOrThrow({ where: { id: run.id } })).status).toBe("COMPLETED");
+    expect(await prisma.aiToolCall.count({ where: { runId: run.id, status: "COMPLETED" } })).toBe(3);
+  });
+  it("routes a report and its ordinary follow-up separately instead of inheriting the report workflow", async () => {
+    const report = await plan({ task: "sessionReview", target: "session" }, { entryId }, "总结整个会话");
+    expect(report.result.task).toBe("sessionReview"); expect(report.result.context?.selectedEntryId).toBeUndefined();
+    const followup = await plan({ task: "globalAssistant", target: "session" }, undefined, "你刚才说的执行问题具体指什么？");
+    expect(followup.result.task).toBe("globalAssistant"); expect(followup.result.context?.depth).toBe("quick");
+  });
+  it("clarifies missing scope, missing trade and ambiguous account numbering without starting runs", async () => {
+    await configure(); const chat = await prisma.aiConversation.create({ data: { name: "clarify" } });
+    vi.stubGlobal("fetch", vi.fn().mockResolvedValue(streamResponse(JSON.stringify(decision({ target: "current", task: "reviewDraft" })))));
+    const missing = await prepareAssistant({ conversationId: chat.id, question: "帮我填写这笔复盘" }, new AbortController().signal);
+    expect(missing.clarification).toBeTruthy(); expect(missing.context).toBeNull();
+    expect((await plan({ target: "trade_number", tradeNo: 99 })).result.clarification).toContain("99");
+    const journal = await prisma.replayJournalSession.create({ data: { datasetId: "market", replayGeneration: 2, initialCapital: 10000, currency: "USD", commissionBps: 0, slippageBps: 0 } });
+    const original = await prisma.replayJournalEntry.findUniqueOrThrow({ where: { id: entryId } });
+    const other = await prisma.replayJournalEntry.create({ data: { ...original, id: "ambiguous-auto", journalSessionId: journal.id, no: 20, logicalKey: "ambiguous-auto" } });
+    try { expect((await plan({ target: "trade_number", tradeNo: 1 })).result.clarification).toContain("多个账户"); }
+    finally { await prisma.replayJournalEntry.delete({ where: { id: other.id } }); }
+    expect(await prisma.aiRun.count({ where: { conversationId: chat.id } })).toBe(0);
+  });
+  it("answers general knowledge without business data and rejects malformed decisions or changed projections", async () => {
+    expect((await plan({ target: "none" }, undefined, "什么是回撤？")).result.context).toBeNull();
+    await configure(); const chat = await prisma.aiConversation.create({ data: { name: "invalid-plan" } });
+    const fetchMock = vi.fn().mockResolvedValue(streamResponse('{"task":"sql","target":"all_database"}')); vi.stubGlobal("fetch", fetchMock);
+    await expect(prepareAssistant({ conversationId: chat.id, question: "分析" }, new AbortController().signal)).rejects.toMatchObject({ code: "ROUTING_INVALID" });
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    await expect(prepareAssistant({ conversationId: chat.id, question: "分析", page: { replaySessionId: sessionId, projectionId: "foreign", depth: "quick", chartAccess: true, includeCurrentChart: true } }, new AbortController().signal)).rejects.toMatchObject({ code: "CONTEXT_CONFLICT" });
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+  });
+  it("reads current revealed charts and on-demand trade charts under the same frozen cutoff", async () => {
+    const { result } = await plan({ task: "chartReading", timeframes: ["5m", "1h"] }, { includeCurrentChart: true }, "比较当前5m和1h走势");
+    const context = result.context!, scope = { id: "auto-charts", secret: "auto-charts", context }, signal = new AbortController().signal;
+    expect(context.currentChart).toBeTruthy(); expect(result.prepareImages).toBe(true);
+    const current = await executeChartTool(scope, context.id, { chartRef: chartRef(scope, context.currentChart!), timeframes: ["5m", "1h"], cursor: null, limit: 80, includeImage: false }, signal, []);
+    expect(current.result.ok).toBe(true); expect(JSON.stringify(current)).not.toContain("98765432");
+    const fresh = await createContext({ replaySessionId: sessionId, projectionId, depth: "quick", chartAccess: true });
+    const lazyScope = { ...scope, context: fresh };
+    const raw = { chartRef: chartRef(lazyScope, fresh.entries[0]), timeframes: ["1h"], cursor: null, limit: 80, includeImage: false };
+    expect(fresh.charts).toHaveLength(0);
+    const read = await executeChartTool(lazyScope, fresh.id, raw, signal, []);
+    expect(read.result.ok).toBe(true); expect(JSON.stringify(read)).not.toContain("98765432");
+    await prisma.marketDataset.update({ where: { id: "market" }, data: { dataVersion: { increment: 1 } } });
+    try { expect((await executeChartTool(lazyScope, fresh.id, { ...raw, timeframes: ["15m"] }, signal, [])).result.error?.code).toBe("STALE_CONTEXT"); }
+    finally { await prisma.marketDataset.update({ where: { id: "market" }, data: { dataVersion: { decrement: 1 } } }); }
+  });
+  it("carries discussion across fresh snapshots of the same object, with other scopes excluded", async () => {
+    await configure(); const chat = await prisma.aiConversation.create({ data: { name: "history-scope" } });
+    const first = await createContext({ replaySessionId: sessionId, projectionId, depth: "quick" });
+    const previous = await createRun({ conversationId: chat.id, contextId: first.id, task: "globalAssistant", question: "previous-same-scope", assetIds: [], chartImages: false, requestId: randomUUID() });
+    vi.stubGlobal("fetch", vi.fn().mockResolvedValue(streamResponse("previous-answer"))); await executeRun(previous.id);
+    const next = await createContext({ replaySessionId: sessionId, projectionId, depth: "quick" });
+    const history = await relevantHistory(chat.id, next, "next-run");
+    expect(history.map((m) => m.content)).toContain("previous-answer");
+    const single = await createContext({ replaySessionId: sessionId, projectionId, entryId, depth: "quick" });
+    expect(await relevantHistory(chat.id, single, "next-run")).toHaveLength(0);
+    expect(await relevantHistory(chat.id, null, "next-run")).toHaveLength(0);
+  });
+  it("keeps a panned chart within its visible source range and a pinned follow-up at the old cutoff", async () => {
+    await configure(); const chat = await prisma.aiConversation.create({ data: { name: "visible-chart" } });
+    vi.stubGlobal("fetch", vi.fn().mockResolvedValue(streamResponse(JSON.stringify(decision({ task: "chartReading" })))));
+    const result = await prepareAssistant({ conversationId: chat.id, question: "分析当前可见图表", page: { replaySessionId: sessionId, projectionId,
+      depth: "quick", chartAccess: true, includeCurrentChart: true, chartWindow: { fromSequence: 0, toSequence: 2, displayIntervalSeconds: 60, displaySession: "ETH" } } }, new AbortController().signal);
+    expect(result.context!.charts.every((c) => c.window.bars.every((b) => b.lastSequence <= 2))).toBe(true);
+    expect(result.context!.chartPlans!.filter((p) => p.entryId === result.context!.currentChart!.id).every((p) => p.endSequence === 2)).toBe(true);
+    vi.stubGlobal("fetch", vi.fn().mockResolvedValue(streamResponse(JSON.stringify(decision({ task: "chartReading", timeframes: ["1h"] })))));
+    const pinned = await prepareAssistant({ conversationId: chat.id, question: "再看1h", contextId: result.context!.id }, new AbortController().signal);
+    expect(pinned.context!.id).toBe(result.context!.id); expect(pinned.context!.currentChart!.closedAt).toBe(result.context!.currentChart!.closedAt);
+  });
+  it("persists the actual routing usage once, rejects changed plans and reuses routing on explicit retry", async () => {
+    const { chat, result } = await plan({ target: "none" }, undefined, "什么是回撤？");
+    const input = { conversationId: chat.id, task: result.task, planId: result.planId, question: "什么是回撤？", assetIds: [], chartImages: false, requestId: randomUUID() };
+    await expect(createRun({ ...input, question: "different" })).rejects.toMatchObject({ code: "PLAN_EXPIRED" });
+    const run = await createRun(input);
+    expect((await createRun(input)).id).toBe(run.id);
+    const routing = await prisma.aiRunStep.findUniqueOrThrow({ where: { runId_stepNo: { runId: run.id, stepNo: 0 } } });
+    expect(routing.phase).toBe("ROUTING"); expect(JSON.parse(routing.usage)).toEqual({ input: 10, output: 5 });
+    vi.stubGlobal("fetch", vi.fn().mockResolvedValue(streamResponse("回撤是从权益峰值的下降。"))); await executeRun(run.id);
+    expect(JSON.parse((await prisma.aiRun.findUniqueOrThrow({ where: { id: run.id } })).usage)).toHaveLength(2);
+    const retry = await retryRun(run.id);
+    expect(JSON.parse(retry.snapshot).routing.reused).toBe(true); expect(JSON.parse(retry.usage)).toHaveLength(0);
+    await cancelRun(retry.id);
+  });
+  it("includes the routing call in the existing six-call budget and reserves a closing answer", async () => {
+    const { chat, result } = await plan({}, undefined, "核对当前会话资料");
+    const run = await createRun({ conversationId: chat.id, task: result.task, contextId: result.context!.id, planId: result.planId,
+      question: "核对当前会话资料", assetIds: [], chartImages: false, requestId: randomUUID() });
+    let calls = 0;
+    vi.stubGlobal("fetch", vi.fn().mockImplementation(async (_url, options) => {
+      calls++;
+      if (calls < 5) return toolResponse([{ id: "budget-" + calls, name: "get_review_template", args: {} }]);
+      expect(JSON.parse(options.body).tool_choice).toBe("none"); return streamResponse("只读取了模板状态，交易事实仍待核对。");
+    }));
+    await executeRun(run.id);
+    expect(calls).toBe(5);
+    const saved = await prisma.aiRun.findUniqueOrThrow({ where: { id: run.id } });
+    expect(saved.status).toBe("COMPLETED"); expect(JSON.parse(saved.usage)).toHaveLength(6);
+  });
+});
 describe("A: scoped read tools and persisted protocol", () => {
   it("completes a multi-call DeepSeek-shaped loop with matching IDs, reasoning and actual-read sources", async () => {
     await configure();
@@ -405,7 +629,7 @@ describe("AI configuration and transport boundaries", () => {
     expect(result).toEqual(["中文"]);
     await configure(); const endpoint = (await readSettings()).value.endpoints[0];
     vi.stubGlobal("fetch", vi.fn().mockResolvedValue(streamResponse("partial", "length")));
-    await expect(generate(endpoint, "test", [], new AbortController().signal)).rejects.toMatchObject({ code: "INCOMPLETE" });
+    await expect(generate(endpoint, "test", [], new AbortController().signal)).rejects.toMatchObject({ code: "BUDGET", budget: { resource: "outputTokens", used: 5, limit: 4096 } });
     vi.stubGlobal("fetch", vi.fn().mockResolvedValue(streamResponse("partial", "stop", false)));
     await expect(generate(endpoint, "test", [], new AbortController().signal)).rejects.toMatchObject({ code: "INCOMPLETE" });
   });
@@ -426,7 +650,7 @@ describe("AI configuration and transport boundaries", () => {
       expect(result.content).toBe("最终回答");
       expect(onReasoning).toHaveBeenCalledWith("核对所提供的事实。");
       expect(onDelta).toHaveBeenCalledWith("最终回答");
-      expect(onDetails).toHaveBeenCalledWith({ startedAt: new Date(started).toISOString(), durationMs: 2100, reasoning: "核对所提供的事实。", reasoningMs: 1600 });
+      expect(onDetails).toHaveBeenCalledWith({ startedAt: new Date(started).toISOString(), durationMs: 2100, reasoning: "核对所提供的事实。", reasoningMs: 1600, usage: { input: 10, output: 5 }, outputTokenLimit: 4096, finishReason: "stop" });
     } finally { clock.mockRestore(); }
   });
   it("bounds reasoning output and retains partial metadata without accepting reasoning-only or truncated answers", async () => {
@@ -434,11 +658,11 @@ describe("AI configuration and transport boundaries", () => {
     vi.stubGlobal("fetch", vi.fn().mockResolvedValue(streamResponse("", "stop", true, "只有思考，没有回答")));
     await expect(generate(endpoint, "test", [], new AbortController().signal, undefined, undefined, { onDetails })).rejects.toMatchObject({ code: "INCOMPLETE" });
     expect(onDetails).toHaveBeenLastCalledWith(expect.objectContaining({ reasoning: "只有思考，没有回答", reasoningMs: expect.any(Number) }));
-    vi.stubGlobal("fetch", vi.fn().mockResolvedValue(streamResponse("", "stop", true, "字".repeat(LIMITS.outputChars + 1))));
-    await expect(generate(endpoint, "test", [], new AbortController().signal, undefined, undefined, { onReasoning })).rejects.toMatchObject({ code: "OUTPUT_LIMIT" });
+    vi.stubGlobal("fetch", vi.fn().mockResolvedValue(streamResponse("", "stop", true, "字".repeat(outputCharLimit(DEFAULT_LIMITS) + 1))));
+    await expect(generate(endpoint, "test", [], new AbortController().signal, undefined, undefined, { onReasoning })).rejects.toMatchObject({ code: "BUDGET", budget: { resource: "outputChars" } });
     expect(onReasoning).not.toHaveBeenCalled();
     vi.stubGlobal("fetch", vi.fn().mockResolvedValue(streamResponse("字".repeat(32001), "stop", true, "字".repeat(32000))));
-    await expect(generate(endpoint, "test", [], new AbortController().signal)).rejects.toMatchObject({ code: "OUTPUT_LIMIT" });
+    await expect(generate(endpoint, "test", [], new AbortController().signal)).rejects.toMatchObject({ code: "BUDGET", budget: { resource: "outputChars" } });
   });
 });
 describe("frozen review context and safe adoption", () => {

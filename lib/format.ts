@@ -1,5 +1,9 @@
 import { defaultLocale } from "./i18n";
 
+export function formatInteger(value: number) {
+  return new Intl.NumberFormat(defaultLocale, { maximumFractionDigits: 0 }).format(value);
+}
+
 export function formatMoney(value: number, currency = "USD") {
   try { return new Intl.NumberFormat(defaultLocale, {
     style: "currency",

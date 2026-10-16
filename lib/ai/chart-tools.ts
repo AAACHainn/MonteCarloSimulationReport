@@ -1,22 +1,24 @@
 import { z } from "zod";
 import { prisma } from "@/lib/db";
-import { readExportWindow } from "@/lib/market-replay/export-window";
+import { readExportWindow, planExportWindow } from "@/lib/market-replay/export-window";
 import { formatInterval, parseSourceInterval } from "@/lib/market-replay/types";
-import { hashValue, chartSourceTimes, type ContextChart, type ContextEntry } from "./context";
+import { hashValue, chartSourceTimes, type ContextChart, type ChartSubject } from "./context";
+import { displayIntervalOptions } from "@/lib/market-replay/display-interval";
 import { decodeCursor, encodeCursor, resourceRef, sourceReceipt, toolFailure, toolSuccess, type Receipt, type ToolEnvelope, type ToolScope } from "./tools";
 export const chartArguments = z.object({ chartRef: z.string().min(1).max(160), timeframes: z.array(z.string().max(20)).min(1).max(4), cursor: z.string().max(2000).nullable(), limit: z.number().int().min(1).max(200).nullable(), includeImage: z.boolean() }).strict();
-export const chartRef = (scope: ToolScope, e: ContextEntry) => scope.context.chartPlans?.some((p) => p.entryId === e.id) ? resourceRef(scope, "chart-context", e.logicalKey) : null;
-export const chartDirectory = (scope: ToolScope, e: ContextEntry) => ({ chartRef: chartRef(scope, e), sourceIntervalSeconds: scope.context.sourceSeconds, originalTimeframe: formatInterval(e.displayIntervalSeconds),
-  availableTimeframes: scope.context.chartPlans?.filter((p) => p.entryId === e.id).map((p) => formatInterval(p.intervalSeconds)) ?? [],
-  boundaries: scope.context.chartPlans?.filter((p) => p.entryId === e.id).map((p) => ({ timeframe: formatInterval(p.intervalSeconds), fromSequence: p.fromSequence, endSequence: p.endSequence })) ?? [] });
+export const chartRef = (scope: ToolScope, e: ChartSubject) => scope.context.chartAccess || scope.context.chartPlans?.some((p) => p.entryId === e.id) ? resourceRef(scope, "chart-context", e.logicalKey) : null;
+export const chartDirectory = (scope: ToolScope, e: ChartSubject) => ({ chartRef: chartRef(scope, e), sourceIntervalSeconds: scope.context.sourceSeconds, originalTimeframe: formatInterval(e.displayIntervalSeconds),
+  availableTimeframes: scope.context.chartAccess ? displayIntervalOptions(scope.context.sourceSeconds, e.displayIntervalSeconds).map(formatInterval) : scope.context.chartPlans?.filter((p) => p.entryId === e.id).map((p) => formatInterval(p.intervalSeconds)) ?? [],
+  boundaries: scope.context.chartPlans?.filter((p) => p.entryId === e.id).map((p) => ({ timeframe: formatInterval(p.intervalSeconds), fromSequence: p.fromSequence, endSequence: p.endSequence })) ?? [],
+  planning: scope.context.chartAccess ? "VERSION_CHECKED_ON_DEMAND" : "PREPLANNED" });
 export async function executeChartTool(scope: ToolScope, contextId: string, raw: unknown, signal: AbortSignal, allowedAssetIds: string[]): Promise<{ result: ToolEnvelope; images: Array<{ assetId: string; sourceRef: string }> }> {
   const fail = (code: string) => ({ result: toolFailure(scope, code), images: [] });
   const parsed = chartArguments.safeParse(raw); if (!parsed.success) return fail("INVALID_ARGUMENTS");
-  const a = parsed.data, c = scope.context, e = c.entries.find((entry) => chartRef(scope, entry) === a.chartRef);
+  const a = parsed.data, c = scope.context, e = [...c.entries, ...(c.currentChart ? [c.currentChart] : [])].find((entry) => chartRef(scope, entry) === a.chartRef);
   if (!e) return fail("NOT_FOUND_IN_SCOPE");
   const seconds = [...new Set(a.timeframes.map(parseSourceInterval))];
   const plans = seconds.map((s) => c.chartPlans?.find((p) => p.entryId === e.id && p.intervalSeconds === s));
-  if (plans.some((p) => !p)) return fail("UNSUPPORTED_TIMEFRAME");
+  if (seconds.some((s) => s === null || !(c.chartAccess ? displayIntervalOptions(c.sourceSeconds, e.displayIntervalSeconds).includes(s) : plans[seconds.indexOf(s)]))) return fail("UNSUPPORTED_TIMEFRAME");
   const binding = ["get_chart_context", a.chartRef, seconds, a.includeImage, a.limit], offset = decodeCursor(scope, binding, a.cursor);
   if (offset === null) return fail("INVALID_CURSOR");
   const normalized = seconds.map((s) => formatInterval(s!));
@@ -28,6 +30,15 @@ export async function executeChartTool(scope: ToolScope, contextId: string, raw:
     signal.throwIfAborted();
     const dataset = await prisma.marketDataset.findUnique({ where: { id: c.datasetId }, select: { dataVersion: true, historyVersion: true } });
     signal.throwIfAborted(); return dataset?.dataVersion === c.dataVersion && dataset.historyVersion === c.historyVersion;
+  }
+  for (let i = 0; i < plans.length; i++) if (!plans[i]) {
+    if (!await versionValid()) return fail("STALE_CONTEXT");
+    const entry = c.entries.find((row) => row.id === e.id);
+    if (!entry) return fail("NOT_FOUND_IN_SCOPE");
+    const before = await planExportWindow({ datasetId: c.datasetId, sourceSeconds: c.sourceSeconds, displaySeconds: seconds[i]!, session: c.display.session,
+      anchorSequence: entry.openedSequence, endSequence: Math.min(entry.closedSequence, c.endSequence), count: 51, budget, signal });
+    if (!await versionValid()) return fail("STALE_CONTEXT");
+    plans[i] = { entryId: e.id, intervalSeconds: seconds[i]!, fromSequence: before.fromSequence, endSequence: Math.min(entry.closedSequence, c.endSequence), historyAvailable: Math.max(0, before.count - 1) };
   }
   const charts: Record<string, unknown>[] = [], sources: Receipt[] = [], images: Array<{ assetId: string; sourceRef: string }> = [], warnings: string[] = [];
   let complete = true;

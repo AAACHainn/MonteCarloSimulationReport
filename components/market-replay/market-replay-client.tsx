@@ -3,6 +3,7 @@ import { createUuid } from "@/lib/uuid";
 
 import { dateTimeLocalValue, selectedTimeToTimestamp } from "@/lib/market-replay/start-time";
 import { useReplayFetch, useReplaySession } from "./replay-session-context";
+import { useAiPageScope } from "@/components/ai/page-context";
 import { useRouter } from "next/navigation";
 import { ReplayDateDialog } from "./replay-date-dialog";
 import { ReplaySessionSwitch } from "./replay-session-switch";
@@ -13,7 +14,7 @@ import { TrainingGateConfigDialog, EntryCheckDialog } from "./training-gate-dial
 import { defaultTrainingGate, isClosingOrder, type TrainingGateState } from "@/lib/paper-trading/training-gate";
 import type { GateApprovalInput, PaperOrderInput, OrderSubmitResult } from "@/lib/paper-trading/types";
 import { retainEntryCheckDraft, type EntryCheckDraft } from "@/lib/paper-trading/entry-check-draft";
-import { startTransition, useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
+import { startTransition, useCallback, useEffect, useMemo, useRef, useState, useId, type ReactNode } from "react";
 import { Breadcrumbs } from "@/components/breadcrumbs";
 import { BookOpen, ListTree, Loader2, Palette, RotateCcw, Ruler, Settings2, Trash2, TrendingUp, WalletCards, X } from "lucide-react";
 import * as Popover from "@radix-ui/react-popover";
@@ -214,6 +215,8 @@ type JournalFocus = { sequence: number; no: number; globalNo: number };
 export function MarketReplayClient({ dataset: initialDataset, initialJournalFocus = null }: { dataset: MarketDatasetSummary; initialJournalFocus?: JournalFocus | null }) {
   const fetch = useReplayFetch();
   const replaySession = useReplaySession();
+  const registerAiScope = useAiPageScope()?.register, aiChartOwner = useId();
+  useEffect(() => () => registerAiScope?.("chart", aiChartOwner, null), [registerAiScope, aiChartOwner]);
   const router = useRouter();
   const [dateDialogOpen, setDateDialogOpen] = useState(false);
   const [dateDialogOpening, setDateDialogOpening] = useState(false);
@@ -1024,6 +1027,11 @@ export function MarketReplayClient({ dataset: initialDataset, initialJournalFocu
   const handleVisibleSequenceRange = useCallback((range: ReplayVisibleSequenceRange) => {
     if (annotationTimerRef.current) clearTimeout(annotationTimerRef.current);
     annotationTimerRef.current = setTimeout(() => {
+      const live = latestReplayRef.current;
+      if (replaySession && live && range.fromSequence <= live.currentSequence) registerAiScope?.("chart", aiChartOwner, {
+        replaySessionId: replaySession.id, projectionId: replaySession.activeProjectionId, sessionName: replaySession.name, includeCurrentChart: true,
+        chartWindow: { fromSequence: range.fromSequence, toSequence: Math.min(range.toSequence, live.currentSequence), displayIntervalSeconds: live.displayIntervalSeconds, displaySession: live.displaySession },
+      });
       const visible = barsRef.current.filter((bar) => (
         bar.lastSequence >= range.fromSequence && bar.firstSequence <= range.toSequence
       ));
@@ -1041,7 +1049,7 @@ export function MarketReplayClient({ dataset: initialDataset, initialJournalFocu
     if (movedLeft && range.barsBefore <= REPLAY_HISTORY_PREFETCH_THRESHOLD) {
       void loadEarlierHistory();
     }
-  }, [latestReplayRef, loadEarlierHistory, loadLaterHistory, loadTradeAnnotations]);
+  }, [latestReplayRef, loadEarlierHistory, loadLaterHistory, loadTradeAnnotations, registerAiScope, aiChartOwner, replaySession]);
 
   useEffect(() => {
     if (!emaSettingsLoaded || !abrSettingsLoaded || initializedDatasetRef.current === dataset.id) return;

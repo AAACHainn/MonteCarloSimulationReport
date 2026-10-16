@@ -10,11 +10,14 @@ export async function captureContextCharts(context: ContextValue & { id: string 
   const container = document.createElement("div");
   container.style.cssText = "position:fixed;left:-10000px;top:0;width:2400px;height:1200px;pointer-events:none";
   document.body.appendChild(container);
-  const preferences = context.chartPreferences ?? capturePdfChartPreferences({ id: context.datasetId, startTime: context.entries[0].openedAt, timezone: context.timezone });
+  const preferences = context.chartPreferences ?? capturePdfChartPreferences({ id: context.datasetId, startTime: context.entries[0]?.openedAt ?? context.asOfTime, timezone: context.timezone });
   const ids: string[] = [];
   try {
+    const prepared = await aiApi<Array<{ id: string; chartHash: string }>>("contexts/" + context.id + "/assets", "GET", undefined, signal);
     for (const chart of context.charts) {
       signal.throwIfAborted();
+      const existing = prepared.find((asset) => asset.chartHash === chart.hash);
+      if (existing) { ids.push(existing.id); continue; }
       const renderer = createChartSnapshotRenderer(container, preferences, context.tick, { ...context.display, displayIntervalSeconds: chart.intervalSeconds ?? context.display.displayIntervalSeconds });
       try {
       const bars = chart.window.bars;

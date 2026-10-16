@@ -1,5 +1,6 @@
 import { z } from "zod";
 import { chartPreferencesSchema } from "./chart-contract";
+import { limitsOverrideSchema } from "./limits";
 
 export const skillKeys = ["globalAssistant", "chartReading", "reviewDraft", "sessionReview"] as const;
 export type SkillKey = typeof skillKeys[number];
@@ -28,12 +29,17 @@ export const skillSchema = z.object({
 export const settingsSchema = z.object({
   schemaVersion: z.literal(1), activeEndpointId: z.string().max(100),
   endpoints: z.array(endpointSchema).max(12),
+  limits: limitsOverrideSchema.optional(),
   skills: z.object({
     globalAssistant: skillSchema, chartReading: skillSchema,
     reviewDraft: skillSchema, sessionReview: skillSchema,
   }),
 });
 export type AiSettings = z.infer<typeof settingsSchema>;
+export const pageChartWindowSchema = z.object({
+  fromSequence: z.number().int().nonnegative(), toSequence: z.number().int().nonnegative(),
+  displayIntervalSeconds: z.number().int().positive(), displaySession: z.enum(["ETH", "RTH"]),
+}).strict().refine((v) => v.fromSequence <= v.toSequence);
 export const contextRequestSchema = z.object({
   replaySessionId: z.string().min(1), entryId: z.string().optional(),
   projectionId: z.string().min(1), templateId: z.string().optional(),
@@ -41,6 +47,10 @@ export const contextRequestSchema = z.object({
   depth: z.enum(["quick", "full"]).default("quick"),
   chartPreferences: chartPreferencesSchema.optional(),
   timeframes: z.array(z.string().min(1).max(20)).min(1).max(4).optional(),
+  chartAccess: z.boolean().default(false),
+  includeCurrentChart: z.boolean().default(false),
+  chartEntryIds: z.array(z.string().min(1)).max(4).optional(),
+  chartWindow: pageChartWindowSchema.optional(),
 }).strict();
 export const runRequestSchema = z.object({
   conversationId: z.string().min(1), contextId: z.string().optional(),
@@ -49,6 +59,8 @@ export const runRequestSchema = z.object({
   chartImages: z.boolean().default(false),
   executionMode: z.enum(["tools-v1", "fixed-v1"]).default("tools-v1"),
   requestId: z.string().uuid(),
+  planId: z.string().uuid().optional(),
+  limits: limitsOverrideSchema.optional(),
 }).strict();
 export type RunInput = Omit<z.infer<typeof runRequestSchema>, "executionMode"> & { executionMode?: "tools-v1" | "fixed-v1" };
 export const reviewResultSchema = z.object({
@@ -68,11 +80,9 @@ export const sessionResultSchema = z.object({
   missing: z.array(z.string().max(1000)).max(50),
 }).strict();
 export const LIMITS = {
-  inputChars: 48000, outputTokens: 4096, outputChars: 64000,
-  modelMs: 120000, runMs: 300000, toolBytes: 32768,
+  toolBytes: 32768,
   imageBytes: 4 * 1024 * 1024, totalImageBytes: 12 * 1024 * 1024,
   contextEntries: 5000, chartsPerContext: 100, batchEntries: 8,
-  maxAnalysisCalls: 750, maxCumulativeChars: 5000000,
 };
 export function outputJsonSchema(task: "reviewDraft" | "sessionReview") {
   const string = { type: "string" }, strings = { type: "array", items: string };

@@ -13,7 +13,7 @@ import { logicalId } from "@/lib/replay-sessions/identity";
 import type { PdfWindow } from "@/lib/paper-trading/pdf-types";
 import type { ReplayJournalEntryData } from "@/lib/paper-trading/types";
 import type { TradingSessionConfig } from "@/lib/market-replay/types";
-import { LIMITS, type contextRequestSchema } from "./schema";
+import { LIMITS, type contextRequestSchema, type pageChartWindowSchema } from "./schema";
 import { ensureAiStorage } from "./config";
 import { AiError } from "./errors";
 import { displayIntervalOptions } from "@/lib/market-replay/display-interval";
@@ -22,11 +22,13 @@ import { defaultChartPreferences } from "./chart-contract";
 import type { PdfChartPreferences } from "@/lib/paper-trading/pdf-types";
 import type { StatisticInput } from "./statistics-v1";
 import { entryLotId, isFifoRowExit } from "@/lib/paper-trading/journal-identity";
+import { withReplayJournalDisplayNumbers } from "@/lib/paper-trading/journal-numbering";
 
 export const hashValue = (value: unknown) => createHash("sha256").update(JSON.stringify(value)).digest("hex");
 export type ContextEntry = ReplayJournalEntryData & { sourceId: string; logicalKey: string; href: string; reviewOrigin: string; reviewSourceRunId?: string | null; disciplineStatus?: "PRESENT" | "NOT_RECORDED" | "CORRUPT"; disciplineContentHash?: string };
 export type ContextChart = { hash: string; sourceId: string; entryId: string; window: PdfWindow; intervalSeconds?: number; preferencesHash?: string; variantRef?: string; sourceTimes?: Record<string, string> };
 export type ChartPlan = { entryId: string; intervalSeconds: number; fromSequence: number; endSequence: number; historyAvailable: number };
+export type ChartSubject = Pick<ContextEntry, "id" | "logicalKey" | "displayIntervalSeconds" | "closedAt">;
 export async function chartSourceTimes(datasetId: string, window: PdfWindow) {
   const rows = await prisma.marketBar.findMany({ where: { datasetId, sequence: { in: [...new Set(window.bars.flatMap((b) => [b.firstSequence, b.lastSequence]))] } }, take: 400, select: { sequence: true, timestamp: true } });
   return Object.fromEntries(rows.map((row) => [String(row.sequence), row.timestamp.toISOString()]));
@@ -46,8 +48,11 @@ export type ContextValue = {
   warnings: string[];
   chartPlans?: ChartPlan[]; chartPreferences?: PdfChartPreferences;
   statisticInput?: StatisticInput;
+  chartAccess?: boolean;
+  currentChart?: ChartSubject;
+  chartWindow?: z.infer<typeof pageChartWindowSchema>;
 };
-export async function createContext(input: z.infer<typeof contextRequestSchema>) {
+export async function createContext(input: z.input<typeof contextRequestSchema>) {
   if (input.draft !== undefined && Array.from(input.draft).length > 2000) throw new AiError("DRAFT_TOO_LONG", copy.ai.draftTooLong);
   await ensureAiStorage();
   const fixed = await prisma.$transaction(async (tx) => {
@@ -95,13 +100,14 @@ export async function createContext(input: z.infer<typeof contextRequestSchema>)
   });
   const dataset = fixed.session.dataset;
   const selected = fixed.entries[0];
-  const displaySeconds = selected?.displayIntervalSeconds ?? fixed.session.progress?.displayIntervalSeconds ?? dataset.sourceIntervalSeconds!;
-  const displaySession = (selected?.displaySession ?? fixed.session.progress?.displaySession) === "RTH" ? "RTH" : "ETH";
+  const displaySeconds = (input.includeCurrentChart ? input.chartWindow?.displayIntervalSeconds ?? fixed.session.progress?.displayIntervalSeconds : selected?.displayIntervalSeconds) ?? fixed.session.progress?.displayIntervalSeconds ?? dataset.sourceIntervalSeconds!;
+  const displaySession = ((input.includeCurrentChart ? input.chartWindow?.displaySession ?? fixed.session.progress?.displaySession : selected?.displaySession) ?? fixed.session.progress?.displaySession) === "RTH" ? "RTH" : "ETH";
   const serialized = serializeMarketDataset({ ...dataset, progress: null });
   const tradingSession = resolveDisplaySession(serialized, displaySession) ?? resolveDisplaySession(serialized, "ETH");
   if (!tradingSession || !dataset.sourceIntervalSeconds || displaySeconds < dataset.sourceIntervalSeconds || displaySeconds % dataset.sourceIntervalSeconds)
     throw new AiError("INTERVAL", copy.ai.invalid);
-  const entries: ContextEntry[] = fixed.entries.map((entry) => {
+  const numberedEntries = await withReplayJournalDisplayNumbers(fixed.entries, input.projectionId);
+  const entries: ContextEntry[] = numberedEntries.map((entry) => {
     const key = entry.logicalKey ?? logicalId(entry.id);
     const origin = fixed.origins.find((r) => r.logicalKey === key && r.content === entry.review);
     let disciplineStatus: ContextEntry["disciplineStatus"] = entry.discipline ? "PRESENT" : "NOT_RECORDED";
@@ -149,8 +155,8 @@ export async function createContext(input: z.infer<typeof contextRequestSchema>)
       exactLogicalKeys: [...new Set(relatedIds.flatMap((id) => orderKeys.get(logicalId(id)) ?? []))],
       value: { order: payload.order ? Object.fromEntries(Object.entries(payload.order).filter(([key]) => ["id", "side", "type", "quantity", "price", "stopLoss", "takeProfit", "reduceOnly"].includes(key))) : null, orderIds: (payload.orderIds ?? []).filter((id) => !input.entryId || orderKeys.get(logicalId(id))?.length) } });
   }
-  if (input.entryId || input.depth === "full") {
-    for (const entry of entries) {
+  if (input.entryId || input.depth === "full" || input.chartEntryIds?.length) {
+    for (const entry of entries.filter((e) => input.entryId || input.depth === "full" || input.chartEntryIds?.includes(e.id))) {
       const intervals = displayIntervalOptions(dataset.sourceIntervalSeconds, entry.displayIntervalSeconds);
       for (const intervalSeconds of intervals) {
         const before = await planExportWindow({ datasetId: dataset.id, sourceSeconds: dataset.sourceIntervalSeconds, displaySeconds: intervalSeconds, session: tradingSession, endSequence: entry.closedSequence,
@@ -176,6 +182,31 @@ export async function createContext(input: z.infer<typeof contextRequestSchema>)
       }
     }
   }
+  let currentChart: ChartSubject | undefined;
+  if (input.includeCurrentChart && !input.entryId && fixed.session.activeProjection!.currentSequence >= 0) {
+    const endSequence = Math.min(fixed.session.activeProjection!.currentSequence, input.chartWindow?.toSequence ?? Infinity);
+    if (input.chartWindow && input.chartWindow.fromSequence > endSequence) throw new AiError("CONTEXT_CONFLICT", copy.ai.conflict, 409);
+    const chartCutoff = endSequence === fixed.session.activeProjection!.currentSequence ? fixed.cutoff : await prisma.marketBar.findUnique({ where: { datasetId_sequence: { datasetId: dataset.id, sequence: endSequence } }, select: { timestamp: true } });
+    currentChart = { id: "current-replay-chart", logicalKey: "current-replay-chart", displayIntervalSeconds: displaySeconds,
+      closedAt: (chartCutoff?.timestamp ?? dataset.startTime).toISOString() };
+    for (const intervalSeconds of displayIntervalOptions(dataset.sourceIntervalSeconds, displaySeconds)) {
+      const before = await planExportWindow({ datasetId: dataset.id, sourceSeconds: dataset.sourceIntervalSeconds, displaySeconds: intervalSeconds,
+        session: tradingSession, endSequence, anchorSequence: endSequence, count: Math.floor(80 / Math.max(1, new Set(input.timeframes?.map(parseSourceInterval)).size)), budget: { rows: 25000, queries: 3000 } });
+      chartPlans.push({ entryId: currentChart.id, intervalSeconds, fromSequence: intervalSeconds === displaySeconds ? Math.max(before.fromSequence, input.chartWindow?.fromSequence ?? 0) : before.fromSequence, endSequence, historyAvailable: Math.max(0, before.count - 1) });
+    }
+    const intervals = input.timeframes?.map(parseSourceInterval) ?? [displaySeconds];
+    if (intervals.some((s) => !chartPlans.some((p) => p.entryId === currentChart!.id && p.intervalSeconds === s))) throw new AiError("UNSUPPORTED_TIMEFRAME", copy.ai.invalid);
+    for (const intervalSeconds of [...new Set(intervals)] as number[]) {
+      const plan = chartPlans.find((p) => p.entryId === currentChart!.id && p.intervalSeconds === intervalSeconds)!;
+      const window = await readExportWindow({ datasetId: dataset.id, sourceSeconds: dataset.sourceIntervalSeconds, displaySeconds: intervalSeconds, session: tradingSession,
+        anchorSequence: plan.fromSequence, endSequence, finalSequence: endSequence + 1, direction: "forward", count: Math.floor(80 / intervals.length),
+        warmupCount: chartPreferences.emaEnabled ? Math.min(1000, Math.max(0, ...chartPreferences.emaIndicators.map((e) => e.length * 3))) : 0 });
+      if (window.bars.length) {
+        const preferencesHash = hashValue(chartPreferences), hash = hashValue({ entryId: currentChart.id, displaySeconds: intervalSeconds, displaySession, window, preferencesHash, rendererVersion: 1 });
+        charts.push({ hash, sourceId: "chart:" + hash, entryId: currentChart.id, window, intervalSeconds, preferencesHash, variantRef: "variant:" + hash, sourceTimes: await chartSourceTimes(dataset.id, window) });
+      }
+    }
+  }
   const current = await prisma.replaySession.findUnique({ where: { id: fixed.session.id }, include: { dataset: { select: { historyVersion: true, dataVersion: true } } } });
   if (!current || current.activeProjectionId !== input.projectionId || current.dataset.historyVersion !== dataset.historyVersion || current.dataset.dataVersion !== dataset.dataVersion)
     throw new AiError("CONTEXT_CONFLICT", copy.ai.conflict, 409);
@@ -186,11 +217,11 @@ export async function createContext(input: z.infer<typeof contextRequestSchema>)
     endSequence: input.entryId ? selected.closedSequence : fixed.session.activeProjection!.currentSequence,
     asOfTime: new Date((input.entryId ? selected.closedAt : fixed.cutoff?.timestamp ?? fixed.entries.at(-1)?.closedAt ?? dataset.startTime).getTime() + dataset.sourceIntervalSeconds * 1000).toISOString(),
     sourceSeconds: dataset.sourceIntervalSeconds, datasetId: dataset.id, symbol: dataset.symbol, timezone: dataset.timezone, tick: dataset.priceTickSize,
-    selectedEntryId: input.entryId, originalDraft: input.draft, depth: input.depth,
+    selectedEntryId: input.entryId, originalDraft: input.draft, depth: input.depth ?? "quick",
     template: fixed.template, entries, charts, events, metrics: sessionMetrics(fixed.trades, entries),
     sourceHash: hashValue(entries.map((e) => [e.logicalKey, e.review, e.setupOptionId, e.tradeReasons])),
     display: { displayIntervalSeconds: displaySeconds, displaySession, session: tradingSession },
-    chartPlans, chartPreferences,
+    chartPlans, chartPreferences, chartAccess: input.chartAccess, currentChart, chartWindow: input.chartWindow,
     ...(!input.entryId && fixed.account ? { statisticInput: { specVersion: "1" as const, currency: fixed.account.currency, endSequence: fixed.session.activeProjection!.currentSequence,
       trades: fixed.trades.map((t) => ({ ...t, status: t.status as "CLOSED" | "OPEN" })) } } : {}),
     warnings: [copy.ai.noHistory, ...(!events.length ? [copy.ai.noEvents] : []), ...(input.depth === "quick" && !input.entryId ? [copy.ai.noCharts] : [])],

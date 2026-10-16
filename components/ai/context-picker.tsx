@@ -20,7 +20,7 @@ export function AiContextPicker({ open, initialSessionId, onClose, onAttach }: {
   const [depth, setDepth] = useState<"quick" | "full">("quick"), [images, setImages] = useState(false);
   const [timeframes, setTimeframes] = useState("");
   const [error, setError] = useState(""), [busy, setBusy] = useState(false);
-  useEffect(() => { if (open && initialSessionId) setSessionId(initialSessionId); }, [open, initialSessionId]);
+  useEffect(() => { if (open && initialSessionId) { setSessionId(initialSessionId); setEntryId("all"); } }, [open, initialSessionId]);
   useEffect(() => {
     if (!open) return;
     const controller = new AbortController(); setBusy(true); setError("");

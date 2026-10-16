@@ -2,6 +2,7 @@ import { createCipheriv, createDecipheriv, randomBytes } from "node:crypto";
 import { prisma } from "@/lib/db";
 import { copy } from "@/lib/i18n";
 import { AiError } from "./errors";
+import { resolveLimits } from "./limits";
 import { defaultSettings } from "./prompts";
 import { settingsSchema, type AiSettings, type Endpoint, type SkillKey } from "./schema";
 
@@ -64,6 +65,7 @@ export function publicSettings(value: AiSettings) {
 }
 export async function saveSettings(input: unknown, expectedVersion: number) {
   const next = settingsSchema.parse(input), old = await readSettings();
+  next.limits = resolveLimits(next.limits);
   if (old.version !== expectedVersion) throw new AiError("CONFIG_CONFLICT", copy.ai.conflict, 409);
   if (new Set(next.endpoints.map((e) => e.id)).size !== next.endpoints.length) throw new AiError("INVALID", copy.ai.invalid);
   if (next.activeEndpointId && !next.endpoints.some((e) => e.id === next.activeEndpointId)) throw new AiError("INVALID", copy.ai.invalid);
@@ -88,12 +90,15 @@ export async function saveSettings(input: unknown, expectedVersion: number) {
   });
   return { value: publicSettings(next), version: expectedVersion + 1 };
 }
-export function resolveModel(settings: AiSettings, task: SkillKey) {
-  const skill = settings.skills[task];
-  if (!skill.enabled) throw new AiError("DISABLED", copy.ai.disabled);
+export function resolveEndpoint(settings: AiSettings) {
   const endpoint = settings.endpoints.find((e) => e.id === settings.activeEndpointId);
   if (!endpoint) throw new AiError("UNCONFIGURED", copy.ai.unconfigured);
   const model = endpoint.defaultModel;
   if (!model) throw new AiError("MODEL_REQUIRED", copy.ai.modelRequired);
-  return { endpoint, model, prompt: skill.prompt };
+  return { endpoint, model };
+}
+export function resolveModel(settings: AiSettings, task: SkillKey) {
+  const skill = settings.skills[task];
+  if (!skill.enabled) throw new AiError("DISABLED", copy.ai.disabled);
+  return { ...resolveEndpoint(settings), prompt: skill.prompt };
 }

@@ -11,6 +11,9 @@ import { boundedJson, requestHeaders, testConnection } from "@/lib/ai/provider";
 import { contextRequestSchema, runRequestSchema, LIMITS } from "@/lib/ai/schema";
 import { DEFAULT_PROMPTS } from "@/lib/ai/prompts";
 import { reviewFactsHash } from "@/lib/ai/review-baseline";
+import { assistantPlanRequest, prepareAssistant } from "@/lib/ai/assistant-plan";
+import { limitsOverrideSchema } from "@/lib/ai/limits";
+import { budgetView } from "@/lib/ai/budget";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -22,6 +25,12 @@ async function handle(request: Request, { params }: Context) {
     const query = new URL(request.url).searchParams;
     await ensureAiStorage();
     if (request.method !== "GET") assertOrigin(request);
+    if (kind === "assistant-plan" && request.method === "POST") return json(await prepareAssistant(assistantPlanRequest.parse(await readBody(request)), request.signal));
+    if (kind === "page-context" && request.method === "GET") {
+      const session = await prisma.replaySession.findUnique({ where: { id: query.get("sessionId") ?? "" }, select: { dataset: { select: { id: true, startTime: true, timezone: true } } } });
+      if (!session) throw new AiError("NOT_FOUND", copy.ai.missing, 404);
+      return json(session);
+    }
     if (kind === "settings") {
       if (request.method === "GET") {
         const config = await readSettings(); return json({ value: publicSettings(config.value), version: config.version, defaults: DEFAULT_PROMPTS });
@@ -75,12 +84,13 @@ async function handle(request: Request, { params }: Context) {
           where: { conversationId: id }, orderBy: [{ createdAt: "desc" }, { id: "desc" }], take: 30,
           ...(query.get("cursor") ? { cursor: { id: query.get("cursor")! }, skip: 1 } : {}),
         });
-        const runs = await prisma.aiRun.findMany({ where: { id: { in: messages.flatMap((m) => m.runId ? [m.runId] : []) } }, select: { id: true, snapshot: true } });
+        const runs = await prisma.aiRun.findMany({ where: { id: { in: messages.flatMap((m) => m.runId ? [m.runId] : []) } }, select: { id: true, snapshot: true, task: true, calls: true, usage: true } });
         const calls = await prisma.aiToolCall.findMany({ where: { runId: { in: runs.map((r) => r.id) } }, orderBy: [{ stepNo: "asc" }, { toolIndex: "asc" }], select: { runId: true, toolCallId: true, name: true, status: true, stepNo: true, toolIndex: true, errorCode: true } });
         return json({ conversation, messages: messages.map((message) => {
           const run = runs.find((r) => r.id === message.runId), snapshot = run ? JSON.parse(run.snapshot) : null;
           return { ...message, reference: snapshot ? snapshot.endpoint.name + " · " + snapshot.model + " · " + (snapshot.reference ?? "") : "",
             response: message.role === "assistant" ? snapshot?.response ?? null : null,
+            budget: message.role === "assistant" && run ? budgetView(run, calls.filter((c) => c.runId === run.id).length) : undefined,
             reads: message.role === "assistant" ? calls.filter((c) => c.runId === message.runId).map((c) => ({ ...c, eventNo: c.stepNo * 10 + c.toolIndex * 2 + 2 })) : [] };
         }) });
       }
@@ -111,7 +121,8 @@ async function handle(request: Request, { params }: Context) {
       const run = await prisma.aiRun.findUnique({ where: { id } });
       if (!run) throw new AiError("NOT_FOUND", copy.ai.missing, 404);
       if (request.method === "POST" && action === "retry") {
-        const retry = await retryRun(id);
+        const input = z.object({ limits: limitsOverrideSchema.optional() }).strict().parse(request.body ? await readBody(request) : {});
+        const retry = await retryRun(id, input.limits);
         if (retry.task === "sessionReview") startAnalysisWorker(retry.id);
         return json({ id: retry.id, task: retry.task });
       }
@@ -127,14 +138,19 @@ async function handle(request: Request, { params }: Context) {
           cancel() { ended = true; void cancelRun(id); },
         }), { headers: { "Content-Type": "application/x-ndjson", "Cache-Control": "no-store", "X-Accel-Buffering": "no" } });
       }
-      if (request.method === "POST" && action === "resume") { await resumeRun(id); startAnalysisWorker(id); return json({ ok: true }); }
+      if (request.method === "POST" && action === "resume") {
+        const input = z.object({ limits: limitsOverrideSchema.optional() }).strict().parse(request.body ? await readBody(request) : {});
+        await resumeRun(id, input.limits); startAnalysisWorker(id); return json({ ok: true });
+      }
       if (request.method === "DELETE") { await cancelRun(id); return json({ ok: true }); }
       await recoverRuns();
       const fresh = await prisma.aiRun.findUniqueOrThrow({ where: { id } }), snap = JSON.parse(fresh.snapshot);
       const calls = await prisma.aiToolCall.findMany({ where: { runId: id }, orderBy: [{ stepNo: "asc" }, { toolIndex: "asc" }], select: { toolCallId: true, name: true, status: true, stepNo: true, toolIndex: true, errorCode: true } });
       return json({ id, task: fresh.task, status: fresh.status, contextId: fresh.contextId, error: fresh.error, calls: fresh.calls,
+        totalCalls: fresh.calls + (snap.routing && !snap.routing.reused ? 1 : 0),
         completedBatches: JSON.parse(fresh.checkpoint).filter((p: { stage?: string }) => !p.stage).length, usage: JSON.parse(fresh.usage), estimatedChars: snap.estimatedChars,
         endpoint: snap.endpoint.name, model: snap.model, reference: snap.reference, response: snap.response ?? null,
+        budget: budgetView(fresh, calls.length),
         reads: calls.map((c) => ({ ...c, eventNo: c.stepNo * 10 + c.toolIndex * 2 + 2 })),
       });
     }

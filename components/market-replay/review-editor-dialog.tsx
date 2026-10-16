@@ -1,6 +1,7 @@
 "use client";
 
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState, useId } from "react";
+import { useAiPageScope, type AiPageScope } from "@/components/ai/page-context";
 import { Loader2, Pencil, Trash2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { ConfirmDialog } from "@/components/ui/confirm-dialog";
@@ -13,7 +14,7 @@ import { copy } from "@/lib/i18n";
 import { limitReview, reviewLength, type ReviewTemplate } from "@/lib/paper-trading/review-templates";
 import { reviewTemplateRenameSchema, reviewTemplateSchema } from "@/lib/validations";
 
-export function ReviewEditorDialog({ open, no, value, initialValue, saving, error, onChange, onSave, onClose, onAi, aiOpen }: {
+export function ReviewEditorDialog({ open, no, value, initialValue, saving, error, onChange, onSave, onClose, onAi, aiOpen, aiScope }: {
   open: boolean;
   no: number;
   value: string;
@@ -25,12 +26,21 @@ export function ReviewEditorDialog({ open, no, value, initialValue, saving, erro
   onClose: () => void;
   onAi?: (templateId?: string) => void;
   aiOpen?: boolean;
+  aiScope?: AiPageScope;
 }) {
   const templatesAbortRef = useRef<AbortController | null>(null);
   const [templates, setTemplates] = useState<ReviewTemplate[]>([]);
   const [templatesLoading, setTemplatesLoading] = useState(false);
   const [templatesError, setTemplatesError] = useState<string | null>(null);
   const [selectedTemplateId, setSelectedTemplateId] = useState("");
+  const registerScope = useAiPageScope()?.register, scopeOwner = useId();
+  const sessionId = aiScope?.replaySessionId, projectionId = aiScope?.projectionId, sessionName = aiScope?.sessionName, entryId = aiScope?.entryId;
+  useEffect(() => {
+    if (open && sessionId && projectionId && sessionName && entryId) registerScope?.("selection", scopeOwner, {
+      replaySessionId: sessionId, projectionId, sessionName, entryId, entryNo: no, draft: value, templateId: selectedTemplateId || undefined,
+    });
+    return () => registerScope?.("selection", scopeOwner, null);
+  }, [registerScope, scopeOwner, open, sessionId, projectionId, sessionName, entryId, no, value, selectedTemplateId]);
   const [nameOpen, setNameOpen] = useState(false);
   const [name, setName] = useState("");
   const [templateSaving, setTemplateSaving] = useState(false);

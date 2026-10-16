@@ -15,8 +15,12 @@ import { LIMITS, reviewResultSchema, sessionResultSchema, type RunInput, type En
 import { toolLoop } from "./tool-loop";
 import { executeReadTool, type Receipt } from "./tools";
 import { programBatch, coverageLedger, type CoverageBatch } from "./program-evidence";
+import { relevantHistory } from "./history";
+import { readPlan, forgetPlan, type PlanningRecord } from "./planning-record";
+import { resolveLimits, type AiLimits, type BudgetBlock } from "./limits";
+import { budgetError } from "./budget";
 
-type RunSnapshot = { endpoint: Endpoint; model: string; prompt: string; question: string; assetIds: string[]; chartAssetIds: string[]; estimatedChars: number; historyBefore?: string; reference?: string; response?: ResponseDetails; executionMode?: "tools-v1" | "fixed-v1"; scopeSecret?: string; toolSchemaVersion?: string; adapterVersion?: string; contextHash?: string };
+type RunSnapshot = { endpoint: Endpoint; model: string; prompt: string; question: string; assetIds: string[]; chartAssetIds: string[]; estimatedChars: number; historyBefore?: string; reference?: string; response?: ResponseDetails; executionMode?: "tools-v1" | "fixed-v1"; scopeSecret?: string; toolSchemaVersion?: string; adapterVersion?: string; contextHash?: string; routing?: PlanningRecord; limits?: AiLimits; budgetExceeded?: BudgetBlock };
 type Checkpoint = { content: string; usage: Usage; stage?: string; coverage?: CoverageBatch }[];
 const localControllers = new Map<string, AbortController>();
 export async function recoverRuns() {
@@ -36,6 +40,9 @@ export async function createRun(input: RunInput) {
     return duplicate;
   }
   const settings = await readSettings(), resolved = resolveModel(settings.value, input.task);
+  const routing = input.planId ? readPlan(input.planId, { conversationId: input.conversationId, questionHash: hashValue(input.question), contextId: input.contextId ?? null, task: input.task }) : undefined;
+  const limits = resolveLimits(routing?.limits ?? settings.value.limits, input.limits);
+  if (routing?.limits && hashValue(limits) !== hashValue(routing.limits)) throw new AiError("PLAN_EXPIRED", copy.ai.planExpired, 409);
   const context = input.contextId ? await readContext(input.contextId) : null;
   if (context) await checkCurrentContext(context);
   if (input.executionMode !== "fixed-v1" && context?.originalDraft !== undefined && Array.from(context.originalDraft).length > 2000) throw new AiError("DRAFT_TOO_LONG", copy.ai.draftTooLong);
@@ -49,21 +56,27 @@ export async function createRun(input: RunInput) {
   const selectedCharts = includeCharts && context ? context.charts.map((c) => chartAssets.find((a) => a.chartHash === c.hash)).filter((a): a is NonNullable<typeof a> => Boolean(a)) : [];
   if (includeCharts && selectedCharts.length !== context?.charts.length) throw new AiError("CHARTS_MISSING", copy.ai.capturing);
   const unitCount = context ? context.selectedEntryId ? Math.max(1, context.charts.length) : context.depth === "full" ? context.charts.length : Math.ceil(context.entries.length / LIMITS.batchEntries) : 1;
-  const estimate = JSON.stringify(contextText(context)).length + unitCount * (resolved.prompt.length + EVIDENCE_RULES.length + input.question.length)
-    + selectedCharts.length * 4000 + LIMITS.inputChars;
-  if (estimate > LIMITS.maxCumulativeChars || unitCount + 1 > LIMITS.maxAnalysisCalls) throw new AiError("BUDGET", copy.ai.budget);
-  const snapshot: RunSnapshot = { ...resolved, question: input.question, assetIds: input.assetIds, chartAssetIds: selectedCharts.map((a) => a.id), estimatedChars: 0,
+  const estimate = (routing?.estimatedChars ?? 0) + JSON.stringify(contextText(context)).length + unitCount * (resolved.prompt.length + EVIDENCE_RULES.length + input.question.length)
+    + selectedCharts.length * 4000 + limits.inputChars;
+  if (input.task === "sessionReview" && estimate > limits.maxAnalysisChars) throw budgetError("maxAnalysisChars", estimate, limits.maxAnalysisChars);
+  if (input.task === "sessionReview" && unitCount + 1 + (routing ? 1 : 0) > limits.maxAnalysisCalls) throw budgetError("maxAnalysisCalls", unitCount + 1 + (routing ? 1 : 0), limits.maxAnalysisCalls);
+  const snapshot: RunSnapshot = { ...resolved, question: input.question, assetIds: input.assetIds, chartAssetIds: selectedCharts.map((a) => a.id), estimatedChars: routing?.estimatedChars ?? 0, routing, limits,
     executionMode: context && input.executionMode !== "fixed-v1" ? "tools-v1" : "fixed-v1", scopeSecret: randomUUID(),
     toolSchemaVersion: "1", adapterVersion: (resolved.endpoint.adapterProfile ?? "generic") + ":1", contextHash: context ? hashValue(context) : undefined,
     reference: context ? context.sessionName + " · " + context.symbol + " · " + context.asOfTime + " · " + (context.selectedEntryId ? context.entries[0].sourceId : copy.ai.wholeSession) : copy.ai.noContext,
   };
-  return prisma.$transaction(async (tx) => {
+  const created = await prisma.$transaction(async (tx) => {
     const claimed = await tx.aiConversation.updateMany({ where: { id: input.conversationId, activeRunId: null }, data: { activeRunId: input.requestId } });
     if (!claimed.count) throw new AiError("BUSY", copy.ai.busy, 409);
-    const run = await tx.aiRun.create({ data: { id: input.requestId, conversationId: input.conversationId, contextId: input.contextId, task: input.task, snapshot: JSON.stringify(snapshot) } });
+    const run = await tx.aiRun.create({ data: { id: input.requestId, conversationId: input.conversationId, contextId: input.contextId, task: input.task, snapshot: JSON.stringify(snapshot),
+      ...(routing ? { usage: JSON.stringify([routing.usage]) } : {}) } });
+    if (routing) await tx.aiRunStep.create({ data: { runId: run.id, stepNo: 0, phase: "ROUTING", status: "COMPLETED", adapterVersion: "assistant-routing:1", requestHash: routing.requestHash,
+      payload: JSON.stringify(routing.decision), usage: JSON.stringify(routing.usage), durationMs: routing.durationMs } });
     await tx.aiMessage.create({ data: { conversationId: input.conversationId, runId: run.id, role: "user", content: input.question, contextId: input.contextId } });
     return run;
   });
+  if (input.planId) forgetPlan(input.planId);
+  return created;
 }
 export async function cancelRun(id: string) {
   localControllers.get(id)?.abort();
@@ -74,12 +87,15 @@ export async function cancelRun(id: string) {
     prisma.aiConversation.updateMany({ where: { id: run.conversationId, activeRunId: id }, data: { activeRunId: null } }),
   ]);
 }
-export async function retryRun(id: string) {
+export async function retryRun(id: string, overrides?: Partial<AiLimits>) {
   const original = await prisma.aiRun.findUnique({ where: { id } });
   if (!original || ["QUEUED", "RUNNING"].includes(original.status)) throw new AiError("INVALID", copy.ai.invalid);
   const snapshot: RunSnapshot = JSON.parse(original.snapshot);
   if (original.contextId) await checkCurrentContext(await readContext(original.contextId));
   delete snapshot.response;
+  delete snapshot.budgetExceeded;
+  snapshot.limits = resolveLimits(snapshot.limits, overrides);
+  if (snapshot.routing) snapshot.routing = { ...snapshot.routing, reused: true };
   const retryId = randomUUID();
   return prisma.$transaction(async (tx) => {
     const claimed = await tx.aiConversation.updateMany({ where: { id: original.conversationId, activeRunId: null }, data: { activeRunId: retryId } });
@@ -103,7 +119,7 @@ export function startAnalysisWorker(id: string) {
     }).catch(() => undefined);
   });
 }
-export async function resumeRun(id: string) {
+export async function resumeRun(id: string, overrides?: Partial<AiLimits>) {
   await recoverRuns();
   const original = await prisma.aiRun.findUnique({ where: { id }, select: { contextId: true } });
   if (original?.contextId) await checkCurrentContext(await readContext(original.contextId));
@@ -112,7 +128,8 @@ export async function resumeRun(id: string) {
     if (!run || run.task !== "sessionReview" || !["INTERRUPTED", "FAILED", "CANCELLED", "INVALID_RESULT"].includes(run.status)) throw new AiError("INVALID", copy.ai.invalid);
     const claimed = await tx.aiConversation.updateMany({ where: { id: run.conversationId, activeRunId: null }, data: { activeRunId: id } });
     if (!claimed.count) throw new AiError("BUSY", copy.ai.busy, 409);
-    await tx.aiRun.update({ where: { id }, data: { status: "QUEUED", error: null, heartbeatAt: new Date() } });
+    const snapshot: RunSnapshot = JSON.parse(run.snapshot); snapshot.limits = resolveLimits(snapshot.limits, overrides); delete snapshot.budgetExceeded; delete snapshot.response;
+    await tx.aiRun.update({ where: { id }, data: { status: "QUEUED", error: null, heartbeatAt: new Date(), snapshot: JSON.stringify(snapshot) } });
     return run;
   });
 }
@@ -158,10 +175,12 @@ export function resultText(result: NonNullable<ReturnType<typeof validatedResult
     : result.summary + "\n\n" + result.rules.map((r) => r.rule + "\n" + copy.ai.supports + ": " + r.supports.join(", ") + "\n" + copy.ai.counterexamples + ": " + r.counterexamples.join(", ") + "\n" + r.validation).join("\n\n") + "\n\n" + result.missing.join("\n");
 }
 export async function executeRun(id: string, emit: (event: unknown) => void = () => undefined, externalSignal?: AbortSignal) {
+  const initial = await prisma.aiRun.findUniqueOrThrow({ where: { id } });
+  const limits = resolveLimits(JSON.parse(initial.snapshot).limits);
   const claimed = await prisma.aiRun.updateMany({ where: { id, status: "QUEUED" }, data: { status: "RUNNING", heartbeatAt: new Date() } });
   if (!claimed.count) return;
   const controller = new AbortController(); localControllers.set(id, controller);
-  const signal = AbortSignal.any([controller.signal, AbortSignal.timeout(LIMITS.runMs), ...(externalSignal ? [externalSignal] : [])]);
+  const signal = AbortSignal.any([controller.signal, AbortSignal.timeout(limits.runSeconds * 1000), ...(externalSignal ? [externalSignal] : [])]);
   const poll = setInterval(() => {
     void prisma.aiRun.findUnique({ where: { id }, select: { status: true } }).then((r) => {
       if (r?.status !== "RUNNING") controller.abort();
@@ -183,8 +202,13 @@ export async function executeRun(id: string, emit: (event: unknown) => void = ()
         if (completed) { const turn = JSON.parse(completed.payload); return { content: turn.content as string, usage: turn.usage as Usage }; }
       }
       const text = JSON.stringify(payload), cost = text.length + config.prompt.length + EVIDENCE_RULES.length + config.question.length + history.reduce((n, m) => n + JSON.stringify(m).length, 0) + imageIds.length * 4000;
-      const maxCalls = run.task === "sessionReview" && config.executionMode === "tools-v1" ? LIMITS.maxAnalysisCalls - 6 : run.task === "sessionReview" || (context?.selectedEntryId && context.charts.length > 1) ? LIMITS.maxAnalysisCalls : 1;
-      if (cost > LIMITS.inputChars || totalChars + cost > LIMITS.maxCumulativeChars - (config.executionMode === "tools-v1" ? LIMITS.inputChars : 0) || calls >= maxCalls) throw new AiError("BUDGET", copy.ai.budget);
+      const routingCalls = config.routing && !config.routing.reused ? 1 : 0;
+      const maxCalls = run.task === "sessionReview" && config.executionMode === "tools-v1" ? limits.maxAnalysisCalls - limits.maxModelCalls - routingCalls : run.task === "sessionReview" ? limits.maxAnalysisCalls - routingCalls : limits.maxModelCalls - routingCalls;
+      const maxChars = run.task === "sessionReview" ? limits.maxAnalysisChars : limits.maxInputChars;
+      if (cost > limits.inputChars) throw budgetError("inputChars", cost, limits.inputChars);
+      const reserveChars = config.executionMode === "tools-v1" ? limits.inputChars : 0;
+      if (totalChars + cost + reserveChars > maxChars) throw budgetError(run.task === "sessionReview" ? "maxAnalysisChars" : "maxInputChars", totalChars + cost + reserveChars, maxChars);
+      if (calls >= maxCalls) throw budgetError(run.task === "sessionReview" ? "maxAnalysisCalls" : "maxModelCalls", calls + routingCalls + (config.executionMode === "tools-v1" ? limits.maxModelCalls : 0) + 1, run.task === "sessionReview" ? limits.maxAnalysisCalls : limits.maxModelCalls);
       totalChars += cost; calls += 1;
       delete config.response;
       await prisma.aiRun.update({ where: { id }, data: { calls, snapshot: JSON.stringify({ ...config, estimatedChars: totalChars }) } });
@@ -200,7 +224,7 @@ export async function executeRun(id: string, emit: (event: unknown) => void = ()
         const turn = await generateTurn(config.endpoint, config.model, requestMessages, signal,
           stream ? (delta) => emit({ type: "delta", text: delta }) : undefined,
           json ? run.task === "reviewDraft" ? "reviewDraft" : "sessionReview" : undefined,
-          stream ? { onReasoning: (text) => emit({ type: "reasoning", text }), onDetails: (details) => { config.response = details; } } : undefined);
+          { ...(stream ? { onReasoning: (text: string) => emit({ type: "reasoning", text }), onDetails: (details: ResponseDetails) => { config.response = details; } } : {}), onUsage: (usage) => { usages[usages.length - 1] = usage; } }, { limits });
         answer = { content: turn.content, usage: turn.usage };
         if (config.executionMode === "tools-v1") {
           signal.throwIfAborted();
@@ -211,6 +235,7 @@ export async function executeRun(id: string, emit: (event: unknown) => void = ()
           });
         }
       } finally {
+        await prisma.aiRun.update({ where: { id }, data: { usage: JSON.stringify(usages) } });
         if (config.response) {
           await prisma.aiRun.update({ where: { id }, data: { snapshot: JSON.stringify({ ...config, estimatedChars: totalChars }) } });
           emit({ type: "response-details", details: config.response });
@@ -223,8 +248,8 @@ export async function executeRun(id: string, emit: (event: unknown) => void = ()
     let answer: { content: string; usage: Usage };
     let receipts: Receipt[] | undefined, canAdopt = true;
     if (context && config.executionMode === "tools-v1" && run.task !== "sessionReview") {
-      const history = await prisma.aiMessage.findMany({ where: { conversationId: run.conversationId, contextId: run.contextId, runId: { not: id }, status: "COMPLETED" }, orderBy: { createdAt: "desc" }, take: 6 });
-      const references = history.reverse().map((m) => ({ role: "user" as const, content: "HISTORICAL_REFERENCE_ONLY (not current evidence):\n" + m.content })).filter((m) => m.content.length < 4000);
+      const history = await relevantHistory(run.conversationId, context, id, config.historyBefore ? new Date(config.historyBefore) : undefined);
+      const references = history.map((m) => ({ role: "user" as const, content: "HISTORICAL_REFERENCE_ONLY (not current evidence):\n" + m.content }));
       const loop = await toolLoop(id, { id, secret: config.scopeSecret!, context }, config, signal, emit, references);
       answer = loop.answer; receipts = loop.receipts; canAdopt = loop.canAdopt;
     } else if (context && (run.task === "sessionReview" || (context.selectedEntryId && context.charts.length > 1))) {
@@ -253,7 +278,7 @@ export async function executeRun(id: string, emit: (event: unknown) => void = ()
       while (JSON.stringify(summaries).length > 24000) {
         const groups: string[][] = []; let group: string[] = [], size = 0;
         for (const summary of summaries) {
-          if (summary.length > 20000) throw new AiError("BUDGET", copy.ai.budget);
+          if (summary.length > 20000) throw new AiError("SUMMARY_SIZE", copy.ai.summaryTooLarge);
           if (size + summary.length > 20000 && group.length) { groups.push(group); group = []; size = 0; }
           group.push(summary); size += summary.length;
         }
@@ -263,12 +288,12 @@ export async function executeRun(id: string, emit: (event: unknown) => void = ()
           const stage = "reduce:" + level + ":" + i, existing = checkpoint.find((p) => p.stage === stage);
           if (existing) { reduced.push(existing.content); continue; }
           const result = await call({ batches: groups[i], instruction: "Compress all these batches into under 1200 characters. Preserve useful observations, counterexamples and actual source IDs. No overall statistical claims." }, []);
-          if (result.content.length > 4000) throw new AiError("BUDGET", copy.ai.budget);
+          if (result.content.length > 4000) throw new AiError("SUMMARY_SIZE", copy.ai.summaryTooLarge);
           checkpoint.push({ ...result, stage }); reduced.push(result.content);
           const saved = await prisma.aiRun.updateMany({ where: { id, status: "RUNNING" }, data: { checkpoint: JSON.stringify(checkpoint) } });
           if (!saved.count) throw new AiError("CANCELLED", copy.ai.stopped);
         }
-        summaries = reduced; if (++level > 6) throw new AiError("BUDGET", copy.ai.budget);
+        summaries = reduced; if (++level > 6) throw new AiError("SUMMARY_SIZE", copy.ai.summaryTooLarge);
       }
       if (config.executionMode === "tools-v1") {
         const scope = { id, secret: config.scopeSecret!, context };
@@ -285,10 +310,9 @@ export async function executeRun(id: string, emit: (event: unknown) => void = ()
         instruction: "Synthesize every batch. Follow the configured task output schema. Patterns are exploratory and require counterexamples." },
         config.assetIds, true, ["reviewDraft", "sessionReview"].includes(run.task));
     } else {
-      const history = await prisma.aiMessage.findMany({ where: { conversationId: run.conversationId, status: "COMPLETED", runId: { not: id }, contextId: run.contextId ?? null,
-        ...(config.historyBefore ? { createdAt: { lt: new Date(config.historyBefore) } } : {}) }, orderBy: [{ createdAt: "desc" }, { id: "desc" }], take: 12 });
+      const history = await relevantHistory(run.conversationId, context, id, config.historyBefore ? new Date(config.historyBefore) : undefined);
       const messages: ModelMessage[] = []; let length = 0;
-      for (const message of history.reverse()) {
+      for (const message of history) {
         if (length + message.content.length > 8000) continue;
         length += message.content.length; messages.push({ role: message.role === "user" ? "user" : "assistant", content: message.content });
       }
@@ -311,9 +335,13 @@ export async function executeRun(id: string, emit: (event: unknown) => void = ()
   } catch (error) {
     const cancelled = controller.signal.aborted || externalSignal?.aborted;
     const status = cancelled ? "CANCELLED" : signal.aborted ? "INTERRUPTED" : "FAILED";
-    const message = cancelled ? copy.ai.stopped : error instanceof AiError ? error.message : copy.ai.interrupted;
+    const failure = !cancelled && signal.aborted ? budgetError("runSeconds", limits.runSeconds, limits.runSeconds) : error;
+    const message = cancelled ? copy.ai.stopped : failure instanceof AiError ? failure.message : copy.ai.interrupted;
+    const latest = await prisma.aiRun.findUniqueOrThrow({ where: { id } });
+    const snapshot: RunSnapshot = JSON.parse(latest.snapshot);
+    if (failure instanceof AiError && failure.budget) snapshot.budgetExceeded = failure.budget;
     await prisma.$transaction([
-      prisma.aiRun.updateMany({ where: { id, status: "RUNNING" }, data: { status, error: message } }),
+      prisma.aiRun.updateMany({ where: { id, status: "RUNNING" }, data: { status, error: message, snapshot: JSON.stringify(snapshot) } }),
       prisma.aiConversation.updateMany({ where: { activeRunId: id }, data: { activeRunId: null } }),
     ]);
     emit({ type: "error", error: message });

@@ -1267,6 +1267,7 @@ export function PaperJournalTable({
       saving={reviewDialogEntryId ? savingReviewIds.has(reviewDialogEntryId) : false}
       error={reviewError}
       aiOpen={ai?.open}
+      aiScope={replaySession && reviewDialogEntryId ? { replaySessionId: replaySession.id, projectionId: replaySession.activeProjectionId, sessionName: replaySession.name, entryId: reviewDialogEntryId } : undefined}
       onAi={ai && replaySession ? (templateId) => {
         if (!reviewDialogEntryId) return;
         void ai.attach({ replaySessionId: replaySession.id, projectionId: replaySession.activeProjectionId,

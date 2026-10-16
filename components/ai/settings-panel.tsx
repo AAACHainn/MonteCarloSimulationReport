@@ -14,12 +14,14 @@ import { skillKeys, type AiSettings, type Endpoint, type SkillKey } from "@/lib/
 import { DEFAULT_PROMPTS, defaultSettings } from "@/lib/ai/prompts";
 import { aiApi } from "./api";
 import { notifyAiSettingsChanged } from "./settings-events";
+import { AiLimitsFields } from "./limits-fields";
+import { aiLimitsSchema, resolveLimits } from "@/lib/ai/limits";
 
 type PublicEndpoint = Endpoint & { hasApiKey?: boolean };
 type ConfigData = { value: AiSettings; version: number };
 export function AiSettingsPanel() {
   const [value, setValue] = useState<AiSettings>(defaultSettings);
-  const [version, setVersion] = useState(0), [tab, setTab] = useState<"models" | "skills">("models");
+  const [version, setVersion] = useState(0), [tab, setTab] = useState<"models" | "skills" | "limits">("models");
   const [busy, setBusy] = useState(true), [loaded, setLoaded] = useState(false), [error, setError] = useState(""), [status, setStatus] = useState("");
   const savedConfig = useRef<ConfigData | null>(null);
   const [showKey, setShowKey] = useState<string | null>(null);
@@ -52,6 +54,7 @@ export function AiSettingsPanel() {
   async function save() {
     setBusy(true); setError(""); setStatus("");
     try {
+      if (!aiLimitsSchema.safeParse(value.limits ?? {}).success) throw new Error(copy.ai.invalidLimits);
       const data = await aiApi<ConfigData>("settings", "PUT", { version, value: { ...value, endpoints: value.endpoints.map((endpoint) => {
         const e = { ...endpoint } as PublicEndpoint; delete e.hasApiKey; return e;
       }) } });
@@ -80,6 +83,7 @@ export function AiSettingsPanel() {
       <div className="flex flex-wrap gap-2 border-b pb-4">
         <Button variant={tab === "models" ? "default" : "ghost"} onClick={() => setTab("models")}>{copy.ai.models}</Button>
         <Button variant={tab === "skills" ? "default" : "ghost"} onClick={() => setTab("skills")}>{copy.ai.skills}</Button>
+        <Button variant={tab === "limits" ? "default" : "ghost"} onClick={() => setTab("limits")}>{copy.ai.limits}</Button>
       </div>
       <p className="text-sm text-slate-600">{copy.ai.configHint}</p>
       <div className="space-y-4" aria-busy={busy}>
@@ -129,7 +133,10 @@ export function AiSettingsPanel() {
             const id = crypto.randomUUID();
             setValue((s) => ({ ...s, activeEndpointId: s.activeEndpointId || id, endpoints: [...s.endpoints, { id, name: copy.ai.endpoint, protocol: "chat-completions", baseUrl: "http://localhost:11434/v1", chatUrl: "", modelsUrl: "", defaultModel: "", models: [], capabilities: {} }] }));
           }}><Plus className="h-4 w-4" />{copy.ai.addEndpoint}</Button>
-        </> : skillKeys.map((key) => <Card key={key}><CardHeader><CardTitle>{copy.ai[key]}</CardTitle></CardHeader><CardContent className="space-y-4">
+        </> : tab === "limits" ? <Card><CardHeader><CardTitle>{copy.ai.limits}</CardTitle></CardHeader><CardContent className="space-y-4">
+          <p className="text-sm leading-6 text-slate-600">{copy.ai.limitsHint}</p>
+          <AiLimitsFields value={{ ...resolveLimits(), ...value.limits }} disabled={busy} onChange={(limits) => { setStatus(""); setValue((s) => ({ ...s, limits })); }} />
+        </CardContent></Card> : skillKeys.map((key) => <Card key={key}><CardHeader><CardTitle>{copy.ai[key]}</CardTitle></CardHeader><CardContent className="space-y-4">
           <CheckboxField disabled={busy} checked={value.skills[key].enabled} onChange={(enabled) => skillChange(key, { enabled })}>{copy.ai.enabled}</CheckboxField>
           <div className="space-y-2"><Label htmlFor={"prompt-" + key}>{copy.ai.prompt}</Label><Textarea disabled={busy} id={"prompt-" + key} rows={6} value={value.skills[key].prompt} onChange={(e) => skillChange(key, { prompt: e.target.value })} /></div>
           <Button disabled={busy} variant="outline" onClick={() => setConfirmation({ label: copy.ai.restoreConfirm, action: () => skillChange(key, { prompt: DEFAULT_PROMPTS[key] }) })}>{copy.ai.restore}</Button>

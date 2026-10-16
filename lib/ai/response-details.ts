@@ -4,4 +4,7 @@ export type ResponseDetails = {
   durationMs: number;
   reasoning: string;
   reasoningMs: number | null;
+  usage?: { input: number | null; output: number | null };
+  outputTokenLimit?: number;
+  finishReason?: string | null;
 };
