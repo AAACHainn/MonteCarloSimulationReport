@@ -7,6 +7,7 @@ import remarkGfm from "remark-gfm";
 import { copy, defaultLocale } from "@/lib/i18n";
 import { formatNumber } from "@/lib/format";
 import type { ResponseDetails } from "@/lib/ai/response-details";
+import type { ReadEvent } from "@/lib/ai/execution-view";
 
 export const AiMarkdown = memo(function AiMarkdown({ text }: { text: string }) {
   return <div className="min-w-0 break-words text-sm leading-6 [&_code]:break-all [&_h1]:my-3 [&_h1]:text-lg [&_h1]:font-semibold [&_h2]:my-3 [&_h2]:font-semibold [&_h3]:my-2 [&_h3]:font-medium [&_li]:ml-4 [&_ol]:list-decimal [&_p]:mb-3 [&_pre]:overflow-x-auto [&_pre]:rounded-md [&_pre]:bg-slate-100 [&_pre]:p-3 [&_table]:w-full [&_td]:border [&_td]:p-2 [&_th]:border [&_th]:bg-slate-50 [&_th]:p-2 [&_ul]:list-disc">
@@ -31,9 +32,10 @@ function Elapsed({ startedAt, durationMs, live, thinking = false }: { startedAt?
   return <span className="tabular-nums" title={copy.ai.elapsedHint}>{thinking ? copy.ai.seconds(formatNumber(milliseconds / 1000)) : copy.ai.elapsed(formatNumber(milliseconds / 1000))}</span>;
 }
 
-export function AiMessageCard({ role = "assistant", text, createdAt, reference, response, live = false, reasoning = response?.reasoning ?? "", reasoningMs = response?.reasoningMs, children }: {
+export function AiMessageCard({ role = "assistant", text, createdAt, reference, response, reads = [], live = false, reasoning = response?.reasoning ?? "", reasoningMs = response?.reasoningMs, children }: {
   role?: string; text: string; createdAt?: string; reference?: string; response?: ResponseDetails | null;
   live?: boolean; reasoning?: string; reasoningMs?: number | null; children?: ReactNode;
+  reads?: ReadEvent[];
 }) {
   const user = role === "user", Icon = user ? UserRound : Bot;
   return <article className={"min-w-0 space-y-3 rounded-lg border p-3 text-left " + (user ? "ml-auto w-fit max-w-[95%] border-blue-100 bg-blue-50" : "mr-auto w-full border-slate-200 bg-slate-50")} aria-label={user ? copy.ai.userMessage : copy.ai.assistantMessage} aria-busy={live}>
@@ -43,6 +45,7 @@ export function AiMessageCard({ role = "assistant", text, createdAt, reference, 
       {!user ? <Elapsed startedAt={response?.startedAt ?? createdAt} durationMs={response?.durationMs} live={live} /> : null}
     </header>
     {reference ? <p className="break-words text-xs text-slate-500">{reference}</p> : null}
+    {!user && reads.length ? <details className="rounded-md border bg-white"><summary className="min-h-10 cursor-pointer rounded-md px-3 py-2 text-xs text-blue-700 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring">{copy.ai.readRecords}</summary><ul className="max-h-64 space-y-2 overflow-y-auto border-t p-3 text-xs" aria-live="polite">{reads.map((read) => <li key={read.toolCallId} className={read.status === "FAILED" ? "text-red-700" : "text-slate-600"}>{copy.ai.readNames[read.name as keyof typeof copy.ai.readNames] ?? copy.ai.readUnknown} · {read.status === "COMPLETED" ? copy.ai.readComplete : read.status === "FAILED" ? copy.ai.readFailed : copy.ai.readRunning}</li>)}</ul></details> : null}
     {!user && reasoning ? <details className="group rounded-md border border-blue-100 bg-white">
       <summary className="flex min-h-10 cursor-pointer list-none flex-wrap items-center gap-2 rounded-md px-3 py-2 text-xs text-blue-700 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring [&::-webkit-details-marker]:hidden">
         <ChevronRight className="h-4 w-4 shrink-0 transition-transform group-open:rotate-90 motion-reduce:transition-none" aria-hidden="true" />

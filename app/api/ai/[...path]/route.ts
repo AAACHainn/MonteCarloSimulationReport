@@ -10,6 +10,7 @@ import { createRun, cancelRun, executeRun, recoverRuns, resumeRun, retryRun, sta
 import { boundedJson, requestHeaders, testConnection } from "@/lib/ai/provider";
 import { contextRequestSchema, runRequestSchema, LIMITS } from "@/lib/ai/schema";
 import { DEFAULT_PROMPTS } from "@/lib/ai/prompts";
+import { reviewFactsHash } from "@/lib/ai/review-baseline";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -41,7 +42,7 @@ async function handle(request: Request, { params }: Context) {
       catch (error) { return json({ status: "FAILED", message: error instanceof AiError ? error.message : copy.ai.connectionFailed }); }
     }
     if (kind === "options" && request.method === "GET") {
-      const sessions = await prisma.replaySession.findMany({ where: { activeProjectionId: { not: null } }, orderBy: { createdAt: "desc" }, take: 200, select: { id: true, name: true, activeProjectionId: true, mode: true, dataset: { select: { symbol: true } } } });
+      const sessions = await prisma.replaySession.findMany({ where: { activeProjectionId: { not: null } }, orderBy: { createdAt: "desc" }, take: 200, select: { id: true, name: true, activeProjectionId: true, mode: true, dataset: { select: { id: true, symbol: true, startTime: true, timezone: true } } } });
       const session = sessions.find((s) => s.id === query.get("sessionId"));
       const entries = session ? await prisma.replayJournalEntry.findMany({ where: { projectionId: session.activeProjectionId }, orderBy: { no: "asc" }, take: LIMITS.contextEntries, select: { id: true, no: true, openedAt: true, closedAt: true, review: true } }) : [];
       const templates = await prisma.replayReviewTemplate.findMany({ orderBy: { name: "asc" }, select: { id: true, name: true, content: true } });
@@ -75,10 +76,12 @@ async function handle(request: Request, { params }: Context) {
           ...(query.get("cursor") ? { cursor: { id: query.get("cursor")! }, skip: 1 } : {}),
         });
         const runs = await prisma.aiRun.findMany({ where: { id: { in: messages.flatMap((m) => m.runId ? [m.runId] : []) } }, select: { id: true, snapshot: true } });
+        const calls = await prisma.aiToolCall.findMany({ where: { runId: { in: runs.map((r) => r.id) } }, orderBy: [{ stepNo: "asc" }, { toolIndex: "asc" }], select: { runId: true, toolCallId: true, name: true, status: true, stepNo: true, toolIndex: true, errorCode: true } });
         return json({ conversation, messages: messages.map((message) => {
           const run = runs.find((r) => r.id === message.runId), snapshot = run ? JSON.parse(run.snapshot) : null;
           return { ...message, reference: snapshot ? snapshot.endpoint.name + " · " + snapshot.model + " · " + (snapshot.reference ?? "") : "",
-            response: message.role === "assistant" ? snapshot?.response ?? null : null };
+            response: message.role === "assistant" ? snapshot?.response ?? null : null,
+            reads: message.role === "assistant" ? calls.filter((c) => c.runId === message.runId).map((c) => ({ ...c, eventNo: c.stepNo * 10 + c.toolIndex * 2 + 2 })) : [] };
         }) });
       }
       if (request.method === "PATCH") {
@@ -128,9 +131,11 @@ async function handle(request: Request, { params }: Context) {
       if (request.method === "DELETE") { await cancelRun(id); return json({ ok: true }); }
       await recoverRuns();
       const fresh = await prisma.aiRun.findUniqueOrThrow({ where: { id } }), snap = JSON.parse(fresh.snapshot);
+      const calls = await prisma.aiToolCall.findMany({ where: { runId: id }, orderBy: [{ stepNo: "asc" }, { toolIndex: "asc" }], select: { toolCallId: true, name: true, status: true, stepNo: true, toolIndex: true, errorCode: true } });
       return json({ id, task: fresh.task, status: fresh.status, contextId: fresh.contextId, error: fresh.error, calls: fresh.calls,
         completedBatches: JSON.parse(fresh.checkpoint).filter((p: { stage?: string }) => !p.stage).length, usage: JSON.parse(fresh.usage), estimatedChars: snap.estimatedChars,
         endpoint: snap.endpoint.name, model: snap.model, reference: snap.reference, response: snap.response ?? null,
+        reads: calls.map((c) => ({ ...c, eventNo: c.stepNo * 10 + c.toolIndex * 2 + 2 })),
       });
     }
     if (kind === "reports" && request.method === "GET") {
@@ -145,9 +150,11 @@ async function handle(request: Request, { params }: Context) {
       if (!message?.result || !message.contextId || message.status !== "COMPLETED") throw new AiError("INVALID", copy.ai.invalid);
       const context = await readContext(message.contextId); await checkCurrentContext(context);
       const result = JSON.parse(message.result);
+      const sourceRun = message.runId ? await prisma.aiRun.findUnique({ where: { id: message.runId } }) : null;
+      if (!sourceRun || sourceRun.status !== "COMPLETED") throw new AiError("INVALID", copy.ai.invalid);
       if (typeof result.draft !== "string" || !context.selectedEntryId) throw new AiError("INVALID", copy.ai.invalid);
-      const entry = await prisma.replayJournalEntry.findFirst({ where: { id: context.selectedEntryId, projectionId: context.projectionId } });
-      if (!entry || entry.review !== context.entries[0].review) throw new AiError("CONFLICT", copy.ai.conflict, 409);
+      const entry = await prisma.replayJournalEntry.findFirst({ where: { id: context.selectedEntryId, projectionId: context.projectionId }, include: { setupOption: { select: { name: true } }, tradeReasons: { select: { id: true, name: true } } } });
+      if (!entry || entry.review !== context.entries[0].review || reviewFactsHash(entry) !== reviewFactsHash(context.entries[0])) throw new AiError("CONFLICT", copy.ai.conflict, 409);
       return json({ entryId: entry.id, projectionId: context.projectionId, replaySessionId: context.replaySessionId,
         originalDraft: context.originalDraft ?? entry.review, draft: result.draft, sourceRunId: message.runId });
     }

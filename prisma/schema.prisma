@@ -44,6 +44,7 @@ model AiAsset {
   bytes     Int
   contextId String?
   chartHash String?
+  contentHash String?
   createdAt DateTime @default(now())
 }
 
@@ -63,6 +64,51 @@ model AiRun {
   updatedAt      DateTime @updatedAt
   @@index([conversationId, createdAt])
   @@index([status, heartbeatAt])
+}
+
+// Protocol evidence is retained independently of chat messages and reports.
+model AiRunStep {
+  id             String   @id @default(cuid())
+  runId          String
+  stepNo         Int
+  phase          String
+  status         String
+  adapterVersion String
+  requestHash    String
+  payload        String   @default("{}")
+  usage          String   @default("{\"input\":null,\"output\":null}")
+  durationMs     Int      @default(0)
+  createdAt      DateTime @default(now())
+  @@unique([runId, stepNo])
+}
+
+model AiChartVariant {
+  id        String   @id
+  contextId String
+  value     String
+  createdAt DateTime @default(now())
+  @@index([contextId])
+}
+
+model AiToolCall {
+  id              String   @id @default(cuid())
+  runId           String
+  stepNo          Int
+  toolCallId      String
+  toolIndex       Int
+  name            String
+  contractVersion String
+  arguments       String
+  argumentsHash   String
+  scopeHash       String
+  status          String
+  result          String   @default("{}")
+  receipts        String   @default("[]")
+  durationMs      Int      @default(0)
+  errorCode       String?
+  createdAt       DateTime @default(now())
+  @@unique([runId, toolCallId])
+  @@index([runId, stepNo, toolIndex])
 }
 
 model AiAnalysis {

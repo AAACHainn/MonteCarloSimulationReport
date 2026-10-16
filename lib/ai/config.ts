@@ -38,7 +38,13 @@ export function endpointUrls(endpoint: Pick<Endpoint, "baseUrl" | "chatUrl" | "m
   return { chat: check(endpoint.chatUrl || base + "/chat/completions"), models: check(endpoint.modelsUrl || base + "/models") };
 }
 export async function ensureAiStorage() {
-  try { await prisma.aiSetting.findUnique({ where: { id: "config" }, select: { id: true } }); }
+  try {
+    await prisma.aiSetting.findUnique({ where: { id: "config" }, select: { id: true } });
+    await prisma.aiRunStep.findFirst({ select: { id: true } });
+    await prisma.aiToolCall.findFirst({ select: { id: true } });
+    await prisma.aiChartVariant.findFirst({ select: { id: true } });
+    await prisma.aiAsset.findFirst({ select: { contentHash: true } });
+  }
   catch { throw new AiError("MIGRATION_REQUIRED", copy.ai.migration, 503); }
 }
 export async function readSettings() {

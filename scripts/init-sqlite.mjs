@@ -685,8 +685,13 @@ try {
     if (!columns.some((item) => item.name === column)) await prisma.$executeRawUnsafe(statement);
   }
   await prisma.$executeRawUnsafe('CREATE INDEX IF NOT EXISTS "ReplayProjectionCommand_commandId_idx" ON "ReplayProjectionCommand"("commandId")');
-  const aiMigration = readFileSync(new URL("../prisma/migrations/20261015180000_add_ai_assistant/migration.sql", import.meta.url), "utf8");
+  const aiMigration = ["20261015180000_add_ai_assistant", "20261016090000_add_ai_tool_execution", "20261016100000_add_ai_chart_variants"]
+    .map((name) => readFileSync(new URL(`../prisma/migrations/${name}/migration.sql`, import.meta.url), "utf8")).join("\n");
   for (const statement of aiMigration.replace(/^\s*--.*$/gm, "").split(";").map((s) => s.trim()).filter(Boolean)) {
+    if (statement.startsWith('ALTER TABLE "AiAsset"')) {
+      const columns = await prisma.$queryRawUnsafe('PRAGMA table_info("AiAsset")');
+      if (columns.some((c) => c.name === "contentHash")) continue;
+    }
     await prisma.$executeRawUnsafe(statement.replace(/^CREATE TABLE /, "CREATE TABLE IF NOT EXISTS ").replace(/^CREATE UNIQUE INDEX /, "CREATE UNIQUE INDEX IF NOT EXISTS ").replace(/^CREATE INDEX /, "CREATE INDEX IF NOT EXISTS "));
   }
 } finally {

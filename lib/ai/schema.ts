@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { chartPreferencesSchema } from "./chart-contract";
 
 export const skillKeys = ["globalAssistant", "chartReading", "reviewDraft", "sessionReview"] as const;
 export type SkillKey = typeof skillKeys[number];
@@ -11,6 +12,8 @@ export const endpointSchema = z.object({
   chatUrl: z.string().trim().max(2000).default(""),
   modelsUrl: z.string().trim().max(2000).default(""),
   tokenParameter: z.enum(["max_tokens", "max_completion_tokens"]).optional(),
+  adapterProfile: z.enum(["generic", "deepseek"]).optional(),
+  toolTransport: z.enum(["stream", "nonstream"]).optional(),
   models: z.array(z.string().trim().min(1).max(160)).max(100).default([]),
   defaultModel: z.string().trim().max(160),
   apiKey: z.string().max(4096).optional(),
@@ -36,15 +39,18 @@ export const contextRequestSchema = z.object({
   projectionId: z.string().min(1), templateId: z.string().optional(),
   draft: z.string().max(8000).optional(),
   depth: z.enum(["quick", "full"]).default("quick"),
+  chartPreferences: chartPreferencesSchema.optional(),
+  timeframes: z.array(z.string().min(1).max(20)).min(1).max(4).optional(),
 }).strict();
 export const runRequestSchema = z.object({
   conversationId: z.string().min(1), contextId: z.string().optional(),
   task: z.enum(skillKeys), question: z.string().trim().min(1).max(8000),
   assetIds: z.array(z.string()).max(6).default([]),
   chartImages: z.boolean().default(false),
+  executionMode: z.enum(["tools-v1", "fixed-v1"]).default("tools-v1"),
   requestId: z.string().uuid(),
 }).strict();
-export type RunInput = z.infer<typeof runRequestSchema>;
+export type RunInput = Omit<z.infer<typeof runRequestSchema>, "executionMode"> & { executionMode?: "tools-v1" | "fixed-v1" };
 export const reviewResultSchema = z.object({
   draft: z.string().refine((s) => Array.from(s).length <= 2000),
   analysis: z.string().max(20000),

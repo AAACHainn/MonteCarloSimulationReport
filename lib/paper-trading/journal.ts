@@ -1,4 +1,5 @@
 import { parseEntryDiscipline } from "./training-gate";
+import { fifoRowId } from "./journal-identity";
 import type {
   PaperJournalContext,
   PaperPositionLotData,
@@ -131,7 +132,7 @@ export function closeLotsFifo(
     const initialRisk = lot.initialRisk ?? lot.actualRisk;
     const gainLoss = lot.side === "LONG" ? exit.price - lot.entryPrice : lot.entryPrice - exit.price;
     entries.push({
-      id: `journal_${exit.fillId}_${lot.id}_${entries.length}`,
+      id: fifoRowId(exit.fillId, lot.id, entries.length),
       lotId: lot.id,
       ...(lot.discipline ? { discipline: lot.discipline } : {}),
       direction: lot.side,

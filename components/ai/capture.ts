@@ -10,12 +10,13 @@ export async function captureContextCharts(context: ContextValue & { id: string 
   const container = document.createElement("div");
   container.style.cssText = "position:fixed;left:-10000px;top:0;width:2400px;height:1200px;pointer-events:none";
   document.body.appendChild(container);
-  const preferences = capturePdfChartPreferences({ id: context.datasetId, startTime: context.entries[0].openedAt, timezone: context.timezone });
-  const renderer = createChartSnapshotRenderer(container, preferences, context.tick, context.display);
+  const preferences = context.chartPreferences ?? capturePdfChartPreferences({ id: context.datasetId, startTime: context.entries[0].openedAt, timezone: context.timezone });
   const ids: string[] = [];
   try {
     for (const chart of context.charts) {
       signal.throwIfAborted();
+      const renderer = createChartSnapshotRenderer(container, preferences, context.tick, { ...context.display, displayIntervalSeconds: chart.intervalSeconds ?? context.display.displayIntervalSeconds });
+      try {
       const bars = chart.window.bars;
       const result = await renderer.capture(chart.window, {
         fromSequence: bars[0].firstSequence, toSequence: bars.at(-1)!.lastSequence,
@@ -27,7 +28,8 @@ export async function captureContextCharts(context: ContextValue & { id: string 
       });
       const asset = await aiApi<{ id: string }>("assets", "POST", { dataUrl, contextId: context.id, chartHash: chart.hash }, signal);
       ids.push(asset.id);
+      } finally { renderer.remove(); }
     }
     return ids;
-  } finally { renderer.remove(); container.remove(); }
+  } finally { container.remove(); }
 }

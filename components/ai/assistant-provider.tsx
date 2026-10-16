@@ -1,6 +1,6 @@
 "use client";
 import { createContext, memo, useCallback, useContext, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
-import { Settings, Minus, Plus, Pencil, Trash2, Eraser, Paperclip, Send, Square, Copy, Loader2 } from "lucide-react";
+import { Settings, Minus, Plus, Pencil, Trash2, Eraser, Paperclip, Send, Square, Copy } from "lucide-react";
 import Image from "next/image";
 import Link from "next/link";
 import { Dialog } from "@/components/ui/dialog";
@@ -16,6 +16,7 @@ import { formatNumber, formatPercent } from "@/lib/format";
 import type { AiSettings, SkillKey } from "@/lib/ai/schema";
 import type { ContextValue } from "@/lib/ai/context";
 import type { ResponseDetails } from "@/lib/ai/response-details";
+import type { ReadEvent } from "@/lib/ai/execution-view";
 import { aiApi } from "./api";
 import { AiAssistantLauncher } from "./assistant-launcher";
 import { AiMarkdown as Markdown, AiMessageCard } from "./assistant-message";
@@ -25,9 +26,9 @@ import { captureContextCharts } from "./capture";
 
 type FixedContext = ContextValue & { id: string };
 type Conversation = { id: string; name: string; activeRunId: string | null };
-type Message = { id: string; role: string; content: string; contextId: string | null; result: string | null; runId: string | null; reference?: string; createdAt: string; response?: ResponseDetails | null };
-type Run = { id: string; status: string; task: string; contextId: string | null; error: string | null; endpoint: string; model: string; completedBatches: number; reference?: string; response?: ResponseDetails | null };
-type LiveResponse = { chat: string; runId: string; text: string; reasoning: string; startedAt: string; reasoningMs?: number; response?: ResponseDetails };
+type Message = { id: string; role: string; content: string; contextId: string | null; result: string | null; runId: string | null; reference?: string; createdAt: string; response?: ResponseDetails | null; reads?: ReadEvent[] };
+type Run = { id: string; status: string; task: string; contextId: string | null; error: string | null; endpoint: string; model: string; completedBatches: number; reference?: string; response?: ResponseDetails | null; reads?: ReadEvent[] };
+type LiveResponse = { chat: string; runId: string; text: string; reasoning: string; startedAt: string; reasoningMs?: number; response?: ResponseDetails; reads?: ReadEvent[] };
 export type AdoptPayload = { entryId: string; projectionId: string; replaySessionId: string; originalDraft: string; draft: string; sourceRunId: string };
 type AssistantContext = {
   open: boolean;
@@ -63,6 +64,7 @@ export function AiAssistantProvider({ children }: { children: ReactNode }) {
   const [messages, setMessages] = useState<Message[]>([]), [context, setContext] = useState<FixedContext | null>(null);
   const [drafts, setDrafts] = useState<Record<string, string>>({}), [assets, setAssets] = useState<string[]>([]);
   const [chartImages, setChartImages] = useState(false);
+  const [fixedMode, setFixedMode] = useState(false);
   const [config, setConfig] = useState<AiSettings | null>(null), [task, setTask] = useState<SkillKey>("globalAssistant");
   const [run, setRun] = useState<Run | null>(null), [stream, setStream] = useState<LiveResponse | null>(null);
   const [error, setError] = useState(""), [status, setStatus] = useState(""), [busy, setBusy] = useState(false);
@@ -100,6 +102,13 @@ export function AiAssistantProvider({ children }: { children: ReactNode }) {
     const rows = data.messages.reverse();
     setMessages((s) => older ? [...rows, ...s.filter((m) => !rows.some((r) => r.id === m.id))] : rows);
     setConversations((s) => s.map((c) => c.id === id ? data.conversation : c));
+    if (!older && !data.conversation.activeRunId) {
+      const latestRunId = [...rows].reverse().find((message) => message.runId)?.runId;
+      if (latestRunId) {
+        const latest = await aiApi<Run>("runs/" + latestRunId);
+        if (currentChat.current === id) { setRun(latest); if (latest.error) setError(latest.error); }
+      }
+    }
     return data.conversation;
   }, []);
   useEffect(() => {
@@ -144,7 +153,10 @@ export function AiAssistantProvider({ children }: { children: ReactNode }) {
     try {
       await ensureChat();
       const { images, ...body } = input;
-      const fixed = await aiApi<FixedContext>("contexts", "POST", body, controller.signal);
+      const options = await aiApi<{ sessions: Array<{ id: string; dataset: { id: string; startTime: string; timezone: string } }> }>("options?sessionId=" + encodeURIComponent(input.replaySessionId), "GET", undefined, controller.signal);
+      const dataset = options.sessions.find((s) => s.id === input.replaySessionId)?.dataset;
+      const { capturePdfChartPreferences } = await import("@/components/market-replay/use-replay-preferences");
+      const fixed = await aiApi<FixedContext>("contexts", "POST", { ...body, ...(dataset ? { chartPreferences: capturePdfChartPreferences(dataset) } : {}) }, controller.signal);
       setContext(fixed); setAssets([]); setChartImages(false); setTask(fixed.selectedEntryId ? "reviewDraft" : "sessionReview");
       if (images) {
         setStatus(copy.ai.capturing);
@@ -180,6 +192,11 @@ export function AiAssistantProvider({ children }: { children: ReactNode }) {
         while ((index = buffer.indexOf("\n")) >= 0) {
           const line = buffer.slice(0, index); buffer = buffer.slice(index + 1); if (!line) continue;
           const event = JSON.parse(line);
+          if (event.type === "model_step_start") { pending = ""; pendingReasoning = ""; value = { ...value, text: "", reasoning: "", reasoningMs: undefined, response: undefined }; }
+          if (["tool_started", "tool_completed", "tool_failed"].includes(event.type)) {
+            value = { ...value, reads: [...(value.reads ?? []).filter((r) => r.toolCallId !== event.toolCallId), { ...event, status: event.type === "tool_completed" ? "COMPLETED" : event.type === "tool_failed" ? "FAILED" : "RUNNING" }] };
+            if (currentChat.current === chatId) setStream(value);
+          }
           if (event.type === "response-start") value = { ...value, startedAt: event.startedAt };
           if (event.type === "delta" || event.type === "reasoning") {
             if (event.type === "delta") pending += event.text; else pendingReasoning += event.text;
@@ -207,7 +224,7 @@ export function AiAssistantProvider({ children }: { children: ReactNode }) {
     setBusy(true); setError(""); setStatus("");
     try {
       const chatId = await ensureChat();
-      const value = await aiApi<{ id: string; task: string }>("runs", "POST", { conversationId: chatId, contextId: context?.id, task, question, assetIds: assets, chartImages, requestId: crypto.randomUUID() });
+      const value = await aiApi<{ id: string; task: string }>("runs", "POST", { conversationId: chatId, contextId: context?.id, task, question, assetIds: assets, chartImages, executionMode: fixedMode ? "fixed-v1" : "tools-v1", requestId: crypto.randomUUID() });
       setDrafts((s) => ({ ...s, [chatId]: "" })); setAssets([]);
       await loadMessages(chatId); await loadChats();
       if (value.task !== "sessionReview") void connectStream(value.id, chatId);
@@ -267,7 +284,7 @@ export function AiAssistantProvider({ children }: { children: ReactNode }) {
         <div ref={contentRef} className="min-h-0 flex-1 space-y-4 overflow-y-auto p-4">
           {messages.length >= 30 ? <Button variant="ghost" size="sm" onClick={() => void loadMessages(conversationId, messages[0].id)}>{copy.ai.older}</Button> : null}
           {!messages.length && !stream ? <p className="rounded-lg border border-dashed p-6 text-sm text-slate-600">{copy.ai.empty}</p> : null}
-          {messages.map((m) => <AiMessageCard key={m.id} role={m.role} text={m.content} createdAt={m.createdAt} reference={m.reference} response={m.response}>
+          {messages.map((m) => <AiMessageCard key={m.id} role={m.role} text={m.content} createdAt={m.createdAt} reference={m.reference} response={m.response} reads={m.reads}>
             <div className="flex flex-wrap gap-2">
               <Button variant="ghost" size="sm" onClick={() => void navigator.clipboard.writeText(m.content).then(() => setStatus(copy.ai.copied))}><Copy className="h-4 w-4" />{copy.ai.copy}</Button>
               {m.contextId ? <Button variant="ghost" size="sm" onClick={() => void aiApi<FixedContext>("contexts/" + m.contextId).then((c) => { setContext(c); setChartImages(false); }).catch((e) => setError(e.message))}>{copy.ai.sources}</Button> : null}
@@ -287,9 +304,9 @@ export function AiAssistantProvider({ children }: { children: ReactNode }) {
               }}>{copy.ai.retry}</Button> : null}
             </div>
           </AiMessageCard>)}
-          {stream?.chat === conversationId && !messages.some((m) => m.role === "assistant" && m.runId === stream.runId) ? <AiMessageCard text={stream.text} createdAt={stream.startedAt} reasoning={stream.reasoning} reasoningMs={stream.response?.reasoningMs ?? stream.reasoningMs} response={stream.response} live={!stream.response} /> : null}
-          {activeRunId && stream?.chat !== conversationId ? <div role="status" className="text-xs text-slate-600"><p className="flex items-center gap-2"><Loader2 className="h-4 w-4 animate-spin" />{copy.ai.running}{run?.task === "sessionReview" ? " · " + copy.ai.processedBatches(run.completedBatches) : ""}</p></div> : null}
-          {!activeRunId && run?.response && ["FAILED", "CANCELLED", "INTERRUPTED"].includes(run.status) ? <AiMessageCard text="" createdAt={run.response.startedAt} response={run.response}><p className="text-xs text-slate-600">{copy.ai.unfinishedAnswer}</p></AiMessageCard> : null}
+          {stream?.chat === conversationId && !messages.some((m) => m.role === "assistant" && m.runId === stream.runId) ? <AiMessageCard text={stream.text} createdAt={stream.startedAt} reasoning={stream.reasoning} reasoningMs={stream.response?.reasoningMs ?? stream.reasoningMs} response={stream.response} reads={stream.reads} live={!stream.response} /> : null}
+          {activeRunId && stream?.chat !== conversationId ? <AiMessageCard text="" reads={run?.reads} live><p role="status" className="text-xs text-slate-600">{run?.task === "sessionReview" ? copy.ai.processedBatches(run.completedBatches) : copy.ai.running}</p></AiMessageCard> : null}
+          {!activeRunId && run && (run.response || run.reads?.length) && ["FAILED", "CANCELLED", "INTERRUPTED"].includes(run.status) ? <AiMessageCard text="" createdAt={run.response?.startedAt} response={run.response} reads={run.reads}><p className="text-xs text-slate-600">{copy.ai.unfinishedAnswer}</p></AiMessageCard> : null}
           {run?.task === "sessionReview" && ["INTERRUPTED", "FAILED", "CANCELLED", "INVALID_RESULT"].includes(run.status) ? <div className="space-y-2"><p className="text-xs text-slate-500">{copy.ai.continuingHint}</p><Button variant="outline" onClick={() => void aiApi("runs/" + run.id + "/resume", "POST", {}).then(loadChats).catch((e) => setError(e.message))}>{copy.ai.continue}</Button></div> : null}
           {context ? <ContextSources key={context.id} context={context} /> : null}
           {error ? <p role="alert" className="text-sm text-red-600">{error}</p> : null}
@@ -319,6 +336,7 @@ export function AiAssistantProvider({ children }: { children: ReactNode }) {
             {activeRunId || busy ? <Button variant="outline" onClick={() => void stop()}><Square className="h-4 w-4" />{copy.ai.stop}</Button> : <Button disabled={!sendDraft.trim() || !endpoint} onClick={() => void send()}><Send className="h-4 w-4" />{copy.ai.send}</Button>}
           </div>
           <p className="text-xs text-slate-500">{copy.ai.contextHint}</p>
+          {context ? <div className="space-y-1"><CheckboxField checked={fixedMode} onChange={setFixedMode} disabled={busy || Boolean(activeRunId)}>{copy.ai.fixedMode}</CheckboxField><p className="text-xs text-slate-500">{copy.ai.fixedModeHint}</p></div> : null}
         </div>
       </div>
     </Dialog>

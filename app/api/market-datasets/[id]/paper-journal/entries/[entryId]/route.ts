@@ -8,6 +8,8 @@ import { replayJournalEntryUpdateSchema } from "@/lib/validations";
 import { AiError } from "@/lib/ai/errors";
 import { readContext } from "@/lib/ai/context";
 import { logicalId } from "@/lib/replay-sessions/identity";
+import { reviewFactsHash } from "@/lib/ai/review-baseline";
+import type { ContextValue } from "@/lib/ai/context";
 
 type RouteContext = { params: Promise<{ id: string; entryId: string }> };
 
@@ -61,18 +63,24 @@ async function handlePATCH(request: Request, context: RouteContext) {
   const scope = getReplayScope()!;
   if (parsed.data.expectedProjectionId && parsed.data.expectedProjectionId !== scope.projectionId)
     return NextResponse.json({ error: copy.ai.conflict }, { status: 409 });
+  let aiBaseline: ContextValue | null = null;
   if (parsed.data.aiSourceRunId) {
     const source = await prisma.aiMessage.findFirst({ where: { runId: parsed.data.aiSourceRunId, role: "assistant", status: "COMPLETED" } });
     const sourceContext = source?.contextId ? await readContext(source.contextId) : null;
     if (!sourceContext || sourceContext.replaySessionId !== scope.id || sourceContext.projectionId !== scope.projectionId
       || sourceContext.selectedEntryId !== entry.id || !source?.result)
       return NextResponse.json({ error: copy.ai.conflict }, { status: 409 });
+    aiBaseline = sourceContext;
   }
   let updated;
   try {
     updated = await prisma.$transaction(async (tx) => {
       const session = await tx.replaySession.findUnique({ where: { id: scope.id } });
       if (!session || session.activeProjectionId !== scope.projectionId) throw new AiError("CONFLICT", copy.ai.conflict, 409);
+      if (aiBaseline) {
+        const current = await tx.replayJournalEntry.findUnique({ where: { id: entry.id }, include: { setupOption: { select: { name: true } }, tradeReasons: { select: { id: true, name: true } } } });
+        if (!current || reviewFactsHash(current) !== reviewFactsHash(aiBaseline.entries[0])) throw new AiError("CONFLICT", copy.ai.conflict, 409);
+      }
       if (parsed.data.review !== undefined) {
         const changed = await tx.replayJournalEntry.updateMany({
           where: { id: entry.id, projectionId: scope.projectionId, review: parsed.data.expectedReview ?? entry.review },

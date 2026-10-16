@@ -1,4 +1,4 @@
-import { randomUUID } from "node:crypto";
+import { randomUUID, createHash } from "node:crypto";
 import { mkdir, readFile, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { prisma } from "@/lib/db";
@@ -23,12 +23,16 @@ export async function saveAsset(dataUrl: string, contextId?: string, chartHash?:
   }
   const id = randomUUID(); await mkdir(join(process.cwd(), "storage", "ai"), { recursive: true });
   await writeFile(assetPath(id), bytes, { flag: "wx" });
-  return prisma.aiAsset.create({ data: { id, mime: match[1], bytes: bytes.length, contextId, chartHash } });
+  return prisma.aiAsset.create({ data: { id, mime: match[1], bytes: bytes.length, contextId, chartHash, contentHash: createHash("sha256").update(bytes).digest("hex") } });
 }
-export async function assetDataUrl(id: string) {
+export async function assetDataUrl(id: string, signal?: AbortSignal) {
+  signal?.throwIfAborted();
   const row = await prisma.aiAsset.findUnique({ where: { id } });
   if (!row) throw new AiError("ASSET_MISSING", copy.ai.missing);
-  const bytes = await readFile(assetPath(id));
+  signal?.throwIfAborted();
+  const bytes = await readFile(assetPath(id), { signal });
+  signal?.throwIfAborted();
+  if (bytes.length !== row.bytes || (row.contentHash && createHash("sha256").update(bytes).digest("hex") !== row.contentHash)) throw new AiError("ASSET_MISMATCH", copy.ai.invalid);
   return "data:" + row.mime + ";base64," + bytes.toString("base64");
 }
 export async function readAsset(id: string) {

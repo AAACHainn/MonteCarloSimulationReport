@@ -4,7 +4,16 @@ import { AiError } from "./errors";
 import { LIMITS, outputJsonSchema, type Endpoint } from "./schema";
 import type { ResponseDetails } from "./response-details";
 
-export type ModelMessage = { role: "system" | "user" | "assistant"; content: string | Array<{ type: "text"; text: string } | { type: "image_url"; image_url: { url: string } }> };
+export type ToolRequest = { id: string; type: "function"; function: { name: string; arguments: string } };
+export type ToolDefinition = { type: "function"; function: { name: string; description: string; parameters: Record<string, unknown>; strict?: boolean } };
+export type ModelMessage = { role: "system" | "user" | "assistant" | "tool"; content: string | null | Array<{ type: "text"; text: string } | { type: "image_url"; image_url: { url: string } }>; tool_calls?: ToolRequest[]; tool_call_id?: string; reasoning_content?: string; reasoning?: string };
+export type ModelTurn = { content: string; usage: Usage; assistant: ModelMessage; finish: "stop" | "tool_calls" };
+export function modelRequest(endpoint: Endpoint, model: string, messages: ModelMessage[], json?: "reviewDraft" | "sessionReview", options: { tools?: ToolDefinition[]; closing?: boolean } = {}) {
+  return { model, messages: endpoint.adapterProfile === "deepseek" ? messages : messages.map((message) => { const wire = { ...message }; delete wire.reasoning_content; delete wire.reasoning; return wire; }),
+    stream: !(options.tools?.length && endpoint.toolTransport === "nonstream" && !options.closing), [endpoint.tokenParameter ?? "max_tokens"]: LIMITS.outputTokens,
+    ...(options.tools?.length ? { tools: options.tools, tool_choice: options.closing ? "none" : "auto" } : {}),
+    ...(json && endpoint.capabilities[model]?.structured === "SUPPORTED" ? { response_format: { type: "json_schema", json_schema: { name: json, strict: true, schema: outputJsonSchema(json) } } } : {}) };
+}
 export type Usage = { input: number | null; output: number | null };
 export function requestHeaders(endpoint: Endpoint) {
   const key = revealKey(endpoint.encryptedKey);
@@ -48,26 +57,47 @@ export async function generate(
   endpoint: Endpoint, model: string, messages: ModelMessage[], signal: AbortSignal,
   onDelta: (text: string) => void = () => undefined, json?: "reviewDraft" | "sessionReview",
   observer: { onReasoning?: (text: string) => void; onDetails?: (details: ResponseDetails) => void } = {},
-) {
+): Promise<{ content: string; usage: Usage }> {
+  const { content, usage } = await generateTurn(endpoint, model, messages, signal, onDelta, json, observer);
+  return { content, usage };
+}
+export async function generateTurn(
+  endpoint: Endpoint, model: string, messages: ModelMessage[], signal: AbortSignal,
+  onDelta: (text: string) => void = () => undefined, json?: "reviewDraft" | "sessionReview",
+  observer: { onReasoning?: (text: string) => void; onDetails?: (details: ResponseDetails) => void } = {},
+  options: { tools?: ToolDefinition[]; closing?: boolean } = {},
+): Promise<ModelTurn> {
   const started = Date.now();
   let reasoning = "", reasoningEnded: number | null = null;
   try {
     const combined = AbortSignal.any([signal, AbortSignal.timeout(LIMITS.modelMs)]);
     let response: Response;
+    const body = modelRequest(endpoint, model, messages, json, options), stream = body.stream;
     try {
       response = await fetch(endpointUrls(endpoint).chat, {
         method: "POST", redirect: "error", signal: combined, headers: requestHeaders(endpoint),
-        body: JSON.stringify({ model, messages, stream: true, [endpoint.tokenParameter ?? "max_tokens"]: LIMITS.outputTokens,
-          ...(json && endpoint.capabilities[model]?.structured === "SUPPORTED" ? { response_format: { type: "json_schema", json_schema: { name: json, strict: true, schema: outputJsonSchema(json) } } } : {}),
-        }),
+        body: JSON.stringify(body),
       });
     } catch { signal.throwIfAborted(); throw new AiError("NETWORK", copy.ai.interrupted, 502); }
-    if (!response.ok) { await response.body?.cancel(); throw new AiError("UPSTREAM", response.status === 401 || response.status === 403 ? copy.ai.auth : copy.ai.remote, 502); }
+    if (!response.ok) { await response.body?.cancel(); throw new AiError(options.tools?.length && [400, 422].includes(response.status) ? "TOOLS_REJECTED" : "UPSTREAM", response.status === 401 || response.status === 403 ? copy.ai.auth : options.tools?.length && [400, 422].includes(response.status) ? copy.ai.toolsRejected : copy.ai.remote, 502); }
     if (!response.body) throw new AiError("INCOMPLETE", copy.ai.incomplete, 502);
     let content = "", finish: string | null = null, done = false;
+    const calls = new Map<number, ToolRequest>();
+    const thoughtFields: Record<string, string> = {};
     let usage: Usage = { input: null, output: null };
     try {
-      for await (const data of sseData(response.body, combined)) {
+      async function* chunks() {
+        if (stream) yield* sseData(response.body!, combined);
+        else {
+          const value = await boundedJson(response, 1024 * 1024);
+          const choice = value.choices?.[0];
+          if (!choice?.message || choice.message.role !== "assistant") throw new AiError("PROTOCOL", copy.ai.incomplete, 502);
+          const tool_calls = choice.message.tool_calls?.map((c: ToolRequest, index: number) => ({ ...c, index }));
+          yield JSON.stringify({ ...value, choices: [{ ...choice, delta: { ...choice.message, tool_calls } }] });
+          yield "[DONE]";
+        }
+      }
+      for await (const data of chunks()) {
         if (data === "[DONE]") { done = true; break; }
         let chunk;
         try { chunk = JSON.parse(data); } catch { throw new AiError("PROTOCOL", copy.ai.incomplete, 502); }
@@ -77,25 +107,58 @@ export async function generate(
           output: Number.isFinite(chunk.usage.completion_tokens) ? chunk.usage.completion_tokens : null,
         };
         const choice = chunk.choices?.[0];
-        if (choice?.delta?.tool_calls || choice?.delta?.refusal) throw new AiError("PROTOCOL", copy.ai.incomplete, 502);
+        if (chunk.choices?.length > 1 || (choice?.delta?.role && choice.delta.role !== "assistant")
+          || (finish && (choice?.delta?.content || choice?.delta?.reasoning_content || choice?.delta?.reasoning || choice?.delta?.tool_calls || choice?.finish_reason))) throw new AiError("PROTOCOL", copy.ai.incomplete, 502);
+        if (choice?.delta?.refusal || choice?.message?.refusal) throw new AiError("PROTOCOL", copy.ai.incomplete, 502);
+        if (choice?.delta?.tool_calls) {
+          if (!options.tools?.length || finish || !Array.isArray(choice.delta.tool_calls)) throw new AiError("PROTOCOL", copy.ai.incomplete, 502);
+          for (const part of choice.delta.tool_calls) {
+            if (!Number.isInteger(part.index) || part.index < 0 || part.index > 3 || (part.type && part.type !== "function")) throw new AiError("PROTOCOL", copy.ai.incomplete, 502);
+            const call = calls.get(part.index) ?? { id: "", type: "function" as const, function: { name: "", arguments: "" } };
+            if (part.id !== undefined) {
+              if (typeof part.id !== "string" || (call.id && call.id !== part.id)) throw new AiError("PROTOCOL", copy.ai.incomplete, 502);
+              call.id = part.id;
+            }
+            if (part.function?.name !== undefined) {
+              if (typeof part.function.name !== "string" || (call.function.name && call.function.name !== part.function.name)) throw new AiError("PROTOCOL", copy.ai.incomplete, 502);
+              call.function.name = part.function.name;
+            }
+            if (part.function?.arguments !== undefined) {
+              if (typeof part.function.arguments !== "string") throw new AiError("PROTOCOL", copy.ai.incomplete, 502);
+              call.function.arguments += part.function.arguments;
+            }
+            if (Buffer.byteLength(call.function.arguments) > 16384 || call.id.length > 160 || call.function.name.length > 100) throw new AiError("PROTOCOL", copy.ai.incomplete, 502);
+            calls.set(part.index, call);
+          }
+          if ([...calls.values()].reduce((n, call) => n + call.function.arguments.length, 0) + content.length + reasoning.length > LIMITS.outputChars) throw new AiError("OUTPUT_LIMIT", copy.ai.budget);
+        }
         // Only consume text explicitly exposed by the service; opaque reasoning is ignored.
         const thought = choice?.delta?.reasoning_content ?? choice?.delta?.reasoning;
+        const argumentChars = [...calls.values()].reduce((n, call) => n + call.function.arguments.length, 0);
         if (typeof thought === "string" && thought) {
-          if (content.length + reasoning.length + thought.length > LIMITS.outputChars) throw new AiError("OUTPUT_LIMIT", copy.ai.budget);
+          if (content.length + reasoning.length + thought.length + argumentChars > LIMITS.outputChars) throw new AiError("OUTPUT_LIMIT", copy.ai.budget);
           reasoning += thought;
+          const field = typeof choice.delta.reasoning_content === "string" ? "reasoning_content" : "reasoning";
+          thoughtFields[field] = (thoughtFields[field] ?? "") + thought;
           observer.onReasoning?.(thought);
         }
         if (typeof choice?.delta?.content === "string" && choice.delta.content) {
           if (reasoningEnded === null) reasoningEnded = Date.now();
           content += choice.delta.content;
-          if (content.length + reasoning.length > LIMITS.outputChars) throw new AiError("OUTPUT_LIMIT", copy.ai.budget);
+          if (content.length + reasoning.length + argumentChars > LIMITS.outputChars) throw new AiError("OUTPUT_LIMIT", copy.ai.budget);
           onDelta(choice.delta.content);
         }
         if (choice?.finish_reason) finish = choice.finish_reason;
       }
       signal.throwIfAborted();
-      if (!done || finish !== "stop" || !content.trim()) throw new AiError("INCOMPLETE", copy.ai.incomplete, 502);
-      return { content, usage };
+      const toolCalls = [...calls].sort(([a], [b]) => a - b).map(([, c]) => c);
+      if (!done || !["stop", "tool_calls"].includes(finish ?? "") || (finish === "stop" && (!content.trim() || toolCalls.length))
+        || (finish === "tool_calls" && (!toolCalls.length || options.closing))) throw new AiError("INCOMPLETE", copy.ai.incomplete, 502);
+      if (new Set(toolCalls.map((c) => c.id)).size !== toolCalls.length || toolCalls.some((c) => !c.id || !c.function.name)) throw new AiError("PROTOCOL", copy.ai.incomplete, 502);
+      // JSON must be complete before any call can be persisted/executed.
+      for (const call of toolCalls) { try { JSON.parse(call.function.arguments); } catch { throw new AiError("PROTOCOL", copy.ai.incomplete, 502); } }
+      return { content, usage, finish: finish as ModelTurn["finish"], assistant: { role: "assistant", content: content || null,
+        ...(toolCalls.length ? { tool_calls: toolCalls } : {}), ...thoughtFields } };
     } catch (error) {
       if (error instanceof AiError) throw error;
       signal.throwIfAborted(); throw new AiError("NETWORK", copy.ai.interrupted, 502);

@@ -9,6 +9,7 @@ import type {
   PaperSide,
 } from "./types";
 import { closeLotsFifo, DEFAULT_PAPER_JOURNAL_CONTEXT, updateLotAdverseRisk } from "./journal";
+import { entryLotId } from "./journal-identity";
 
 const EPSILON = 1e-12;
 
@@ -236,7 +237,7 @@ export function advancePaperTrading(input: PaperAdvanceInput): PaperAdvanceResul
     }
     if (openedQuantity > EPSILON && !journalTrackingBlocked) {
       lots.push({
-        id: `lot_${fill.id}`,
+        id: entryLotId(fill.id),
         entryFillId: fill.id,
         ...(state.trainingGate ? { entryNetPnl: -feePerUnit * openedQuantity } : {}),
         ...(order.discipline ? { discipline: order.discipline } : {}),

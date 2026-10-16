@@ -1,4 +1,5 @@
-import { execFileSync } from "node:child_process";
+import { execFileSync, spawn } from "node:child_process";
+import { createServer } from "node:http";
 import { randomUUID } from "node:crypto";
 import { rmSync } from "node:fs";
 import { beforeAll, afterAll, afterEach, describe, expect, it, vi } from "vitest";
@@ -19,6 +20,12 @@ import { createReplaySession } from "@/lib/replay-sessions/service";
 import { PATCH as updateEntry } from "@/app/api/market-datasets/[id]/paper-journal/entries/[entryId]/route";
 import { POST as aiPOST, GET as aiGET } from "@/app/api/ai/[...path]/route";
 import { LIMITS, skillKeys, type RunInput } from "./schema";
+import { executeReadTool, emptyFilters, scopeManifest, tradeRef, type ToolScope } from "./tools";
+import { generateTurn } from "./provider";
+import { executeChartTool, chartRef } from "./chart-tools";
+import { coverageLedger } from "./program-evidence";
+import { saveAsset } from "./assets";
+import { entryLotId, fifoRowId } from "@/lib/paper-trading/journal-identity";
 let file = "", sessionId = "", projectionId = "", entryId = "";
 const base = new Date("2026-10-01T00:00:00Z");
 beforeAll(async () => {
@@ -70,10 +77,237 @@ async function configure() {
   settings.activeEndpointId = "local";
   return saveSettings(settings, old.version);
 }
-async function makeRun(contextId?: string, task: RunInput["task"] = "globalAssistant") {
+async function makeRun(contextId?: string, task: RunInput["task"] = "globalAssistant", executionMode: RunInput["executionMode"] = "fixed-v1") {
   const chat = await prisma.aiConversation.create({ data: { name: "test" } });
-  return createRun({ conversationId: chat.id, contextId, task, question: "整理复盘", assetIds: [], chartImages: false, requestId: randomUUID() });
+  return createRun({ conversationId: chat.id, contextId, task, executionMode, question: "整理复盘", assetIds: [], chartImages: false, requestId: randomUUID() });
 }
+function toolResponse(calls: Array<{ id: string; name: string; args: unknown }>, reasoning = "真实返回的思考") {
+  const chunks = [{ choices: [{ delta: { reasoning_content: reasoning } }] },
+    ...calls.map((c, index) => ({ choices: [{ delta: { tool_calls: [{ index, id: c.id, type: "function", function: { name: c.name, arguments: JSON.stringify(c.args) } }] } }] })),
+    { choices: [{ delta: {}, finish_reason: "tool_calls" }] }];
+  return new Response(chunks.map((c) => "data: " + JSON.stringify(c) + "\r\n\r\n").join("") + "data: [DONE]\r\n\r\n");
+}
+describe("A: scoped read tools and persisted protocol", () => {
+  it("completes a multi-call DeepSeek-shaped loop with matching IDs, reasoning and actual-read sources", async () => {
+    await configure();
+    const settings = await readSettings(); settings.value.endpoints[0].adapterProfile = "deepseek"; await saveSettings(settings.value, settings.version);
+    const ctx = await createContext({ replaySessionId: sessionId, projectionId, entryId, depth: "quick", draft: "" });
+    const run = await makeRun(ctx.id, "reviewDraft", "tools-v1");
+    const mock = vi.fn().mockImplementation(async (_url, options) => {
+      const request = JSON.parse(options.body);
+      if (mock.mock.calls.length === 1) {
+        const manifest = JSON.parse(request.messages.at(-1).content).scopeManifest;
+        expect(JSON.stringify(request.messages)).not.toContain(ctx.entries[0].review);
+        return toolResponse([{ id: "facts-call", name: "get_trade_record", args: { tradeRef: manifest.selection.selectedTradeRef, sections: ["facts"], cursor: null, limit: null } }, { id: "template-call", name: "get_review_template", args: {} }]);
+      }
+      expect(request.messages.find((m: { role: string }) => m.role === "assistant").reasoning_content).toBe("真实返回的思考");
+      const results = request.messages.filter((m: { role: string }) => m.role === "tool");
+      expect(results.map((r: { tool_call_id: string }) => r.tool_call_id)).toEqual(["facts-call", "template-call"]);
+      expect(JSON.parse(results[1].content).data.draft.text).toBe("");
+      return streamResponse(JSON.stringify({ draft: "事实复盘，动机未记录。", analysis: "资料限制。", sources: [JSON.parse(results[0].content).sources[0].sourceRef], missing: ["原计划未记录"] }));
+    });
+    vi.stubGlobal("fetch", mock); await executeRun(run.id);
+    expect((await prisma.aiRun.findUniqueOrThrow({ where: { id: run.id } })).status).toBe("COMPLETED");
+    expect(await prisma.aiRunStep.count({ where: { runId: run.id, status: "COMPLETED" } })).toBe(2);
+    expect(await prisma.aiToolCall.count({ where: { runId: run.id, status: "COMPLETED" } })).toBe(2);
+    expect(await prisma.aiMessage.count({ where: { runId: run.id, role: "assistant" } })).toBe(1);
+  });
+  it("rejects unearned adoption, unregistered tools, foreign references and mismatched cursors", async () => {
+    await configure(); const ctx = await createContext({ replaySessionId: sessionId, projectionId, entryId, depth: "quick" });
+    const scope: ToolScope = { id: "one", secret: "secret-one", context: ctx }, signal = new AbortController().signal;
+    expect(executeReadTool(scope, "list_trade_records", { filters: emptyFilters, cursor: null, limit: 1 }, signal).error?.code).toBe("OUT_OF_SCOPE");
+    expect(executeReadTool(scope, "get_trade_record", { tradeRef: "trade:other", sections: ["facts"], cursor: null, limit: null }, signal).error?.code).toBe("NOT_FOUND_IN_SCOPE");
+    expect(JSON.stringify(scopeManifest(scope))).not.toContain(ctx.entries[0].review);
+    const sessionScope: ToolScope = { ...scope, context: { ...ctx, selectedEntryId: undefined, entries: Array.from({ length: 55 }, (_, i) => ({ ...ctx.entries[0], logicalKey: "key" + i, no: i + 1, globalNo: i + 1 })) } };
+    const page = executeReadTool(sessionScope, "list_trade_records", { filters: emptyFilters, cursor: null, limit: 50 }, signal);
+    expect(Number(page.coverage.returnedRows)).toBeGreaterThan(0);
+    expect(Number(page.coverage.returnedRows)).toBeLessThanOrEqual(50);
+    expect(executeReadTool(sessionScope, "list_trade_records", { filters: { ...emptyFilters, direction: "SHORT" }, cursor: page.nextCursor, limit: 50 }, signal).error?.code).toBe("INVALID_CURSOR");
+    let next = page;
+    while (next.nextCursor) next = executeReadTool(sessionScope, "list_trade_records", { filters: emptyFilters, cursor: next.nextCursor, limit: 50 }, signal);
+    expect(next.coverage.returnedSoFar).toBe(55);
+    const facts = executeReadTool(scope, "get_trade_record", { tradeRef: tradeRef(scope, ctx.entries[0]), sections: ["facts"], cursor: null, limit: null }, signal);
+    expect(facts.ok && facts.data.review).toBeUndefined();
+    const run = await makeRun(ctx.id, "reviewDraft", "tools-v1");
+    vi.stubGlobal("fetch", vi.fn().mockResolvedValue(streamResponse(JSON.stringify({ draft: "不应采用", analysis: "", sources: [], missing: [] }))));
+    await executeRun(run.id); expect((await prisma.aiRun.findUniqueOrThrow({ where: { id: run.id } })).status).toBe("INVALID_RESULT");
+  });
+  it("rejects partial/duplicate protocol calls before execution and permits nonstream policy chosen in advance", async () => {
+    const endpoint = (await configure()).value.endpoints[0];
+    const tools = [{ type: "function" as const, function: { name: "get_review_template", description: "template", parameters: {} } }];
+    const signal = new AbortController().signal;
+    vi.stubGlobal("fetch", vi.fn().mockResolvedValue(toolResponse([{ id: "same", name: "get_review_template", args: {} }, { id: "same", name: "get_review_template", args: {} }])));
+    await expect(generateTurn(endpoint, "test", [], signal, undefined, undefined, {}, { tools })).rejects.toMatchObject({ code: "PROTOCOL" });
+    vi.stubGlobal("fetch", vi.fn().mockResolvedValue(Response.json({ choices: [{ finish_reason: "tool_calls", message: { role: "assistant", content: null, reasoning_content: "保留", tool_calls: [{ id: "one", type: "function", function: { name: "get_review_template", arguments: "{}" } }] } }] })));
+    const turn = await generateTurn({ ...endpoint, toolTransport: "nonstream" }, "test", [], signal, undefined, undefined, {}, { tools });
+    expect(turn.assistant.reasoning_content).toBe("保留"); expect(turn.finish).toBe("tool_calls");
+    await expect(createContext({ replaySessionId: sessionId, projectionId, entryId, depth: "quick", draft: "😀".repeat(2001) })).rejects.toMatchObject({ code: "DRAFT_TOO_LONG" });
+    expect((await createContext({ replaySessionId: sessionId, projectionId, entryId, depth: "quick", draft: "😀".repeat(2000) })).originalDraft).toHaveLength(4000);
+  });
+});
+describe("B: frozen multi-period charts", () => {
+  it.each(["generic", "deepseek"] as const)("delivers distinct prepared images with complete tool-result matching (%s)", async (adapterProfile) => {
+    await configure(); const settings = await readSettings(); settings.value.endpoints[0].adapterProfile = adapterProfile; await saveSettings(settings.value, settings.version);
+    const c = await createContext({ replaySessionId: sessionId, projectionId, entryId, depth: "quick", draft: "", timeframes: ["5m", "1h"] });
+    const png = "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+jL1cAAAAASUVORK5CYII=";
+    for (const ch of c.charts) await saveAsset(png, c.id, ch.hash);
+    const chat = await prisma.aiConversation.create({ data: { name: "images" } });
+    const run = await createRun({ conversationId: chat.id, contextId: c.id, task: "globalAssistant", question: "看两个周期", chartImages: true, assetIds: [], requestId: randomUUID() });
+    const mock = vi.fn().mockImplementation(async (_url, options) => {
+      const request = JSON.parse(options.body);
+      if (mock.mock.calls.length === 1) {
+        const manifest = JSON.parse(request.messages.at(-1).content).scopeManifest;
+        return toolResponse([{ id: "images", name: "get_chart_context", args: { chartRef: manifest.selection.chartRef, timeframes: ["5m", "1h"], includeImage: true, cursor: null, limit: 120 } }]);
+      }
+      const results = request.messages.filter((m: { role: string }) => m.role === "tool");
+      expect(results).toHaveLength(1); expect(results[0].tool_call_id).toBe("images");
+      const imageMessages = request.messages.filter((m: { content: unknown }) => Array.isArray(m.content) && m.content.some((p: { type: string }) => p.type === "image_url"));
+      expect(imageMessages.every((m: { role: string }) => m.role === (adapterProfile === "deepseek" ? "tool" : "user"))).toBe(true);
+      expect(imageMessages.flatMap((m: { content: Array<{ type: string }> }) => m.content.filter((p) => p.type === "image_url"))).toHaveLength(2);
+      return streamResponse("已读取两个各自冻结的周期图，形成柱截至同一序号。");
+    });
+    vi.stubGlobal("fetch", mock); await executeRun(run.id);
+    const call = await prisma.aiToolCall.findFirstOrThrow({ where: { runId: run.id } });
+    expect(JSON.parse(call.receipts).filter((r: { evidenceKind: string }) => r.evidenceKind === "CHART_IMAGE")).toHaveLength(2);
+    expect((await prisma.aiRun.findUniqueOrThrow({ where: { id: run.id } })).status).toBe("COMPLETED");
+  });
+  it("normalizes 60m/1h, preserves the shared cutoff and reports unprepared images truthfully", async () => {
+    const c = await createContext({ replaySessionId: sessionId, projectionId, entryId, depth: "quick", timeframes: ["5m", "1h"] });
+    const scope: ToolScope = { id: "chart-run", secret: "chart-secret", context: c }, signal = new AbortController().signal;
+    const raw = { chartRef: chartRef(scope, c.entries[0]), timeframes: ["5m", "60m", "1h"], cursor: null, limit: 120, includeImage: true };
+    const response = await executeChartTool(scope, c.id, raw, signal, []);
+    expect(response.result.ok).toBe(true);
+    const charts = response.result.ok ? response.result.data.charts as Array<{ timeframe: string; cutoffSequence: number; bars: Array<{ lastSequence: number; status: string }>; imageStatus: string; windowHash: string }> : [];
+    expect(charts.map((ch) => ch.timeframe)).toEqual(["5m", "1h"]);
+    expect(charts.every((ch) => ch.cutoffSequence === 3 && ch.bars.every((b) => b.lastSequence <= 3 && b.status === "FORMING"))).toBe(true);
+    expect(new Set(charts.map((ch) => ch.windowHash)).size).toBe(2);
+    expect(charts.every((ch) => ch.imageStatus === "IMAGE_NOT_PREPARED")).toBe(true);
+    expect(response.result.sources.every((s) => !s.imageAttached)).toBe(true);
+    expect(JSON.stringify(response)).not.toContain("98765432");
+    for (const timeframes of [[], ["1s"], ["1m", "5m", "15m", "1h", "4h"]]) expect((await executeChartTool(scope, c.id, { ...raw, timeframes }, signal, [])).result.ok).toBe(false);
+    const before = await prisma.aiChartVariant.count({ where: { contextId: c.id } });
+    await executeChartTool(scope, c.id, raw, signal, []);
+    expect(await prisma.aiChartVariant.count({ where: { contextId: c.id } })).toBe(before);
+    await prisma.marketDataset.update({ where: { id: c.datasetId }, data: { dataVersion: { increment: 1 } } });
+    try {
+      expect((await executeChartTool(scope, c.id, { ...raw, timeframes: ["15m"] }, signal, [])).result.error?.code).toBe("STALE_CONTEXT");
+      expect((await executeChartTool(scope, c.id, raw, signal, [])).result.ok).toBe(true);
+    } finally { await prisma.marketDataset.update({ where: { id: c.datasetId }, data: { dataVersion: c.dataVersion } }); }
+  });
+});
+describe("C: complete-session program scheduling with final tool verification", () => {
+  it("finishes a full chart analysis in the standalone worker using uploaded assets and a local HTTP model", async () => {
+    await configure();
+    const server = createServer(async (request, response) => {
+      const chunks: Buffer[] = []; for await (const part of request) chunks.push(Buffer.from(part));
+      const body = JSON.parse(Buffer.concat(chunks).toString());
+      const result = !body.tools ? streamResponse("已读取全部本批事实及预先上传的图片") : !body.messages.some((m: { role: string }) => m.role === "tool")
+        ? toolResponse([{ id: "worker-statistics", name: "get_session_statistics", args: { view: "overall", cursor: null, limit: null } }])
+        : streamResponse(JSON.stringify({ summary: "完整会话已覆盖；候选结论仍需下个会话验证。", rules: [], missing: [] }));
+      response.writeHead(200, { "Content-Type": "text/event-stream" }); response.end(await result.text());
+    });
+    await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
+    const address = server.address(); if (!address || typeof address === "string") throw new Error("No local model port");
+    const settings = await readSettings(); settings.value.endpoints[0].baseUrl = "http://127.0.0.1:" + address.port + "/v1"; await saveSettings(settings.value, settings.version);
+    const context = await createContext({ replaySessionId: sessionId, projectionId, depth: "full" });
+    const png = "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+jL1cAAAAASUVORK5CYII=";
+    for (const chart of context.charts) await saveAsset(png, context.id, chart.hash);
+    const before = (await prisma.replayJournalEntry.findUniqueOrThrow({ where: { id: entryId } })).review;
+    const run = await makeRun(context.id, "sessionReview", "tools-v1");
+    const child = spawn(process.execPath, ["--import", "tsx", "scripts/ai-analysis-worker.ts", run.id], { env: { ...process.env, DATABASE_URL: "file:" + file, MARKET_DATA_SYNC_ENABLED: "0" }, windowsHide: true, stdio: "ignore" });
+    const timeout = setTimeout(() => child.kill(), 20000);
+    try {
+      const code = await new Promise<number | null>((resolve, reject) => { child.on("exit", resolve); child.on("error", reject); });
+      expect(code).toBe(0);
+      const saved = await prisma.aiRun.findUniqueOrThrow({ where: { id: run.id } });
+      expect(saved.status).toBe("COMPLETED");
+      expect(coverageLedger(context, JSON.parse(saved.checkpoint).flatMap((p: { coverage?: unknown }) => p.coverage ? [p.coverage] : []))).toMatchObject({ complete: true, readImages: context.charts.length, missingImages: 0 });
+      expect((await prisma.replayJournalEntry.findUniqueOrThrow({ where: { id: entryId } })).review).toBe(before);
+    } finally { clearTimeout(timeout); if (child.exitCode === null) child.kill(); await new Promise<void>((resolve) => server.close(() => resolve())); await configure(); }
+  }, 30000);
+  it("compares fixed-data and tool mode for the same question and frozen scope using a local protocol fixture", async () => {
+    await configure(); const context = await createContext({ replaySessionId: sessionId, projectionId, entryId, depth: "quick", draft: "" });
+    const results: Array<{ mode: string; status: string; calls: number; estimatedChars: number; durationMs: number; usage: unknown }> = [];
+    for (const mode of ["fixed-v1", "tools-v1"] as const) {
+      const run = await makeRun(context.id, "reviewDraft", mode), started = Date.now();
+      const mock = vi.fn().mockImplementation(async (_url, options) => {
+        const request = JSON.parse(options.body);
+        if (request.tools && !request.messages.some((m: { role: string }) => m.role === "tool")) {
+          const manifest = JSON.parse(request.messages.at(-1).content).scopeManifest;
+          return toolResponse([{ id: "compare-facts", name: "get_trade_record", args: { tradeRef: manifest.selection.selectedTradeRef, sections: ["facts"], cursor: null, limit: null } }, { id: "compare-template", name: "get_review_template", args: {} }]);
+        }
+        const factResult = request.messages.find((m: { role: string; tool_call_id?: string }) => m.role === "tool" && m.tool_call_id === "compare-facts");
+        return streamResponse(JSON.stringify({ draft: "交易事实已核对；原计划与情绪未记录。", analysis: "仅使用本次资料。", sources: [factResult ? JSON.parse(factResult.content).sources[0].sourceRef : context.entries[0].sourceId], missing: ["原计划与情绪未记录"] }));
+      });
+      vi.stubGlobal("fetch", mock); await executeRun(run.id);
+      const saved = await prisma.aiRun.findUniqueOrThrow({ where: { id: run.id } });
+      results.push({ mode, status: saved.status, calls: saved.calls, estimatedChars: JSON.parse(saved.snapshot).estimatedChars, durationMs: Date.now() - started, usage: JSON.parse(saved.usage) });
+    }
+    expect(results.map((r) => r.status)).toEqual(["COMPLETED", "COMPLETED"]);
+    expect(results.map((r) => r.calls)).toEqual([1, 2]);
+    expect(results.every((r) => r.estimatedChars > 0 && r.durationMs >= 0)).toBe(true);
+    console.info("AI_LOCAL_MODE_COMPARISON", JSON.stringify(results));
+  });
+  it("resumes completed tool protocol units without repeating paid extraction or tool results", async () => {
+    await configure(); const c = await createContext({ replaySessionId: sessionId, projectionId, depth: "quick" });
+    const run = await makeRun(c.id, "sessionReview", "tools-v1");
+    const first = vi.fn().mockResolvedValueOnce(streamResponse("完整批次"))
+      .mockResolvedValueOnce(toolResponse([{ id: "resume-statistics", name: "get_session_statistics", args: { view: "overall", cursor: null, limit: null } }]))
+      .mockRejectedValueOnce(new Error("unknown paid request outcome"));
+    vi.stubGlobal("fetch", first); await executeRun(run.id);
+    expect((await prisma.aiRun.findUniqueOrThrow({ where: { id: run.id } })).status).toBe("FAILED");
+    await resumeRun(run.id);
+    const resumed = vi.fn().mockImplementation(async (_url, options) => {
+      const request = JSON.parse(options.body); expect(request.messages.filter((m: { role: string }) => m.role === "tool")).toHaveLength(1);
+      return streamResponse(JSON.stringify({ summary: "显式继续后的完整报告", rules: [], missing: ["未审图"] }));
+    });
+    vi.stubGlobal("fetch", resumed); await executeRun(run.id);
+    expect(resumed).toHaveBeenCalledTimes(1);
+    expect(await prisma.aiToolCall.count({ where: { runId: run.id } })).toBe(1);
+    const saved = await prisma.aiRun.findUniqueOrThrow({ where: { id: run.id } }); expect(saved.status).toBe("COMPLETED"); expect(saved.calls).toBe(4);
+    expect(JSON.parse(saved.usage)[2]).toEqual({ input: null, output: null });
+  });
+  it("reserves the sixth model request for closing and never silently retries a paid error", async () => {
+    await configure(); const c = await createContext({ replaySessionId: sessionId, projectionId, entryId, depth: "quick" });
+    const run = await makeRun(c.id, "globalAssistant", "tools-v1");
+    const mock = vi.fn().mockImplementation(async (_url, options) => JSON.parse(options.body).tool_choice === "none" ? streamResponse("读取达到上限，仅就已读部分回答。") : toolResponse([{ id: "loop-" + mock.mock.calls.length, name: "get_review_template", args: {} }]));
+    vi.stubGlobal("fetch", mock); await executeRun(run.id);
+    expect(mock).toHaveBeenCalledTimes(6); expect(await prisma.aiToolCall.count({ where: { runId: run.id } })).toBe(5);
+    const failed = await makeRun(c.id, "globalAssistant", "tools-v1"), network = vi.fn().mockRejectedValue(new Error("connection unknown"));
+    vi.stubGlobal("fetch", network); await executeRun(failed.id);
+    expect(network).toHaveBeenCalledTimes(1); expect((await prisma.aiRun.findUniqueOrThrow({ where: { id: failed.id } })).status).toBe("FAILED");
+  });
+  it("covers every frozen row including empty reviews, then shares the tool loop budget and evidence chain", async () => {
+    await configure(); const original = await createContext({ replaySessionId: sessionId, projectionId, depth: "quick" });
+    const context = { ...original, template: { id: "selected-session-template", name: "本次选用", content: "原计划\n执行\n改进" }, entries: Array.from({ length: 9 }, (_, i) => ({ ...original.entries[0], id: "session-row:" + i, logicalKey: "session-key:" + i, no: i + 1, globalNo: i + 1, review: i === 0 ? "已写笔记" : "" })) };
+    const fixed = await prisma.aiContext.create({ data: { value: JSON.stringify(context) } });
+    const run = await makeRun(fixed.id, "sessionReview", "tools-v1");
+    let source = "";
+    const mock = vi.fn().mockImplementation(async (_url, options) => {
+      const request = JSON.parse(options.body), last = request.messages.at(-1);
+      if (!request.tools) {
+        const batch = JSON.parse(last.content[0].text.split("REFERENCE_DATA:\n")[1]);
+        source ||= batch.records[0].sources[0];
+        expect(batch.records.every((r: { review?: unknown; facts?: unknown }) => r.review && r.facts)).toBe(true);
+        expect(batch.template.data.template.content).toBe("原计划\n执行\n改进");
+        return streamResponse("候选观察，来源 " + source);
+      }
+      if (!request.messages.some((m: { role: string }) => m.role === "tool")) {
+        const program = JSON.parse(request.messages.find((m: { content: unknown }) => typeof m.content === "string" && m.content.includes('"programInput"')).content).programInput;
+        expect(program.coverage).toMatchObject({ expectedRows: 9, factRows: 9, reviewedRows: 1, emptyReviewRows: 8, complete: true });
+        expect(program.overall.ok).toBe(true);
+        return toolResponse([{ id: "groups", name: "get_session_statistics", args: { view: "setup_direction", cursor: null, limit: null } }]);
+      }
+      return streamResponse(JSON.stringify({ summary: "覆盖全部 9 行；快速模式未审图。Setup 扣费净额暂不可用。", rules: [{ rule: "候选观察，尚需验证", supports: [source], counterexamples: [], validation: "下一会话记录支持与反例" }], missing: ["缺少独立反例"] }));
+    });
+    vi.stubGlobal("fetch", mock); await executeRun(run.id);
+    const complete = await prisma.aiRun.findUniqueOrThrow({ where: { id: run.id } });
+    expect(complete.status).toBe("COMPLETED"); expect(complete.calls).toBe(4);
+    expect(await prisma.aiRunStep.count({ where: { runId: run.id } })).toBe(4);
+    expect(JSON.parse(complete.checkpoint).flatMap((b: { coverage: { entryKeys: string[] } }) => b.coverage.entryKeys)).toHaveLength(9);
+    expect(coverageLedger(context, [])).toMatchObject({ complete: false, factRows: 0 });
+  });
+});
 describe("AI configuration and transport boundaries", () => {
   it("encrypts, rejects tampering and normalizes explicit version paths", () => {
     const cipher = protectKey("secret"); expect(cipher).not.toContain("secret"); expect(revealKey(cipher)).toBe("secret");
@@ -208,6 +442,34 @@ describe("AI configuration and transport boundaries", () => {
   });
 });
 describe("frozen review context and safe adoption", () => {
+  it("associates closed-lot fills by engine identity and paginates execution without widening a single-row scope", async () => {
+    const original = await prisma.replayJournalEntry.findUniqueOrThrow({ where: { id: entryId } });
+    const lotId = entryLotId("fill-1"), key = fifoRowId("fill-3", lotId, 0), rowId = "identity-fixture-" + randomUUID();
+    await prisma.replayJournalEntry.create({ data: { ...original, id: rowId, logicalKey: key, lotId, no: 99, accountNo: 99, entryPrice: 102, review: "" } });
+    try {
+      const context = await createContext({ replaySessionId: sessionId, projectionId, entryId: rowId, depth: "quick" });
+      context.events.push({ sourceId: "unrelated-cycle-event", cycleKey: context.entries[0].cycleKey ?? null, sequence: 2, kind: "ORDER_UPDATE", value: { sentinel: "UNLINKED_CYCLE_SENTINEL" } });
+      const scope: ToolScope = { id: "identity-scope", secret: "identity-scope-secret", context }, signal = new AbortController().signal;
+      const args = { tradeRef: tradeRef(scope, context.entries[0]), sections: ["facts", "execution"], cursor: null as string | null, limit: 1 };
+      const ids = new Set<string>(); let result;
+      do {
+        result = executeReadTool(scope, "get_trade_record", args, signal); expect(result.ok).toBe(true);
+        if (result.ok) {
+          const events = (result.data.execution as { events: Array<{ sourceId: string; attribution: string }> }).events;
+          for (const event of events) { expect(event.attribution).toBe("EXACT_ROW"); expect(ids.has(event.sourceId)).toBe(false); ids.add(event.sourceId); }
+          if (args.cursor) { expect(result.data.facts).toBeUndefined(); expect(result.data.previouslyReadAtomicSources).toBeDefined(); }
+        }
+        expect(JSON.stringify(result)).not.toContain("UNLINKED_CYCLE_SENTINEL");
+        args.cursor = result.nextCursor;
+      } while (args.cursor);
+      expect(ids.size).toBe(3);
+      expect(executeReadTool(scope, "get_trade_record", { ...args, sections: ["facts"], cursor: null, limit: null }, signal).coverage.complete).toBe(true);
+      await prisma.aiContext.update({ where: { id: context.id }, data: { value: JSON.stringify(context) } });
+      const run = await makeRun(context.id, "globalAssistant", "fixed-v1");
+      const mock = vi.fn().mockResolvedValue(streamResponse("仅使用可靠关联的执行记录。")); vi.stubGlobal("fetch", mock); await executeRun(run.id);
+      expect(mock.mock.calls[0][1].body).not.toContain("UNLINKED_CYCLE_SENTINEL");
+    } finally { await prisma.replayJournalEntry.delete({ where: { id: rowId } }); }
+  });
   it("never includes future sentinel values, including a forming higher-period candle", async () => {
     const fixed = await createContext({ replaySessionId: sessionId, projectionId, entryId, depth: "quick", draft: "正在编辑" });
     expect(JSON.stringify(fixed)).not.toContain("98765432");
