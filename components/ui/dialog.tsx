@@ -57,7 +57,7 @@ export function Dialog({ open, title, description, children, className, contentC
           className={cn("flex shrink-0 items-start gap-3 border-b px-5 py-4", framed && "cursor-move touch-none select-none focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring")}
         >
           <div className="min-w-0 flex-1">
-            <h2 id={titleId} className="text-lg font-semibold text-slate-950">{title}</h2>
+            <h2 id={titleId} className="break-words text-lg font-semibold text-slate-950">{title}</h2>
             {description ? <p id={descriptionId} className="mt-1 text-sm text-slate-600">{description}</p> : null}
           </div>
           <div className="flex shrink-0 items-center gap-2">

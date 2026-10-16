@@ -101,8 +101,8 @@ export function AiAssistantProvider({ children }: { children: ReactNode }) {
     try { const data = await aiApi<{ value: AiSettings }>("settings"); setConfig(data.value); } catch (e) { setError(e instanceof Error ? e.message : copy.ai.failed); }
   }, []);
   useEffect(() => {
-    if (!open) return;
     const refresh = () => { void loadConfig(); };
+    refresh();
     const storage = (event: StorageEvent) => { if (event.key === AI_SETTINGS_CHANGED_EVENT) refresh(); };
     window.addEventListener("focus", refresh);
     window.addEventListener(AI_SETTINGS_CHANGED_EVENT, refresh);
@@ -112,7 +112,7 @@ export function AiAssistantProvider({ children }: { children: ReactNode }) {
       window.removeEventListener(AI_SETTINGS_CHANGED_EVENT, refresh);
       window.removeEventListener("storage", storage);
     };
-  }, [open, loadConfig]);
+  }, [loadConfig]);
   const loadChats = useCallback(async () => {
     const data = await aiApi<Conversation[]>("conversations"); setConversations(data); return data;
   }, []);
@@ -363,6 +363,7 @@ export function AiAssistantProvider({ children }: { children: ReactNode }) {
     finally { setBusy(false); }
   }
   const endpoint = config?.endpoints.find((e) => e.id === config.activeEndpointId);
+  const assistantName = config?.personalization?.name ?? copy.ai.title;
   const sendDraft = drafts[conversationId] ?? "";
   const automaticPage = scopeMode === "page" ? pageScope : null;
   const scopeTitle = scopeMode === "none" ? copy.ai.generalChat : automaticPage
@@ -374,8 +375,8 @@ export function AiAssistantProvider({ children }: { children: ReactNode }) {
   const assistantValue = useMemo(() => ({ open, attach, registerEditor }), [open, attach, registerEditor]);
   return <Assistant.Provider value={assistantValue}>
     {children}
-    <AiAssistantLauncher hidden={open} onOpen={() => setOpen(true)} />
-    <Dialog open={open} keepMounted modal={false} movable resizable defaultWidth={680} defaultHeight={780} title={copy.ai.title} description={endpoint ? endpoint.name + " · " + endpoint.defaultModel : copy.ai.unconfigured}
+    <AiAssistantLauncher hidden={open} assistantName={assistantName} onOpen={() => setOpen(true)} />
+    <Dialog open={open} keepMounted modal={false} movable resizable defaultWidth={680} defaultHeight={780} title={assistantName} description={endpoint ? endpoint.name + " · " + endpoint.defaultModel : copy.ai.unconfigured}
       layerClassName="z-[60]" contentClassName="flex min-h-0 flex-1 flex-col p-0" widthStorageKey="ai-window-width-v1" heightStorageKey="ai-window-height-v1"
       headerActions={<><Button asChild size="icon" variant="ghost"><Link href="/settings/ai" target="_blank" rel="noopener noreferrer" aria-label={copy.ai.openSettings}><Settings className="h-4 w-4" aria-hidden="true" /></Link></Button><Button size="icon" variant="ghost" aria-label={copy.ai.minimize} onClick={() => setOpen(false)}><Minus className="h-4 w-4" aria-hidden="true" /></Button></>}
       onClose={() => void close()}>
@@ -402,7 +403,7 @@ export function AiAssistantProvider({ children }: { children: ReactNode }) {
               { icon: <ChartNoAxesCombined className="h-4 w-4 shrink-0" aria-hidden="true" />, text: copy.ai.suggestReport },
             ].map((item) => <Button key={item.text} variant="outline" className="h-auto min-h-10 justify-start whitespace-normal py-2 text-left text-slate-700" disabled={busy} onClick={() => { setDrafts((s) => ({ ...s, [conversationId]: item.text })); document.getElementById("ai-input")?.focus(); }}>{item.icon}{item.text}</Button>)}</div>
           </div> : null}
-          {messages.map((m) => <AiMessageCard key={m.id} role={m.role} text={m.content} createdAt={m.createdAt} reference={m.reference} response={m.response} reads={m.reads} budget={m.budget} images={m.images}>
+          {messages.map((m) => <AiMessageCard key={m.id} assistantName={assistantName} role={m.role} text={m.content} createdAt={m.createdAt} reference={m.reference} response={m.response} reads={m.reads} budget={m.budget} images={m.images}>
             <div className="flex flex-wrap gap-2">
               <Button variant="ghost" size="sm" onClick={() => void navigator.clipboard.writeText(m.content).then(() => setStatus(copy.ai.copied))}><Copy className="h-4 w-4" />{copy.ai.copy}</Button>
               {m.contextId ? <Button variant="ghost" size="sm" onClick={() => viewSources(m.contextId!)}>{copy.ai.sources}</Button> : null}
@@ -415,9 +416,9 @@ export function AiAssistantProvider({ children }: { children: ReactNode }) {
               {m.role === "user" ? <Button variant="ghost" size="sm" disabled={busy || Boolean(activeRunId)} onClick={() => { if (m.runId) void retry(m.runId); }}>{copy.ai.retry}</Button> : null}
             </div>
           </AiMessageCard>)}
-          {stream?.chat === conversationId && !messages.some((m) => m.role === "assistant" && m.runId === stream.runId) ? <AiMessageCard text={stream.text} createdAt={stream.startedAt} reasoning={stream.reasoning} reasoningMs={stream.response?.reasoningMs ?? stream.reasoningMs} response={stream.response} reads={stream.reads} images={mergeDisplayedImages(stream.images ?? [], run?.id === stream.runId ? run.images ?? [] : [])} budget={run?.id === stream.runId ? run.budget : undefined} live={!stream.response} /> : null}
-          {activeRunId && stream?.chat !== conversationId ? <AiMessageCard text="" reads={run?.reads} budget={run?.budget} images={run?.images} live><p role="status" className="text-xs text-slate-600">{run?.task === "sessionReview" ? copy.ai.processedBatches(run.completedBatches) : copy.ai.running}</p></AiMessageCard> : null}
-          {!activeRunId && run && ["FAILED", "CANCELLED", "INTERRUPTED"].includes(run.status) ? <AiMessageCard text="" createdAt={run.response?.startedAt} response={run.response} reads={run.reads} images={messages.some((m) => m.role === "assistant" && m.runId === run.id) ? [] : run.images} budget={run.budget}><p className="text-xs text-slate-600">{copy.ai.unfinishedAnswer}</p><Button variant="outline" disabled={busy || loadingChat} onClick={() => adjustLimits(run)}>{run.task === "sessionReview" ? copy.ai.adjustAndContinue : copy.ai.adjustAndRetry}</Button></AiMessageCard> : null}
+          {stream?.chat === conversationId && !messages.some((m) => m.role === "assistant" && m.runId === stream.runId) ? <AiMessageCard assistantName={assistantName} text={stream.text} createdAt={stream.startedAt} reasoning={stream.reasoning} reasoningMs={stream.response?.reasoningMs ?? stream.reasoningMs} response={stream.response} reads={stream.reads} images={mergeDisplayedImages(stream.images ?? [], run?.id === stream.runId ? run.images ?? [] : [])} budget={run?.id === stream.runId ? run.budget : undefined} live={!stream.response} /> : null}
+          {activeRunId && stream?.chat !== conversationId ? <AiMessageCard assistantName={assistantName} text="" reads={run?.reads} budget={run?.budget} images={run?.images} live><p role="status" className="text-xs text-slate-600">{run?.task === "sessionReview" ? copy.ai.processedBatches(run.completedBatches) : copy.ai.running}</p></AiMessageCard> : null}
+          {!activeRunId && run && ["FAILED", "CANCELLED", "INTERRUPTED"].includes(run.status) ? <AiMessageCard assistantName={assistantName} text="" createdAt={run.response?.startedAt} response={run.response} reads={run.reads} images={messages.some((m) => m.role === "assistant" && m.runId === run.id) ? [] : run.images} budget={run.budget}><p className="text-xs text-slate-600">{copy.ai.unfinishedAnswer}</p><Button variant="outline" disabled={busy || loadingChat} onClick={() => adjustLimits(run)}>{run.task === "sessionReview" ? copy.ai.adjustAndContinue : copy.ai.adjustAndRetry}</Button></AiMessageCard> : null}
           {run?.task === "sessionReview" && ["INTERRUPTED", "FAILED", "CANCELLED", "INVALID_RESULT"].includes(run.status) ? <div className="space-y-2"><p className="text-xs text-slate-500">{copy.ai.continuingHint}</p><Button variant="outline" disabled={busy || Boolean(activeRunId)} onClick={() => void retry(run.id, undefined, true)}>{copy.ai.continue}</Button></div> : null}
         </div>
         <div className="max-h-[60dvh] shrink-0 space-y-3 overflow-y-auto border-t bg-slate-50 p-3">
@@ -435,7 +436,7 @@ export function AiAssistantProvider({ children }: { children: ReactNode }) {
           {capturingRun && capturingRun === activeRunId ? <p role="status" className="flex items-center gap-2 text-xs text-slate-600"><Loader2 className="h-4 w-4 animate-spin motion-reduce:animate-none" aria-hidden="true" />{copy.ai.preparingChartImages}</p> : null}
           {assets.length ? <div className="flex max-h-24 gap-2 overflow-x-auto">{assets.map((id) => <Button key={id} variant="outline" className="h-auto p-1" aria-label={copy.ai.removeImage} onClick={() => setAssets((s) => s.filter((a) => a !== id))}><Image unoptimized width={96} height={64} className="h-16 max-w-24 object-contain" src={"/api/ai/assets/" + id} alt={copy.ai.imageHint} /></Button>)}</div> : null}
           <div className="space-y-2">
-          <Label htmlFor="ai-input" className="sr-only">{copy.ai.title}</Label>
+          <Label htmlFor="ai-input" className="sr-only">{assistantName}</Label>
           <Textarea id="ai-input" rows={3} maxLength={8000} value={sendDraft} disabled={loadingChat} placeholder={copy.ai.placeholder} className="min-h-20 max-h-40 resize-y" aria-describedby="ai-composer-hint"
             onChange={(e) => setDrafts((s) => ({ ...s, [conversationId]: e.target.value }))}
             onPaste={(e) => { if (e.clipboardData.files.length) { e.preventDefault(); void upload(e.clipboardData.files); } }}

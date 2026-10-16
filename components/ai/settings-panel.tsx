@@ -11,7 +11,7 @@ import { CheckboxField } from "@/components/ui/checkbox-field";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { copy } from "@/lib/i18n";
-import { skillKeys, type AiSettings, type Endpoint, type SkillKey } from "@/lib/ai/schema";
+import { personalizationSchema, skillKeys, type AiSettings, type Endpoint, type SkillKey } from "@/lib/ai/schema";
 import { DEFAULT_PROMPTS, defaultSettings } from "@/lib/ai/prompts";
 import { aiApi } from "./api";
 import { notifyAiSettingsChanged } from "./settings-events";
@@ -22,7 +22,7 @@ type PublicEndpoint = Endpoint & { hasApiKey?: boolean };
 type ConfigData = { value: AiSettings; version: number };
 export function AiSettingsPanel() {
   const [value, setValue] = useState<AiSettings>(defaultSettings);
-  const [version, setVersion] = useState(0), [tab, setTab] = useState<"models" | "skills" | "limits">("models");
+  const [version, setVersion] = useState(0), [tab, setTab] = useState<"models" | "skills" | "limits" | "personalization">("models");
   const [busy, setBusy] = useState(true), [loaded, setLoaded] = useState(false), [error, setError] = useState(""), [status, setStatus] = useState("");
   const savedConfig = useRef<ConfigData | null>(null);
   const [showKey, setShowKey] = useState<string | null>(null);
@@ -52,7 +52,12 @@ export function AiSettingsPanel() {
   function skillChange(id: SkillKey, patch: Partial<AiSettings["skills"][SkillKey]>) {
     setStatus(""); setValue((s) => ({ ...s, skills: { ...s.skills, [id]: { ...s.skills[id], ...patch } } }));
   }
+  const invalidName = !personalizationSchema.safeParse(value.personalization).success;
+  function changeAssistantName(name: string) {
+    setStatus(""); setError(""); setValue((s) => ({ ...s, personalization: { ...s.personalization, name } }));
+  }
   async function save() {
+    if (invalidName) { setTab("personalization"); requestAnimationFrame(() => document.getElementById("ai-assistant-name")?.focus()); return null; }
     setBusy(true); setError(""); setStatus("");
     try {
       if (!aiLimitsSchema.safeParse(value.limits ?? {}).success) throw new Error(copy.ai.invalidLimits);
@@ -85,6 +90,7 @@ export function AiSettingsPanel() {
         <Button variant={tab === "models" ? "default" : "ghost"} onClick={() => setTab("models")}>{copy.ai.models}</Button>
         <Button variant={tab === "skills" ? "default" : "ghost"} onClick={() => setTab("skills")}>{copy.ai.skills}</Button>
         <Button variant={tab === "limits" ? "default" : "ghost"} onClick={() => setTab("limits")}>{copy.ai.limits}</Button>
+        <Button variant={tab === "personalization" ? "default" : "ghost"} onClick={() => setTab("personalization")}>{copy.ai.personalization}</Button>
       </div>
       <p className="text-sm text-slate-600">{copy.ai.configHint}</p>
       <div className="space-y-4" aria-busy={busy}>
@@ -137,6 +143,16 @@ export function AiSettingsPanel() {
         </> : tab === "limits" ? <Card><CardHeader><CardTitle>{copy.ai.limits}</CardTitle></CardHeader><CardContent className="space-y-4">
           <p className="text-sm leading-6 text-slate-600">{copy.ai.limitsHint}</p>
           <AiLimitsFields value={{ ...resolveLimits(), ...value.limits }} disabled={busy} onChange={(limits) => { setStatus(""); setValue((s) => ({ ...s, limits })); }} />
+        </CardContent></Card> : tab === "personalization" ? <Card><CardHeader><CardTitle>{copy.ai.personalization}</CardTitle></CardHeader><CardContent className="space-y-4">
+          <div className="space-y-2">
+            <Label htmlFor="ai-assistant-name">{copy.ai.assistantName}</Label>
+            <Input id="ai-assistant-name" value={value.personalization.name} disabled={busy} required
+              aria-invalid={invalidName} aria-describedby={"ai-assistant-name-hint" + (invalidName ? " ai-assistant-name-error" : "")}
+              onChange={(event) => changeAssistantName(event.target.value)} />
+            <p id="ai-assistant-name-hint" className="text-xs text-slate-500">{copy.ai.assistantNameHint}</p>
+            {invalidName ? <p id="ai-assistant-name-error" role="alert" className="text-xs text-red-600">{copy.ai.invalidAssistantName}</p> : null}
+          </div>
+          <Button variant="outline" disabled={busy || value.personalization.name === copy.ai.title} onClick={() => changeAssistantName(copy.ai.title)}>{copy.ai.restoreAssistantName}</Button>
         </CardContent></Card> : skillKeys.map((key) => <Card key={key}><CardHeader><CardTitle>{copy.ai[key]}</CardTitle></CardHeader><CardContent className="space-y-4">
           <CheckboxField disabled={busy} checked={value.skills[key].enabled} onChange={(enabled) => skillChange(key, { enabled })}>{copy.ai.enabled}</CheckboxField>
           <div className="space-y-2"><Label htmlFor={"prompt-" + key}>{copy.ai.prompt}</Label><Textarea disabled={busy} id={"prompt-" + key} rows={6} value={value.skills[key].prompt} onChange={(e) => skillChange(key, { prompt: e.target.value })} /></div>

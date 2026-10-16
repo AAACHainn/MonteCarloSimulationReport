@@ -65,6 +65,8 @@ export function publicSettings(value: AiSettings) {
 }
 export async function saveSettings(input: unknown, expectedVersion: number) {
   const next = settingsSchema.parse(input), old = await readSettings();
+  // Older settings pages omit personalization when saving the rest of the form.
+  if ((input as Partial<AiSettings>).personalization === undefined) next.personalization = old.value.personalization;
   next.limits = resolveLimits(next.limits);
   if (old.version !== expectedVersion) throw new AiError("CONFIG_CONFLICT", copy.ai.conflict, 409);
   if (new Set(next.endpoints.map((e) => e.id)).size !== next.endpoints.length) throw new AiError("INVALID", copy.ai.invalid);

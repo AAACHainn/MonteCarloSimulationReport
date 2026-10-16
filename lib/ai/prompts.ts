@@ -1,4 +1,5 @@
 import type { AiSettings, SkillKey } from "./schema";
+import { copy } from "@/lib/i18n";
 
 export const EVIDENCE_RULES = [
   "你是交易练习与复盘助手。只使用本次提供的结构化事实、图表、用户笔记和来源ID。",
@@ -17,7 +18,7 @@ export const DEFAULT_PROMPTS: Record<SkillKey, string> = {
   sessionReview: "梳理全部提供的交易及笔记，分别评价扣费表现与执行质量。提出可验证的规则，保留反例和资料不足。严格输出JSON：{summary:报告正文,rules:[{rule:候选规则,supports:来源ID数组,counterexamples:来源ID数组,validation:后续验证动作}],missing:缺失信息数组}。仅输出JSON，不用代码围栏。",
 };
 export function defaultSettings(): AiSettings {
-  return { schemaVersion: 1, activeEndpointId: "", endpoints: [], skills: {
+  return { schemaVersion: 1, activeEndpointId: "", endpoints: [], personalization: { name: copy.ai.title }, skills: {
     globalAssistant: { enabled: true, prompt: DEFAULT_PROMPTS.globalAssistant },
     chartReading: { enabled: true, prompt: DEFAULT_PROMPTS.chartReading },
     reviewDraft: { enabled: true, prompt: DEFAULT_PROMPTS.reviewDraft },

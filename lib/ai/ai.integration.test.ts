@@ -35,6 +35,8 @@ import { relevantHistory } from "./history";
 import { DEFAULT_LIMITS, outputCharLimit } from "./limits";
 import { executeDisplayImages, loadDisplayedImages, retainInterruptedImageReply } from "./display-images";
 import type { DisplayedImage } from "./display-images-contract";
+import { personalizationSchema } from "./schema";
+import { copy } from "@/lib/i18n";
 let file = "", sessionId = "", projectionId = "", entryId = "";
 const base = new Date("2026-10-01T00:00:00Z");
 beforeAll(async () => {
@@ -816,6 +818,50 @@ describe("C: complete-session program scheduling with final tool verification", 
   });
 });
 describe("AI configuration and transport boundaries", () => {
+  it("defaults legacy assistant names and preserves a customized name when older clients save", async () => {
+    await configure();
+    const old = await readSettings();
+    const legacy: Record<string, unknown> = { ...old.value };
+    delete legacy.personalization;
+    await prisma.aiSetting.update({ where: { id: "config" }, data: { value: JSON.stringify(legacy) } });
+    expect((await readSettings()).value.personalization.name).toBe(copy.ai.title);
+    const renamed = await saveSettings({ ...old.value, personalization: { name: "交易搭子" } }, old.version);
+    const savedByOldClient = await saveSettings(legacy, renamed.version);
+    expect(savedByOldClient.value.personalization.name).toBe("交易搭子");
+    expect((await readSettings()).value.personalization.name).toBe("交易搭子");
+  });
+  it("persists trimmed display names through the settings API without calling a model or changing credentials", async () => {
+    await configure();
+    const old = await readSettings();
+    const mock = vi.fn(); vi.stubGlobal("fetch", mock);
+    const response = await aiPOST(new Request("http://localhost/api/ai/settings", {
+      method: "PUT", headers: { Origin: "http://localhost", "Content-Type": "application/json" },
+      body: JSON.stringify({ version: old.version, value: { ...old.value, personalization: { name: "  小智 🤖  " } } }),
+    }), { params: Promise.resolve({ path: ["settings"] }) });
+    expect(response.status).toBe(200);
+    const saved = await response.json();
+    expect(saved.value.personalization.name).toBe("小智 🤖");
+    expect(JSON.stringify(saved)).not.toContain("private-test-key");
+    expect(saved.value.endpoints[0].encryptedKey).toBeUndefined();
+    const read = await readSettings();
+    expect(read.value.personalization.name).toBe("小智 🤖");
+    expect(read.value.endpoints).toEqual(old.value.endpoints);
+    expect(read.value.skills).toEqual(old.value.skills);
+    await expect(saveSettings(old.value, old.version)).rejects.toMatchObject({ code: "CONFIG_CONFLICT" });
+    expect(mock).not.toHaveBeenCalled();
+    await saveSettings({ ...read.value, personalization: { name: copy.ai.title } }, read.version);
+    expect((await readSettings()).value.personalization.name).toBe(copy.ai.title);
+  });
+  it("validates assistant names by Unicode characters and rejects invalid saves without changing persisted settings", async () => {
+    expect(personalizationSchema.parse({ name: "🤖".repeat(32) }).name).toHaveLength(64);
+    for (const name of ["", "  ", "x".repeat(33), "🤖".repeat(33), "a\nb", "a\tb", "a\u0000b", "a\u2028b"]) {
+      expect(personalizationSchema.safeParse({ name }).success).toBe(false);
+    }
+    await configure();
+    const old = await readSettings();
+    await expect(saveSettings({ ...old.value, personalization: { name: " " } }, old.version)).rejects.toThrow();
+    expect(await readSettings()).toEqual(old);
+  });
   it("encrypts, rejects tampering and normalizes explicit version paths", () => {
     const cipher = protectKey("secret"); expect(cipher).not.toContain("secret"); expect(revealKey(cipher)).toBe("secret");
     expect(() => revealKey(cipher + "x")).toThrow();

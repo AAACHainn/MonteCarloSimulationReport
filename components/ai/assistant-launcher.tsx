@@ -11,7 +11,7 @@ const directions: Record<string, [number, number]> = { ArrowLeft: [-1, 0], Arrow
 const viewport = () => ({ width: document.documentElement.clientWidth, height: document.documentElement.clientHeight });
 type Drag = { pointerId: number; startX: number; startY: number; start: FloatingPosition; latest: FloatingPosition; moved: boolean };
 
-export function AiAssistantLauncher({ hidden, onOpen }: { hidden: boolean; onOpen: () => void }) {
+export function AiAssistantLauncher({ hidden, onOpen, assistantName = copy.ai.title }: { hidden: boolean; onOpen: () => void; assistantName?: string }) {
   const [position, setPosition] = useState<FloatingPosition | null>(null);
   const preferred = useRef<FloatingPosition | null>(null), drag = useRef<Drag | null>(null), suppressClick = useRef(false);
   const button = useRef<HTMLButtonElement>(null), hintId = useId();
@@ -59,7 +59,7 @@ export function AiAssistantLauncher({ hidden, onOpen }: { hidden: boolean; onOpe
   return <>
     <Button ref={button} type="button" size="icon" hidden={hidden} aria-hidden={hidden || undefined}
       className={"fixed z-[60] h-12 w-12 touch-none select-none rounded-lg shadow-lg cursor-grab active:cursor-grabbing" + (hidden ? " hidden" : "")}
-      style={position ? { left: position.x, top: position.y } : { right: 20, bottom: 20 }} aria-label={copy.ai.open} aria-describedby={hintId} title={copy.ai.moveLauncherHint}
+      style={position ? { left: position.x, top: position.y } : { right: 20, bottom: 20 }} aria-label={copy.ai.openNamedAssistant(assistantName)} aria-describedby={hintId} title={assistantName + " · " + copy.ai.moveLauncherHint}
       onPointerDown={(event) => {
         if (event.button !== 0 || !event.isPrimary || drag.current) return;
         const rect = event.currentTarget.getBoundingClientRect(), start = { x: rect.left, y: rect.top };

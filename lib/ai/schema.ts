@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { copy } from "@/lib/i18n";
 import { chartPreferencesSchema } from "./chart-contract";
 import { limitsOverrideSchema } from "./limits";
 
@@ -26,10 +27,19 @@ export type Endpoint = z.infer<typeof endpointSchema>;
 export const skillSchema = z.object({
   enabled: z.boolean(), prompt: z.string().max(16000),
 });
+export const personalizationSchema = z.object({
+  name: z.string().trim().min(1, copy.ai.invalidAssistantName)
+    .refine((name) => Array.from(name).length <= 32, copy.ai.invalidAssistantName)
+    .refine((name) => Array.from(name).every((character) => {
+      const code = character.codePointAt(0)!;
+      return code >= 32 && (code < 127 || code > 159) && code !== 0x2028 && code !== 0x2029;
+    }), copy.ai.invalidAssistantName),
+});
 export const settingsSchema = z.object({
   schemaVersion: z.literal(1), activeEndpointId: z.string().max(100),
   endpoints: z.array(endpointSchema).max(12),
   limits: limitsOverrideSchema.optional(),
+  personalization: personalizationSchema.default({ name: copy.ai.title }),
   skills: z.object({
     globalAssistant: skillSchema, chartReading: skillSchema,
     reviewDraft: skillSchema, sessionReview: skillSchema,

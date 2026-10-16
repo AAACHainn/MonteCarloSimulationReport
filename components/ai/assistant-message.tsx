@@ -36,17 +36,18 @@ function Elapsed({ startedAt, durationMs, live, thinking = false }: { startedAt?
   return <span className="tabular-nums" title={copy.ai.elapsedHint}>{thinking ? copy.ai.seconds(formatNumber(milliseconds / 1000)) : copy.ai.elapsed(formatNumber(milliseconds / 1000))}</span>;
 }
 
-export function AiMessageCard({ role = "assistant", text, createdAt, reference, response, budget, reads = [], images = [], live = false, reasoning = response?.reasoning ?? "", reasoningMs = response?.reasoningMs, children }: {
+export function AiMessageCard({ role = "assistant", assistantName = copy.ai.title, text, createdAt, reference, response, budget, reads = [], images = [], live = false, reasoning = response?.reasoning ?? "", reasoningMs = response?.reasoningMs, children }: {
   role?: string; text: string; createdAt?: string; reference?: string; response?: ResponseDetails | null;
   live?: boolean; reasoning?: string; reasoningMs?: number | null; children?: ReactNode;
   reads?: ReadEvent[];
   budget?: BudgetView;
   images?: DisplayedImage[];
+  assistantName?: string;
 }) {
   const user = role === "user", Icon = user ? UserRound : Bot;
   return <article className={"min-w-0 space-y-3 rounded-lg border p-3 text-left " + (user ? "ml-auto w-fit max-w-[95%] border-blue-100 bg-blue-50" : "mr-auto w-full border-slate-200 bg-slate-50")} aria-label={user ? copy.ai.userMessage : copy.ai.assistantMessage} aria-busy={live}>
     <header className="flex flex-wrap items-center gap-x-3 gap-y-1 text-xs text-slate-500">
-      <span className={"inline-flex items-center gap-1.5 font-medium " + (user ? "text-blue-700" : "text-slate-700")}><Icon className="h-4 w-4" aria-hidden="true" />{user ? copy.ai.you : copy.ai.title}</span>
+      <span className={"inline-flex min-w-0 max-w-full items-center gap-1.5 font-medium " + (user ? "text-blue-700" : "text-slate-700")}><Icon className="h-4 w-4 shrink-0" aria-hidden="true" /><span className="min-w-0 break-words">{user ? copy.ai.you : assistantName}</span></span>
       {createdAt ? <time dateTime={createdAt} className="tabular-nums">{new Date(createdAt).toLocaleString(defaultLocale, { year: "numeric", month: "2-digit", day: "2-digit", hour: "2-digit", minute: "2-digit", second: "2-digit", timeZoneName: "short" })}</time> : null}
       {!user ? <Elapsed startedAt={response?.startedAt ?? createdAt} durationMs={response?.durationMs} live={live} /> : null}
     </header>
