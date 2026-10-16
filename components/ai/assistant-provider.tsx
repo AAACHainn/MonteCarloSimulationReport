@@ -1,9 +1,7 @@
 "use client";
 import { createContext, memo, useCallback, useContext, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
-import { Bot, Settings, Minus, Plus, Pencil, Trash2, Eraser, Paperclip, Send, Square, Copy, Loader2 } from "lucide-react";
-import ReactMarkdown from "react-markdown";
+import { Settings, Minus, Plus, Pencil, Trash2, Eraser, Paperclip, Send, Square, Copy, Loader2 } from "lucide-react";
 import Image from "next/image";
-import remarkGfm from "remark-gfm";
 import Link from "next/link";
 import { Dialog } from "@/components/ui/dialog";
 import { ConfirmDialog } from "@/components/ui/confirm-dialog";
@@ -17,15 +15,19 @@ import { copy } from "@/lib/i18n";
 import { formatNumber, formatPercent } from "@/lib/format";
 import type { AiSettings, SkillKey } from "@/lib/ai/schema";
 import type { ContextValue } from "@/lib/ai/context";
+import type { ResponseDetails } from "@/lib/ai/response-details";
 import { aiApi } from "./api";
+import { AiAssistantLauncher } from "./assistant-launcher";
+import { AiMarkdown as Markdown, AiMessageCard } from "./assistant-message";
 import { AI_SETTINGS_CHANGED_EVENT } from "./settings-events";
 import { AiContextPicker, type AttachInput } from "./context-picker";
 import { captureContextCharts } from "./capture";
 
 type FixedContext = ContextValue & { id: string };
 type Conversation = { id: string; name: string; activeRunId: string | null };
-type Message = { id: string; role: string; content: string; contextId: string | null; result: string | null; runId: string | null; reference?: string };
-type Run = { id: string; status: string; task: string; contextId: string | null; error: string | null; endpoint: string; model: string; calls: number; completedBatches: number; estimatedChars: number; reference?: string; usage: Array<{ input: number | null; output: number | null }> };
+type Message = { id: string; role: string; content: string; contextId: string | null; result: string | null; runId: string | null; reference?: string; createdAt: string; response?: ResponseDetails | null };
+type Run = { id: string; status: string; task: string; contextId: string | null; error: string | null; endpoint: string; model: string; completedBatches: number; reference?: string; response?: ResponseDetails | null };
+type LiveResponse = { chat: string; runId: string; text: string; reasoning: string; startedAt: string; reasoningMs?: number; response?: ResponseDetails };
 export type AdoptPayload = { entryId: string; projectionId: string; replaySessionId: string; originalDraft: string; draft: string; sourceRunId: string };
 type AssistantContext = {
   open: boolean;
@@ -35,15 +37,6 @@ type AssistantContext = {
 const Assistant = createContext<AssistantContext | null>(null);
 export const useAiAssistant = () => useContext(Assistant);
 
-const Markdown = memo(function Markdown({ text }: { text: string }) {
-  return <div className="min-w-0 break-words text-sm leading-6 [&_code]:break-all [&_h1]:my-3 [&_h1]:text-lg [&_h1]:font-semibold [&_h2]:my-3 [&_h2]:font-semibold [&_h3]:my-2 [&_h3]:font-medium [&_li]:ml-4 [&_ol]:list-decimal [&_p]:mb-3 [&_pre]:overflow-x-auto [&_pre]:rounded-md [&_pre]:bg-slate-100 [&_pre]:p-3 [&_table]:w-full [&_td]:border [&_td]:p-2 [&_th]:border [&_th]:bg-slate-50 [&_th]:p-2 [&_ul]:list-disc">
-    <ReactMarkdown remarkPlugins={[remarkGfm]} components={{
-      img: () => null,
-      table: ({ children }) => <div className="mb-3 overflow-x-auto"><table>{children}</table></div>,
-      a: ({ href, children }) => <a href={href} target="_blank" rel="noopener noreferrer" className="text-blue-700 underline">{children}</a>,
-    }}>{text}</ReactMarkdown>
-  </div>;
-});
 const ContextSources = memo(function ContextSources({ context }: { context: FixedContext }) {
   const [images, setImages] = useState<Array<{ id: string; chartHash: string }>>([]);
   return <details className="text-xs" onToggle={(event) => {
@@ -71,7 +64,7 @@ export function AiAssistantProvider({ children }: { children: ReactNode }) {
   const [drafts, setDrafts] = useState<Record<string, string>>({}), [assets, setAssets] = useState<string[]>([]);
   const [chartImages, setChartImages] = useState(false);
   const [config, setConfig] = useState<AiSettings | null>(null), [task, setTask] = useState<SkillKey>("globalAssistant");
-  const [run, setRun] = useState<Run | null>(null), [stream, setStream] = useState<{ chat: string; text: string } | null>(null);
+  const [run, setRun] = useState<Run | null>(null), [stream, setStream] = useState<LiveResponse | null>(null);
   const [error, setError] = useState(""), [status, setStatus] = useState(""), [busy, setBusy] = useState(false);
   const [confirmation, setConfirmation] = useState<"clear" | "delete" | null>(null), [rename, setRename] = useState<string | null>(null);
   const [reports, setReports] = useState<Array<{ id: string; contextId: string; content: string; createdAt: string }>>([]);
@@ -166,8 +159,17 @@ export function AiAssistantProvider({ children }: { children: ReactNode }) {
   }, []);
   async function connectStream(id: string, chatId: string) {
     const controller = new AbortController(); streamAbort.current = controller;
-    let text = "", buffer = "", pending = "", flushTimer: ReturnType<typeof setTimeout> | undefined;
-    const flush = () => { text += pending; pending = ""; if (currentChat.current === chatId) setStream({ chat: chatId, text }); flushTimer = undefined; };
+    let value: LiveResponse = { chat: chatId, runId: id, text: "", reasoning: "", startedAt: new Date().toISOString() };
+    let buffer = "", pending = "", pendingReasoning = "", flushTimer: ReturnType<typeof setTimeout> | undefined;
+    const flush = () => {
+      const reasoning = value.reasoning + pendingReasoning;
+      value = { ...value, text: value.text + pending, reasoning,
+        reasoningMs: value.reasoningMs ?? (pending && reasoning ? Math.max(0, Date.now() - Date.parse(value.startedAt)) : undefined) };
+      pending = ""; pendingReasoning = "";
+      if (currentChat.current === chatId) setStream(value);
+      flushTimer = undefined;
+    };
+    if (currentChat.current === chatId) setStream(value);
     try {
       const response = await fetch("/api/ai/runs/" + id + "/stream", { signal: controller.signal });
       if (!response.ok || !response.body) throw new Error(copy.ai.failed);
@@ -178,7 +180,15 @@ export function AiAssistantProvider({ children }: { children: ReactNode }) {
         while ((index = buffer.indexOf("\n")) >= 0) {
           const line = buffer.slice(0, index); buffer = buffer.slice(index + 1); if (!line) continue;
           const event = JSON.parse(line);
-          if (event.type === "delta") { pending += event.text; if (!flushTimer) flushTimer = setTimeout(flush, 50); }
+          if (event.type === "response-start") value = { ...value, startedAt: event.startedAt };
+          if (event.type === "delta" || event.type === "reasoning") {
+            if (event.type === "delta") pending += event.text; else pendingReasoning += event.text;
+            if (!flushTimer) flushTimer = setTimeout(flush, 50);
+          }
+          if (event.type === "response-details") {
+            if (flushTimer) clearTimeout(flushTimer);
+            value = { ...value, response: event.details }; flush();
+          }
           if (event.type === "error") throw new Error(event.error);
           if (event.type === "done" && !event.valid && currentChat.current === chatId) setStatus(copy.ai.invalidResult);
         }
@@ -187,7 +197,8 @@ export function AiAssistantProvider({ children }: { children: ReactNode }) {
     } catch (e) { if (!controller.signal.aborted && currentChat.current === chatId) setError(e instanceof Error ? e.message : copy.ai.failed); }
     finally {
       if (flushTimer) clearTimeout(flushTimer);
-      pending = ""; if (currentChat.current === chatId) { setStream(null); setRun(await aiApi<Run>("runs/" + id)); await loadMessages(chatId); }
+      pending = ""; pendingReasoning = "";
+      if (currentChat.current === chatId) { setRun(await aiApi<Run>("runs/" + id)); await loadMessages(chatId); setStream(null); }
       await loadChats();
     }
   }
@@ -235,7 +246,7 @@ export function AiAssistantProvider({ children }: { children: ReactNode }) {
   const assistantValue = useMemo(() => ({ open, attach, registerEditor }), [open, attach, registerEditor]);
   return <Assistant.Provider value={assistantValue}>
     {children}
-    <Button className="fixed bottom-5 right-5 z-[60] h-12 w-12 rounded-lg shadow-lg" size="icon" aria-label={copy.ai.open} onClick={() => setOpen(true)}><Bot className="h-6 w-6" aria-hidden="true" /></Button>
+    <AiAssistantLauncher hidden={open} onOpen={() => setOpen(true)} />
     <Dialog open={open} keepMounted modal={false} movable resizable defaultWidth={800} defaultHeight={720} title={copy.ai.title} description={endpoint ? endpoint.name + " · " + endpoint.defaultModel : copy.ai.unconfigured}
       layerClassName="z-[60]" contentClassName="flex min-h-0 flex-1 flex-col p-0" widthStorageKey="ai-window-width-v1" heightStorageKey="ai-window-height-v1"
       headerActions={<><Button asChild size="icon" variant="ghost"><Link href="/settings/ai" target="_blank" rel="noopener noreferrer" aria-label={copy.ai.openSettings}><Settings className="h-4 w-4" aria-hidden="true" /></Link></Button><Button size="icon" variant="ghost" aria-label={copy.ai.minimize} onClick={() => setOpen(false)}><Minus className="h-4 w-4" aria-hidden="true" /></Button></>}
@@ -251,14 +262,12 @@ export function AiAssistantProvider({ children }: { children: ReactNode }) {
         {context ? <div className="shrink-0 border-b bg-blue-50 px-3 py-2 text-xs text-blue-700">
           <div className="flex flex-wrap items-center justify-between gap-2"><span>{context.sessionName} · {context.symbol} · {context.template?.name ?? copy.ai.noTemplate}</span><Button size="sm" variant="ghost" onClick={() => { setContext(null); setTask("globalAssistant"); setAssets([]); }}>{copy.ai.removeContext}</Button></div>
           <p>{copy.ai.scope(context.entries.length, context.metrics.reviewedRows)} · {context.display.displayIntervalSeconds}s · {context.timezone} · {context.capturedAt}</p>
-          {task === "sessionReview" ? <p className="mt-1">{copy.ai.analysisPlan((context.depth === "full" ? context.charts.length : Math.ceil(context.entries.length / 8)) + 1, context.depth === "full" ? context.charts.length : 0)}</p> : null}
+          {task === "sessionReview" ? <p className="mt-1">{copy.ai.analysisPlan}</p> : null}
         </div> : null}
         <div ref={contentRef} className="min-h-0 flex-1 space-y-4 overflow-y-auto p-4">
           {messages.length >= 30 ? <Button variant="ghost" size="sm" onClick={() => void loadMessages(conversationId, messages[0].id)}>{copy.ai.older}</Button> : null}
           {!messages.length && !stream ? <p className="rounded-lg border border-dashed p-6 text-sm text-slate-600">{copy.ai.empty}</p> : null}
-          {messages.map((m) => <article key={m.id} className={m.role === "user" ? "rounded-lg border bg-slate-50 p-3" : "min-w-0 space-y-2"}>
-            {m.reference ? <p className="break-words text-xs text-slate-500">{m.reference}</p> : null}
-            <Markdown text={m.content} />
+          {messages.map((m) => <AiMessageCard key={m.id} role={m.role} text={m.content} createdAt={m.createdAt} reference={m.reference} response={m.response}>
             <div className="flex flex-wrap gap-2">
               <Button variant="ghost" size="sm" onClick={() => void navigator.clipboard.writeText(m.content).then(() => setStatus(copy.ai.copied))}><Copy className="h-4 w-4" />{copy.ai.copy}</Button>
               {m.contextId ? <Button variant="ghost" size="sm" onClick={() => void aiApi<FixedContext>("contexts/" + m.contextId).then((c) => { setContext(c); setChartImages(false); }).catch((e) => setError(e.message))}>{copy.ai.sources}</Button> : null}
@@ -277,10 +286,10 @@ export function AiAssistantProvider({ children }: { children: ReactNode }) {
                 }).catch((e) => setError(e.message));
               }}>{copy.ai.retry}</Button> : null}
             </div>
-          </article>)}
-          {stream?.chat === conversationId ? <p className="whitespace-pre-wrap break-words text-sm leading-6" aria-live="off">{stream.text}</p> : null}
-          {activeRunId ? <div role="status" className="text-xs text-slate-600"><p className="flex items-center gap-2"><Loader2 className="h-4 w-4 animate-spin" />{copy.ai.running} · {run?.completedBatches ?? 0} · {run?.model}</p><p>{run?.reference}</p></div> : null}
-          {run ? <p className="text-xs text-slate-500">{run.endpoint} · {run.model} · {run.calls} · {copy.ai.estimated}</p> : null}
+          </AiMessageCard>)}
+          {stream?.chat === conversationId && !messages.some((m) => m.role === "assistant" && m.runId === stream.runId) ? <AiMessageCard text={stream.text} createdAt={stream.startedAt} reasoning={stream.reasoning} reasoningMs={stream.response?.reasoningMs ?? stream.reasoningMs} response={stream.response} live={!stream.response} /> : null}
+          {activeRunId && stream?.chat !== conversationId ? <div role="status" className="text-xs text-slate-600"><p className="flex items-center gap-2"><Loader2 className="h-4 w-4 animate-spin" />{copy.ai.running}{run?.task === "sessionReview" ? " · " + copy.ai.processedBatches(run.completedBatches) : ""}</p></div> : null}
+          {!activeRunId && run?.response && ["FAILED", "CANCELLED", "INTERRUPTED"].includes(run.status) ? <AiMessageCard text="" createdAt={run.response.startedAt} response={run.response}><p className="text-xs text-slate-600">{copy.ai.unfinishedAnswer}</p></AiMessageCard> : null}
           {run?.task === "sessionReview" && ["INTERRUPTED", "FAILED", "CANCELLED", "INVALID_RESULT"].includes(run.status) ? <div className="space-y-2"><p className="text-xs text-slate-500">{copy.ai.continuingHint}</p><Button variant="outline" onClick={() => void aiApi("runs/" + run.id + "/resume", "POST", {}).then(loadChats).catch((e) => setError(e.message))}>{copy.ai.continue}</Button></div> : null}
           {context ? <ContextSources key={context.id} context={context} /> : null}
           {error ? <p role="alert" className="text-sm text-red-600">{error}</p> : null}

@@ -77,7 +77,8 @@ async function handle(request: Request, { params }: Context) {
         const runs = await prisma.aiRun.findMany({ where: { id: { in: messages.flatMap((m) => m.runId ? [m.runId] : []) } }, select: { id: true, snapshot: true } });
         return json({ conversation, messages: messages.map((message) => {
           const run = runs.find((r) => r.id === message.runId), snapshot = run ? JSON.parse(run.snapshot) : null;
-          return { ...message, reference: snapshot ? snapshot.endpoint.name + " · " + snapshot.model + " · " + (snapshot.reference ?? "") : "" };
+          return { ...message, reference: snapshot ? snapshot.endpoint.name + " · " + snapshot.model + " · " + (snapshot.reference ?? "") : "",
+            response: message.role === "assistant" ? snapshot?.response ?? null : null };
         }) });
       }
       if (request.method === "PATCH") {
@@ -129,7 +130,7 @@ async function handle(request: Request, { params }: Context) {
       const fresh = await prisma.aiRun.findUniqueOrThrow({ where: { id } }), snap = JSON.parse(fresh.snapshot);
       return json({ id, task: fresh.task, status: fresh.status, contextId: fresh.contextId, error: fresh.error, calls: fresh.calls,
         completedBatches: JSON.parse(fresh.checkpoint).filter((p: { stage?: string }) => !p.stage).length, usage: JSON.parse(fresh.usage), estimatedChars: snap.estimatedChars,
-        endpoint: snap.endpoint.name, model: snap.model, reference: snap.reference,
+        endpoint: snap.endpoint.name, model: snap.model, reference: snap.reference, response: snap.response ?? null,
       });
     }
     if (kind === "reports" && request.method === "GET") {

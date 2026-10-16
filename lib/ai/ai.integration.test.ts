@@ -18,7 +18,7 @@ import { generate, sseData } from "./provider";
 import { createReplaySession } from "@/lib/replay-sessions/service";
 import { PATCH as updateEntry } from "@/app/api/market-datasets/[id]/paper-journal/entries/[entryId]/route";
 import { POST as aiPOST, GET as aiGET } from "@/app/api/ai/[...path]/route";
-import { skillKeys, type RunInput } from "./schema";
+import { LIMITS, skillKeys, type RunInput } from "./schema";
 let file = "", sessionId = "", projectionId = "", entryId = "";
 const base = new Date("2026-10-01T00:00:00Z");
 beforeAll(async () => {
@@ -58,8 +58,9 @@ beforeAll(async () => {
 }, 30000);
 afterEach(() => vi.unstubAllGlobals());
 afterAll(async () => { await prisma.$disconnect(); vi.unstubAllEnvs(); if (file.includes("ai-test-")) rmSync(file, { force: true }); });
-function streamResponse(text: string, finish = "stop", done = true) {
-  const raw = 'data: ' + JSON.stringify({ choices: [{ delta: { content: text }, finish_reason: null }] }) + "\n\n"
+function streamResponse(text: string, finish = "stop", done = true, reasoning?: string) {
+  const raw = (reasoning ? "data: " + JSON.stringify({ choices: [{ delta: { reasoning_content: reasoning }, finish_reason: null }] }) + "\n\n" : "")
+    + 'data: ' + JSON.stringify({ choices: [{ delta: { content: text }, finish_reason: null }] }) + "\n\n"
     + "data: " + JSON.stringify({ choices: [{ delta: {}, finish_reason: finish }], usage: { prompt_tokens: 10, completion_tokens: 5 } }) + "\n\n" + (done ? "data: [DONE]\n\n" : "");
   return new Response(new ReadableStream({ start(c) { c.enqueue(new TextEncoder().encode(raw)); c.close(); } }), { headers: { "Content-Type": "text/event-stream" } });
 }
@@ -180,6 +181,31 @@ describe("AI configuration and transport boundaries", () => {
     const settings = await aiGET(new Request("http://localhost/api/ai/settings"), { params: Promise.resolve({ path: ["settings"] }) });
     expect(await settings.text()).not.toContain("encryptedKey");
   });
+  it("separates exposed reasoning from the answer and measures time to answer and completion", async () => {
+    await configure(); const endpoint = (await readSettings()).value.endpoints[0];
+    const started = Date.parse("2026-10-15T12:00:00Z"), clock = vi.spyOn(Date, "now").mockReturnValue(started);
+    const onDetails = vi.fn(), onDelta = vi.fn(() => clock.mockReturnValue(started + 2100));
+    const onReasoning = vi.fn(() => clock.mockReturnValue(started + 1600));
+    vi.stubGlobal("fetch", vi.fn().mockResolvedValue(streamResponse("最终回答", "stop", true, "核对所提供的事实。")));
+    try {
+      const result = await generate(endpoint, "test", [], new AbortController().signal, onDelta, undefined, { onReasoning, onDetails });
+      expect(result.content).toBe("最终回答");
+      expect(onReasoning).toHaveBeenCalledWith("核对所提供的事实。");
+      expect(onDelta).toHaveBeenCalledWith("最终回答");
+      expect(onDetails).toHaveBeenCalledWith({ startedAt: new Date(started).toISOString(), durationMs: 2100, reasoning: "核对所提供的事实。", reasoningMs: 1600 });
+    } finally { clock.mockRestore(); }
+  });
+  it("bounds reasoning output and retains partial metadata without accepting reasoning-only or truncated answers", async () => {
+    const endpoint = (await readSettings()).value.endpoints[0], onDetails = vi.fn(), onReasoning = vi.fn();
+    vi.stubGlobal("fetch", vi.fn().mockResolvedValue(streamResponse("", "stop", true, "只有思考，没有回答")));
+    await expect(generate(endpoint, "test", [], new AbortController().signal, undefined, undefined, { onDetails })).rejects.toMatchObject({ code: "INCOMPLETE" });
+    expect(onDetails).toHaveBeenLastCalledWith(expect.objectContaining({ reasoning: "只有思考，没有回答", reasoningMs: expect.any(Number) }));
+    vi.stubGlobal("fetch", vi.fn().mockResolvedValue(streamResponse("", "stop", true, "字".repeat(LIMITS.outputChars + 1))));
+    await expect(generate(endpoint, "test", [], new AbortController().signal, undefined, undefined, { onReasoning })).rejects.toMatchObject({ code: "OUTPUT_LIMIT" });
+    expect(onReasoning).not.toHaveBeenCalled();
+    vi.stubGlobal("fetch", vi.fn().mockResolvedValue(streamResponse("字".repeat(32001), "stop", true, "字".repeat(32000))));
+    await expect(generate(endpoint, "test", [], new AbortController().signal)).rejects.toMatchObject({ code: "OUTPUT_LIMIT" });
+  });
 });
 describe("frozen review context and safe adoption", () => {
   it("never includes future sentinel values, including a forming higher-period candle", async () => {
@@ -217,6 +243,38 @@ describe("frozen review context and safe adoption", () => {
   });
 });
 describe("run lifecycle and session analysis", () => {
+  it("persists display metadata separately, reloads it without secrets and never resends it as conversation history", async () => {
+    await configure(); const run = await makeRun(), events: unknown[] = [];
+    const thought = "display-only-reasoning-哨兵";
+    vi.stubGlobal("fetch", vi.fn().mockResolvedValue(streamResponse("已核对交易事实。", "stop", true, thought)));
+    await executeRun(run.id, (event) => events.push(event));
+    expect(events).toContainEqual({ type: "reasoning", text: thought });
+    const saved = await prisma.aiRun.findUniqueOrThrow({ where: { id: run.id } });
+    expect(JSON.parse(saved.snapshot).response).toMatchObject({ reasoning: thought, durationMs: expect.any(Number), reasoningMs: expect.any(Number) });
+    const response = await aiGET(new Request("http://localhost/api/ai/conversations/" + run.conversationId), { params: Promise.resolve({ path: ["conversations", run.conversationId] }) });
+    const body = await response.json();
+    expect(body.messages.find((m: { role: string }) => m.role === "assistant")).toMatchObject({ content: "已核对交易事实。", result: null, createdAt: expect.any(String), response: { reasoning: thought } });
+    expect(body.messages.find((m: { role: string }) => m.role === "user").response).toBeNull();
+    expect(JSON.stringify(body)).not.toContain("encryptedKey");
+    expect(JSON.stringify(body)).not.toContain("private-test-key");
+    const next = await createRun({ conversationId: run.conversationId, task: "globalAssistant", question: "继续", assetIds: [], chartImages: false, requestId: randomUUID() });
+    const mock = vi.fn().mockResolvedValue(streamResponse("普通回答")); vi.stubGlobal("fetch", mock);
+    await executeRun(next.id);
+    const request = mock.mock.calls[0][1].body;
+    expect(request).toContain("已核对交易事实。"); expect(request).not.toContain(thought);
+    expect(JSON.parse((await prisma.aiRun.findUniqueOrThrow({ where: { id: next.id } })).snapshot).response).toMatchObject({ reasoning: "", reasoningMs: null });
+    const retry = await retryRun(run.id);
+    expect(JSON.parse(retry.snapshot).response).toBeUndefined(); await cancelRun(retry.id);
+  });
+  it("keeps truncated reasoning as failed-run metadata without saving a completed assistant answer", async () => {
+    const run = await makeRun();
+    vi.stubGlobal("fetch", vi.fn().mockResolvedValue(streamResponse("部分回答", "length", true, "已返回的部分思考")));
+    await executeRun(run.id);
+    const saved = await prisma.aiRun.findUniqueOrThrow({ where: { id: run.id } });
+    expect(saved.status).toBe("FAILED");
+    expect(JSON.parse(saved.snapshot).response.reasoning).toBe("已返回的部分思考");
+    expect(await prisma.aiMessage.count({ where: { runId: run.id, role: "assistant" } })).toBe(0);
+  });
   it("claims only one run per chat; cancellation prevents late results from being saved", async () => {
     await configure(); const run = await makeRun();
     await expect(createRun({ conversationId: run.conversationId, task: "globalAssistant", question: "并发", assetIds: [], chartImages: false, requestId: randomUUID() })).rejects.toMatchObject({ code: "BUSY" });
@@ -240,10 +298,13 @@ describe("run lifecycle and session analysis", () => {
     const before = (await prisma.replayJournalEntry.findUniqueOrThrow({ where: { id: entryId } })).review;
     const run = await makeRun(ctx.id, "sessionReview");
     const answer = { summary: "样本有限，待后续验证。", rules: [{ rule: "候选条件", supports: [ctx.entries[0].sourceId], counterexamples: [], validation: "记录下一会话" }], missing: ["缺少反例，不能确认优势"] };
-    vi.stubGlobal("fetch", vi.fn().mockResolvedValueOnce(streamResponse("批次事实与来源")).mockResolvedValueOnce(streamResponse(JSON.stringify(answer))));
+    vi.stubGlobal("fetch", vi.fn().mockResolvedValueOnce(streamResponse("批次事实与来源", "stop", true, "批次思考"))
+      .mockResolvedValueOnce(streamResponse(JSON.stringify(answer), "stop", true, "最终汇总思考")));
     await executeRun(run.id);
     const complete = await prisma.aiRun.findUniqueOrThrow({ where: { id: run.id } });
     expect(complete.status).toBe("COMPLETED"); expect(JSON.parse(complete.checkpoint)).toHaveLength(1);
+    expect(JSON.parse(complete.snapshot).response.reasoning).toBe("最终汇总思考");
+    expect(complete.checkpoint).not.toContain("批次思考");
     expect(await prisma.aiAnalysis.count({ where: { runId: run.id } })).toBe(1);
     expect((await prisma.replayJournalEntry.findUniqueOrThrow({ where: { id: entryId } })).review).toBe(before);
   });

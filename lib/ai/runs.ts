@@ -9,9 +9,10 @@ import { checkCurrentContext, readContext, type ContextValue } from "./context";
 import { AiError } from "./errors";
 import { EVIDENCE_RULES } from "./prompts";
 import { generate, type ModelMessage, type Usage } from "./provider";
+import type { ResponseDetails } from "./response-details";
 import { LIMITS, reviewResultSchema, sessionResultSchema, type RunInput, type Endpoint } from "./schema";
 
-type RunSnapshot = { endpoint: Endpoint; model: string; prompt: string; question: string; assetIds: string[]; chartAssetIds: string[]; estimatedChars: number; historyBefore?: string; reference?: string };
+type RunSnapshot = { endpoint: Endpoint; model: string; prompt: string; question: string; assetIds: string[]; chartAssetIds: string[]; estimatedChars: number; historyBefore?: string; reference?: string; response?: ResponseDetails };
 type Checkpoint = { content: string; usage: Usage; stage?: string }[];
 const localControllers = new Map<string, AbortController>();
 export async function recoverRuns() {
@@ -70,6 +71,7 @@ export async function retryRun(id: string) {
   const original = await prisma.aiRun.findUnique({ where: { id } });
   if (!original || ["QUEUED", "RUNNING"].includes(original.status)) throw new AiError("INVALID", copy.ai.invalid);
   const snapshot: RunSnapshot = JSON.parse(original.snapshot);
+  delete snapshot.response;
   const retryId = randomUUID();
   return prisma.$transaction(async (tx) => {
     const claimed = await tx.aiConversation.updateMany({ where: { id: original.conversationId, activeRunId: null }, data: { activeRunId: retryId } });
@@ -161,12 +163,25 @@ export async function executeRun(id: string, emit: (event: unknown) => void = ()
       const text = JSON.stringify(payload), cost = text.length + config.prompt.length + EVIDENCE_RULES.length + config.question.length + history.reduce((n, m) => n + JSON.stringify(m).length, 0) + imageIds.length * 4000;
       if (cost > LIMITS.inputChars || totalChars + cost > LIMITS.maxCumulativeChars || calls >= (run.task === "sessionReview" || (context?.selectedEntryId && context.charts.length > 1) ? LIMITS.maxAnalysisCalls : 1)) throw new AiError("BUDGET", copy.ai.budget);
       totalChars += cost; calls += 1;
+      delete config.response;
       await prisma.aiRun.update({ where: { id }, data: { calls, snapshot: JSON.stringify({ ...config, estimatedChars: totalChars }) } });
       usages.push({ input: null, output: null });
       await prisma.aiRun.update({ where: { id }, data: { usage: JSON.stringify(usages) } });
       const parts: Exclude<ModelMessage["content"], string> = [{ type: "text", text: config.question + "\nATTACHED_IMAGE_COUNT=" + imageIds.length + "\nREFERENCE_DATA:\n" + text }];
       for (const assetId of imageIds) parts.push({ type: "image_url", image_url: { url: await assetDataUrl(assetId) } });
-      const answer = await generate(config.endpoint, config.model, [{ role: "system", content: config.prompt + "\n" + EVIDENCE_RULES }, ...history, { role: "user", content: parts }], signal, stream ? (delta) => emit({ type: "delta", text: delta }) : undefined, json ? run.task === "reviewDraft" ? "reviewDraft" : "sessionReview" : undefined);
+      if (stream) emit({ type: "response-start", startedAt: new Date().toISOString() });
+      let answer: { content: string; usage: Usage };
+      try {
+        answer = await generate(config.endpoint, config.model, [{ role: "system", content: config.prompt + "\n" + EVIDENCE_RULES }, ...history, { role: "user", content: parts }], signal,
+          stream ? (delta) => emit({ type: "delta", text: delta }) : undefined,
+          json ? run.task === "reviewDraft" ? "reviewDraft" : "sessionReview" : undefined,
+          stream ? { onReasoning: (text) => emit({ type: "reasoning", text }), onDetails: (details) => { config.response = details; } } : undefined);
+      } finally {
+        if (config.response) {
+          await prisma.aiRun.update({ where: { id }, data: { snapshot: JSON.stringify({ ...config, estimatedChars: totalChars }) } });
+          emit({ type: "response-details", details: config.response });
+        }
+      }
       usages[usages.length - 1] = answer.usage;
       await prisma.aiRun.update({ where: { id }, data: { usage: JSON.stringify(usages) } });
       return answer;
