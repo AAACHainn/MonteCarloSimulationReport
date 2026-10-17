@@ -65,11 +65,11 @@ export function ReplaySessionsDashboard({ dataset, initialSessions, initialCreat
     finally { setBusy(false); }
   }
 
-  async function create() {
+  async function create(value: string) {
     if (busy) return;
     setBusy(true); setError(null);
     try {
-      const timestamp = selectedTimeToTimestamp(start, dataset.timezone);
+      const timestamp = selectedTimeToTimestamp(value, dataset.timezone);
       if (!Number.isFinite(timestamp)) throw new Error(t.invalid);
       const response = await fetch(`/api/market-datasets/${dataset.id}/replay-sessions`, {
         method: "POST", headers: { "Content-Type": "application/json" },
@@ -152,7 +152,7 @@ export function ReplaySessionsDashboard({ dataset, initialSessions, initialCreat
     </CardContent></Card>
     <ReplayStartDialog open={createOpen} title={t.create} description={t.createDescription} confirmLabel={t.create} value={start}
       minimum={dateTimeLocalValue(dataset.startTime, dataset.timezone)} maximum={dateTimeLocalValue(dataset.endTime, dataset.timezone)}
-      timezone={dataset.timezone} busy={busy} error={error} onChange={setStart} onCancel={() => setCreateOpen(false)} onConfirm={() => void create()}>
+      timezone={dataset.timezone} busy={busy} error={error} onChange={setStart} onCancel={() => setCreateOpen(false)} onConfirm={(value) => void create(value)}>
       <div className="space-y-2"><Label htmlFor="replay-session-name">{t.name}</Label><Input id="replay-session-name" value={name} maxLength={100} onChange={(event) => setName(event.target.value)} disabled={busy} /></div>
       <div className="space-y-2"><Label htmlFor="replay-session-mode">{t.mode}</Label><Select value={mode} disabled={busy} onValueChange={(value) => setMode(value as ReplaySessionMode)}>
         <SelectTrigger id="replay-session-mode"><SelectValue /></SelectTrigger><SelectContent><SelectItem value="TRAINING">{t.training}</SelectItem><SelectItem value="LIVE_REPLAY">{t.liveReplay}</SelectItem></SelectContent>

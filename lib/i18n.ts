@@ -8,6 +8,15 @@ export type SupportedLocale = (typeof supportedLocales)[number];
 
 export const dictionaries = {
   "zh-CN": {
+    dateTimePicker: {
+      dateFormat: "YYYY-MM-DD", timeFormat: "HH:mm:ss",
+      formatHint: "日期格式 YYYY-MM-DD；时间为 24 小时制 HH:mm，秒可省略。",
+      errors: {
+        date: "请输入有效日期，例如 2021-09-07。",
+        time: "请输入有效时间，例如 08:30 或 08:30:00。",
+        range: "所选日期时间超出下方可用范围，请调整。",
+      },
+    },
     trainingGate: {
       loadingStrategies: "正在加载交易策略…", inactive: "已停用",
       title: "交易关卡", remaining: (n: number) => `关卡 · 剩余 ${n} 笔`,

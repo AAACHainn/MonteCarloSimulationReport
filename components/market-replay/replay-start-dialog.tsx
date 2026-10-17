@@ -1,16 +1,10 @@
 "use client";
 
-import { type ReactNode } from "react";
+import { useRef, type ReactNode } from "react";
 import { Button } from "@/components/ui/button";
 import { Dialog } from "@/components/ui/dialog";
-import { DateTimePicker } from "@/components/ui/date-time-picker";
+import { DateTimePicker, type DateTimePickerHandle } from "@/components/ui/date-time-picker";
 import { copy } from "@/lib/i18n";
-
-function clampDateTime(value: string, minimum: string, maximum: string) {
-  if (value < minimum) return minimum;
-  if (value > maximum) return maximum;
-  return value;
-}
 
 export function ReplayStartDialog({
   open,
@@ -37,12 +31,13 @@ export function ReplayStartDialog({
   error: string | null;
   onChange: (value: string) => void;
   onCancel: () => void;
-  onConfirm: () => void;
+  onConfirm: (value: string) => void;
   title?: string;
   description?: string;
   confirmLabel?: string;
   children?: ReactNode;
 }) {
+  const pickerRef = useRef<DateTimePickerHandle>(null);
   return (
     <Dialog
       open={open}
@@ -51,9 +46,14 @@ export function ReplayStartDialog({
       className="max-w-sm"
       onClose={() => { if (!busy) onCancel(); }}
     >
-      <div className="space-y-4">
+      <form className="space-y-4" noValidate onSubmit={(event) => {
+        event.preventDefault();
+        if (busy) return;
+        const selected = pickerRef.current?.validate();
+        if (selected) onConfirm(selected);
+      }}>
         {children}
-        <DateTimePicker value={value} minimum={minimum} maximum={maximum} disabled={busy} onChange={(next) => onChange(clampDateTime(next, minimum, maximum))} />
+        <DateTimePicker ref={pickerRef} value={value} minimum={minimum} maximum={maximum} disabled={busy} onChange={onChange} />
 
         <Button
           type="button"
@@ -68,9 +68,9 @@ export function ReplayStartDialog({
         {error ? <p className="text-sm text-red-600">{error}</p> : null}
         <div className="flex justify-end gap-2 border-t pt-4">
           <Button type="button" variant="outline" disabled={busy} onClick={onCancel}>{copy.common.cancel}</Button>
-          <Button type="button" disabled={busy} onClick={onConfirm}>{busy ? copy.marketReplay.selectingReplayDate : confirmLabel ?? copy.marketReplay.selectReplayDateConfirm}</Button>
+          <Button type="submit" disabled={busy}>{busy ? copy.marketReplay.selectingReplayDate : confirmLabel ?? copy.marketReplay.selectReplayDateConfirm}</Button>
         </div>
-      </div>
+      </form>
     </Dialog>
   );
 }

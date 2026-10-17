@@ -35,6 +35,7 @@ import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { ConfirmDialog } from "@/components/ui/confirm-dialog";
 import { Dialog } from "@/components/ui/dialog";
+import { DateTimePicker, type DateTimePickerHandle } from "@/components/ui/date-time-picker";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
@@ -237,6 +238,7 @@ export function MarketReplayClient({ dataset: initialDataset, initialJournalFocu
     captureIntent: capturePlaybackIntent,
     wantsToPlay: wantsPlayback,
   } = useReplayPlayback(latestReplayRef, setReplay);
+  const startPickerRef = useRef<DateTimePickerHandle>(null);
   const [startValue, setStartValue] = useState(() => dateTimeLocalValue(dataset.startTime, dataset.timezone));
   const [startDialogOpen, setStartDialogOpen] = useState(false);
   const [startDialogValue, setStartDialogValue] = useState(startValue);
@@ -1572,8 +1574,10 @@ export function MarketReplayClient({ dataset: initialDataset, initialJournalFocu
 
   async function beginReplay(event: React.FormEvent<HTMLFormElement>) {
     event.preventDefault();
+    const selected = startPickerRef.current?.validate();
+    if (!selected) return;
     try {
-      await startReplayAt(startValue);
+      await startReplayAt(selected);
     } catch (error) {
       setStartError(error instanceof Error && error.message ? error.message : copy.marketReplay.loadError);
     }
@@ -1953,7 +1957,7 @@ export function MarketReplayClient({ dataset: initialDataset, initialJournalFocu
     }
   }
 
-  async function applyNewReplayStart() {
+  async function applyNewReplayStart(value: string) {
     if (!latestReplayRef.current || startDialogBusy) return;
     setStartDialogBusy(true);
     manualStepsRef.current.cancel();
@@ -1965,7 +1969,7 @@ export function MarketReplayClient({ dataset: initialDataset, initialJournalFocu
       saveTimerRef.current = null;
       pendingSaveRef.current = null;
       await saveChainRef.current.catch(() => undefined);
-      if (await startReplayAt(startDialogValue)) {
+      if (await startReplayAt(value)) {
         setStartDialogOpen(false);
         setSaveStatus("idle");
       }
@@ -2350,19 +2354,12 @@ export function MarketReplayClient({ dataset: initialDataset, initialJournalFocu
           <CardDescription>{copy.marketReplay.setupDescription}</CardDescription>
         </CardHeader>
         <CardContent>
-          <form onSubmit={beginReplay} className="space-y-4">
+          <form noValidate onSubmit={beginReplay} className="space-y-4">
             <div className="space-y-2">
-              <Label htmlFor="replay-start">{copy.marketReplay.startAt}</Label>
-              <Input
-                id="replay-start"
-                type="datetime-local"
-                step="1"
-                required
-                min={dateTimeLocalValue(dataset.startTime, dataset.timezone)}
-                max={dateTimeLocalValue(dataset.endTime, dataset.timezone)}
-                value={startValue}
-                onChange={(event) => setStartValue(event.target.value)}
-              />
+              <DateTimePicker ref={startPickerRef}
+                minimum={dateTimeLocalValue(dataset.startTime, dataset.timezone)}
+                maximum={dateTimeLocalValue(dataset.endTime, dataset.timezone)}
+                value={startValue} onChange={setStartValue} />
               <p className="text-xs text-slate-500">{dataset.timezone} · {formatDatasetTime(dataset.startTime, dataset.timezone)} – {formatDatasetTime(dataset.endTime, dataset.timezone)}</p>
             </div>
             {startError ? <p className="text-sm text-red-600">{startError}</p> : null}
@@ -3082,7 +3079,7 @@ export function MarketReplayClient({ dataset: initialDataset, initialJournalFocu
         error={startError}
         onChange={setStartDialogValue}
         onCancel={closeStartDialog}
-        onConfirm={() => void applyNewReplayStart()}
+        onConfirm={(value) => void applyNewReplayStart(value)}
       />
     </>)}
     </ReplayCorrectionProvider>

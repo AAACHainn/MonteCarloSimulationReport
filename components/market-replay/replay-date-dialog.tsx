@@ -1,9 +1,9 @@
 "use client";
-import { useId, useState } from "react";
+import { useId, useRef, useState } from "react";
 import { Loader2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Dialog } from "@/components/ui/dialog";
-import { DateTimePicker } from "@/components/ui/date-time-picker";
+import { DateTimePicker, type DateTimePickerHandle } from "@/components/ui/date-time-picker";
 import { copy } from "@/lib/i18n";
 import { formatUtcOffset, utcOffsetDateTimeLocalValue, utcOffsetDateTimeToTimestamp } from "@/lib/market-replay/display-timezone";
 
@@ -12,6 +12,7 @@ export function ReplayDateDialog({ open, currentTime, minimum, maximum, displayU
   onClose: () => void; onLocate: (timestamp: string, forward: boolean) => Promise<boolean>;
 }) {
   const id = useId();
+  const pickerRef = useRef<DateTimePickerHandle>(null);
   const [value, setValue] = useState(() => utcOffsetDateTimeLocalValue(currentTime, displayUtcOffsetMinutes));
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -19,9 +20,11 @@ export function ReplayDateDialog({ open, currentTime, minimum, maximum, displayU
   const maximumValue = utcOffsetDateTimeLocalValue(allowForward ? maximum : currentTime, displayUtcOffsetMinutes);
   async function locate(forward: boolean) {
     if (busy) return;
+    const selected = pickerRef.current?.validate();
+    if (!selected) return;
     setBusy(true); setError(null);
     try {
-      const time = utcOffsetDateTimeToTimestamp(value, displayUtcOffsetMinutes);
+      const time = utcOffsetDateTimeToTimestamp(selected, displayUtcOffsetMinutes);
       if (!Number.isFinite(time)) throw new Error(copy.replaySessions.locateInvalid);
       const upperBound = forward ? maximum : currentTime;
       if (time < new Date(minimum).getTime() || time > new Date(upperBound).getTime()) throw new Error(copy.replaySessions.locateOutOfRange);
@@ -32,7 +35,7 @@ export function ReplayDateDialog({ open, currentTime, minimum, maximum, displayU
   return <Dialog open={open} title={copy.replaySessions.locateDate} className="max-w-sm" onClose={() => { if (!busy) onClose(); }}>
     <form className="space-y-4" noValidate aria-busy={busy} onSubmit={(event) => { event.preventDefault(); void locate(false); }}>
       <p id={`${id}-timezone`} className="text-xs text-slate-600">{copy.marketReplay.displayTimezone} · {formatUtcOffset(displayUtcOffsetMinutes)}</p>
-      <DateTimePicker value={value} minimum={minimumValue} maximum={maximumValue} disabled={busy} describedBy={`${id}-timezone ${id}-hint${error ? ` ${id}-error` : ""}`} onChange={(next) => { setValue(next); setError(null); }} />
+      <DateTimePicker ref={pickerRef} value={value} minimum={minimumValue} maximum={maximumValue} disabled={busy} describedBy={`${id}-timezone ${id}-hint${error ? ` ${id}-error` : ""}`} onChange={(next) => { setValue(next); setError(null); }} />
       <p id={`${id}-hint`} className="text-xs text-slate-500">{copy.replaySessions.locateHint}</p>
       <p className="text-xs tabular-nums text-slate-500">{minimumValue.replace("T", " ")} – {maximumValue.replace("T", " ")}</p>
       {allowForward ? <p className="text-xs text-slate-600">{copy.replaySessions.forwardHint}</p> : null}
