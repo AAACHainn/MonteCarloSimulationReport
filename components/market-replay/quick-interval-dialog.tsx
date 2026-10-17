@@ -49,10 +49,8 @@ export function QuickIntervalDialog({
     setUnit("m");
     setError(null);
     setBusy(false);
-    window.requestAnimationFrame(() => {
-      inputRef.current?.focus();
-      inputRef.current?.select();
-    });
+    // Preserve the digit that opened the dialog so subsequent digits append.
+    inputRef.current?.focus();
   }, [initialValue, open]);
 
   async function submit(event: FormEvent<HTMLFormElement>) {
