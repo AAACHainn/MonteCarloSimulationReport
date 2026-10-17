@@ -84,6 +84,7 @@ export function useReplayPlayback(
   const dismissAutoPause = useCallback(() => setAutoPauseEvent(null), []);
   const captureIntent = useCallback(() => trackerRef.current.current(), []);
   const isIntentCurrent = useCallback((intent: ReplayPlaybackIntent) => trackerRef.current.isCurrent(intent), []);
+  const wantsToPlay = useCallback(() => trackerRef.current.wantsToPlay(), []);
   const shouldResume = useCallback(() => trackerRef.current.canPlay(), []);
 
   return {
@@ -99,5 +100,6 @@ export function useReplayPlayback(
     captureIntent,
     isIntentCurrent,
     shouldResume,
+    wantsToPlay,
   };
 }

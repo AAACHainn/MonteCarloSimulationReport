@@ -2,7 +2,6 @@
 
 import { useCallback, useEffect, useRef, type Dispatch, type SetStateAction } from "react";
 import type { PaperSessionSnapshot } from "@/lib/paper-trading/types";
-import { createPaperDeltaAccumulator, type PaperDeltaAccumulator } from "./client-sync";
 
 /** Volatile account/sync state. None of these coordination tokens are persisted. */
 export function useReplayAccountRuntime(
@@ -16,11 +15,6 @@ export function useReplayAccountRuntime(
   const paperMutationActiveRef = useRef(false);
   const paperMutationChainRef = useRef<Promise<void>>(Promise.resolve());
   const pendingPaperMutationsRef = useRef(0);
-  const syncingRef = useRef(false);
-  const syncCompletionRef = useRef<Promise<boolean>>(Promise.resolve(true));
-  const lastSyncStartedAtRef = useRef(0);
-  const syncLatencyMsRef = useRef(500);
-  const paperDeltaAccumulatorRef = useRef<PaperDeltaAccumulator>(createPaperDeltaAccumulator(-1));
 
   useEffect(() => { paperSnapshotRef.current = paperSnapshot; }, [paperSnapshot]);
 
@@ -42,11 +36,6 @@ export function useReplayAccountRuntime(
     paperMutationActiveRef,
     paperMutationChainRef,
     pendingPaperMutationsRef,
-    syncingRef,
-    syncCompletionRef,
-    lastSyncStartedAtRef,
-    syncLatencyMsRef,
-    paperDeltaAccumulatorRef,
     commitPaperSnapshot,
     commitConfirmedPaperSnapshot,
   };

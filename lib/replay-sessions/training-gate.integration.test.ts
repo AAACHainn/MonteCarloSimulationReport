@@ -215,7 +215,7 @@ describe("training gate APIs and persistence", () => {
     const accumulator = createPaperDeltaAccumulator(0);
     recordPaperAdvance(accumulator, current, result, true, null, progress.generation);
     const delta = buildPaperReplayDelta(accumulator, applySpeculativeAdvance(current, result));
-    const body = { generation: progress.generation, requestId: "authentic", confirmedSequence: 0, syncVersion: progress.syncVersion, dataVersion: 1, expectedPaperVersion: current.session.version, targetSequence: 1, paperDelta: delta };
+    const body = { generation: progress.generation, requestId: "authentic", confirmedSequence: 0, syncVersion: progress.syncVersion, dataVersion: 1, expectedPaperVersion: current.session.version, targetSequence: 1, historyVersion: 1, contextRuns: [{ fromSequence: 1, toSequence: 1, generation: progress.generation, context: null }] };
     const forged = structuredClone(delta);
     forged.state.trainingGate!.completedCount = 3;
     forged.fingerprint = paperStateFingerprint(forged.state, forged.activeOrders, forged.openLots);

@@ -66,3 +66,10 @@ export function isReplayShortcutInputTarget(target: EventTarget | null) {
     "input, textarea, select, [contenteditable]:not([contenteditable='false']), [role='textbox'], [role='combobox'], [role='dialog'], [role='alertdialog']",
   ));
 }
+
+/** Retained floating windows stay in the DOM while closed. Only visible dialogs
+ * should reserve page-wide shortcuts; modal and alert dialogs still block them. */
+export function hasVisibleReplayDialog() {
+  return [...document.querySelectorAll<HTMLElement>('[role="dialog"], [role="alertdialog"]')]
+    .some(dialog => !dialog.closest('[aria-hidden="true"], [hidden], [inert]') && dialog.getClientRects().length > 0);
+}

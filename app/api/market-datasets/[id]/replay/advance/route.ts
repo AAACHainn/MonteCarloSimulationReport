@@ -7,6 +7,7 @@ import { copy } from "@/lib/i18n";
 import { aggregateMarketBars, getAggregationBucket } from "@/lib/market-replay/aggregation";
 import { resolveDisplaySession } from "@/lib/market-replay/chart-sessions";
 import { datasetSourceInterval, serializeSourceBar } from "@/lib/market-replay/dataset";
+import type { ReplayServerResult } from "@/lib/market-replay/server-sync-types";
 import { syncReplayToTarget } from "@/lib/market-replay/replay-sync";
 import { MAX_DISPLAY_ADVANCE_SOURCE_BARS, isValidDisplayInterval } from "@/lib/market-replay/types";
 import { paperAdvanceSchema } from "@/lib/validations";
@@ -27,19 +28,24 @@ async function handlePOST(request: Request, context: RouteContext) {
   ]);
   if (!dataset || !progress) return NextResponse.json({ error: copy.marketReplay.datasetNotFound }, { status: 404 });
   if (parsed.data.historyVersion !== undefined && parsed.data.historyVersion !== dataset.historyVersion) return NextResponse.json({ error: copy.marketSync.historyChanged, code: "HISTORY_CHANGED" }, { status: 409 });
-  if (progress.currentSequence !== parsed.data.expectedCurrentSequence) {
+  const cached = parsed.data.requestId && progress.lastSyncRequestId === parsed.data.requestId && progress.lastSyncResponse
+    ? JSON.parse(progress.lastSyncResponse) as ReplayServerResult : null;
+  if (cached && (cached.fromSequence !== parsed.data.expectedCurrentSequence || !cached.displayAdvance)) {
     return NextResponse.json({ error: copy.paperTrading.conflict }, { status: 409 });
   }
-  if (progress.currentSequence >= dataset.barCount - 1) {
+  if (!cached && progress.currentSequence !== parsed.data.expectedCurrentSequence) {
+    return NextResponse.json({ error: copy.paperTrading.conflict }, { status: 409 });
+  }
+  if (!cached && progress.currentSequence >= dataset.barCount - 1) {
     return NextResponse.json({ error: copy.paperTrading.noNextBar }, { status: 400 });
   }
 
-  let targetSequence = Math.min(dataset.barCount - 1, progress.currentSequence + parsed.data.count);
+  let targetSequence = cached?.currentSequence ?? Math.min(dataset.barCount - 1, progress.currentSequence + parsed.data.count);
   let aggregationStart: Date | null = null;
-  let completedDisplayBucketStart: string | null = null;
-  let reachedVisibleBucket = parsed.data.displayIntervalSeconds === undefined;
+  let completedDisplayBucketStart: string | null = cached?.displayAdvance?.completedDisplayBucketStart ?? null;
+  let reachedVisibleBucket = cached?.displayAdvance?.reachedVisibleBucket ?? (parsed.data.displayIntervalSeconds === undefined);
   let displaySessionConfig: NonNullable<ReturnType<typeof resolveDisplaySession>> | null = null;
-  if (parsed.data.displayIntervalSeconds !== undefined) {
+  if (!cached && parsed.data.displayIntervalSeconds !== undefined) {
     const sourceSeconds = datasetSourceInterval(dataset);
     if (!sourceSeconds || !isValidDisplayInterval(sourceSeconds, parsed.data.displayIntervalSeconds)) {
       return NextResponse.json({ error: copy.marketReplay.invalidDisplayInterval }, { status: 400 });
@@ -83,10 +89,11 @@ async function handlePOST(request: Request, context: RouteContext) {
     if (bucketStarts.length) aggregationStart = new Date(bucketStarts[0]);
   }
 
-  const outcome = await syncReplayToTarget(id, {
+  const outcome = cached ? { status: 200 as const, response: cached, error: null } : await syncReplayToTarget(id, {
     historyVersion: parsed.data.historyVersion,
     generation: progress.generation,
-    requestId: `legacy_${randomUUID()}`,
+    requestId: parsed.data.requestId ?? `legacy_${randomUUID()}`,
+    displayAdvance: { completedDisplayBucketStart, reachedVisibleBucket },
     confirmedSequence: progress.currentSequence,
     syncVersion: progress.syncVersion,
     expectedPaperVersion: parsed.data.expectedVersion ?? null,
@@ -103,15 +110,20 @@ async function handlePOST(request: Request, context: RouteContext) {
   if (outcome.status !== 200) return NextResponse.json({ error: outcome.error, code: outcome.code }, { status: outcome.status });
 
   const advanced = await prisma.marketBar.findMany({
-    where: { datasetId: id, sequence: { gt: progress.currentSequence, lte: targetSequence } },
+    where: { datasetId: id, sequence: { gt: parsed.data.expectedCurrentSequence, lte: targetSequence } },
     orderBy: { sequence: "asc" },
   });
+  if (parsed.data.displayIntervalSeconds !== undefined && !displaySessionConfig) displaySessionConfig = resolveDisplaySession(dataset, parsed.data.displaySession);
+  if (!aggregationStart && advanced[0] && parsed.data.displayIntervalSeconds !== undefined) {
+    const bucket = getAggregationBucket(advanced[0].timestamp.getTime(), datasetSourceInterval(dataset)!, parsed.data.displayIntervalSeconds, displaySessionConfig!);
+    if (bucket) aggregationStart = new Date(bucket.start);
+  }
   const prefix = aggregationStart && advanced[0]?.timestamp > aggregationStart
     ? await prisma.marketBar.findMany({
       where: {
         datasetId: id,
         timestamp: { gte: aggregationStart, lt: advanced[0].timestamp },
-        sequence: { lte: progress.currentSequence },
+        sequence: { lte: parsed.data.expectedCurrentSequence },
       },
       orderBy: { sequence: "asc" },
     })
@@ -129,6 +141,7 @@ async function handlePOST(request: Request, context: RouteContext) {
   }));
 
   const response = NextResponse.json({
+    ...outcome.response,
     currentSequence: targetSequence,
     advancedBars: parsed.data.displayIntervalSeconds === undefined ? advanced.map(serializeSourceBar) : [],
     completedDisplayBucketStart,

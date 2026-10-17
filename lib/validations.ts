@@ -174,6 +174,7 @@ export const paperOrderUpdateSchema = z.object({
 copy.paperTrading.orderUpdateRequired);
 
 export const paperAdvanceSchema = z.object({
+  requestId: z.string().trim().min(1).max(120).optional(),
   historyVersion: z.coerce.number().int().positive().optional(),
   expectedCurrentSequence: z.coerce.number().int().min(-1),
   expectedVersion: z.coerce.number().int().positive().optional().nullable(),
@@ -301,6 +302,21 @@ export const replaySyncSchema = z.object({
   targetSequence: z.coerce.number().int().min(0),
   paperDelta: paperReplayDeltaSchema.nullable(),
 }).superRefine((value, context) => {
+  if (value.targetSequence <= value.confirmedSequence || value.targetSequence - value.confirmedSequence > MAX_REPLAY_SYNC_SOURCE_BARS) {
+    context.addIssue({ code: z.ZodIssueCode.custom, message: copy.marketReplay.validation.progressInvalid });
+  }
+});
+
+export const replayServerSyncSchema = z.object({
+  generation: z.number().int().positive(), requestId: z.string().trim().min(1).max(120),
+  confirmedSequence: z.number().int().min(-1), syncVersion: z.number().int().min(0),
+  dataVersion: z.number().int().positive(), historyVersion: z.number().int().positive(),
+  expectedPaperVersion: z.number().int().positive().nullable(), targetSequence: z.number().int().min(0),
+  contextRuns: z.array(z.object({
+    fromSequence: z.number().int().nonnegative(), toSequence: z.number().int().nonnegative(),
+    generation: z.number().int().positive(), context: paperJournalContextSchema.nullable(),
+  })).max(MAX_REPLAY_SYNC_SOURCE_BARS),
+}).strict().superRefine((value, context) => {
   if (value.targetSequence <= value.confirmedSequence || value.targetSequence - value.confirmedSequence > MAX_REPLAY_SYNC_SOURCE_BARS) {
     context.addIssue({ code: z.ZodIssueCode.custom, message: copy.marketReplay.validation.progressInvalid });
   }

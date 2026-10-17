@@ -26,6 +26,8 @@ type Props = {
   onNext: () => void;
   onSpeedChange: (value: number) => void;
   onFocusJournalEntry: (entry: ReplayJournalEntryData) => void;
+  retrying?: boolean;
+  playbackRequested?: boolean;
   correctionPending?: boolean;
   onLocateDate?: () => void;
   dateForwarding?: boolean;
@@ -37,7 +39,7 @@ export function ReplayPlaybackBar({
   replay, sourceIntervalSeconds, paperSnapshot, currentBar,
   displayUtcOffsetMinutes, revealedCount, replayCount, statusText,
   webFullscreen, onToggleWebFullscreen,
-  onToggle, onNext, onSpeedChange, onFocusJournalEntry, correctionPending = false,
+  onToggle, onNext, onSpeedChange, onFocusJournalEntry, correctionPending = false, retrying = false, playbackRequested = replay.status === "playing",
   onLocateDate, dateForwarding = false, dateForwardStatus, onStopDateForward,
 }: Props) {
   const shortcuts = useReplayShortcuts();
@@ -45,7 +47,7 @@ export function ReplayPlaybackBar({
     ? copy.marketReplay.play
     : replay.status === "finished" ? copy.marketReplay.finished : copy.marketReplay.pause;
   return (
-    <div className="flex h-14 shrink-0 items-center gap-2 border-t bg-slate-50/80 px-3">
+    <div aria-busy={retrying} className="flex h-14 shrink-0 items-center gap-2 border-t bg-slate-50/80 px-3">
       <div className="flex min-w-0 flex-1 items-center gap-2 overflow-x-auto [&>*]:shrink-0">
         <Button
           type="button"
@@ -56,9 +58,9 @@ export function ReplayPlaybackBar({
           onClick={onToggle}
           disabled={replay.status === "finished" || correctionPending}
         >
-          {replay.status === "playing" ? <Pause className="h-4 w-4" /> : <Play className="h-4 w-4" />}{replay.status === "playing" ? copy.marketReplay.pause : copy.marketReplay.play}
+          {playbackRequested ? <Pause className="h-4 w-4" /> : <Play className="h-4 w-4" />}{playbackRequested ? copy.marketReplay.pause : copy.marketReplay.play}
         </Button>
-        <Button type="button" size="sm" variant="outline" className="h-9" title={copy.marketReplay.playbackShortcutHint(shortcuts.nextBar)} aria-keyshortcuts={shortcuts.nextBarAria} onClick={onNext} disabled={replay.status === "finished" || replay.status === "playing" || correctionPending}>
+        <Button type="button" size="sm" variant="outline" className="h-9" title={copy.marketReplay.playbackShortcutHint(shortcuts.nextBar)} aria-keyshortcuts={shortcuts.nextBarAria} onClick={onNext} disabled={retrying || replay.status === "finished" || replay.status === "playing" || correctionPending}>
           <ChevronRight className="h-4 w-4" />{copy.marketReplay.nextBar}<kbd className="ml-1 hidden rounded border bg-white px-1.5 py-0.5 font-mono text-[10px] text-slate-500 lg:inline">{shortcuts.nextBar}</kbd>
         </Button>
         {onLocateDate ? <Button type="button" variant="outline" size="sm" className="h-9" disabled={correctionPending || dateForwarding} onClick={onLocateDate}><CalendarDays className="h-4 w-4" aria-hidden="true" />{copy.replaySessions.locateDate}</Button> : null}
@@ -69,14 +71,14 @@ export function ReplayPlaybackBar({
         <Input id="replay-speed" type="range" min={MIN_PLAYBACK_RATE} max={MAX_PLAYBACK_RATE} value={replay.playbackRate} onChange={(event) => onSpeedChange(Number(event.target.value))} className="h-8 w-24 border-0 bg-transparent px-0 lg:w-32" />
         <Input aria-label={copy.marketReplay.speed} type="number" min={MIN_PLAYBACK_RATE} max={MAX_PLAYBACK_RATE} value={replay.playbackRate} onChange={(event) => onSpeedChange(Math.max(MIN_PLAYBACK_RATE, Math.min(MAX_PLAYBACK_RATE, Number(event.target.value))))} className="h-8 w-20" />
         <span className="text-xs font-medium text-slate-700">{copy.marketReplay.playbackRate(replay.playbackRate)}</span>
-        <span className="ml-auto max-w-48 truncate text-xs font-medium text-slate-700 xl:hidden" title={statusText || undefined}>
+        <span role="status" aria-live="polite" className="ml-auto max-w-48 truncate text-xs font-medium text-slate-700 xl:hidden" title={statusText || undefined}>
           {stateLabel}{statusText ? ` · ${statusText}` : ""}
         </span>
         <div className="ml-auto hidden items-center gap-4 text-xs xl:flex">
           <span className="text-slate-500">{copy.marketReplay.progress(revealedCount, replayCount)}</span>
           <span className="font-medium text-slate-800">{currentBar ? formatUtcDateTime(currentBar.timestamp, displayUtcOffsetMinutes) : copy.marketReplay.waiting}</span>
           <span className="hidden font-mono text-slate-600 2xl:inline">{currentBar ? `${currentBar.open} / ${currentBar.high} / ${currentBar.low} / ${currentBar.close}` : "–"}</span>
-          <span className="font-medium text-slate-700">{stateLabel}{statusText ? ` · ${statusText}` : ""}</span>
+          <span role="status" aria-live="polite" className="font-medium text-slate-700">{stateLabel}{statusText ? ` · ${statusText}` : ""}</span>
         </div>
       </div>
       <Button

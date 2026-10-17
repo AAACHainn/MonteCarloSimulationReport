@@ -12,7 +12,7 @@ import { executeSyncRun } from "./engine";
 import type { MarketProvider } from "./databento";
 import { DatabentoProvider } from "./databento";
 import { defaultSchedule, type SyncBar } from "./types";
-import { persistClientReplayBatch } from "@/lib/market-replay/replay-sync";
+import { syncReplayToTarget } from "@/lib/market-replay/replay-sync";
 import { GET as chunksGET } from "@/app/api/market-datasets/[id]/bars/chunks/route";
 import { acquireDatasetLease, releaseDatasetLease } from "./lease";
 import { SyncError } from "./security";
@@ -55,15 +55,15 @@ describe("persistent incremental market synchronization", () => {
     const next = await enqueueSync(id); const noData = provider(); const fetchBars = vi.spyOn(noData, "bars");
     await executeSyncRun(next.id, new AbortController().signal, noData); expect(fetchBars).not.toHaveBeenCalled();
     expect((await prisma.marketDataSyncRun.findUnique({ where: { id: next.id } }))?.status).toBe("COMPLETED");
-    const outcome = await persistClientReplayBatch(id, { requestId: "new-client", generation: 1, syncVersion: 0, confirmedSequence: 0, targetSequence: 1, expectedPaperVersion: null, dataVersion: 1, historyVersion: 1, paperDelta: null }); expect(outcome.status).toBe(200);
-    const legacy = await persistClientReplayBatch(id, { requestId: "old-client", generation: 1, syncVersion: 1, confirmedSequence: 1, targetSequence: 2, expectedPaperVersion: null, dataVersion: 1, paperDelta: null }); expect(legacy.status).toBe(409);
+    const outcome = await syncReplayToTarget(id, { requestId: "new-client", generation: 1, syncVersion: 0, confirmedSequence: 0, targetSequence: 1, expectedPaperVersion: null, dataVersion: 1, historyVersion: 1 }); expect(outcome.status).toBe(200);
+    const legacy = await syncReplayToTarget(id, { requestId: "old-client", generation: 1, syncVersion: 1, confirmedSequence: 1, targetSequence: 2, expectedPaperVersion: null, dataVersion: 1 }); expect(legacy.status).toBe(409);
     const context = { params: Promise.resolve({ id }) };
     expect((await chunksGET(new Request(`http://localhost/api/bars?version=1&historyVersion=1&startDate=2026-09-01`), context)).status).toBe(200);
     expect((await chunksGET(new Request(`http://localhost/api/bars?version=1&startDate=2026-09-01`), context)).status).toBe(409);
     await prisma.marketDataset.update({ where: { id }, data: { historyVersion: { increment: 1 }, dataVersion: { increment: 1 } } });
     expect((await chunksGET(new Request(`http://localhost/api/bars?version=1&historyVersion=1&startDate=2026-09-01`), context)).status).toBe(409);
-    expect((await persistClientReplayBatch(id, { requestId: "changed-history", generation: 1, syncVersion: 1, confirmedSequence: 1, targetSequence: 2, expectedPaperVersion: null, dataVersion: 2, historyVersion: 1, paperDelta: null })).status).toBe(409);
-    expect((await persistClientReplayBatch(id, { requestId: "new-client", generation: 1, syncVersion: 0, confirmedSequence: 0, targetSequence: 1, expectedPaperVersion: null, dataVersion: 1, historyVersion: 1, paperDelta: null })).status).toBe(200);
+    expect((await syncReplayToTarget(id, { requestId: "changed-history", generation: 1, syncVersion: 1, confirmedSequence: 1, targetSequence: 2, expectedPaperVersion: null, dataVersion: 2, historyVersion: 1 })).status).toBe(409);
+    expect((await syncReplayToTarget(id, { requestId: "new-client", generation: 1, syncVersion: 0, confirmedSequence: 0, targetSequence: 1, expectedPaperVersion: null, dataVersion: 1, historyVersion: 1 })).status).toBe(200);
   });
   it("blocks paid downloads before fetching when budget is insufficient", async () => {
     const id = await fixture(0); const run = await enqueueSync(id); const source = provider(undefined, 0.01); const fetchBars = vi.spyOn(source, "bars");

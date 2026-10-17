@@ -7,6 +7,7 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { copy } from "@/lib/i18n";
+import { hasVisibleReplayDialog } from "@/lib/market-replay/keyboard-shortcuts";
 import { displayIntervalOptions } from "@/lib/market-replay/display-interval";
 import { quickIntervalUnitSeconds, type QuickIntervalUnit } from "@/lib/market-replay/quick-interval";
 import { formatInterval } from "@/lib/market-replay/types";
@@ -33,7 +34,7 @@ export function DisplayIntervalControls({
         || event.isComposing || quickIntervalInitialValue !== null) return;
       const target = event.target as HTMLElement | null;
       if (target?.closest("input, textarea, select, [contenteditable]:not([contenteditable='false']), [role='dialog'], [role='listbox'], [role='menu'], [role='combobox']")
-        || document.querySelector("[role='dialog']")) return;
+        || hasVisibleReplayDialog()) return;
       event.preventDefault();
       setQuickIntervalInitialValue(event.key);
     };
