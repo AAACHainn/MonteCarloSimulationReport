@@ -13,6 +13,8 @@ export const REPLAY_HISTORY_RAW_SOURCE_BUDGET = 25_000;
 export const MAX_REPLAY_ADVANCE_COUNT = 100;
 export const MAX_DISPLAY_ADVANCE_SOURCE_BARS = 86_400;
 export const MAX_REPLAY_SYNC_SOURCE_BARS = 100;
+// Explicit manual/date batches; automatic playback retains its short 100-bar transactions.
+export const MAX_REPLAY_BULK_SOURCE_BARS = 1000;
 export const MARKET_CACHE_BUDGET_BYTES = 256 * 1024 * 1024;
 export const MARKET_DISPLAY_CACHE_BUDGET_BYTES = 64 * 1024 * 1024;
 export const MARKET_CACHE_EVICT_TO_RATIO = 0.8;

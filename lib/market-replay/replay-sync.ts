@@ -1,3 +1,4 @@
+import type { MarketBar } from "@prisma/client";
 import { hydrateTrainingLots } from "@/lib/paper-trading/serialize";
 import { progressWhere, accountWhere, assertReplayWritable, markReplayMutation, getReplayScope } from '@/lib/replay-sessions/scope';
 import { prisma } from "@/lib/db";
@@ -38,12 +39,14 @@ export type ReplaySyncInput = {
   expectedPaperVersion: number | null;
   targetSequence: number;
   journalContext?: PaperJournalContext | null;
+  /** Keep the former 100-source commit-boundary equity samples when coalescing manual requests. */
+  preserveSyncSamples?: boolean;
 };
 
 export type ReplaySyncSuccess = ReplayServerResult;
 
 export type ReplaySyncOutcome =
-  | { status: 200; error: null; response: ReplaySyncSuccess }
+  | { status: 200; error: null; response: ReplaySyncSuccess; processedBars?: MarketBar[] }
   | { status: 400 | 404 | 409; error: string; code?: string; response?: never };
 
 export async function syncReplayToTarget(
@@ -132,7 +135,9 @@ export async function syncReplayToTarget(
           for (const order of result.orders) if (originals.get(order.id) !== JSON.stringify(order)) changed.set(order.id, order);
           orders = result.orders.filter((order) => order.status === "PENDING");
           chunkFills.push(...result.fills); entries.push(...result.journalEntries);
-          if (result.fills.length || bar.sequence === input.targetSequence || bar.sequence === dataset.barCount - 1 || bar.sequence % account.equitySampleStride === 0) equityPoints.push(result.equityPoint);
+          if (result.fills.length || bar.sequence === input.targetSequence || bar.sequence === dataset.barCount - 1
+            || bar.sequence % account.equitySampleStride === 0
+            || (input.preserveSyncSamples && (bar.sequence - progress.currentSequence) % MAX_REPLAY_SYNC_SOURCE_BARS === 0)) equityPoints.push(result.equityPoint);
         }
         account = await persistDerivedBatch(tx, account, progress.generation, { state, orders: [...changed.values()], fills: chunkFills, lots, entries, equityPoints },
           { previousLots, updateProjection: false });
@@ -169,7 +174,8 @@ export async function syncReplayToTarget(
       data: { currentSequence: input.targetSequence, syncVersion, lastSyncRequestId: input.requestId, lastSyncResponse: JSON.stringify(response) },
     });
     await markReplayMutation(tx, input.targetSequence);
-    return { status: 200, error: null, response } as const;
+    // Internal reuse by the display advance route; API handlers only serialize response.
+    return { status: 200, error: null, response, processedBars: dbBars } as const;
   }, { timeout: 120_000 });
   return outcome;
 }

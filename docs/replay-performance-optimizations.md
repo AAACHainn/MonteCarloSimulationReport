@@ -43,3 +43,8 @@
 完整 lint、TypeScript 与生产构建通过。首次构建扫描到备份目录中保留 .ts 扩展名的代码副本，已保留内容并改为 .backup 后重建通过。
 
 本机重建前的当前数据、配置与附件备份记录为 tmp/local-replay-performance-current-backup.txt；48 张表计数、两个账户和两条回放进度与备份基线一致，原 .env 保持一致，完整性检查为 ok、外键检查无异常。服务已恢复至 http://localhost:3000，页面与 API 的只读检查返回 200，实际连接确认 SQLite 3.51.3 / WAL / FULL；核对记录为 tmp/local-replay-performance-install-report.json。刷新页面后加载新前端。生产环境未执行部署。
+
+
+## 第四项：特殊场景的较长等待
+
+跨非显示时段、高周期手动推进与日期快进的后续优化，见 [特殊场景等待优化](replay-special-waits.md)。

@@ -1,6 +1,6 @@
 "use client";
 
-import { advancedDisplayBars, canReuseAnnotations, type AnnotationCoverage } from "@/lib/market-replay/advance-display";
+import { advancedDisplayBars, canReuseAnnotations, manualAdvanceBatchSize, mergeDisplayAdvanceWindow, type AnnotationCoverage } from "@/lib/market-replay/advance-display";
 import { createUuid } from "@/lib/uuid";
 
 import { dateTimeLocalValue, selectedTimeToTimestamp } from "@/lib/market-replay/start-time";
@@ -74,6 +74,7 @@ import {
   EMA_LENGTH_MAX,
   EMA_LENGTH_MIN,
   MAX_EMA_INDICATORS,
+  MAX_REPLAY_BULK_SOURCE_BARS,
   REPLAY_HISTORY_BAR_LIMIT,
   REPLAY_HISTORY_COMPACT_TO,
   REPLAY_HISTORY_PREFETCH_THRESHOLD,
@@ -143,6 +144,7 @@ type WindowPayload = {
 };
 type ServerAdvancePayload = ReplayServerResult & {
   reachedVisibleBucket?: boolean;
+  aggregatedBars?: AggregatedMarketBarData[];
   lastSourceBar?: MarketBarData | null;
 };
 type TradeAnnotationsPayload = {
@@ -1301,13 +1303,23 @@ export function MarketReplayClient({ dataset: initialDataset, initialJournalFocu
           count: 1, displayIntervalSeconds: next.displayIntervalSeconds, displaySession: next.displaySession,
           abrValue: abrValue !== null && abrValue > 0 ? abrValue : null, abrLength, displayUtcOffsetMinutes,
         }, async (data) => {
+          if (!Array.isArray(data.aggregatedBars) || data.aggregatedBars.some(bar => bar.lastSequence > data.currentSequence)) {
+            throw new ReplayRequestError(copy.marketReplay.advanceConflict, 409);
+          }
           next = { ...next, currentSequence: data.currentSequence, confirmedSequence: data.currentSequence,
             syncVersion: data.syncVersion, status: data.currentSequence >= next.barCount - 1 ? "finished" : (latestReplayRef.current?.status ?? next.status) };
           snapshot = data.snapshot; lastSourceBar = data.lastSourceBar ?? null;
           reachedVisibleBucket = data.reachedVisibleBucket ?? false;
           commitConfirmedPaperSnapshot(snapshot);
           setReplay(next); currentSourceBarRef.current = lastSourceBar; setCurrentSourceBar(lastSourceBar);
-          await readReplayData(() => loadWindow(next.currentSequence, next.displayIntervalSeconds, next.displaySession, indicatorWarmupCountRef.current));
+          const previousTail = barsRef.current.at(-1);
+          const window = mergeDisplayAdvanceWindow(barsRef.current, warmupBarsRef.current, data.aggregatedBars,
+            indicatorWarmupCountRef.current, next.currentSequence >= next.barCount - 1);
+          barsRef.current = window.bars; warmupBarsRef.current = window.warmupBars;
+          setBars(window.bars); setWarmupBars(window.warmupBars);
+          getDisplayCache(next.displayIntervalSeconds, next.displaySession).schedulePersist(
+            advancedDisplayBars(window.bars, data.fromSequence, previousTail));
+          if (data.fills.length) void loadTradeAnnotations(window.bars.slice(-DEFAULT_REPLAY_MAX_VISIBLE_BARS));
         });
         if (!ok) return false;
         if (reachedVisibleBucket || !shouldContinue()) break;
@@ -1328,12 +1340,13 @@ export function MarketReplayClient({ dataset: initialDataset, initialJournalFocu
     }
   }, [abrLength, autoPausePlayback, beginBuffering, commitConfirmedPaperSnapshot, confirmedPaperSnapshotRef, dataset.id,
     dataset.historyVersion, displayUtcOffsetMinutes, endBuffering, executeServerAdvance, flushVisible, latestReplayRef,
-    loadWindow, paperMutationActiveRef, paperMutationChainRef, readReplayData, setReplay]);
+    getDisplayCache, loadTradeAnnotations, paperMutationActiveRef, paperMutationChainRef, setReplay]);
 
   const processServerBars = useCallback(async (
     requestedCount: number,
     shouldContinue: () => boolean = () => true,
     playbackIntent?: ReplayPlaybackIntent,
+    bulk = false,
   ) => {
     const frameStartedAt = performance.now();
     const current = latestReplayRef.current;
@@ -1341,7 +1354,7 @@ export function MarketReplayClient({ dataset: initialDataset, initialJournalFocu
       historyConflictRef.current || !shouldContinue() || !current || advancingRef.current || paperMutationActiveRef.current || viewChangingRef.current
       || current.currentSequence >= current.barCount - 1 || !dataset.sourceIntervalSeconds
     ) return 0;
-    const count = Math.min(requestedCount, REPLAY_SYNC_BATCH_SIZE, current.barCount - 1 - current.currentSequence);
+    const count = Math.min(requestedCount, bulk ? MAX_REPLAY_BULK_SOURCE_BARS : REPLAY_SYNC_BATCH_SIZE, current.barCount - 1 - current.currentSequence);
     if (count <= 0) return 0;
     advancingRef.current = true;
     let resolveAdvance: () => void = () => undefined;
@@ -1412,6 +1425,7 @@ export function MarketReplayClient({ dataset: initialDataset, initialJournalFocu
       }
       const lastSourceBar = sourceBars.at(-1)!;
       const body: ReplayServerRequest = {
+        ...(bulk && count > REPLAY_SYNC_BATCH_SIZE ? { batchMode: "BULK" as const } : {}),
         requestId: createUuid(), generation: current.generation, confirmedSequence: current.currentSequence,
         syncVersion: current.syncVersion, dataVersion: dataset.dataVersion, historyVersion: dataset.historyVersion ?? 1,
         expectedPaperVersion: confirmedPaperSnapshotRef.current?.session.version ?? null,
@@ -1684,7 +1698,8 @@ export function MarketReplayClient({ dataset: initialDataset, initialJournalFocu
           currentSourceBarRef.current?.timestamp ?? first.timestamp,
           marketSession,
         );
-        const candidates = await marketCache.getBarsAfter(current.currentSequence, 100, currentAnchor);
+        const candidates = await marketCache.getBarsAfter(current.currentSequence,
+          manualAdvanceBatchSize(dataset.sourceIntervalSeconds, current.displayIntervalSeconds), currentAnchor);
         if (isCancelled()) break;
         const inBucket = candidates.filter((bar) => {
           const bucket = getAggregationBucket(
@@ -1696,7 +1711,7 @@ export function MarketReplayClient({ dataset: initialDataset, initialJournalFocu
           return bucket?.start === targetBucket.start;
         });
         if (!inBucket.length) break;
-        const processed = await processServerBars(inBucket.length, () => !isCancelled());
+        const processed = await processServerBars(inBucket.length, () => !isCancelled(), undefined, true);
         if (!processed || !(await flushVisible())) break;
         if (processed < inBucket.length || inBucket.length < candidates.length) break;
       }
@@ -2140,7 +2155,7 @@ export function MarketReplayClient({ dataset: initialDataset, initialJournalFocu
     try {
       while ((latestReplayRef.current?.currentSequence ?? data.sequence) < data.sequence && !cancelForwardRef.current) {
         const current = latestReplayRef.current!;
-        const processed = await processServerBars(Math.min(100, data.sequence - current.currentSequence), () => !cancelForwardRef.current);
+        const processed = await processServerBars(Math.min(MAX_REPLAY_BULK_SOURCE_BARS, data.sequence - current.currentSequence), () => !cancelForwardRef.current, undefined, true);
         if (!processed || !await flushVisible()) return false;
         setForwardProgress({ current: latestReplayRef.current!.currentSequence, target: data.sequence });
       }

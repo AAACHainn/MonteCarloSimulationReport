@@ -3,6 +3,7 @@ import type { ReplayContextRun } from "@/lib/replay-sessions/context-runs";
 
 /** Requests contain progress and chart context, never client trade results. */
 export type ReplayServerRequest = {
+  batchMode?: "BULK";
   generation: number;
   requestId: string;
   confirmedSequence: number;

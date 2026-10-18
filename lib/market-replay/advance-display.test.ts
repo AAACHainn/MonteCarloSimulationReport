@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import type { AggregatedMarketBarData } from "./types";
-import { advancedDisplayBars, canReuseAnnotations } from "./advance-display";
+import { advancedDisplayBars, canReuseAnnotations, manualAdvanceBatchSize, mergeDisplayAdvanceWindow } from "./advance-display";
 import { DisplayBarCache } from "./bar-cache";
 
 function bar(first: number, last = first): AggregatedMarketBarData {
@@ -69,5 +69,38 @@ describe("ordinary advance browser work", () => {
     const coverage = { fromSequence: 100, toSequence: 200, revealedSequence: 300, journalEntryCount: 8 };
     expect(canReuseAnnotations(coverage, 110, 201, 301, 8)).toBe(false);
     expect(canReuseAnnotations(coverage, 110, 199, 301, 8)).toBe(true);
+  });
+  it("uses bounded larger manual batches only when the display ratio needs them", () => {
+    expect(manualAdvanceBatchSize(60, 300)).toBe(100);
+    expect(manualAdvanceBatchSize(1, 300)).toBe(300);
+    expect(manualAdvanceBatchSize(1, 3600)).toBe(1000);
+    expect(manualAdvanceBatchSize(1, 86400)).toBe(1000);
+  });
+  it("applies full aggregate revisions without duplicating volume or replacing history", () => {
+    const history = bar(0,4); const forming = { ...bar(5,7), volume: 3 };
+    const completed = { ...bar(5,9), volume: 5, status: "COMPLETE" as const };
+    const warmup = [bar(-5,-1)];
+    const first = mergeDisplayAdvanceWindow([history, forming], warmup, [completed, bar(10,11)], 8, false);
+    const retry = mergeDisplayAdvanceWindow(first.bars, first.warmupBars, [completed, bar(10,11)], 8, false);
+    expect(first.bars).toEqual([history, completed, bar(10,11)]);
+    expect(first.bars[0]).toBe(history);
+    expect(first.warmupBars).toBe(warmup);
+    expect(retry.bars).toEqual(first.bars);
+    expect(retry.bars[1].volume).toBe(5);
+  });
+  it("leaves the display window untouched while only hidden source candles advance", () => {
+    const bars = [bar(0,4)]; const warmup = [bar(-5,-1)];
+    const hidden = mergeDisplayAdvanceWindow(bars, warmup, [], 8, false);
+    expect(hidden.bars).toBe(bars); expect(hidden.warmupBars).toBe(warmup);
+    const finished = mergeDisplayAdvanceWindow(bars, warmup, [], 8, true);
+    expect(finished.bars[0].status).toBe("COMPLETE");
+    expect(bars[0].status).toBe("FORMING");
+  });
+  it("compacts only when the existing history limit is exceeded and keeps indicator warmup", () => {
+    const bars = Array.from({ length: 25000 }, (_, i) => bar(i * 5, i * 5 + 4));
+    const next = mergeDisplayAdvanceWindow(bars, [], [bar(125000)], 2, false);
+    expect(next.bars).toHaveLength(24000);
+    expect(next.warmupBars).toEqual(bars.slice(999,1001));
+    expect(next.bars[0]).toBe(bars[1001]);
   });
 });

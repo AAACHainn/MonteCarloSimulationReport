@@ -12,6 +12,7 @@ import {
   MAX_DISPLAY_INTERVAL_SECONDS,
   MAX_REPLAY_ADVANCE_COUNT,
   MAX_REPLAY_SYNC_SOURCE_BARS,
+  MAX_REPLAY_BULK_SOURCE_BARS,
   isPlaybackRate,
 } from "./market-replay/types";
 import {
@@ -312,6 +313,7 @@ export const replaySyncSchema = z.object({
 });
 
 export const replayServerSyncSchema = z.object({
+  batchMode: z.literal("BULK").optional(),
   generation: z.number().int().positive(), requestId: z.string().trim().min(1).max(120),
   confirmedSequence: z.number().int().min(-1), syncVersion: z.number().int().min(0),
   dataVersion: z.number().int().positive(), historyVersion: z.number().int().positive(),
@@ -319,9 +321,10 @@ export const replayServerSyncSchema = z.object({
   contextRuns: z.array(z.object({
     fromSequence: z.number().int().nonnegative(), toSequence: z.number().int().nonnegative(),
     generation: z.number().int().positive(), context: paperJournalContextSchema.nullable(),
-  })).max(MAX_REPLAY_SYNC_SOURCE_BARS),
+  })).max(MAX_REPLAY_BULK_SOURCE_BARS),
 }).strict().superRefine((value, context) => {
-  if (value.targetSequence <= value.confirmedSequence || value.targetSequence - value.confirmedSequence > MAX_REPLAY_SYNC_SOURCE_BARS) {
+  const maximum = value.batchMode === "BULK" ? MAX_REPLAY_BULK_SOURCE_BARS : MAX_REPLAY_SYNC_SOURCE_BARS;
+  if (value.contextRuns.length > maximum || value.targetSequence <= value.confirmedSequence || value.targetSequence - value.confirmedSequence > maximum) {
     context.addIssue({ code: z.ZodIssueCode.custom, message: copy.marketReplay.validation.progressInvalid });
   }
 });

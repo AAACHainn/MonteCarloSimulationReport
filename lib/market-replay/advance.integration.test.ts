@@ -38,10 +38,13 @@ import type { PaperFillData, PaperEquityPointData } from "@/lib/paper-trading/ty
 import { GET as windowGET } from "@/app/api/market-datasets/[id]/bars/window/route";
 import { GET as chunksGET } from "@/app/api/market-datasets/[id]/bars/chunks/route";
 import { resolveDisplaySession } from "./chart-sessions";
-import { getAggregationBucket } from "./aggregation";
+import { aggregateMarketBars, getAggregationBucket, mergeSourceBarInto } from "./aggregation";
+import { calculateLatestAbr } from "./abr";
+import { appendContextRun, type ReplayContextRun } from "@/lib/replay-sessions/context-runs";
 import { buildMarketBarBlocks } from "./bar-blocks";
 import { readLaterHistoryWindow, mergeHistoricalBars } from "./historical-window";
 import type { AggregatedMarketBarData } from "./types";
+import type { ReplayServerResult } from "./server-sync-types";
 
 
 const fixtureSessions = new Map<string, string>();
@@ -155,6 +158,118 @@ async function serverSyncBody(id: string, targetSequence: number, requestId: str
 }
 
 describe("replay advance with real SQLite", () => {
+
+  it("matches per-source ABR, FIFO, fees, OCO and every equity sample when coalescing a thousand source bars", async () => {
+    // Different commit boundaries round-trip SQLite Float values a different number of times.
+    const equivalent = (actual: unknown, expected: unknown): void => {
+      if (typeof expected === "number") { expect(actual).toBeCloseTo(expected, 10); return; }
+      if (expected instanceof Date) { expect(actual).toEqual(expected); return; }
+      if (Array.isArray(expected)) {
+        expect(Array.isArray(actual)).toBe(true); expect(actual).toHaveLength(expected.length);
+        expected.forEach((value, index) => equivalent((actual as unknown[])[index], value)); return;
+      }
+      if (expected !== null && typeof expected === "object") {
+        expect(actual).not.toBeNull(); expect(typeof actual).toBe("object");
+        expect(Object.keys(actual as object)).toEqual(Object.keys(expected));
+        for (const [key,value] of Object.entries(expected)) equivalent((actual as Record<string,unknown>)[key], value);
+        return;
+      }
+      expect(actual).toEqual(expected);
+    };
+    const ids = ["bulk-reference", "bulk-coalesced"];
+    for (const id of ids) {
+      await seed(id, 1, 4000, 2399);
+      const account = await prisma.paperTradingSession.findFirstOrThrow({ where: { datasetId: id } });
+      await prisma.paperTradingSession.update({ where: { id: account.id }, data: { commissionBps: 5, slippageBps: 2, equitySampleStride: 7 } });
+      for (const order of [
+        { id: "entry", side: "BUY" as const, quantity: 2, activeFromSequence: 2400, stopLoss: 90, takeProfit: 120 },
+        { id: "reduce", side: "SELL" as const, quantity: 1, activeFromSequence: 2450, reduceOnly: true },
+        { id: "reverse", side: "SELL" as const, quantity: 2, activeFromSequence: 2500, stopLoss: 110, takeProfit: 90 },
+        { id: "close", side: "BUY" as const, quantity: 1, activeFromSequence: 2700, reduceOnly: true },
+      ]) await seedOrder({ sessionId: account.id, type: "MARKET", createdSequence: 2399, ...order });
+    }
+    const records = await prisma.marketBar.findMany({ where: { datasetId: ids[0], sequence: { lte: 3399 } }, orderBy: { sequence: "asc" } });
+    const sourceBars = records.map(serializeSourceBar);
+    const displaySession = { mode: "TWENTY_FOUR_SEVEN" as const, timezone: "UTC", openMinute: null, closeMinute: null, weekdays: [1,2,3,4,5,6,7] };
+    const bars = aggregateMarketBars({ bars: sourceBars.slice(0,2400), sourceSeconds: 1, displaySeconds: 300, session: displaySession, currentSequence: 2399, finalSequence: 3999 });
+    const runs: ReplayContextRun[] = [];
+    for (const source of sourceBars.slice(2400)) {
+      const abrValue = calculateLatestAbr([], bars, 8);
+      mergeSourceBarInto(bars, source, { sourceSeconds: 1, displaySeconds: 300, session: displaySession, finalSequence: 3999 });
+      appendContextRun(runs, source.sequence, { abrValue, abrLength: 8, displayIntervalSeconds: 300, displaySession: "ETH", displayUtcOffsetMinutes: 0, priceTickSize: 0.01 }, 1);
+    }
+    type BulkResult = ReplayServerResult & { snapshot: NonNullable<ReplayServerResult["snapshot"]> };
+    const responses: BulkResult[] = [];
+    for (const id of ids) {
+      const size = id === ids[0] ? 100 : 1000;
+      let final: BulkResult | undefined;
+      for (let from = 2400; from <= 3399; from += size) {
+        const to = Math.min(3399, from + size - 1);
+        const body = { ...await serverSyncBody(id, to, "bulk-" + from),
+          contextRuns: runs.filter(run => run.toSequence >= from && run.fromSequence <= to).map(run => ({ ...run, fromSequence: Math.max(from,run.fromSequence), toSequence: Math.min(to,run.toSequence) })),
+          ...(size > 100 ? { batchMode: "BULK" } : {}) };
+        const response = await syncPOST(syncRequest(body), context(id));
+        expect(response.status, await response.clone().text()).toBe(200); final = await response.json();
+        expect(final).not.toHaveProperty("processedBars");
+        if (size > 100) expect(await (await syncPOST(syncRequest(body), context(id))).json()).toEqual(final);
+      }
+      if (!final) throw new Error("Expected a completed bulk comparison");
+      responses.push(final);
+    }
+    const state = (value: typeof responses[number]) => { const { id: _id, datasetId: _dataset, activeCycleKey: _cycle, ...rest } = value.snapshot.session; void _id; void _dataset; void _cycle; return rest; };
+    equivalent(state(responses[1]), state(responses[0]));
+    equivalent(responses[1].snapshot.stats, responses[0].snapshot.stats);
+    const fills = (value: typeof responses[number]) => value.snapshot.recentFills.map(({ id: _id, cycleKey: _cycle, ...rest }: PaperFillData) => { void _id; void _cycle; return rest; });
+    equivalent(fills(responses[1]), fills(responses[0]));
+    expect(responses[1].snapshot.session.netQuantity).toBe(0);
+    const stored = [];
+    for (const id of ids) {
+      const account = await prisma.paperTradingSession.findFirstOrThrow({ where: { datasetId: id } });
+      const scope = await loadReplayScope(fixtureSessions.get(id)!);
+      stored.push({
+        equity: await prisma.paperEquityPoint.findMany({ where: { sessionId: account.id }, orderBy: { sequence: "asc" }, select: { sequence: true, timestamp: true, balance: true, equity: true, drawdown: true } }),
+        contexts: await prisma.replayContextRun.findMany({ where: { projectionId: scope.projectionId }, orderBy: { fromSequence: "asc" }, select: { fromSequence: true, toSequence: true, context: true } }),
+        journals: await prisma.replayJournalEntry.findMany({ where: { projectionId: scope.projectionId }, orderBy: [{ closedSequence: "asc" },{ openedSequence: "asc" }], select: { openedSequence: true, closedSequence: true, quantity: true, entryPrice: true, exitPrice: true, abrValue: true, actualRisk: true, gainLoss: true } }),
+      });
+    }
+    equivalent(stored[1], stored[0]);
+    expect(stored[1].journals.length).toBeGreaterThan(0);
+    expect(stored[1].journals.every(entry => entry.abrValue !== null)).toBe(true);
+  });
+
+  it("requires explicit bounded bulk mode and rejects oversized source/context payloads before mutation", async () => {
+    const id = "bulk-limit"; await seed(id, 1, 1200);
+    const baseline = await prisma.replayProgress.findFirstOrThrow({ where: { datasetId: id } });
+    const body = await serverSyncBody(id, 1000, "over-limit");
+    for (const invalid of [body, { ...body, batchMode: "BULK" }, { ...body, batchMode: "UNKNOWN", targetSequence: 0 }]) {
+      expect((await syncPOST(syncRequest(invalid), context(id))).status).toBe(400);
+    }
+    const tooManyContexts = { ...body, targetSequence: 999, batchMode: "BULK", contextRuns: Array.from({ length: 1001 }, (_, sequence) => ({ fromSequence: sequence, toSequence: sequence, generation: 1, context: null })) };
+    expect((await syncPOST(syncRequest(tooManyContexts), context(id))).status).toBe(400);
+    expect(await prisma.replayProgress.findFirstOrThrow({ where: { datasetId: id } })).toEqual(baseline);
+    expect(await prisma.paperFill.count({ where: { session: { datasetId: id } } })).toBe(0);
+  });
+
+  it("rolls back a large batch and its sampled equity, context and fills when snapshot preparation fails", async () => {
+    const id = "bulk-rollback"; await seed(id, 1, 1200);
+    const account = await prisma.paperTradingSession.findFirstOrThrow({ where: { datasetId: id } });
+    await seedOrder({ id: "entry", sessionId: account.id, type: "MARKET", side: "BUY", quantity: 1, createdSequence: -1, activeFromSequence: 0, stopLoss: 90, takeProfit: 120 });
+    const body = { ...await serverSyncBody(id, 999, "bulk-rollback"), batchMode: "BULK" };
+    const before = await prisma.replayProgress.findFirstOrThrow({ where: { datasetId: id } });
+    const beforeAccount = await prisma.paperTradingSession.findUniqueOrThrow({ where: { id: account.id } });
+    const fault = vi.spyOn(snapshotModule, "getPaperSessionSnapshot").mockRejectedValueOnce(new Error("bulk snapshot failure"));
+    const log = vi.spyOn(console,"error").mockImplementation(() => undefined);
+    try { expect((await syncPOST(syncRequest(body), context(id))).status).toBe(500); }
+    finally { fault.mockRestore(); log.mockRestore(); }
+    expect(await prisma.replayProgress.findFirstOrThrow({ where: { datasetId: id } })).toEqual(before);
+    expect(await prisma.paperTradingSession.findUniqueOrThrow({ where: { id: account.id } })).toEqual(beforeAccount);
+    expect(await prisma.paperFill.count({ where: { sessionId: account.id } })).toBe(0);
+    expect(await prisma.paperEquityPoint.count({ where: { sessionId: account.id } })).toBe(0);
+    expect(await prisma.replayContextRun.count({ where: { projectionId: account.projectionId! } })).toBe(0);
+    expect((await syncPOST(syncRequest(body), context(id))).status).toBe(200);
+    expect(await prisma.paperFill.count({ where: { sessionId: account.id } })).toBe(1);
+  });
+
   it("coalesces context boundaries and inserts changing source contexts in a bounded batch", async () => {
     const id = "lean-contexts";
     await seed(id, 1, 200);

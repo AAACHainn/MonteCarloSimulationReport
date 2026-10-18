@@ -4,6 +4,7 @@ import { randomUUID } from "node:crypto";
 import { NextResponse } from "next/server";
 import { prisma, replayDatabaseQueryCount } from "@/lib/db";
 import { copy } from "@/lib/i18n";
+import { planDisplayAdvance } from "@/lib/market-replay/display-advance";
 import { aggregateMarketBars, getAggregationBucket } from "@/lib/market-replay/aggregation";
 import { resolveDisplaySession } from "@/lib/market-replay/chart-sessions";
 import { datasetSourceInterval, serializeSourceBar } from "@/lib/market-replay/dataset";
@@ -54,42 +55,15 @@ async function handlePOST(request: Request, context: RouteContext) {
     if (!displaySessionConfig) {
       return NextResponse.json({ error: copy.marketReplay.unsupportedDisplaySession }, { status: 400 });
     }
-    const candidates = await prisma.marketBar.findMany({
-      where: { datasetId: id, sequence: { gt: progress.currentSequence } },
-      orderBy: { sequence: "asc" },
-      take: MAX_DISPLAY_ADVANCE_SOURCE_BARS + 1,
-    });
-    if (!candidates.length) return NextResponse.json({ error: copy.paperTrading.noNextBar }, { status: 400 });
-    const cappedLast = candidates[Math.min(candidates.length, MAX_DISPLAY_ADVANCE_SOURCE_BARS) - 1];
-    const bucketStarts: number[] = [];
-    let previousVisibleSequence: number | null = null;
-    for (const candidate of candidates) {
-      const bucket = getAggregationBucket(
-        candidate.timestamp.getTime(), sourceSeconds, parsed.data.displayIntervalSeconds, displaySessionConfig,
-      );
-      if (!bucket) continue;
-      if (bucketStarts.at(-1) !== bucket.start) {
-        if (bucketStarts.length >= parsed.data.count) {
-          targetSequence = previousVisibleSequence!;
-          reachedVisibleBucket = true;
-          completedDisplayBucketStart = new Date(bucketStarts.at(-1)!).toISOString();
-          break;
-        }
-        bucketStarts.push(bucket.start);
-      }
-      previousVisibleSequence = candidate.sequence;
-    }
-    if (!reachedVisibleBucket) {
-      targetSequence = cappedLast.sequence;
-      if (targetSequence === dataset.barCount - 1 && bucketStarts.length >= parsed.data.count) {
-        reachedVisibleBucket = true;
-        completedDisplayBucketStart = new Date(bucketStarts.at(-1)!).toISOString();
-      }
-    }
-    if (bucketStarts.length) aggregationStart = new Date(bucketStarts[0]);
+    const plan = await planDisplayAdvance({ currentSequence: progress.currentSequence, barCount: dataset.barCount,
+      sourceSeconds, displaySeconds: parsed.data.displayIntervalSeconds, session: displaySessionConfig, count: parsed.data.count },
+      (after, take) => prisma.marketBar.findMany({ where: { datasetId: id, sequence: { gt: after } },
+        orderBy: { sequence: "asc" }, take, select: { sequence: true, timestamp: true } }));
+    if (!plan) return NextResponse.json({ error: copy.paperTrading.noNextBar }, { status: 400 });
+    ({ targetSequence, aggregationStart, completedDisplayBucketStart, reachedVisibleBucket } = plan);
   }
 
-  const outcome = cached ? { status: 200 as const, response: cached, error: null } : await syncReplayToTarget(id, {
+  const outcome = cached ? { status: 200 as const, response: cached, error: null, processedBars: undefined } : await syncReplayToTarget(id, {
     historyVersion: parsed.data.historyVersion,
     generation: progress.generation,
     requestId: parsed.data.requestId ?? `legacy_${randomUUID()}`,
@@ -109,7 +83,7 @@ async function handlePOST(request: Request, context: RouteContext) {
   }, MAX_DISPLAY_ADVANCE_SOURCE_BARS);
   if (outcome.status !== 200) return NextResponse.json({ error: outcome.error, code: outcome.code }, { status: outcome.status });
 
-  const advanced = await prisma.marketBar.findMany({
+  const advanced = outcome.processedBars ?? await prisma.marketBar.findMany({
     where: { datasetId: id, sequence: { gt: parsed.data.expectedCurrentSequence, lte: targetSequence } },
     orderBy: { sequence: "asc" },
   });
@@ -137,7 +111,9 @@ async function handlePOST(request: Request, context: RouteContext) {
     finalSequence: dataset.barCount - 1,
   }).map((bar) => ({
     ...bar,
-    status: bar.sourceCount === bar.expectedCount ? "COMPLETE" as const : "INCOMPLETE" as const,
+    status: bar.status === "FORMING" && (reachedVisibleBucket
+      || Date.parse(bar.bucketEnd) <= (advanced.at(-1)?.timestamp.getTime() ?? 0) + datasetSourceInterval(dataset)! * 1000)
+      ? "INCOMPLETE" as const : bar.status,
   }));
 
   const response = NextResponse.json({
