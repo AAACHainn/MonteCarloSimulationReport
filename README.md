@@ -99,6 +99,8 @@ docker compose down
 | 变量 | 默认值 / 示例 | 用途 |
 | --- | --- | --- |
 | `DATABASE_URL` | `file:./dev.db` | 本地 Node 与开发 Compose 下对应 `prisma/dev.db` |
+| `SQLITE_DRIVER` | `native` | 可选 `better-sqlite3`；切换前按升级指南备份并在目标环境验证 |
+| `SQLITE_JOURNAL_MODE` | `delete`（示例配置） | 新驱动可显式设为 `wal`，每条连接保持 FULL；native 仅支持 DELETE |
 | `MARKET_DATA_ENCRYPTION_KEY` | 空 | 可选；行情连接使用的 32 字节 Base64 加密主密钥，配置后须跨重启与升级保留 |
 | `MARKET_DATA_SYNC_ENABLED` | `1` | 行情同步任务处理与调度开关；设为 `0` 关闭，数据集仍需单独启用同步 |
 | `AI_ENCRYPTION_KEY` | 空 | 独立 AI 密钥加密主密钥；本地运行 `node scripts/setup-ai-key.mjs` 生成一次并保留 |
@@ -113,7 +115,9 @@ corepack pnpm run build
 corepack pnpm start
 ```
 
-仓库还提供 `Dockerfile.prod` 与 `compose.prod.yaml`。生产 Compose 引用预构建镜像，拉取源码不会自动更新该镜像；当前生产 Dockerfile 的独立后台 worker 打包仍有缺口，详情见 [Docker 部署检查](docs/upgrade.md#docker-部署的额外检查)。
+仓库还提供 `Dockerfile.prod` 与 `compose.prod.yaml`。生产 Compose 引用预构建镜像，拉取源码不会自动更新该镜像；runner 已包含后台 worker 所需源码，仍须验证目标镜像的原生驱动、worker 与持久化。启用 WAL 时还需显式传入 SQLite 配置，并将迁移从服务启动命令分离，详见 [Docker 部署检查](docs/upgrade.md#docker-部署的额外检查)。
+
+本次回放事务、浏览器和特殊等待优化无需新增结构迁移，重新构建、重启并刷新页面即可生效；SQLite WAL 提交优化需额外显式接入，版本来源和切换步骤见 [SQLite 升级](docs/upgrade.md#sqlite-引擎与-wal-升级)。
 
 ## 使用流程
 
