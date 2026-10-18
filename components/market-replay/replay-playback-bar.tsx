@@ -1,5 +1,6 @@
 "use client";
 
+import * as Popover from "@radix-ui/react-popover";
 import { CalendarDays, ChevronRight, Maximize, Minimize, Pause, Play } from "lucide-react";
 import { PaperTradingDetails } from "./paper-trading-panel";
 import { useReplayShortcuts } from "./use-replay-shortcuts";
@@ -43,9 +44,17 @@ export function ReplayPlaybackBar({
   onLocateDate, dateForwarding = false, dateForwardStatus, onStopDateForward,
 }: Props) {
   const shortcuts = useReplayShortcuts();
-  const stateLabel = replay.status === "playing"
-    ? copy.marketReplay.play
-    : replay.status === "finished" ? copy.marketReplay.finished : copy.marketReplay.pause;
+  const stateLabel = replay.status === "finished" ? copy.marketReplay.finished
+    : playbackRequested ? copy.marketReplay.play : copy.marketReplay.pause;
+  const statusLabel = stateLabel + (statusText ? ` · ${statusText}` : "");
+  const status = (
+    <span role="status" aria-live="polite" aria-atomic="true" className="inline-flex h-8 w-48 shrink-0 items-center justify-end text-xs font-medium text-slate-700">
+      {statusText ? <Popover.Root>
+        <Popover.Trigger asChild><Button type="button" variant="ghost" className="h-8 w-full min-w-0 justify-end px-0 text-xs" aria-label={statusLabel}><span className="truncate">{statusLabel}</span></Button></Popover.Trigger>
+        <Popover.Portal><Popover.Content side="top" align="end" collisionPadding={8} aria-label={copy.marketReplay.status} className="z-[70] max-w-[calc(100vw-2rem)] rounded-md border bg-white px-3 py-2 text-sm text-slate-700 shadow-lg"><p className="mb-1 font-medium">{copy.marketReplay.status}</p><p className="max-w-xs">{statusText}</p></Popover.Content></Popover.Portal>
+      </Popover.Root> : stateLabel}
+    </span>
+  );
   return (
     <div aria-busy={retrying} className="flex h-14 shrink-0 items-center gap-2 border-t bg-slate-50/80 px-3">
       <div className="flex min-w-0 flex-1 items-center gap-2 overflow-x-auto [&>*]:shrink-0">
@@ -71,14 +80,12 @@ export function ReplayPlaybackBar({
         <Input id="replay-speed" type="range" min={MIN_PLAYBACK_RATE} max={MAX_PLAYBACK_RATE} value={replay.playbackRate} onChange={(event) => onSpeedChange(Number(event.target.value))} className="h-8 w-24 border-0 bg-transparent px-0 lg:w-32" />
         <Input aria-label={copy.marketReplay.speed} type="number" min={MIN_PLAYBACK_RATE} max={MAX_PLAYBACK_RATE} value={replay.playbackRate} onChange={(event) => onSpeedChange(Math.max(MIN_PLAYBACK_RATE, Math.min(MAX_PLAYBACK_RATE, Number(event.target.value))))} className="h-8 w-20" />
         <span className="text-xs font-medium text-slate-700">{copy.marketReplay.playbackRate(replay.playbackRate)}</span>
-        <span role="status" aria-live="polite" className="ml-auto max-w-48 truncate text-xs font-medium text-slate-700 xl:hidden" title={statusText || undefined}>
-          {stateLabel}{statusText ? ` · ${statusText}` : ""}
-        </span>
+        <span className="ml-auto xl:hidden">{status}</span>
         <div className="ml-auto hidden items-center gap-4 text-xs xl:flex">
           <span className="text-slate-500">{copy.marketReplay.progress(revealedCount, replayCount)}</span>
           <span className="font-medium text-slate-800">{currentBar ? formatUtcDateTime(currentBar.timestamp, displayUtcOffsetMinutes) : copy.marketReplay.waiting}</span>
           <span className="hidden font-mono text-slate-600 2xl:inline">{currentBar ? `${currentBar.open} / ${currentBar.high} / ${currentBar.low} / ${currentBar.close}` : "–"}</span>
-          <span role="status" aria-live="polite" className="font-medium text-slate-700">{stateLabel}{statusText ? ` · ${statusText}` : ""}</span>
+          {status}
         </div>
       </div>
       <Button

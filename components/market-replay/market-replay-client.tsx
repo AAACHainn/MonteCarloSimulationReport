@@ -128,7 +128,9 @@ import {
   useReplayPreferences,
 } from "@/components/market-replay/use-replay-preferences";
 
-type SaveStatus = "idle" | "saving" | "saved" | "error";
+import { useDelayedActivity } from "@/lib/use-delayed-activity";
+import { replayPlaybackStatusText, type ReplaySaveStatus } from "@/lib/market-replay/playback-status";
+
 type WindowPayload = {
   visibleBars: AggregatedMarketBarData[];
   warmupBars: AggregatedMarketBarData[];
@@ -246,7 +248,7 @@ export function MarketReplayClient({ dataset: initialDataset, initialJournalFocu
   const startDialogSuspensionRef = useRef<ReplaySuspension | null>(null);
   const confirmationSuspensionRef = useRef<ReplaySuspension | null>(null);
   const [startError, setStartError] = useState<string | null>(null);
-  const [saveStatus, setSaveStatus] = useState<SaveStatus>("idle");
+  const [saveStatus, setSaveStatus] = useState<ReplaySaveStatus>("idle");
   const [confirmAction, setConfirmAction] = useState<"reset" | "paper-clear" | null>(null);
   const [settingsDialog, setSettingsDialog] = useState<"candlesticks" | "indicators" | "paper" | null>(null);
   const [candlestickStyleDraft, setCandlestickStyleDraft] = useState<CandlestickStyle | null>(null);
@@ -2298,23 +2300,11 @@ export function MarketReplayClient({ dataset: initialDataset, initialJournalFocu
   const currentBar = replay && replay.currentSequence >= 0 ? currentSourceBar : null;
   const revealedCount = replay ? Math.max(0, replay.currentSequence - replay.startSequence + 1) : 0;
   const replayCount = replay ? replay.barCount - replay.startSequence : 0;
-  const statusText = useMemo(() => {
-    if (retrying) return wantsPlayback() ? copy.marketReplay.advanceRetrying : copy.marketReplay.advanceRetryingPaused;
-    if (recoveryNotice) return recoveryNotice;
-    if (buffering) return copy.marketReplay.buffering;
-    if (saveStatus === "saving") return copy.marketReplay.saving;
-    if (saveStatus === "error") return copy.marketReplay.saveError;
-    if (saveStatus === "saved") return copy.marketReplay.saved;
-    if (replay?.status !== "paused") return "";
-    if (pauseReason === "page-hidden") return copy.marketReplay.pauseReasonHidden;
-    if (pauseReason === "operation") return copy.marketReplay.pauseReasonOperation;
-    if (pauseReason === "operation-failed") return copy.marketReplay.pauseReasonOperationFailed;
-    if (pauseReason === "source-failed") return copy.marketReplay.pauseReasonSourceFailed;
-    if (pauseReason === "sync-conflict") return copy.marketReplay.pauseReasonSyncConflict;
-    if (pauseReason === "state-mismatch") return copy.marketReplay.pauseReasonStateMismatch;
-    if (pauseReason === "user") return copy.marketReplay.pauseReasonUser;
-    return "";
-  }, [buffering, pauseReason, recoveryNotice, replay?.status, retrying, saveStatus, wantsPlayback]);
+  const activityVisible = useDelayedActivity(saveStatus === "saving" || buffering || pauseReason === "operation");
+  const statusText = replayPlaybackStatusText({
+    retrying, playbackRequested: wantsPlayback(), recoveryNotice, buffering, saveStatus,
+    activityVisible, replayStatus: replay?.status, pauseReason,
+  });
 
   function wrapWorkspace(content: ReactNode) {
     return <div className="flex h-full min-h-0 flex-col gap-2">
