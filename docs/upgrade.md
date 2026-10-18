@@ -35,7 +35,7 @@
 
 ```powershell
 node --version
-corepack pnpm install --frozen-lockf
+corepack pnpm install --frozen-lockfile
 corepack pnpm prisma generate
 ```
 
@@ -68,6 +68,12 @@ corepack pnpm run db:init-sqlite
 该脚本会修改已有数据库，包含多会话转换、单份结果清理及关卡字段补齐，不是一个只创建空表的命令。只有确认适用于目标旧库、在备份副本演练并核对数据后，才对正式库使用。
 
 使用兜底脚本不会补齐 `_prisma_migrations`。若随后切换到自动执行 `migrate deploy` 的 Docker 生产方式，需先在副本上验证并建立与真实状态一致的迁移基线；Prisma `migrate resolve` 只能用于已经核实完成的迁移，不能代替数据转换。无法确定状态时停止正式库写入，保留现场并说明具体差异。
+
+### SQLite 引擎与 WAL 的独立验证
+
+当前默认应用的 SQLite 版本由 Prisma 内置驱动决定，没有独立的 SQLite 版本配置。Prisma 锁文件版本不能代替应用连接执行 SELECT sqlite_version() 的结果。
+
+本次提交优化的版本来源、候选依赖、隔离基准、副本检查和尚未完成的生产接入事项，见 [SQLite 提交优化验证](sqlite-wal-validation.md)。项目已支持通过 SQLITE_DRIVER 和 SQLITE_JOURNAL_MODE 显式接入新驱动，本机试用已按独立文档执行；其他安装仍默认 native，不自动启用正式库 WAL。不能仅拉取代码或更新系统 sqlite3 工具就认为该环境已切换。正式接入前需完成文档中的依赖兼容与目标镜像验收，再按本指南备份、演练和部署。
 
 ## 4. 本阶段的重要迁移
 

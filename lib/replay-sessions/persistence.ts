@@ -22,11 +22,13 @@ export type DerivedBatch = {
   entries: ReplayJournalEntryDraft[];
   equityPoints: PaperEquityPointData[];
 };
-export async function persistDerivedBatch(tx: Prisma.TransactionClient, account: PaperTradingSession, generation: number, batch: DerivedBatch) {
+export async function persistDerivedBatch(tx: Prisma.TransactionClient, account: PaperTradingSession, generation: number, batch: DerivedBatch,
+  options: { previousLots?: PaperPositionLotData[]; updateProjection?: boolean } = {}) {
   const scope = getReplayScope();
-  const owner = scope ? await tx.replaySession.findUniqueOrThrow({ where: { id: scope.id }, select: { activeProjectionId: true } }) : null;
-  await tx.paperTradingSession.update({ where: { id: account.id }, data: paperStateUpdate(batch.state) });
-  if (scope?.mode === "TRAINING" && batch.state.trainingGate) {
+  const owner = scope && batch.orders.some(order => !order.createdAt)
+    ? await tx.replaySession.findUniqueOrThrow({ where: { id: scope.id }, select: { activeProjectionId: true } }) : null;
+  if (scope?.mode === "TRAINING" && batch.state.trainingGate
+    && JSON.stringify(batch.state.trainingGate) !== JSON.stringify(scope.trainingGate)) {
     await tx.replaySession.update({ where: { id: scope.id }, data: { trainingGate: JSON.stringify(batch.state.trainingGate) } });
   }
   for (const order of batch.orders) {
@@ -45,11 +47,14 @@ export async function persistDerivedBatch(tx: Prisma.TransactionClient, account:
   })) });
   const stats = await persistTrades(tx, account.id, batch.orders, batch.fills, tradeStatsFromSession(account));
   const journalId = await ensureReplayJournalSession(tx, account, generation);
-  await persistPaperJournalState(tx, account.datasetId, account.id, journalId, batch.lots, batch.entries);
+  const lotsChanged = options.previousLots === undefined || JSON.stringify(options.previousLots) !== JSON.stringify(batch.lots);
+  await persistPaperJournalState(tx, account.datasetId, account.id, journalId, batch.lots, batch.entries, { persistLots: lotsChanged });
   if (batch.equityPoints.length) await tx.paperEquityPoint.createMany({ data: batch.equityPoints.map((point) => ({
     ...point, sessionId: account.id, timestamp: new Date(point.timestamp),
   })) });
-  const updated = await tx.paperTradingSession.update({ where: { id: account.id }, data: { ...stats, tradeStatsVersion: 1 } });
-  if (scope) await tx.replayProjection.update({ where: { id: scope.projectionId }, data: { currentSequence: batch.state.lastProcessedSequence } });
+  const updated = await tx.paperTradingSession.update({ where: { id: account.id }, data: {
+    ...paperStateUpdate(batch.state), ...stats, tradeStatsVersion: 1, journalSessionId: journalId,
+  } });
+  if (scope && options.updateProjection !== false) await tx.replayProjection.update({ where: { id: scope.projectionId }, data: { currentSequence: batch.state.lastProcessedSequence } });
   return updated;
 }

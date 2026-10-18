@@ -1,4 +1,6 @@
 "use client";
+
+import { advancedDisplayBars, canReuseAnnotations, type AnnotationCoverage } from "@/lib/market-replay/advance-display";
 import { createUuid } from "@/lib/uuid";
 
 import { dateTimeLocalValue, selectedTimeToTimestamp } from "@/lib/market-replay/start-time";
@@ -399,6 +401,7 @@ export function MarketReplayClient({ dataset: initialDataset, initialJournalFocu
   const windowPrefetchAbortRef = useRef<AbortController | null>(null);
   const annotationAbortRef = useRef<AbortController | null>(null);
   const annotationRequestRef = useRef(0);
+  const annotationCoverageRef = useRef<AnnotationCoverage | null>(null);
   const annotationTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const historyAbortRef = useRef<AbortController | null>(null);
   const historyLoadingRef = useRef(false);
@@ -654,7 +657,15 @@ export function MarketReplayClient({ dataset: initialDataset, initialJournalFocu
   const loadTradeAnnotations = useCallback(async (
     visibleBars: AggregatedMarketBarData[],
     journalNo: number | null = null,
+    force = true,
   ) => {
+    const from = visibleBars[0]?.firstSequence;
+    const to = visibleBars.at(-1)?.lastSequence;
+    const revealedSequence = latestReplayRef.current?.currentSequence ?? -1;
+    const journalEntryCount = confirmedPaperSnapshotRef.current?.stats.journalEntryCount;
+    if (!force && journalNo === null && from !== undefined && to !== undefined
+      && canReuseAnnotations(annotationCoverageRef.current, from, to, revealedSequence, journalEntryCount)) return;
+    annotationCoverageRef.current = null;
     const requestId = ++annotationRequestRef.current;
     annotationAbortRef.current?.abort();
     annotationAbortRef.current = null;
@@ -681,6 +692,9 @@ export function MarketReplayClient({ dataset: initialDataset, initialJournalFocu
       if (requestId !== annotationRequestRef.current) return;
       setTradeAnnotations(data.items);
       setTradeAnnotationsTruncated(data.truncated);
+      if (!data.truncated && journalNo === null && from !== undefined && to !== undefined && journalEntryCount !== undefined) {
+        annotationCoverageRef.current = { fromSequence: from, toSequence: to, revealedSequence, journalEntryCount };
+      }
     } catch {
       if (controller.signal.aborted || requestId !== annotationRequestRef.current) return;
       setTradeAnnotations([]);
@@ -688,7 +702,7 @@ export function MarketReplayClient({ dataset: initialDataset, initialJournalFocu
     } finally {
       if (annotationAbortRef.current === controller) annotationAbortRef.current = null;
     }
-  }, [dataset.id, fetch]);
+  }, [dataset.id, fetch, latestReplayRef, confirmedPaperSnapshotRef]);
 
   const loadWindow = useCallback(async (
     endSequence: number,
@@ -1016,7 +1030,7 @@ export function MarketReplayClient({ dataset: initialDataset, initialJournalFocu
       const visible = barsRef.current.filter((bar) => (
         bar.lastSequence >= range.fromSequence && bar.firstSequence <= range.toSequence
       ));
-      void loadTradeAnnotations(visible);
+      void loadTradeAnnotations(visible, null, false);
     }, 120);
     const previousBarsBefore = historyLastBarsBeforeRef.current;
     historyLastBarsBeforeRef.current = range.barsBefore;
@@ -1345,6 +1359,7 @@ export function MarketReplayClient({ dataset: initialDataset, initialJournalFocu
         marketSession,
       );
       const sourceCursor = current.currentSequence;
+      const previousDisplayTail = barsRef.current.at(-1);
       let sourceBars = marketCache.readMemoryBarsAfter(sourceCursor, count);
       if (sourceBars.length < count) {
         beginBuffering();
@@ -1409,7 +1424,7 @@ export function MarketReplayClient({ dataset: initialDataset, initialJournalFocu
         commitConfirmedPaperSnapshot(data.snapshot);
         setReplay(value => value ? { ...value, currentSequence: data.currentSequence, confirmedSequence: data.currentSequence,
           syncVersion: data.syncVersion, status: data.currentSequence >= value.barCount - 1 ? "finished" : value.status } : value);
-        void getDisplayCache(current!.displayIntervalSeconds, current!.displaySession).persist(aggregates.slice(-200));
+        getDisplayCache(current!.displayIntervalSeconds, current!.displaySession).schedulePersist(advancedDisplayBars(aggregates, sourceCursor, previousDisplayTail));
         if (data.fills.length) void loadTradeAnnotations(aggregates.slice(-DEFAULT_REPLAY_MAX_VISIBLE_BARS));
       });
       return ok ? sourceBars.length : 0;

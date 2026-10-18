@@ -1,6 +1,7 @@
 allowBuilds:
   '@prisma/client': true
   '@prisma/engines': true
+  better-sqlite3: true
   core-js: false
   esbuild: true
   prisma: true
@@ -9,7 +10,13 @@ allowBuilds:
 onlyBuiltDependencies:
   - "@prisma/client"
   - "@prisma/engines"
+  - better-sqlite3
   - esbuild
   - prisma
   - sharp
   - unrs-resolver
+
+# Local SQLite WAL trial: this override is outside the adapter's declared ^11.9.0 range.
+# Keep exact versions until the compatibility suite and target runtime are revalidated.
+overrides:
+  "@prisma/adapter-better-sqlite3>better-sqlite3": "12.8.0"

@@ -1,7 +1,9 @@
-import { PrismaClient } from "@prisma/client";
+import { createDatabaseClient } from "../lib/sqlite-client.mjs";
+import { existsSync } from "node:fs";
 import { readFileSync } from "node:fs";
 
-const prisma = new PrismaClient();
+if (existsSync(".env")) process.loadEnvFile(".env");
+const prisma = createDatabaseClient({}, { allowCreate: true });
 
 const createStatements = [
   `CREATE TABLE IF NOT EXISTS "ReplayReviewTemplate" (

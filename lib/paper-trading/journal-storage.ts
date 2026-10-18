@@ -57,9 +57,10 @@ export async function persistPaperJournalState(
   journalSessionId: string,
   lots: PaperPositionLotData[],
   entries: ReplayJournalEntryDraft[],
+  options: { persistLots?: boolean } = {},
 ) {
-  await tx.paperPositionLot.deleteMany({ where: { sessionId: paperSessionId } });
-  if (lots.length) {
+  if (options.persistLots !== false) await tx.paperPositionLot.deleteMany({ where: { sessionId: paperSessionId } });
+  if (options.persistLots !== false && lots.length) {
     await tx.paperPositionLot.createMany({
       data: lots.map((lot) => ({
         ...lot, discipline: lot.discipline ? JSON.stringify(lot.discipline) : null,

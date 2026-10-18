@@ -4,12 +4,12 @@ import JSZip from "jszip";
 import { beforeAll, afterAll, describe, it, expect, vi } from "vitest";
 
 vi.mock("@/lib/db", async () => {
-  const { PrismaClient } = await import("@prisma/client");
+  const { createDatabaseClient } = await import("@/lib/sqlite-client.mjs");
   const { randomUUID } = await import("node:crypto");
   const { join } = await import("node:path");
   const { tmpdir } = await import("node:os");
   return {
-    prisma: new PrismaClient({ datasourceUrl: `file:${join(tmpdir(), `replay-sessions-${randomUUID()}.db`)}` }),
+    prisma: createDatabaseClient({ datasourceUrl: `file:${join(tmpdir(), `replay-sessions-${randomUUID()}.db`)}` }, { allowCreate: true }),
     replayDatabaseQueryCount: () => null,
   };
 });

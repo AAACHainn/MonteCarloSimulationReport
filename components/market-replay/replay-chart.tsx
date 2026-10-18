@@ -1,4 +1,6 @@
 "use client";
+
+import { syncPriceLine } from "@/lib/market-replay/price-lines";
 import { createUuid } from "@/lib/uuid";
 import { useReplaySession } from "./replay-session-context";
 
@@ -891,14 +893,15 @@ export function ReplayChart({
   useEffect(() => {
     const series = candleRef.current;
     if (!series) return;
-    for (const line of priceLinesRef.current.values()) series.removePriceLine(line);
-    priceLinesRef.current.clear();
+    const nextKeys = new Set<string>();
     lineTargetsRef.current.clear();
     const nextLineActions: LineAction[] = [];
     // Live order and position lines stay usable when historical annotations are hidden.
     const addLine = (target: LineTarget | null, price: number, color: string, title: string, solid = false) => {
-      const key = target?.key ?? `static:${title}`;
-      priceLinesRef.current.set(key, series.createPriceLine({ price, color, lineWidth: 1, lineStyle: solid ? 0 : 2, axisLabelVisible: true, title }));
+      const key = target?.key ?? "position";
+      nextKeys.add(key);
+      syncPriceLine(priceLinesRef.current, key, { price, color, lineWidth: 1, lineStyle: solid ? 0 : 2, axisLabelVisible: true, title },
+        options => series.createPriceLine(options));
       if (target) lineTargetsRef.current.set(key, target);
     };
     const addAction = (action: Omit<LineAction, "y">) => {
@@ -938,8 +941,12 @@ export function ReplayChart({
       addLine({ key: "draft:sl", price: draft.stopLoss, kind: "draft", field: "stopLoss" }, draft.stopLoss, "rgba(220,38,38,0.5)", bracketPriceLineTitle(reference, draft.stopLoss, priceTickSize), true);
       addLine({ key: "draft:tp", price: draft.takeProfit, kind: "draft", field: "takeProfit" }, draft.takeProfit, "rgba(22,163,74,0.5)", bracketPriceLineTitle(reference, draft.takeProfit, priceTickSize), true);
     }
+    for (const [key, line] of priceLinesRef.current) if (!nextKeys.has(key)) {
+      series.removePriceLine(line);
+      priceLinesRef.current.delete(key);
+    }
     setLineActions((current) => sameLineActions(current, nextLineActions) ? current : nextLineActions);
-  }, [draft, draftSizing, paperSnapshot, priceTickSize]);
+  }, [draft, paperSnapshot, priceTickSize]);
 
   const moveDraftLine = useCallback((current: DraftOrder, field: LineTarget["field"], price: number): DraftOrder => {
     price = snapPriceToTick(price, priceTickSize);

@@ -457,6 +457,9 @@ export class MarketBarCache {
 
 /** Persistent cache of already aggregated display candles. Failures are intentionally non-fatal. */
 export class DisplayBarCache {
+  private pending = new Map<string, AggregatedMarketBarData>();
+  private persistTimer: ReturnType<typeof setTimeout> | null = null;
+  private writes: Promise<void> = Promise.resolve();
   private database: Promise<IDBDatabase | null> | null = null;
   private disabled = false;
   private disposed = false;
@@ -581,7 +584,30 @@ export class DisplayBarCache {
     }
   }
 
-  async persist(bars: AggregatedMarketBarData[]) {
+  schedulePersist(bars: AggregatedMarketBarData[]) {
+    if (this.disposed || !bars.length) return;
+    for (const bar of bars) this.pending.set(bar.timestamp, bar);
+    if (this.persistTimer === null) this.persistTimer = setTimeout(() => {
+      this.persistTimer = null;
+      const pending = [...this.pending.values()];
+      this.pending.clear();
+      void this.persist(pending);
+    }, 250);
+  }
+
+  persist(bars: AggregatedMarketBarData[]) {
+    if (this.disposed || !bars.length) return Promise.resolve();
+    // A window refresh supersedes any older delayed revisions of the same bucket.
+    const queued = [...new Map([...this.pending.values(), ...bars].map(bar => [bar.timestamp, bar])).values()];
+    this.pending.clear();
+    if (this.persistTimer !== null) clearTimeout(this.persistTimer);
+    this.persistTimer = null;
+    const write = this.writes.then(() => this.disposed ? undefined : this.persistNow(queued));
+    this.writes = write.catch(() => undefined);
+    return this.writes;
+  }
+
+  private async persistNow(bars: AggregatedMarketBarData[]) {
     const database = await this.open();
     if (!database || !bars.length) return;
     const unique = [...new Map(bars.map((bar) => [bar.timestamp, bar])).values()];
@@ -624,7 +650,11 @@ export class DisplayBarCache {
 
   dispose() {
     this.disposed = true;
-    void this.database?.then((database) => database?.close());
+    if (this.persistTimer !== null) clearTimeout(this.persistTimer);
+    this.persistTimer = null;
+    this.pending.clear(); // Disposable display cache; authoritative progress is already committed on the server.
+    const database = this.database;
+    void this.writes.then(() => database?.then(connection => connection?.close()));
     this.database = Promise.resolve(null);
   }
 }

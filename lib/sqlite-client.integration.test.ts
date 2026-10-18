@@ -1,0 +1,91 @@
+import { randomUUID } from "node:crypto";
+import { execFileSync } from "node:child_process";
+import { existsSync, rmSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join, resolve } from "node:path";
+import { pathToFileURL } from "node:url";
+import { createRequire } from "node:module";
+import { afterEach, describe, expect, it } from "vitest";
+import { createDatabaseClient, resolveSqlitePath } from "./sqlite-client.mjs";
+import type { PrismaClient } from "@prisma/client";
+const { DatabaseSync } = createRequire(import.meta.url)("node:sqlite") as typeof import("node:sqlite");
+const clients: PrismaClient[] = [];
+const files: string[] = [];
+function file() { const path = join(tmpdir(), "sqlite-client-" + randomUUID() + ".db"); files.push(path); return path; }
+function client(path: string, mode: "wal" | "delete" = "wal", allowCreate = true) {
+  const value = createDatabaseClient({ datasourceUrl: "file:" + path }, { env: { SQLITE_DRIVER: "better-sqlite3", SQLITE_JOURNAL_MODE: mode }, allowCreate });
+  clients.push(value); return value;
+}
+afterEach(async () => {
+  for (const value of clients.splice(0)) await value.$disconnect();
+  for (const path of files.splice(0)) if (existsSync(path)) rmSync(path);
+});
+describe("configured SQLite runtime", () => {
+  it("resolves relative URLs against prisma/ and retains absolute paths and spaces", () => {
+    const root = resolve(tmpdir(), "sqlite-project");
+    expect(resolveSqlitePath("file:./dev.db", root)).toBe(join(root, "prisma", "dev.db"));
+    const path = file().replace(".db", " with spaces.db");
+    expect(resolveSqlitePath("file:" + path)).toBe(path);
+    expect(resolveSqlitePath(pathToFileURL(path).href)).toBe(path);
+    expect(() => resolveSqlitePath("file:./dev.db?connection_limit=1")).toThrow();
+  });
+  it("refuses invalid driver settings and missing databases rather than creating an empty runtime database", async () => {
+    expect(() => createDatabaseClient({}, { env: { SQLITE_DRIVER: "unknown" } })).toThrow("SQLITE_DRIVER");
+    expect(() => createDatabaseClient({}, { env: { SQLITE_DRIVER: "native", SQLITE_JOURNAL_MODE: "wal" } })).toThrow("WAL requires");
+    const path = file();
+    expect(() => client(path, "wal", false)).toThrow("does not exist");
+    expect(existsSync(path)).toBe(false);
+  });
+  it("applies the fixed engine, WAL, FULL and foreign keys on each independently opened connection", async () => {
+    const path = file(); const first = client(path);
+    expect(await first.$queryRawUnsafe("SELECT sqlite_version() AS version")).toEqual([{ version: "3.51.3" }]);
+    const second = client(path);
+    for (const db of [first, second]) {
+      expect(await db.$queryRawUnsafe("PRAGMA journal_mode")).toEqual([{ journal_mode: "wal" }]);
+      expect(Number((await db.$queryRawUnsafe<Array<{ synchronous: number }>>("PRAGMA synchronous"))[0].synchronous)).toBe(2);
+      expect(Number((await db.$queryRawUnsafe<Array<{ foreign_keys: number }>>("PRAGMA foreign_keys"))[0].foreign_keys)).toBe(1);
+    }
+  });
+  it("preserves millisecond dates across commit/reopen and rolls back failed writes", async () => {
+    const path = file(); const db = client(path);
+    await db.$executeRawUnsafe('CREATE TABLE AiSetting (id TEXT PRIMARY KEY, value TEXT NOT NULL, version INTEGER NOT NULL DEFAULT 1, updatedAt DATETIME NOT NULL)');
+    const date = new Date("2026-10-18T01:02:03.123Z");
+    await db.aiSetting.create({ data: { id: "kept", value: "test", updatedAt: date } });
+    await expect(db.$transaction(async tx => { await tx.aiSetting.create({ data: { id: "rolled-back", value: "test", updatedAt: date } }); throw new Error("expected rollback"); })).rejects.toThrow("expected rollback");
+    await db.$disconnect();
+    const reopened = client(path, "wal", false);
+    expect((await reopened.aiSetting.findUniqueOrThrow({ where: { id: "kept" } })).updatedAt.toISOString()).toBe(date.toISOString());
+    expect(await reopened.aiSetting.count()).toBe(1);
+    await reopened.$disconnect();
+    const raw = new DatabaseSync(path, { readOnly: true });
+    try { expect(raw.prepare("SELECT typeof(updatedAt) AS storage FROM AiSetting").get()?.storage).toBe("integer"); } finally { raw.close(); }
+  });
+  it("enforces foreign keys during transaction writes", async () => {
+    const db = client(file());
+    await db.$executeRawUnsafe("CREATE TABLE Parent (id INTEGER PRIMARY KEY)");
+    await db.$executeRawUnsafe("CREATE TABLE Child (id INTEGER PRIMARY KEY, parentId INTEGER REFERENCES Parent(id))");
+    await expect(db.$executeRawUnsafe("INSERT INTO Child VALUES (1, 999)")).rejects.toThrow();
+    expect(await db.$queryRawUnsafe("SELECT COUNT(*) AS count FROM Child")).toEqual([{ count: BigInt(0) }]);
+  });
+  it("blocks accidental old-engine WAL writes and allows explicit offline conversion back to DELETE", async () => {
+    const path = file(); const db = client(path); await db.$queryRawUnsafe("SELECT 1"); await db.$disconnect();
+    expect(() => createDatabaseClient({ datasourceUrl: "file:" + path }, { env: { SQLITE_DRIVER: "native" } })).toThrow("WAL mode");
+    const rollback = client(path, "delete", false); await rollback.$queryRawUnsafe("SELECT 1"); await rollback.$disconnect();
+    const original = createDatabaseClient({ datasourceUrl: "file:" + path }, { env: { SQLITE_DRIVER: "native" } }); clients.push(original);
+    expect(await original.$queryRawUnsafe("PRAGMA journal_mode")).toEqual([{ journal_mode: "delete" }]);
+  });
+  it("uses the same fixed driver and FULL setting in an independently launched Node worker", async () => {
+    const path = file(); const db = client(path); await db.$queryRawUnsafe("SELECT 1"); await db.$disconnect();
+    const script = [
+      'import { createDatabaseClient } from "./lib/sqlite-client.mjs";',
+      'const db = createDatabaseClient();',
+      'try { console.log(JSON.stringify({ version: await db.$queryRawUnsafe("SELECT sqlite_version() AS version"), mode: await db.$queryRawUnsafe("PRAGMA journal_mode"), sync: await db.$queryRawUnsafe("PRAGMA synchronous") }, (_key,value) => typeof value === "bigint" ? Number(value) : value)); } finally { await db.$disconnect(); }',
+    ].join("\n");
+    const result = JSON.parse(execFileSync(process.execPath, ["--input-type=module", "--eval", script], {
+      cwd: process.cwd(), encoding: "utf8", windowsHide: true,
+      env: { ...process.env, DATABASE_URL: "file:" + path, SQLITE_DRIVER: "better-sqlite3", SQLITE_JOURNAL_MODE: "wal" },
+    }));
+    expect(result).toEqual({ version: [{ version: "3.51.3" }], mode: [{ journal_mode: "wal" }], sync: [{ synchronous: 2 }] });
+  });
+
+});

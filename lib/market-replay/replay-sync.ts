@@ -99,6 +99,8 @@ export async function syncReplayToTarget(
     }
 
     const fills: PaperFillData[] = [];
+    let snapshotSession: SessionRecord | null = session;
+    let snapshotGate = getReplayScope()?.trainingGate;
     if (session) {
       if (session.version !== input.expectedPaperVersion || session.lastProcessedSequence !== progress.currentSequence) {
         return { status: 409, error: copy.paperTrading.conflict } as const;
@@ -113,6 +115,7 @@ export async function syncReplayToTarget(
       let lots = (await tx.paperPositionLot.findMany({ where: { sessionId: account.id }, orderBy: [{ openedSequence: "asc" }, { createdAt: "asc" }, { id: "asc" }] })).map(serializePaperPositionLot);
       let contextIndex = 0;
       for (let offset = 0; offset < dbBars.length; offset += REPLAY_CHECKPOINT_STRIDE) {
+        const previousLots = lots;
         const bars = dbBars.slice(offset, offset + REPLAY_CHECKPOINT_STRIDE);
         const changed = new Map<string, PaperOrderData>();
         const originals = new Map(orders.map((order) => [order.id, JSON.stringify(order)]));
@@ -131,7 +134,8 @@ export async function syncReplayToTarget(
           chunkFills.push(...result.fills); entries.push(...result.journalEntries);
           if (result.fills.length || bar.sequence === input.targetSequence || bar.sequence === dataset.barCount - 1 || bar.sequence % account.equitySampleStride === 0) equityPoints.push(result.equityPoint);
         }
-        account = await persistDerivedBatch(tx, account, progress.generation, { state, orders: [...changed.values()], fills: chunkFills, lots, entries, equityPoints });
+        account = await persistDerivedBatch(tx, account, progress.generation, { state, orders: [...changed.values()], fills: chunkFills, lots, entries, equityPoints },
+          { previousLots, updateProjection: false });
         fills.push(...chunkFills);
         await persistContextRuns(tx, input.contextRuns
           ? input.contextRuns.filter(run => run.toSequence >= bars[0].sequence && run.fromSequence <= state.lastProcessedSequence)
@@ -139,15 +143,13 @@ export async function syncReplayToTarget(
           : [{ fromSequence: bars[0].sequence, toSequence: state.lastProcessedSequence, generation: progress.generation, context: input.journalContext ?? null }]);
         await saveReplayCheckpoint(tx, state.lastProcessedSequence);
       }
+      snapshotSession = account;
+      snapshotGate = state.trainingGate;
     } else if (input.expectedPaperVersion !== null) {
       return { status: 409, error: copy.paperTrading.conflict } as const;
     }
 
     const syncVersion = progress.syncVersion + 1;
-    await tx.replayProgress.update({
-      where: { id: progress.id },
-      data: { currentSequence: input.targetSequence, syncVersion, lastSyncRequestId: input.requestId },
-    });
     const response: ReplaySyncSuccess = {
       requestId: input.requestId,
       fromSequence: progress.currentSequence,
@@ -158,11 +160,13 @@ export async function syncReplayToTarget(
       syncVersion,
       dataVersion: dataset.dataVersion,
       fills,
-      snapshot: await getPaperSessionSnapshot(datasetId, tx),
+      snapshot: await getPaperSessionSnapshot(datasetId, tx, {
+        session: snapshotSession, trainingGate: snapshotGate, trainingLotsHydrated: true, currentBar: dbBars.at(-1),
+      }),
     };
     await tx.replayProgress.update({
       where: { id: progress.id },
-      data: { lastSyncResponse: JSON.stringify(response) },
+      data: { currentSequence: input.targetSequence, syncVersion, lastSyncRequestId: input.requestId, lastSyncResponse: JSON.stringify(response) },
     });
     await markReplayMutation(tx, input.targetSequence);
     return { status: 200, error: null, response } as const;

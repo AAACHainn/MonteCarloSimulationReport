@@ -5,18 +5,25 @@ import { execFileSync } from "node:child_process";
 import { rmSync } from "node:fs";
 import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
 
+const queryAudit = vi.hoisted(() => ({ statements: [] as string[] }));
 vi.mock("@/lib/db", async () => {
-  const { PrismaClient } = await import("@prisma/client");
+  const { createDatabaseClient } = await import("@/lib/sqlite-client.mjs");
   const { tmpdir } = await import("node:os");
   const { join } = await import("node:path");
   const { randomUUID } = await import("node:crypto");
+  const client = createDatabaseClient({ datasourceUrl: `file:${join(tmpdir(), "replay-integration-" + randomUUID() + ".db")}`,
+    log: [{ emit: "event", level: "query" }] }, { allowCreate: true });
+  (client as unknown as { $on(event: "query", callback: (event: { query: string }) => void): void })
+    .$on("query", event => queryAudit.statements.push(event.query));
   return {
-    prisma: new PrismaClient({ datasourceUrl: `file:${join(tmpdir(), "replay-integration-" + randomUUID() + ".db")}` }),
+    prisma: client,
     replayDatabaseQueryCount: () => null,
   };
 });
 
 import { prisma } from "@/lib/db";
+import * as snapshotModule from "@/lib/paper-trading/serialize";
+import { persistContextRuns } from "@/lib/replay-sessions/context-storage";
 import { POST as advanceRoutePOST } from "@/app/api/market-datasets/[id]/replay/advance/route";
 import { POST as syncPOSTRoute } from "@/app/api/market-datasets/[id]/replay/sync/route";
 import { POST as resetPOSTRoute } from "@/app/api/market-datasets/[id]/replay/reset/route";
@@ -148,6 +155,96 @@ async function serverSyncBody(id: string, targetSequence: number, requestId: str
 }
 
 describe("replay advance with real SQLite", () => {
+  it("coalesces context boundaries and inserts changing source contexts in a bounded batch", async () => {
+    const id = "lean-contexts";
+    await seed(id, 1, 200);
+    const scope = await loadReplayScope(fixtureSessions.get(id)!);
+    const contextA = { abrValue: 2, abrLength: 14, displayIntervalSeconds: 60, displaySession: "ETH" as const, displayUtcOffsetMinutes: 0, priceTickSize: 0.25 };
+    await runWithReplayScope(scope, () => prisma.$transaction(tx => persistContextRuns(tx, [
+      { fromSequence: 0, toSequence: 0, generation: 1, context: contextA },
+    ])));
+    const first = queryAudit.statements.length;
+    await runWithReplayScope(scope, () => prisma.$transaction(tx => persistContextRuns(tx, [
+      { fromSequence: 1, toSequence: 1, generation: 1, context: contextA },
+      { fromSequence: 2, toSequence: 2, generation: 1, context: contextA },
+      { fromSequence: 3, toSequence: 3, generation: 1, context: null },
+      { fromSequence: 4, toSequence: 4, generation: 1, context: null },
+      ...Array.from({ length: 100 }, (_, i) => ({ fromSequence: 5 + i, toSequence: 5 + i, generation: 1, context: { ...contextA, abrValue: i + 3 } })),
+    ])));
+    const statements = queryAudit.statements.slice(first);
+    expect(statements.filter(sql => sql.startsWith("INSERT ") && sql.includes("ReplayContextRun"))).toHaveLength(1);
+    expect(statements.filter(sql => sql.startsWith("UPDATE ") && sql.includes("ReplayContextRun"))).toHaveLength(1);
+    const stored = await prisma.replayContextRun.findMany({ where: { projectionId: scope.projectionId }, orderBy: { fromSequence: "asc" } });
+    expect(stored).toHaveLength(102);
+    expect(stored[0]).toMatchObject({ fromSequence: 0, toSequence: 2 });
+    expect(stored[1]).toMatchObject({ fromSequence: 3, toSequence: 4 });
+    for (let i = 2; i < stored.length; i++) {
+      expect(stored[i].fromSequence).toBe(i + 3);
+      expect(JSON.parse(stored[i].context).context.abrValue).toBe(i + 1);
+    }
+  });
+
+  it.each([false, true])("avoids redundant writes with held position = %s and returns the committed snapshot", async (held) => {
+    const id = "lean-sync-" + held;
+    await seed(id, 1, 10);
+    const account = await prisma.paperTradingSession.findFirstOrThrow({ where: { datasetId: id } });
+    if (held) await seedOrder({ id: "entry", sessionId: account.id, side: "BUY", type: "MARKET", quantity: 2,
+      stopLoss: 95, takeProfit: 110, createdSequence: -1, activeFromSequence: 0 });
+    expect((await syncPOST(syncRequest(await serverSyncBody(id, 0, "prime")), context(id))).status).toBe(200);
+    const beforeLots = await prisma.paperPositionLot.findMany({ where: { sessionId: account.id } });
+    const beforeOrders = await prisma.paperOrder.findMany({ where: { sessionId: account.id } });
+    const body = await serverSyncBody(id, 1, "lean");
+    const first = queryAudit.statements.length;
+    const response = await syncPOST(syncRequest(body), context(id));
+    const statements = queryAudit.statements.slice(first);
+    expect(response.status).toBe(200);
+    const result = await response.json();
+    for (const table of ["PaperTradingSession", "ReplayProgress", "ReplayProjection"]) {
+      expect(statements.filter(sql => sql.startsWith('UPDATE ') && sql.includes(table))).toHaveLength(1);
+    }
+    expect(statements.some(sql => /^(DELETE|INSERT|UPDATE) /.test(sql) && sql.includes('PaperPositionLot'))).toBe(false);
+    expect(await prisma.paperPositionLot.findMany({ where: { sessionId: account.id } })).toEqual(beforeLots);
+    expect(await prisma.paperOrder.findMany({ where: { sessionId: account.id } })).toEqual(beforeOrders);
+    expect(result.snapshot).toEqual(JSON.parse(JSON.stringify(await getPaperSessionSnapshot(id))));
+    expect(result.fills).toEqual([]);
+    expect(result.snapshot.session.lastProcessedSequence).toBe(1);
+  });
+
+  it("rolls back matching and all saved state when snapshot preparation fails, then safely retries", async () => {
+    const id = "lean-sync-rollback";
+    await seed(id, 1, 10);
+    expect((await syncPOST(syncRequest(await serverSyncBody(id, 0, "prime")), context(id))).status).toBe(200);
+    const account = await prisma.paperTradingSession.findFirstOrThrow({ where: { datasetId: id } });
+    await seedOrder({ id: "entry", sessionId: account.id, side: "BUY", type: "MARKET", quantity: 2,
+      stopLoss: 95, takeProfit: 110, createdSequence: 0, activeFromSequence: 1 });
+    const body = await serverSyncBody(id, 1, "rollback-and-retry");
+    const read = () => Promise.all([
+      prisma.paperTradingSession.findUnique({ where: { id: account.id } }),
+      prisma.replayProgress.findFirst({ where: { datasetId: id } }),
+      prisma.paperOrder.findMany({ where: { sessionId: account.id } }),
+      prisma.paperFill.findMany({ where: { sessionId: account.id } }),
+      prisma.paperPositionLot.findMany({ where: { sessionId: account.id } }),
+      prisma.paperEquityPoint.findMany({ where: { sessionId: account.id } }),
+      prisma.replayProjection.findUnique({ where: { id: account.projectionId! } }),
+      prisma.replaySession.findUnique({ where: { id: fixtureSessions.get(id)! } }),
+      prisma.replayCheckpoint.findMany({ where: { projectionId: account.projectionId! } }),
+    ]);
+    const before = await read();
+    const fault = vi.spyOn(snapshotModule, "getPaperSessionSnapshot").mockRejectedValueOnce(new Error("snapshot failure"));
+    const consoleError = vi.spyOn(console, "error").mockImplementation(() => undefined);
+    try { expect((await syncPOST(syncRequest(body), context(id))).status).toBe(500); }
+    finally { fault.mockRestore(); consoleError.mockRestore(); }
+    expect(await read()).toEqual(before);
+    const committed = await syncPOST(syncRequest(body), context(id));
+    expect(committed.status).toBe(200);
+    const receipt = await committed.json();
+    expect(receipt.fills).toHaveLength(1);
+    expect(receipt.snapshot).toEqual(JSON.parse(JSON.stringify(await getPaperSessionSnapshot(id))));
+    const replayed = await syncPOST(syncRequest(body), context(id));
+    expect(await replayed.json()).toEqual(receipt);
+    expect(await prisma.paperFill.count({ where: { sessionId: account.id } })).toBe(1);
+  });
+
   it("resumes legacy block construction from the persisted cursor", async () => {
     const id = "block-resume";
     await seed(id, 1, 5_000, -1, false);

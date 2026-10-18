@@ -127,23 +127,34 @@ export function serializePaperPositionLot(lot: {
     displayUtcOffsetMinutes: lot.displayUtcOffsetMinutes, priceTickSize: lot.priceTickSize };
 }
 
-export async function getPaperSessionSnapshot(datasetId: string, db: Prisma.TransactionClient = prisma): Promise<PaperSessionSnapshot | null> {
+/** Prepared values must come from matching/persistence in the same transaction. */
+export type PreparedPaperSnapshot = {
+  session: SessionRecord | null;
+  trainingGate?: PaperSessionState["trainingGate"];
+  trainingLotsHydrated?: boolean;
+  currentBar?: { close: number } | null;
+};
+export async function getPaperSessionSnapshot(datasetId: string, db: Prisma.TransactionClient = prisma,
+  prepared?: PreparedPaperSnapshot): Promise<PaperSessionSnapshot | null> {
   const scope = getReplayScope();
   if (scope?.mode === "TRAINING") {
-    const owner = await db.replaySession.findUniqueOrThrow({ where: { id: scope.id }, select: { trainingGate: true } });
-    scope.trainingGate = parseTrainingGate(owner.trainingGate);
+    if (prepared && "trainingGate" in prepared) scope.trainingGate = prepared.trainingGate;
+    else {
+      const owner = await db.replaySession.findUniqueOrThrow({ where: { id: scope.id }, select: { trainingGate: true } });
+      scope.trainingGate = parseTrainingGate(owner.trainingGate);
+    }
   }
-  const storedSession = await db.paperTradingSession.findFirst({ where: accountWhere(datasetId) });
+  const storedSession = prepared ? prepared.session : await db.paperTradingSession.findFirst({ where: accountWhere(datasetId) });
   if (!storedSession) return null;
   const session = await ensurePaperTradeStats(storedSession as SessionRecord, db);
-  if (scope?.mode === "TRAINING") await hydrateTrainingLots(db, session.id);
+  if (scope?.mode === "TRAINING" && !prepared?.trainingLotsHydrated) await hydrateTrainingLots(db, session.id);
   const [activeOrders, recentOrders, recentFills, recentTrades, openLots, currentBar, journalEntryCount] = await Promise.all([
     db.paperOrder.findMany({ where: { sessionId: session.id, status: "PENDING" }, orderBy: [{ createdSequence: "asc" }, { createdAt: "asc" }] }),
     db.paperOrder.findMany({ where: { sessionId: session.id, status: { not: "PENDING" } }, orderBy: { updatedAt: "desc" }, take: 30 }),
     db.paperFill.findMany({ where: { sessionId: session.id }, orderBy: [{ sequence: "desc" }, { createdAt: "desc" }], take: 50 }),
     db.paperTrade.findMany({ where: { sessionId: session.id }, orderBy: { openedSequence: "desc" }, take: 30 }),
     db.paperPositionLot.findMany({ where: { sessionId: session.id }, orderBy: [{ openedSequence: "asc" }, { createdAt: "asc" }] }),
-    session.lastProcessedSequence >= 0
+    prepared && "currentBar" in prepared ? Promise.resolve(prepared.currentBar) : session.lastProcessedSequence >= 0
       ? db.marketBar.findUnique({ where: { datasetId_sequence: { datasetId, sequence: session.lastProcessedSequence } } })
       : Promise.resolve(null),
     session.journalSessionId

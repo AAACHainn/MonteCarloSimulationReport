@@ -1,4 +1,5 @@
-import { PrismaClient } from "@prisma/client";
+import type { PrismaClient } from "@prisma/client";
+import { createDatabaseClient } from "./sqlite-client.mjs";
 
 const globalForPrisma = globalThis as unknown as {
   prisma?: PrismaClient;
@@ -9,11 +10,15 @@ const queryMetricsEnabled = process.env.REPLAY_QUERY_METRICS === "1";
 
 export const prisma =
   globalForPrisma.prisma ??
-  new PrismaClient({
+  createDatabaseClient({
     log: [
       ...(process.env.NODE_ENV === "development" ? ["error", "warn"] as const : ["error"] as const),
       ...(queryMetricsEnabled ? [{ emit: "event" as const, level: "query" as const }] : []),
     ],
+  }, {
+    onConnected: ({ sqliteVersion, journalMode, synchronous }) => {
+      console.info(JSON.stringify({ event: "sqlite-runtime", sqliteVersion, journalMode, synchronous }));
+    },
   });
 
 if (queryMetricsEnabled && !globalForPrisma.replayQueryListenerAttached) {

@@ -1,0 +1,9 @@
+{
+  "name": "sqlite-wal-candidate",
+  "private": true,
+  "packageManager": "pnpm@11.4.0",
+  "dependencies": {
+    "@prisma/adapter-better-sqlite3": "6.19.3",
+    "better-sqlite3": "12.8.0"
+  }
+}
