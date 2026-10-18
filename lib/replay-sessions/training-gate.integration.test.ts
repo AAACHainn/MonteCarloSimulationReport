@@ -76,6 +76,37 @@ async function place(sessionId: string, input: Record<string, unknown> = {}) {
 const approval = (s: { id: string; checklistVersion: number }, checkedItemIds = ["trend", "risk"]) => ({ strategyId: s.id, checklistVersion: s.checklistVersion, checkedItemIds });
 
 describe("training gate APIs and persistence", () => {
+  it("settles consecutive losses and cancels unchecked entries immediately while paused", async () => {
+    const session = await setup("TRAINING", [100, 100, 100, 100, 100], 10);
+    for (let index = 0; index < 2; index += 1) {
+      expect((await place(session.id)).status).toBe(201);
+      await advance(session.id);
+      if (index === 1) expect((await place(session.id, { type: "LIMIT", price: 50 })).status).toBe(201);
+      const before = await snapshot(session.id);
+      expect((await place(session.id, { side: "SELL", reduceOnly: true, executeAtCurrentClose: true })).status).toBe(201);
+      const after = await snapshot(session.id);
+      expect(after.session.lastProcessedSequence).toBe(before.session.lastProcessedSequence);
+      expect(after.session.netQuantity).toBe(0);
+      expect(after.session.trainingGate).toMatchObject({ active: index === 1, lossStreak: index === 1 ? 0 : 1 });
+    }
+    const state = await snapshot(session.id);
+    expect(state.activeOrders).toHaveLength(0);
+    expect(state.session.trainingGate).toMatchObject({ active: true, source: "LOSS_STREAK", cancelledOrderCount: 1 });
+    expect(state.stats).toMatchObject({ tradeCount: 2, journalEntryCount: 2 });
+  });
+
+  it("permits a paused immediate exit while an entry checklist gate is active", async () => {
+    const session = await setup();
+    expect((await place(session.id)).status).toBe(201);
+    await advance(session.id);
+    expect((await start(session.id, 2)).status).toBe(200);
+    expect((await place(session.id, { side: "SELL", reduceOnly: true, executeAtCurrentClose: true })).status).toBe(201);
+    const closed = await snapshot(session.id);
+    expect(closed.session.netQuantity).toBe(0);
+    expect(closed.session.trainingGate).toMatchObject({ active: true, completedCount: 0, targetCount: 2 });
+    expect(closed.stats.journalEntryCount).toBe(1);
+  });
+
   it.each([
     ["TRAINING", false], ["TRAINING", true], ["LIVE_REPLAY", false], ["LIVE_REPLAY", true],
   ] as const)("saves annotations through encoded journal URLs in %s (archived=%s) without changing trading state", async (mode, archived) => {

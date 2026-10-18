@@ -111,6 +111,15 @@ function fillReason(oldQuantity: number, newQuantity: number, order: PaperOrderD
 }
 
 export function advancePaperTrading(input: PaperAdvanceInput): PaperAdvanceResult {
+  return processPaperTrading(input);
+}
+
+/** Execute only the requested reducing market order at the revealed source close. */
+export function closePaperTradingAtCurrentPrice(input: PaperAdvanceInput, orderId: string): PaperAdvanceResult {
+  return processPaperTrading(input, orderId);
+}
+
+function processPaperTrading(input: PaperAdvanceInput, immediateOrderId?: string): PaperAdvanceResult {
   const state = { ...input.state, ...(input.state.trainingGate ? { trainingGate: { ...input.state.trainingGate } } : {}) };
   const orders = input.orders.map((order) => ({ ...order }));
   const fills: PaperFillData[] = [];
@@ -119,7 +128,11 @@ export function advancePaperTrading(input: PaperAdvanceInput): PaperAdvanceResul
   const journalEntries = [] as PaperAdvanceResult["journalEntries"];
   const journalContext = input.journalContext ?? DEFAULT_PAPER_JOURNAL_CONTEXT;
   const { bar, makeId } = input;
-  if (bar.sequence !== state.lastProcessedSequence + 1) throw new Error("Paper trading can only advance one bar at a time.");
+  if (immediateOrderId === undefined) {
+    if (bar.sequence !== state.lastProcessedSequence + 1) throw new Error("Paper trading can only advance one bar at a time.");
+  } else if (bar.sequence !== state.lastProcessedSequence) {
+    throw new Error("An immediate close requires the current processed source bar.");
+  }
 
   function execute(order: PaperOrderData, basePrice: number) {
     let quantity = order.quantity;
@@ -268,32 +281,42 @@ export function advancePaperTrading(input: PaperAdvanceInput): PaperAdvanceResul
     }
   }
 
-  updateLotAdverseRisk(lots, bar.open);
-  processAtPrice(bar.open, true);
-  const path = bar.close > bar.open
-    ? [bar.open, bar.low, bar.high, bar.close]
-    : [bar.open, bar.high, bar.low, bar.close];
-  for (let index = 0; index < path.length - 1; index += 1) {
-    let cursor = path[index];
-    const end = path[index + 1];
-    while (cursor !== end) {
-      const candidates = orders.flatMap((order) => {
-        if (order.status !== "PENDING" || order.activeFromSequence > bar.sequence) return [];
-        const trigger = triggerOnSegment(order, cursor, end);
-        return trigger === null ? [] : [{ order, trigger }];
-      }).sort((a, b) => {
-        const distance = Math.abs(a.trigger - cursor) - Math.abs(b.trigger - cursor);
-        return distance || compareOrders(a.order, b.order);
-      });
-      const candidate = candidates[0];
-      if (!candidate) {
-        updateLotAdverseRisk(lots, end);
-        break;
+  if (immediateOrderId !== undefined) {
+    const order = orders.find((item) => item.id === immediateOrderId);
+    if (!order || order.status !== "PENDING" || order.type !== "MARKET" || !order.reduceOnly || order.isProtective
+      || order.activeFromSequence > bar.sequence || sign(state.netQuantity) === 0
+      || (state.netQuantity > 0 ? order.side !== "SELL" : order.side !== "BUY")) {
+      throw new Error("An immediate close requires a reducing market order and an open position.");
+    }
+    execute(order, bar.close);
+  } else {
+    updateLotAdverseRisk(lots, bar.open);
+    processAtPrice(bar.open, true);
+    const path = bar.close > bar.open
+      ? [bar.open, bar.low, bar.high, bar.close]
+      : [bar.open, bar.high, bar.low, bar.close];
+    for (let index = 0; index < path.length - 1; index += 1) {
+      let cursor = path[index];
+      const end = path[index + 1];
+      while (cursor !== end) {
+        const candidates = orders.flatMap((order) => {
+          if (order.status !== "PENDING" || order.activeFromSequence > bar.sequence) return [];
+          const trigger = triggerOnSegment(order, cursor, end);
+          return trigger === null ? [] : [{ order, trigger }];
+        }).sort((a, b) => {
+          const distance = Math.abs(a.trigger - cursor) - Math.abs(b.trigger - cursor);
+          return distance || compareOrders(a.order, b.order);
+        });
+        const candidate = candidates[0];
+        if (!candidate) {
+          updateLotAdverseRisk(lots, end);
+          break;
+        }
+        cursor = candidate.trigger;
+        updateLotAdverseRisk(lots, cursor);
+        execute(candidate.order, candidate.trigger);
+        processAtPrice(cursor, false);
       }
-      cursor = candidate.trigger;
-      updateLotAdverseRisk(lots, cursor);
-      execute(candidate.order, candidate.trigger);
-      processAtPrice(cursor, false);
     }
   }
 

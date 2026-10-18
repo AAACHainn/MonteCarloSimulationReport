@@ -73,7 +73,9 @@ export async function runReplayCorrection(jobId: string) {
     const summary = JSON.parse(job.summary) as { fallbackTargetSequence?: number };
     const boundary = job.type === "DELETE_CYCLE" ? summary.fallbackTargetSequence! : job.targetSequence;
     const checkpoint = await prisma.replayCheckpoint.findFirst({ where: { projectionId: job.baseProjectionId,
-      OR: [{ sourceSequence: { lt: boundary } }, { sourceSequence: boundary, commandOrdinal: 0 }] },
+      // Current-price fills occur after candle matching. Start before that
+      // source candle so prefix copying cannot retain its later user fills.
+      OR: [{ sourceSequence: { lt: boundary } }, ...(boundary < 0 ? [{ sourceSequence: boundary, commandOrdinal: 0 }] : [])] },
       orderBy: [{ sourceSequence: "desc" }, { commandOrdinal: "desc" }],
     });
     if (!checkpoint) throw new ReplaySessionError("HISTORY_MISSING", 409, copy.replaySessions.correctionHistoryMissing);

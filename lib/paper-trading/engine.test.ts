@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { advancePaperTrading } from "./engine";
+import { advancePaperTrading, closePaperTradingAtCurrentPrice } from "./engine";
 import type { PaperOrderData, PaperSessionState } from "./types";
 
 let counter = 0;
@@ -78,5 +78,48 @@ describe("paper trading engine", () => {
 
   it("rejects attempts to skip a bar", () => {
     expect(() => advancePaperTrading({ state: state(), orders: [], bar: { ...bar, sequence: 11 }, makeId })).toThrow();
+  });
+});
+
+describe("current-price market close", () => {
+  it.each([2, -2])("closes a %s position at the current source close without replaying other orders", (netQuantity) => {
+    const closing = order({ id: "close", side: netQuantity > 0 ? "SELL" : "BUY", quantity: 99, reduceOnly: true });
+    const protective = order({ id: "stop", side: closing.side, type: "STOP", price: netQuantity > 0 ? 95 : 108,
+      reduceOnly: true, isProtective: true, ocoGroupId: "bracket" });
+    const pending = order({ id: "entry" });
+    const original = state({ lastProcessedSequence: 10, netQuantity, averageEntryPrice: 100, commissionBps: 10, slippageBps: 20 });
+    const result = closePaperTradingAtCurrentPrice({ state: original, orders: [protective, pending, closing], bar, makeId }, closing.id);
+    const price = 105 * (netQuantity > 0 ? 0.998 : 1.002);
+    expect(result.fills).toHaveLength(1);
+    expect(result.fills[0]).toMatchObject({ orderId: "close", sequence: 10, timestamp: bar.timestamp,
+      price, quantity: 2, closedQuantity: 2, openedQuantity: 0, reason: "CLOSE" });
+    expect(result.fills[0].fee).toBeCloseTo(price * 2 / 1000);
+    expect(result.state).toMatchObject({ netQuantity: 0, averageEntryPrice: null, lastProcessedSequence: 10, version: 2 });
+    expect(result.orders.find((item) => item.id === "stop")).toMatchObject({ status: "CANCELLED", cancelReason: "POSITION_CLOSED" });
+    expect(result.orders.find((item) => item.id === "entry")).toEqual(pending);
+    expect(result.equityPoint.sequence).toBe(10);
+    expect(result.equityPoint.equity).toBe(result.equityPoint.balance);
+    expect(original.netQuantity).toBe(netQuantity);
+    expect(closing.status).toBe("PENDING");
+  });
+
+  it("supports partial reduction and preserves the remaining protective quantity", () => {
+    const closing = order({ side: "SELL", quantity: 1, reduceOnly: true });
+    const protective = order({ side: "SELL", quantity: 3, type: "STOP", price: 95, reduceOnly: true, isProtective: true });
+    const result = closePaperTradingAtCurrentPrice({ state: state({ lastProcessedSequence: 10, netQuantity: 3, averageEntryPrice: 100 }),
+      orders: [closing, protective], bar, makeId }, closing.id);
+    expect(result.fills[0]).toMatchObject({ price: 105, reason: "REDUCE" });
+    expect(result.state.netQuantity).toBe(2);
+    expect(result.orders[1]).toMatchObject({ quantity: 2, status: "PENDING" });
+  });
+
+  it("rejects unprocessed bars, opening orders, and absent positions", () => {
+    const closing = order({ side: "SELL", reduceOnly: true });
+    expect(() => closePaperTradingAtCurrentPrice({ state: state({ netQuantity: 1, averageEntryPrice: 100 }), orders: [closing], bar, makeId }, closing.id)).toThrow();
+    for (const current of [state({ lastProcessedSequence: 10 }), state({ lastProcessedSequence: 10, netQuantity: -1, averageEntryPrice: 100 })]) {
+      expect(() => closePaperTradingAtCurrentPrice({ state: current, orders: [closing], bar, makeId }, closing.id)).toThrow();
+    }
+    const entry = order();
+    expect(() => closePaperTradingAtCurrentPrice({ state: state({ lastProcessedSequence: 10, netQuantity: 1, averageEntryPrice: 100 }), orders: [entry], bar, makeId }, entry.id)).toThrow();
   });
 });

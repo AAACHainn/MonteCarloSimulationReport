@@ -11,6 +11,8 @@ import { getPaperSessionSnapshot, serializePaperOrder } from "@/lib/paper-tradin
 import { calculateRiskSizing, isValidBracket } from "@/lib/paper-trading/risk-sizing";
 import { isPriceOnTick } from "@/lib/market-replay/price-ticks";
 import { paperOrderSchema } from "@/lib/validations";
+import { serializeSourceBar } from "@/lib/market-replay/dataset";
+import { executeCurrentPriceClose } from "@/lib/paper-trading/current-price-close";
 
 type RouteContext = { params: Promise<{ id: string }> };
 
@@ -28,13 +30,18 @@ async function handlePOST(request: Request, context: RouteContext) {
       tx.marketDataset.findUnique({ where: { id }, select: { barCount: true, priceTickSize: true } }),
     ]);
     if (!progress || !dataset || progress.currentSequence < 0) return { status: 400, error: copy.paperTrading.noCurrentBar };
-    if (progress.currentSequence >= dataset.barCount - 1) return { status: 400, error: copy.paperTrading.noNextBar };
+    if (!parsed.data.executeAtCurrentClose && progress.currentSequence >= dataset.barCount - 1) return { status: 400, error: copy.paperTrading.noNextBar };
+    if (parsed.data.executeAtCurrentClose && (session.lastProcessedSequence !== progress.currentSequence
+      || !isClosingOrder(session.netQuantity, parsed.data.side, Math.min(parsed.data.quantity, Math.abs(session.netQuantity))))) {
+      return { status: 400, error: copy.paperTrading.immediateCloseInvalid };
+    }
     const prices = [parsed.data.price, parsed.data.stopLoss, parsed.data.takeProfit].filter((value): value is number => value !== null && value !== undefined);
     if (prices.some((price) => !isPriceOnTick(price, dataset.priceTickSize))) {
       return { status: 400, error: copy.paperTrading.priceNotOnTick };
     }
     const currentBar = await tx.marketBar.findUnique({ where: { datasetId_sequence: { datasetId: id, sequence: progress.currentSequence } } });
-    const reference = parsed.data.price ?? currentBar?.close;
+    if (!currentBar) return { status: 400, error: copy.paperTrading.noCurrentBar };
+    const reference = parsed.data.price ?? currentBar.close;
     if (reference == null || !isValidBracket(parsed.data.side, reference, parsed.data.stopLoss ?? null, parsed.data.takeProfit ?? null)) {
       return { status: 400, error: copy.paperTrading.invalidBracket };
     }
@@ -87,12 +94,20 @@ async function handlePOST(request: Request, context: RouteContext) {
         reduceOnly,
         discipline: discipline ? JSON.stringify(discipline) : null,
         createdSequence: progress.currentSequence,
-        activeFromSequence: progress.currentSequence + 1,
+        activeFromSequence: progress.currentSequence + (parsed.data.executeAtCurrentClose ? 0 : 1),
       },
     });
     if (getReplayScope()) order = await tx.paperOrder.update({ where: { id: order.id }, data: { id: storageId(order.id) } });
-    await tx.paperTradingSession.update({ where: { id: session.id }, data: { version: { increment: 1 } } });
-    await recordReplayCommand(tx, progress.currentSequence, "ORDER_CREATE", { order: serializePaperOrder(order) });
+    const recordedOrder = serializePaperOrder(order);
+    if (parsed.data.executeAtCurrentClose) {
+      await executeCurrentPriceClose(tx, session, progress.generation, serializeSourceBar(currentBar), recordedOrder.id);
+    } else {
+      await tx.paperTradingSession.update({ where: { id: session.id }, data: { version: { increment: 1 } } });
+    }
+    await recordReplayCommand(tx, progress.currentSequence, "ORDER_CREATE", {
+      order: recordedOrder,
+      ...(parsed.data.executeAtCurrentClose ? { executeAtCurrentClose: true, generation: progress.generation } : {}),
+    });
     await markReplayMutation(tx);
     return { status: 201, error: null };
   });

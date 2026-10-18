@@ -155,10 +155,14 @@ export const paperOrderSchema = z.object({
   stopLoss: z.coerce.number().finite().optional().nullable(),
   takeProfit: z.coerce.number().finite().optional().nullable(),
   reduceOnly: z.boolean().optional().default(false),
+  executeAtCurrentClose: z.boolean().optional().default(false),
   expectedVersion: z.coerce.number().int().positive(),
 }).superRefine((value, ctx) => {
   if (value.type !== "MARKET" && value.price == null) {
     ctx.addIssue({ code: z.ZodIssueCode.custom, path: ["price"], message: copy.paperTrading.priceRequired });
+  }
+  if (value.executeAtCurrentClose && (value.type !== "MARKET" || !value.reduceOnly)) {
+    ctx.addIssue({ code: z.ZodIssueCode.custom, path: ["executeAtCurrentClose"], message: copy.paperTrading.immediateCloseInvalid });
   }
 });
 

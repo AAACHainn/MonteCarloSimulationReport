@@ -149,3 +149,18 @@ describe("paper order API fixed-risk behavior", () => {
     expect(mocks.tx.paperOrder.update).not.toHaveBeenCalled();
   });
 });
+
+describe("current-price close validation", () => {
+  it.each([
+    { type: "MARKET", reduceOnly: false },
+    { type: "LIMIT", reduceOnly: true },
+    { type: "STOP", reduceOnly: true },
+  ])("rejects immediate execution for $type / reduceOnly=$reduceOnly", async (order) => {
+    mocks.tx.paperOrder.create.mockClear();
+    const response = await POST(request("POST", {
+      side: "SELL", quantity: 1, price: 100, expectedVersion: 1, executeAtCurrentClose: true, ...order,
+    }), context);
+    expect(response.status).toBe(400);
+    expect(mocks.tx.paperOrder.create).not.toHaveBeenCalled();
+  });
+});

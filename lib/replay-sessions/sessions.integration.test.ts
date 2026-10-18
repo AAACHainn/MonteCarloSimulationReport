@@ -170,6 +170,135 @@ describe("complete replay corrections", () => {
     const numbers = Array.from(sheet.matchAll(/<c r="A(\d+)"[^>]*><v>(\d+)<\/v><\/c>/g)).map((match) => Number(match[2]));
     return { pdf: await pdf.json(), excel: numbers };
   }
+  it.each(["TRAINING", "LIVE_REPLAY"] as const)("immediately closes a paused %s position and persists the whole result at the same sequence", async (mode) => {
+    const session = await create(mode); await account(session); await advance(session);
+    const side = mode === "TRAINING" ? "BUY" : "SELL";
+    let state = (await snapshot(session.id))!;
+    const entry = await orderPOST(request(session, "POST", { side, type: "MARKET", quantity: 2,
+      stopLoss: side === "BUY" ? 50 : 150, takeProfit: side === "BUY" ? 150 : 50, expectedVersion: state.session.version }), context);
+    expect(entry.status).toBe(201);
+    await advance(session);
+    state = (await snapshot(session.id))!;
+    const pending = await orderPOST(request(session, "POST", { side: "BUY", type: "LIMIT", quantity: 1, price: 40, expectedVersion: state.session.version }), context);
+    expect(pending.status).toBe(201);
+    state = (await snapshot(session.id))!;
+    const progress = await prisma.replayProgress.findUniqueOrThrow({ where: { replaySessionId: session.id } });
+    const unrelated = await create("TRAINING"); await account(unrelated);
+    const unrelatedBefore = await snapshot(unrelated.id);
+    const payload = { side: side === "BUY" ? "SELL" : "BUY", type: "MARKET", quantity: 2, reduceOnly: true,
+      executeAtCurrentClose: true, expectedVersion: state.session.version };
+    const response = await orderPOST(request(session, "POST", payload), context);
+    expect(response.status).toBe(201);
+    const closed = (await response.json()).snapshot;
+    const price = 102 * (side === "BUY" ? 0.998 : 1.002);
+    expect(closed.session).toMatchObject({ netQuantity: 0, averageEntryPrice: null, lastProcessedSequence: 1, version: state.session.version + 1 });
+    expect(closed.recentFills).toHaveLength(2);
+    expect(closed.recentFills[0]).toMatchObject({ sequence: 1, timestamp: new Date(base.getTime() + 60_000).toISOString(),
+      price, reason: "CLOSE", quantity: 2, openedQuantity: 0 });
+    expect(closed.activeOrders).toHaveLength(1);
+    expect(closed.activeOrders[0]).toMatchObject({ price: 40, status: "PENDING", isProtective: false });
+    expect(closed.recentOrders.filter((item: { isProtective: boolean; status: string }) => item.isProtective && item.status === "CANCELLED")).toHaveLength(2);
+    expect(closed.stats).toMatchObject({ tradeCount: 1, journalEntryCount: 1, unrealizedPnl: 0 });
+    expect(closed.stats.totalFees).toBeCloseTo((101 * (side === "BUY" ? 1.002 : 0.998) + price) * 2 / 1000);
+    const storedAccount = await prisma.paperTradingSession.findUniqueOrThrow({ where: { projectionId: session.activeProjectionId } });
+    const point = await prisma.paperEquityPoint.findUniqueOrThrow({ where: { sessionId_sequence: { sessionId: storedAccount.id, sequence: 1 } } });
+    expect(point.equity).toBeCloseTo(closed.stats.equity);
+    const journal = await prisma.replayJournalEntry.findFirstOrThrow({ where: { projectionId: session.activeProjectionId } });
+    expect(journal).toMatchObject({ openedSequence: 1, closedSequence: 1, quantity: 2, exitPrice: price });
+    expect(await prisma.replayProgress.findUnique({ where: { replaySessionId: session.id } })).toEqual(progress);
+    expect(await snapshot(unrelated.id)).toEqual(unrelatedBefore);
+    expect((await orderPOST(request(session, "POST", payload), context)).status).toBe(409);
+    expect((await orderPOST(request(session, "POST", { ...payload, expectedVersion: closed.session.version }), context)).status).toBe(400);
+    expect(await prisma.paperFill.count({ where: { sessionId: storedAccount.id } })).toBe(2);
+    const afterNext = (await advance(session))!;
+    expect(afterNext.session.netQuantity).toBe(0);
+    expect(afterNext.recentFills).toHaveLength(2);
+    expect(afterNext.stats.tradeCount).toBe(1);
+  });
+
+  it("rolls back the order, account and journals if immediate fill persistence fails", async () => {
+    const session = await create("LIVE_REPLAY"); await account(session); await advance(session);
+    await order(session, "BUY", 1); await advance(session);
+    const before = (await snapshot(session.id))!;
+    const commands = await prisma.replayCommand.count({ where: { replaySessionId: session.id } });
+    const point = await prisma.paperEquityPoint.findFirstOrThrow({ where: { session: { projectionId: session.activeProjectionId }, sequence: 1 } });
+    await prisma.$executeRawUnsafe("CREATE TRIGGER reject_current_close BEFORE INSERT ON PaperFill WHEN NEW.reason = 'CLOSE' BEGIN SELECT RAISE(ABORT, 'test current close failure'); END");
+    const log = vi.spyOn(console, "error").mockImplementation(() => undefined);
+    try {
+      const response = await orderPOST(request(session, "POST", { side: "SELL", type: "MARKET", quantity: 1, reduceOnly: true,
+        executeAtCurrentClose: true, expectedVersion: before.session.version }), context);
+      expect(response.status).toBe(500);
+      expect(await snapshot(session.id)).toEqual(before);
+      expect(await prisma.replayCommand.count({ where: { replaySessionId: session.id } })).toBe(commands);
+      expect(await prisma.paperEquityPoint.findFirstOrThrow({ where: { session: { projectionId: session.activeProjectionId }, sequence: 1 } })).toEqual(point);
+    } finally {
+      log.mockRestore();
+      await prisma.$executeRawUnsafe("DROP TRIGGER reject_current_close");
+    }
+  });
+
+  it("allows immediate close on the last source bar while ordinary market closes still need a next bar", async () => {
+    const session = await create("LIVE_REPLAY"); await account(session); await advance(session);
+    await order(session, "BUY", 1); await advance(session, 7);
+    const state = (await snapshot(session.id))!;
+    expect(state.session.lastProcessedSequence).toBe(7);
+    const payload = { side: "SELL", type: "MARKET", quantity: 1, reduceOnly: true, expectedVersion: state.session.version };
+    expect((await orderPOST(request(session, "POST", payload), context)).status).toBe(400);
+    const response = await orderPOST(request(session, "POST", { ...payload, executeAtCurrentClose: true }), context);
+    expect(response.status).toBe(201);
+    expect((await response.json()).snapshot.recentFills[0]).toMatchObject({ sequence: 7, price: 108 * 0.998, reason: "CLOSE" });
+    expect((await snapshot(session.id))!.session.netQuantity).toBe(0);
+  });
+
+  it("rewinds to the candle before its immediate-close command, restoring the position without leaked fills or journals", async () => {
+    const session = await create("LIVE_REPLAY"); await account(session); await advance(session);
+    await order(session, "BUY", 1); await advance(session);
+    const state = (await snapshot(session.id))!;
+    expect((await orderPOST(request(session, "POST", { side: "SELL", type: "MARKET", quantity: 1, reduceOnly: true,
+      executeAtCurrentClose: true, expectedVersion: state.session.version }), context)).status).toBe(201);
+    const job = await createCorrection(session.id, { requestId: "rewind-immediate-close", type: "REWIND", targetSequence: 1,
+      expectedVersion: (await loadReplayScope(session.id)).version });
+    await runReplayCorrection(job.id);
+    expect((await readCorrection(session.id, job.id)).status).toBe("READY");
+    await commitCorrection(session.id, job.id);
+    const restored = (await snapshot(session.id))!;
+    expect(restored.session.netQuantity).toBe(1);
+    expect(restored.session.lastProcessedSequence).toBe(1);
+    expect(restored.recentFills).toHaveLength(1);
+    expect(restored.recentFills[0].reason).toBe("ENTRY");
+    expect(restored.stats).toMatchObject({ tradeCount: 0, journalEntryCount: 0 });
+    expect(restored.recentTrades).toHaveLength(1);
+    expect(restored.recentTrades[0].status).toBe("OPEN");
+  });
+
+  it("rebuilds a retained immediate close when deleting an earlier position cycle", async () => {
+    const session = await create("LIVE_REPLAY"); await account(session); await advance(session);
+    await order(session, "BUY", 1); await advance(session);
+    let state = (await snapshot(session.id))!;
+    const firstCycle = state.recentFills[0].cycleKey!;
+    async function closeNow() {
+      state = (await snapshot(session.id))!;
+      const response = await orderPOST(request(session, "POST", { side: "SELL", type: "MARKET", quantity: 1, reduceOnly: true,
+        executeAtCurrentClose: true, expectedVersion: state.session.version }), context);
+      expect(response.status).toBe(201);
+    }
+    await closeNow();
+    await order(session, "BUY", 1); await advance(session);
+    await closeNow();
+    const retained = (await snapshot(session.id))!.recentFills[0];
+    await advance(session, 2);
+    const job = await createCorrection(session.id, { requestId: "delete-before-immediate-close", type: "DELETE_CYCLE", cycleKey: firstCycle,
+      expectedVersion: (await loadReplayScope(session.id)).version });
+    await runReplayCorrection(job.id);
+    expect((await readCorrection(session.id, job.id)).status).toBe("READY");
+    await commitCorrection(session.id, job.id);
+    const rebuilt = (await snapshot(session.id))!;
+    expect(rebuilt.session).toMatchObject({ netQuantity: 0, lastProcessedSequence: 4 });
+    expect(rebuilt.recentFills).toHaveLength(2);
+    expect(rebuilt.recentFills[0]).toEqual(retained);
+    expect(rebuilt.stats).toMatchObject({ tradeCount: 1, journalEntryCount: 1 });
+  });
+
   it("displays the sixth allocated trade as 1 after repeated rewinds, then continues at 2 without changing internal identity", async () => {
     const session = await create("LIVE_REPLAY"); await account(session); await advance(session);
     for (let attempt = 0; attempt < 5; attempt++) {

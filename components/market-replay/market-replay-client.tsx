@@ -2058,7 +2058,14 @@ export function MarketReplayClient({ dataset: initialDataset, initialJournalFocu
           if (response.status === 409) await reloadPaper();
           throw new Error(data?.error ?? copy.paperTrading.requestFailed);
         }
-        if (data.snapshot !== undefined) commitConfirmedPaperSnapshot(data.snapshot as PaperSessionSnapshot | null);
+        if (data.snapshot !== undefined) {
+          const snapshot = data.snapshot as PaperSessionSnapshot | null;
+          const previousFillId = confirmedPaperSnapshotRef.current?.recentFills[0]?.id;
+          commitConfirmedPaperSnapshot(snapshot);
+          if (snapshot?.recentFills[0]?.id && snapshot.recentFills[0].id !== previousFillId) {
+            void loadTradeAnnotations(barsRef.current.slice(-DEFAULT_REPLAY_MAX_VISIBLE_BARS));
+          }
+        }
         return true;
       } catch (error) {
         setPaperError(error instanceof Error ? error.message : copy.paperTrading.requestFailed);
@@ -2173,8 +2180,10 @@ export function MarketReplayClient({ dataset: initialDataset, initialJournalFocu
 
   async function sendPaperOrder(order: PaperOrderInput, gateApproval?: GateApprovalInput) {
     if (!paperSnapshotRef.current) return false;
+    // Capture before mutatePaper temporarily suspends automatic playback.
+    const executeAtCurrentClose = order.type === "MARKET" && order.reduceOnly === true && !wantsPlayback();
     return mutatePaper(`/api/market-datasets/${dataset.id}/paper-session/orders`, (version) => ({
-      method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ ...order, gateApproval, expectedVersion: version }),
+      method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ ...order, executeAtCurrentClose, gateApproval, expectedVersion: version }),
     }));
   }
 
