@@ -9,6 +9,7 @@
     "start": "next start",
     "lint": "eslint .",
     "test": "vitest run",
+    "benchmark:drawing-projection": "node --import tsx scripts/benchmark-drawing-projection.ts",
     "benchmark:market-import-memory": "node --max-old-space-size=1024 --import tsx scripts/benchmark-market-import-memory.ts",
     "prisma:generate": "prisma generate",
     "prisma:migrate": "prisma migrate dev",

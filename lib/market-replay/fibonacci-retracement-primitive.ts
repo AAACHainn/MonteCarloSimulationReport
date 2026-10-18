@@ -10,13 +10,15 @@ import {
   DEFAULT_FIBONACCI_RETRACEMENT_STYLE,
   distanceToSegment,
   fibonacciPriceAtLevel,
-  logicalIndexForAnchor,
   trendLineCanvasDashArray,
   type FibonacciRetracementDrawing,
   type TrendLineGeometry,
 } from "@/lib/market-replay/chart-drawings";
-import type { AggregatedMarketBarData, TradingSessionConfig } from "@/lib/market-replay/types";
+import { DrawingTimelineLocator, type DrawingTimelineBar } from "./drawing-timeline";
+import type { TradingSessionConfig } from "@/lib/market-replay/types";
 import { formatPriceForTick } from "@/lib/market-replay/price-ticks";
+
+import { segmentIntersectsViewport } from "./drawing-viewport";
 
 export type FibonacciPoint = { x: number; y: number };
 export type FibonacciHitPart = "start" | "end" | "line";
@@ -26,7 +28,7 @@ export type FibonacciHit = {
   distance: number;
   priority: 1 | 2;
 };
-type ProjectedLevel = { value: number; price: number; color: string; y: number };
+type ProjectedLevel = { value: number; price: number; color: string; y: number; lineVisible?: boolean };
 type ProjectedDrawing = {
   drawing: FibonacciRetracementDrawing;
   start: FibonacciPoint;
@@ -47,7 +49,8 @@ export type FibonacciRetracementPrimitiveSnapshot = {
   preview: { id: string; geometry: TrendLineGeometry } | null;
   draft: TrendLineGeometry | null;
   draftStyle: FibonacciRetracementDrawing["style"];
-  bars: AggregatedMarketBarData[];
+  bars: readonly DrawingTimelineBar[];
+  timeline?: DrawingTimelineLocator;
   displayIntervalSeconds: number;
   sourceIntervalSeconds: number;
   session: TradingSessionConfig;
@@ -82,6 +85,7 @@ export function hitTestFibonacciRetracements(drawings: ProjectedDrawing[], point
     const left = Math.min(item.start.x, item.end.x);
     const right = Math.max(item.start.x, item.end.x);
     for (const level of item.levels) {
+      if (level.lineVisible === false) continue;
       const distance = distanceToSegment(point, { x: left, y: level.y }, { x: right, y: level.y });
       if (distance <= Math.max(LINE_HIT_RADIUS, item.drawing.style.width / 2 + 4)) {
         hit = betterHit(hit, { drawingId: item.drawing.id, part: "line", distance, priority: 1 });
@@ -107,10 +111,12 @@ function drawLevels(
     context.strokeStyle = level.color;
     context.lineWidth = style.width;
     context.setLineDash(trendLineCanvasDashArray(style.lineStyle));
-    context.beginPath();
-    context.moveTo(left, level.y);
-    context.lineTo(right, level.y);
-    context.stroke();
+    if (level.lineVisible !== false) {
+      context.beginPath();
+      context.moveTo(left, level.y);
+      context.lineTo(right, level.y);
+      context.stroke();
+    }
 
     const text = `${level.value}  ${formatPriceForTick(level.price, priceTickSize)}`;
     const textWidth = context.measureText(text).width;
@@ -168,6 +174,7 @@ export class FibonacciRetracementPrimitive implements ISeriesPrimitive<Time> {
     session: { mode: "TWENTY_FOUR_SEVEN", timezone: "UTC", openMinute: null, closeMinute: null, weekdays: [1, 2, 3, 4, 5, 6, 7] },
     priceTickSize: 0.01,
   };
+  private readonly timeline = new DrawingTimelineLocator();
   private projected: ProjectedSnapshot = EMPTY_PROJECTED;
   private readonly views = [new FibonacciPaneView(() => this.projected)];
 
@@ -181,7 +188,13 @@ export class FibonacciRetracementPrimitive implements ISeriesPrimitive<Time> {
     this.chart = null; this.series = null; this.requestUpdate = null; this.projected = EMPTY_PROJECTED;
   }
   paneViews() { return this.views; }
-  setDrawings(snapshot: FibonacciRetracementPrimitiveSnapshot) { this.snapshot = snapshot; this.requestRedraw(); }
+  setDrawings(snapshot: FibonacciRetracementPrimitiveSnapshot) {
+    this.snapshot = snapshot;
+    if (!snapshot.timeline) this.timeline.setTimeline(snapshot.bars, snapshot.displayIntervalSeconds, {
+      sourceIntervalSeconds: snapshot.sourceIntervalSeconds, session: snapshot.session,
+    });
+    this.requestRedraw();
+  }
   requestRedraw() { this.requestUpdate?.(); }
 
   updateAllViews() {
@@ -189,16 +202,9 @@ export class FibonacciRetracementPrimitive implements ISeriesPrimitive<Time> {
     const series = this.series;
     if (!chart || !series) { this.projected = EMPTY_PROJECTED; return; }
     const project = (drawing: FibonacciRetracementDrawing, geometry: TrendLineGeometry, selected: boolean) => {
-      const projectionOptions = {
-        sourceIntervalSeconds: this.snapshot.sourceIntervalSeconds,
-        session: this.snapshot.session,
-      };
-      const startIndex = logicalIndexForAnchor(
-        geometry.start, this.snapshot.bars, this.snapshot.displayIntervalSeconds, projectionOptions,
-      );
-      const endIndex = logicalIndexForAnchor(
-        geometry.end, this.snapshot.bars, this.snapshot.displayIntervalSeconds, projectionOptions,
-      );
+      const timeline = this.snapshot.timeline ?? this.timeline;
+      const startIndex = timeline.logicalIndexForAnchor(geometry.start);
+      const endIndex = timeline.logicalIndexForAnchor(geometry.end);
       if (startIndex === null || endIndex === null) return null;
       const startX = chart.timeScale().logicalToCoordinate(startIndex as never);
       const endX = chart.timeScale().logicalToCoordinate(endIndex as never);
@@ -209,7 +215,10 @@ export class FibonacciRetracementPrimitive implements ISeriesPrimitive<Time> {
         if (!level.enabled) return [];
         const price = fibonacciPriceAtLevel(geometry, level.value);
         const y = series.priceToCoordinate(price);
-        return y === null ? [] : [{ value: level.value, price, color: level.color, y: Number(y) }];
+        return y === null ? [] : [{ value: level.value, price, color: level.color, y: Number(y),
+          lineVisible: segmentIntersectsViewport({ x: Number(startX), y: Number(y) },
+            { x: Number(endX), y: Number(y) }, chart.timeScale().width(), chart.panes()[0]?.getHeight() ?? 0),
+        }];
       });
       return {
         drawing: geometry === drawing.geometry ? drawing : { ...drawing, geometry },

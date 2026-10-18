@@ -61,6 +61,7 @@ import {
   type TrendLineDrawing,
   type TrendLineGeometry,
 } from "@/lib/market-replay/chart-drawings";
+import { drawingTimelineBars, DrawingTimelineLocator } from "@/lib/market-replay/drawing-timeline";
 import { TrendLinePrimitive } from "@/lib/market-replay/trend-line-primitive";
 import { FibonacciRetracementPrimitive } from "@/lib/market-replay/fibonacci-retracement-primitive";
 import { formatUtcDateTime, formatUtcOffset } from "@/lib/market-replay/display-timezone";
@@ -337,6 +338,11 @@ export function ReplayChart({
   displaySessionRef.current = displaySession;
   const barsRef = useRef(visibleBars);
   const timelineBarsRef = useRef(bars);
+  const projectionBars = useMemo(() => drawingTimelineBars(bars), [bars]);
+  const projectionBarsRef = useRef(projectionBars);
+  const drawingTimelineRef = useRef(new DrawingTimelineLocator());
+  const drawingScopeRef = useRef(visibilityScope);
+  const drawingFrameRef = useRef<number | null>(null);
   const drawingSessionRef = useRef(barCountSession);
   const requestedDrawingSessionRef = useRef(barCountSession);
   requestedDrawingSessionRef.current = barCountSession;
@@ -434,29 +440,39 @@ export function ReplayChart({
   }, []);
 
   const syncDrawingPrimitive = useCallback(() => {
-    trendLinePrimitiveRef.current?.setDrawings({
-      drawings: drawingsRef.current.filter((drawing): drawing is TrendLineDrawing => drawing.type === DRAWING_TYPE_TREND_LINE),
-      selectedDrawingId: selectedDrawingIdRef.current,
-      preview: drawingPreviewRef.current,
-      draft: drawingToolRef.current === DRAWING_TYPE_TREND_LINE ? drawingDraftRef.current : null,
-      draftStyle: trendLineDraftStyleRef.current,
-      bars: barsRef.current,
-      displayIntervalSeconds: displayIntervalSecondsRef.current,
-      sourceIntervalSeconds: sourceIntervalSecondsRef.current,
-      session: drawingSessionRef.current,
-      priceTickSize: priceTickSizeRef.current,
-    });
-    fibonacciPrimitiveRef.current?.setDrawings({
-      drawings: drawingsRef.current.filter((drawing): drawing is FibonacciRetracementDrawing => drawing.type === DRAWING_TYPE_FIB_RETRACEMENT),
-      selectedDrawingId: selectedDrawingIdRef.current,
-      preview: drawingPreviewRef.current,
-      draft: drawingToolRef.current === DRAWING_TYPE_FIB_RETRACEMENT ? drawingDraftRef.current : null,
-      draftStyle: fibonacciDraftStyleRef.current,
-      bars: barsRef.current,
-      displayIntervalSeconds: displayIntervalSecondsRef.current,
-      sourceIntervalSeconds: sourceIntervalSecondsRef.current,
-      session: drawingSessionRef.current,
-      priceTickSize: priceTickSizeRef.current,
+    if (drawingFrameRef.current !== null) return;
+    drawingFrameRef.current = requestAnimationFrame(() => {
+      drawingFrameRef.current = null;
+      const timeline = drawingTimelineRef.current;
+      timeline.setTimeline(projectionBarsRef.current, displayIntervalSecondsRef.current, {
+        sourceIntervalSeconds: sourceIntervalSecondsRef.current, session: drawingSessionRef.current,
+      }, drawingScopeRef.current);
+      trendLinePrimitiveRef.current?.setDrawings({
+        drawings: drawingsRef.current.filter((drawing): drawing is TrendLineDrawing => drawing.type === DRAWING_TYPE_TREND_LINE),
+        selectedDrawingId: selectedDrawingIdRef.current,
+        preview: drawingPreviewRef.current,
+        draft: drawingToolRef.current === DRAWING_TYPE_TREND_LINE ? drawingDraftRef.current : null,
+        draftStyle: trendLineDraftStyleRef.current,
+        bars: projectionBarsRef.current,
+        timeline,
+        displayIntervalSeconds: displayIntervalSecondsRef.current,
+        sourceIntervalSeconds: sourceIntervalSecondsRef.current,
+        session: drawingSessionRef.current,
+        priceTickSize: priceTickSizeRef.current,
+      });
+      fibonacciPrimitiveRef.current?.setDrawings({
+        drawings: drawingsRef.current.filter((drawing): drawing is FibonacciRetracementDrawing => drawing.type === DRAWING_TYPE_FIB_RETRACEMENT),
+        selectedDrawingId: selectedDrawingIdRef.current,
+        preview: drawingPreviewRef.current,
+        draft: drawingToolRef.current === DRAWING_TYPE_FIB_RETRACEMENT ? drawingDraftRef.current : null,
+        draftStyle: fibonacciDraftStyleRef.current,
+        bars: projectionBarsRef.current,
+        timeline,
+        displayIntervalSeconds: displayIntervalSecondsRef.current,
+        sourceIntervalSeconds: sourceIntervalSecondsRef.current,
+        session: drawingSessionRef.current,
+        priceTickSize: priceTickSizeRef.current,
+      });
     });
   }, []);
 
@@ -468,7 +484,7 @@ export function ReplayChart({
   }, []);
 
   useEffect(() => {
-    requestAnimationFrame(syncDrawingPrimitive);
+    syncDrawingPrimitive();
   }, [drawings, selectedDrawingId, syncDrawingPrimitive]);
 
   const syncMeasurementCoordinates = useCallback(() => {
@@ -682,6 +698,10 @@ export function ReplayChart({
     candleCountdownPrimitiveRef.current = candleCountdownPrimitive;
     syncDrawingPrimitive();
     return () => {
+      if (drawingFrameRef.current !== null) {
+        cancelAnimationFrame(drawingFrameRef.current);
+        drawingFrameRef.current = null;
+      }
       observer.disconnect();
       chart.timeScale().unsubscribeVisibleLogicalRangeChange(syncLineActionCoordinates);
       chart.timeScale().unsubscribeVisibleLogicalRangeChange(syncMeasurementCoordinates);
@@ -750,7 +770,7 @@ export function ReplayChart({
   }, [displayUtcOffsetMinutes]);
 
   useEffect(() => {
-    requestAnimationFrame(syncDrawingPrimitive);
+    syncDrawingPrimitive();
   }, [fibonacciDraftStyle, syncDrawingPrimitive, trendLineDraftStyle]);
 
   useEffect(() => {
@@ -762,6 +782,8 @@ export function ReplayChart({
     const next = bars;
     barsRef.current = visibleBars;
     timelineBarsRef.current = next;
+    projectionBarsRef.current = projectionBars;
+    drawingScopeRef.current = visibilityScope;
     displayIntervalSecondsRef.current = nextDisplayIntervalSeconds;
     drawingSessionRef.current = requestedDrawingSessionRef.current;
     const volumeSeries = volumeRef.current;
@@ -831,8 +853,8 @@ export function ReplayChart({
     lastDataSessionRef.current = nextDisplaySession;
     requestAnimationFrame(syncVisibleSequenceRange);
     requestAnimationFrame(syncMeasurementCoordinates);
-    requestAnimationFrame(syncDrawingPrimitive);
-  }, [bars, visibleBars, hiddenAfter, readOnly, syncDrawingPrimitive, syncMeasurementCoordinates, syncVisibleSequenceRange]);
+    syncDrawingPrimitive();
+  }, [bars, projectionBars, visibleBars, hiddenAfter, readOnly, visibilityScope, displayIntervalSeconds, displaySession, barCountSession, sourceIntervalSeconds, syncDrawingPrimitive, syncMeasurementCoordinates, syncVisibleSequenceRange]);
 
   useEffect(() => {
     if (focusSequence === null) return;
@@ -1007,7 +1029,8 @@ export function ReplayChart({
       if (!Number.isFinite(price)) return null;
       const snappedX = chart.timeScale().logicalToCoordinate(index as never);
       const snappedY = series.priceToCoordinate(price);
-      if (snappedX === null || snappedY === null) return null;
+      if (snappedX === null || snappedY === null
+        || drawingTimelineRef.current.timestampForLogicalIndex(index) === null) return null;
       return {
         anchor: anchorForLogicalIndex({
           logicalIndex: index,
@@ -1016,6 +1039,7 @@ export function ReplayChart({
           displayIntervalSeconds: displayIntervalSecondsRef.current,
           sourceIntervalSeconds: sourceIntervalSecondsRef.current,
           session: drawingSessionRef.current,
+          timeline: drawingTimelineRef.current,
         }),
         coordinate: { x: Number(snappedX), y: Number(snappedY) },
       };
@@ -1692,10 +1716,7 @@ export function ReplayChart({
     volumeRef.current?.priceScale().applyOptions({ autoScale: true });
     setContextMenu(null);
     requestAnimationFrame(syncLineActionCoordinates);
-    requestAnimationFrame(() => {
-      trendLinePrimitiveRef.current?.requestRedraw();
-      fibonacciPrimitiveRef.current?.requestRedraw();
-    });
+    syncDrawingPrimitive();
   }
 
   function createDraft(side: PaperSide, type: "LIMIT" | "STOP") {

@@ -8,14 +8,16 @@ import {
 } from "lightweight-charts";
 import {
   distanceToSegment,
-  logicalIndexForAnchor,
   trendLineCanvasDashArray,
   type TrendLineDrawing,
   type TrendLineGeometry,
   type TrendLineStyle,
 } from "@/lib/market-replay/chart-drawings";
-import type { AggregatedMarketBarData, TradingSessionConfig } from "@/lib/market-replay/types";
+import { DrawingTimelineLocator, type DrawingTimelineBar } from "./drawing-timeline";
+import type { TradingSessionConfig } from "@/lib/market-replay/types";
 import { formatPriceForTick } from "@/lib/market-replay/price-ticks";
+
+import { segmentIntersectsViewport } from "./drawing-viewport";
 
 export type TrendLinePoint = { x: number; y: number };
 export type TrendLineHitPart = "start" | "end" | "line";
@@ -24,6 +26,7 @@ export type TrendLineProjectedDrawing = {
   start: TrendLinePoint;
   end: TrendLinePoint;
   selected: boolean;
+  lineVisible?: boolean;
 };
 export type TrendLinePrimitiveSnapshot = {
   drawings: TrendLineDrawing[];
@@ -31,7 +34,8 @@ export type TrendLinePrimitiveSnapshot = {
   preview: { id: string; geometry: TrendLineGeometry } | null;
   draft: TrendLineGeometry | null;
   draftStyle: TrendLineStyle;
-  bars: AggregatedMarketBarData[];
+  bars: readonly DrawingTimelineBar[];
+  timeline?: DrawingTimelineLocator;
   displayIntervalSeconds: number;
   sourceIntervalSeconds: number;
   session: TradingSessionConfig;
@@ -98,6 +102,7 @@ export function hitTestTrendLines(drawings: TrendLineProjectedDrawing[], point: 
         hit = betterHit(hit, { drawingId: item.drawing.id, part: "end", distance: endDistance, priority: 2 });
       }
     }
+    if (item.lineVisible === false) continue;
     const lineDistance = distanceToSegment(point, item.start, item.end);
     const lineRadius = Math.max(LINE_HIT_RADIUS, item.drawing.style.width / 2 + 4);
     if (lineDistance <= lineRadius) {
@@ -182,6 +187,7 @@ class TrendLinePaneRenderer implements IPrimitivePaneRenderer {
     target.useMediaCoordinateSpace(({ context }) => {
       const snapshot = this.snapshot();
       for (const item of snapshot.drawings) {
+        if (item.lineVisible === false) continue;
         if (item.selected) {
           context.save();
           context.globalAlpha = 0.9;
@@ -257,6 +263,7 @@ export class TrendLinePrimitive implements ISeriesPrimitive<Time> {
     session: { mode: "TWENTY_FOUR_SEVEN", timezone: "UTC", openMinute: null, closeMinute: null, weekdays: [1, 2, 3, 4, 5, 6, 7] },
     priceTickSize: 0.01,
   };
+  private readonly timeline = new DrawingTimelineLocator();
   private projected: ProjectedSnapshot = EMPTY_PROJECTED_SNAPSHOT;
   private readonly views = [new TrendLinePaneView(() => this.projected)];
 
@@ -280,6 +287,9 @@ export class TrendLinePrimitive implements ISeriesPrimitive<Time> {
 
   setDrawings(snapshot: TrendLinePrimitiveSnapshot) {
     this.snapshot = snapshot;
+    if (!snapshot.timeline) this.timeline.setTimeline(snapshot.bars, snapshot.displayIntervalSeconds, {
+      sourceIntervalSeconds: snapshot.sourceIntervalSeconds, session: snapshot.session,
+    });
     this.requestRedraw();
   }
 
@@ -297,16 +307,9 @@ export class TrendLinePrimitive implements ISeriesPrimitive<Time> {
     const paneWidth = chart.timeScale().width();
     const paneHeight = chart.panes()[0]?.getHeight() ?? 0;
     const projectGeometry = (geometry: TrendLineGeometry) => {
-      const projectionOptions = {
-        sourceIntervalSeconds: this.snapshot.sourceIntervalSeconds,
-        session: this.snapshot.session,
-      };
-      const startIndex = logicalIndexForAnchor(
-        geometry.start, this.snapshot.bars, this.snapshot.displayIntervalSeconds, projectionOptions,
-      );
-      const endIndex = logicalIndexForAnchor(
-        geometry.end, this.snapshot.bars, this.snapshot.displayIntervalSeconds, projectionOptions,
-      );
+      const timeline = this.snapshot.timeline ?? this.timeline;
+      const startIndex = timeline.logicalIndexForAnchor(geometry.start);
+      const endIndex = timeline.logicalIndexForAnchor(geometry.end);
       if (startIndex === null || endIndex === null) return null;
       const startX = chart.timeScale().logicalToCoordinate(startIndex as never);
       const endX = chart.timeScale().logicalToCoordinate(endIndex as never);
@@ -326,6 +329,7 @@ export class TrendLinePrimitive implements ISeriesPrimitive<Time> {
       return [{
         drawing: geometry === drawing.geometry ? drawing : { ...drawing, geometry },
         ...coordinate,
+        lineVisible: segmentIntersectsViewport(coordinate.start, coordinate.end, paneWidth, paneHeight),
         selected: drawing.id === this.snapshot.selectedDrawingId,
       }];
     });

@@ -44,6 +44,37 @@ function shiftCalendarDate(date: { year: number; month: number; day: number }, d
   };
 }
 
+type CalendarDate = { year: number; month: number; day: number };
+
+function tradingDateAt(timestampMs: number, session: TradingSessionConfig) {
+  const parts = localParts(timestampMs, session.timezone);
+  return shiftCalendarDate(parts, session.mode === "OVERNIGHT_SESSION"
+    && parts.hour * 60 + parts.minute >= session.openMinute! ? 1 : 0);
+}
+
+/** Shared by aggregation, adjacent buckets and the drawing calendar. */
+function tradingSessionBounds(tradingDate: CalendarDate, session: TradingSessionConfig) {
+  if (session.openMinute === null || session.closeMinute === null
+    || (session.mode === "DAILY_SESSION" && session.openMinute >= session.closeMinute)) return null;
+  const date = shiftCalendarDate(tradingDate, 0);
+  if (!session.weekdays.includes(date.weekday)) return null;
+  const startDate = session.mode === "OVERNIGHT_SESSION" ? shiftCalendarDate(date, -1) : date;
+  const key = [session.mode, session.timezone, session.openMinute, session.closeMinute,
+    date.year, date.month, date.day].join(":");
+  let bounds = sessionBoundsCache.get(key);
+  if (!bounds) {
+    bounds = {
+      start: new TZDate(startDate.year, startDate.month - 1, startDate.day,
+        Math.floor(session.openMinute / 60), session.openMinute % 60, 0, session.timezone).getTime(),
+      end: new TZDate(date.year, date.month - 1, date.day,
+        Math.floor(session.closeMinute / 60), session.closeMinute % 60, 0, session.timezone).getTime(),
+    };
+    if (sessionBoundsCache.size >= 10_000) sessionBoundsCache.clear();
+    sessionBoundsCache.set(key, bounds);
+  }
+  return bounds.end > bounds.start ? bounds : null;
+}
+
 export function getAggregationBucket(
   timestampMs: number,
   sourceSeconds: number,
@@ -60,33 +91,8 @@ export function getAggregationBucket(
   }
 
   if (session.openMinute === null || session.closeMinute === null) return null;
-  const parts = localParts(timestampMs, session.timezone);
-  const openHour = Math.floor(session.openMinute / 60);
-  const openMinute = session.openMinute % 60;
-  const closeHour = Math.floor(session.closeMinute / 60);
-  const closeMinute = session.closeMinute % 60;
-  let tradingDate = { year: parts.year, month: parts.month, day: parts.day, weekday: parts.weekday };
-  let startDate = tradingDate;
-  if (session.mode === "OVERNIGHT_SESSION") {
-    const localMinute = parts.hour * 60 + parts.minute;
-    tradingDate = shiftCalendarDate(parts, localMinute >= session.openMinute ? 1 : 0);
-    startDate = shiftCalendarDate(tradingDate, -1);
-  } else if (session.openMinute >= session.closeMinute) return null;
-  if (!session.weekdays.includes(tradingDate.weekday)) return null;
-  const boundsKey = [
-    session.mode, session.timezone, session.openMinute, session.closeMinute,
-    startDate.year, startDate.month, startDate.day,
-    tradingDate.year, tradingDate.month, tradingDate.day,
-  ].join(":");
-  let bounds = sessionBoundsCache.get(boundsKey);
-  if (!bounds) {
-    bounds = {
-      start: new TZDate(startDate.year, startDate.month - 1, startDate.day, openHour, openMinute, 0, session.timezone).getTime(),
-      end: new TZDate(tradingDate.year, tradingDate.month - 1, tradingDate.day, closeHour, closeMinute, 0, session.timezone).getTime(),
-    };
-    if (sessionBoundsCache.size >= 10_000) sessionBoundsCache.clear();
-    sessionBoundsCache.set(boundsKey, bounds);
-  }
+  const bounds = tradingSessionBounds(tradingDateAt(timestampMs, session), session);
+  if (!bounds) return null;
   const sessionStart = bounds.start;
   const sessionEnd = bounds.end;
   if (timestampMs < sessionStart || timestampMs >= sessionEnd || (timestampMs - sessionStart) % sourceMs !== 0) return null;
@@ -106,28 +112,12 @@ export function getAdjacentAggregationBucketStart(
   if (session.mode === "TWENTY_FOUR_SEVEN") return timestampMs + direction * displayMs;
   if (session.openMinute === null || session.closeMinute === null) return null;
 
-  const parts = localParts(timestampMs, session.timezone);
-  const localDate = { year: parts.year, month: parts.month, day: parts.day };
-  const baseTradingDate = session.mode === "OVERNIGHT_SESSION"
-    ? shiftCalendarDate(localDate, parts.hour * 60 + parts.minute >= session.openMinute ? 1 : 0)
-    : localDate;
-  const openHour = Math.floor(session.openMinute / 60);
-  const openMinute = session.openMinute % 60;
-  const closeHour = Math.floor(session.closeMinute / 60);
-  const closeMinute = session.closeMinute % 60;
+  const baseTradingDate = tradingDateAt(timestampMs, session);
   for (let step = 0; step <= 14; step += 1) {
     const tradingDate = shiftCalendarDate(baseTradingDate, direction * step);
-    if (!session.weekdays.includes(tradingDate.weekday)) continue;
-    const startDate = session.mode === "OVERNIGHT_SESSION"
-      ? shiftCalendarDate(tradingDate, -1)
-      : tradingDate;
-    const sessionStart = new TZDate(
-      startDate.year, startDate.month - 1, startDate.day, openHour, openMinute, 0, session.timezone,
-    ).getTime();
-    const sessionEnd = new TZDate(
-      tradingDate.year, tradingDate.month - 1, tradingDate.day, closeHour, closeMinute, 0, session.timezone,
-    ).getTime();
-    if (sessionEnd <= sessionStart) continue;
+    const bounds = tradingSessionBounds(tradingDate, session);
+    if (!bounds) continue;
+    const { start: sessionStart, end: sessionEnd } = bounds;
 
     let candidate: number;
     if (direction > 0) {
@@ -148,6 +138,110 @@ export function getAdjacentAggregationBucketStart(
     }
   }
   return null;
+}
+
+const CALENDAR_DAY_MS = 86_400_000;
+export const MAX_DRAWING_CALENDAR_DAYS = 36_600;
+type CalendarDay = { start: number; end: number; count: number; ordinal: number };
+
+/** Counts chart slots by trading day, never by individual candles. Ordinals stay
+ * stable when either end of the cached calendar grows. No market data is created. */
+export class AggregationCalendar {
+  private readonly days = new Map<number, CalendarDay>();
+  private firstDay = 0;
+  private lastDay = -1;
+  private readonly displayMs: number;
+
+  constructor(displaySeconds: number, private readonly session: TradingSessionConfig) {
+    this.displayMs = Math.max(1, displaySeconds) * 1_000;
+  }
+
+  private dayNumber(timestamp: number) {
+    const date = tradingDateAt(timestamp, this.session);
+    return Date.UTC(date.year, date.month - 1, date.day) / CALENDAR_DAY_MS;
+  }
+
+  private makeDay(day: number, ordinal: number): CalendarDay {
+    const date = new Date(day * CALENDAR_DAY_MS);
+    const bounds = tradingSessionBounds({ year: date.getUTCFullYear(),
+      month: date.getUTCMonth() + 1, day: date.getUTCDate() }, this.session);
+    return { start: bounds?.start ?? 0, end: bounds?.end ?? 0,
+      count: bounds ? Math.ceil((bounds.end - bounds.start) / this.displayMs) : 0, ordinal };
+  }
+
+  private ensureDay(day: number) {
+    if (!Number.isFinite(day)) return false;
+    if (!this.days.size) {
+      this.firstDay = day; this.lastDay = day;
+      this.days.set(day, this.makeDay(day, 0));
+      return true;
+    }
+    // Refuse the entire request rather than returning an apparently valid,
+    // truncated coordinate when the bounded calendar cannot reach an anchor.
+    if (Math.max(day, this.lastDay) - Math.min(day, this.firstDay) + 1 > MAX_DRAWING_CALENDAR_DAYS) return false;
+    while (this.lastDay < day) {
+      const previous = this.days.get(this.lastDay)!;
+      this.lastDay += 1;
+      this.days.set(this.lastDay, this.makeDay(this.lastDay, previous.ordinal + previous.count));
+    }
+    while (this.firstDay > day) {
+      const next = this.days.get(this.firstDay)!;
+      this.firstDay -= 1;
+      const previous = this.makeDay(this.firstDay, 0);
+      previous.ordinal = next.ordinal - previous.count;
+      this.days.set(this.firstDay, previous);
+    }
+    return true;
+  }
+
+  position(timestamp: number, direction: -1 | 1): number | null {
+    if (!Number.isFinite(timestamp)) return null;
+    if (this.session.mode === "TWENTY_FOUR_SEVEN") return Math.floor(timestamp / this.displayMs);
+    const day = this.dayNumber(timestamp);
+    if (!this.ensureDay(day)) return null;
+    for (let step = 0; step <= 7; step += 1) {
+      const candidate = day + step * direction;
+      if (!this.ensureDay(candidate)) return null;
+      const entry = this.days.get(candidate)!;
+      if (!entry.count) continue;
+      if (timestamp >= entry.start && timestamp < entry.end) {
+        return entry.ordinal + Math.floor((timestamp - entry.start) / this.displayMs);
+      }
+      if (direction > 0 && timestamp < entry.start) return entry.ordinal;
+      if (direction < 0 && timestamp >= entry.end) return entry.ordinal + entry.count - 1;
+    }
+    return null;
+  }
+
+  timestampAtOffset(timestamp: number, offset: number): number | null {
+    if (!Number.isSafeInteger(offset) || !Number.isFinite(timestamp)) return null;
+    if (this.session.mode === "TWENTY_FOUR_SEVEN") return timestamp + offset * this.displayMs;
+    if (!this.session.weekdays.length
+      || Math.abs(offset) > MAX_DRAWING_CALENDAR_DAYS * Math.ceil(49 * 3_600_000 / this.displayMs)) return null;
+    const origin = this.position(timestamp, 1);
+    if (origin === null) return null;
+    const target = origin + offset;
+    let step = 8;
+    for (;;) {
+      const first = this.days.get(this.firstDay)!;
+      const last = this.days.get(this.lastDay)!;
+      if (target >= first.ordinal && target < last.ordinal + last.count) break;
+      const remaining = MAX_DRAWING_CALENDAR_DAYS - this.days.size;
+      if (!remaining) return null;
+      const extension = Math.min(step, remaining);
+      if (!this.ensureDay(target < first.ordinal ? this.firstDay - extension : this.lastDay + extension)) return null;
+      step *= 2;
+    }
+    let low = this.firstDay, high = this.lastDay;
+    while (low < high) {
+      const mid = Math.floor((low + high) / 2);
+      const day = this.days.get(mid)!;
+      if (day.ordinal + day.count <= target) low = mid + 1;
+      else high = mid;
+    }
+    const day = this.days.get(low)!;
+    return day.start + (target - day.ordinal) * this.displayMs;
+  }
 }
 
 export function aggregateMarketBars({

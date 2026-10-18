@@ -1,7 +1,7 @@
 import { z } from "zod";
+import { drawingTimelineLocator, type DrawingTimelineLocator } from "./drawing-timeline";
 import {
-  getAdjacentAggregationBucketStart,
-  getAggregationBucket,
+  AggregationCalendar,
 } from "@/lib/market-replay/aggregation";
 import type { AggregatedMarketBarData, TradingSessionConfig } from "@/lib/market-replay/types";
 
@@ -263,6 +263,7 @@ export function anchorForLogicalIndex({
   displayIntervalSeconds,
   sourceIntervalSeconds,
   session,
+  timeline,
 }: {
   logicalIndex: number;
   price: number;
@@ -270,13 +271,14 @@ export function anchorForLogicalIndex({
   displayIntervalSeconds: number;
   sourceIntervalSeconds?: number;
   session?: TradingSessionConfig;
+  timeline?: DrawingTimelineLocator;
 }): DrawingAnchor {
   const index = Math.round(logicalIndex);
   const bar = bars[index];
   if (bar) return { timestamp: bar.timestamp, sourceSequence: bar.firstSequence, price };
   const referenceIndex = index < 0 ? 0 : bars.length - 1;
   const reference = bars[referenceIndex];
-  const projectedTimestamp = reference && sourceIntervalSeconds && session
+  const projectedTimestamp = timeline ? timeline.timestampForLogicalIndex(index) : reference && sourceIntervalSeconds && session
     ? aggregationBucketStartAtOffset({
       timestampMs: new Date(reference.timestamp).getTime(),
       bucketOffset: index - referenceIndex,
@@ -284,6 +286,9 @@ export function anchorForLogicalIndex({
       session,
     })
     : null;
+  if ((timeline || (sourceIntervalSeconds && session)) && projectedTimestamp === null) {
+    throw new RangeError("Drawing anchor is outside the supported trading calendar");
+  }
   const timestamp = reference
     ? new Date(projectedTimestamp ?? (
       new Date(reference.timestamp).getTime() + (index - referenceIndex) * displayIntervalSeconds * 1_000
@@ -297,109 +302,10 @@ export type ChartTimelineProjectionOptions = {
   session: TradingSessionConfig;
 };
 
-function adjacentAggregationBucketStart({
-  timestampMs,
-  direction,
-  displayIntervalSeconds,
-  session,
-}: {
-  timestampMs: number;
-  direction: -1 | 1;
-  displayIntervalSeconds: number;
-  session: TradingSessionConfig;
+function aggregationBucketStartAtOffset({ timestampMs, bucketOffset, displayIntervalSeconds, session }: {
+  timestampMs: number; bucketOffset: number; displayIntervalSeconds: number; session: TradingSessionConfig;
 }) {
-  return getAdjacentAggregationBucketStart(timestampMs, direction, displayIntervalSeconds, session);
-}
-
-function aggregationBucketStartAtOffset({
-  timestampMs,
-  bucketOffset,
-  displayIntervalSeconds,
-  session,
-}: {
-  timestampMs: number;
-  bucketOffset: number;
-  displayIntervalSeconds: number;
-  session: TradingSessionConfig;
-}) {
-  let result = timestampMs;
-  const direction: -1 | 1 = bucketOffset < 0 ? -1 : 1;
-  for (let remaining = Math.abs(bucketOffset); remaining > 0; remaining -= 1) {
-    const adjacent = adjacentAggregationBucketStart({
-      timestampMs: result,
-      direction,
-      displayIntervalSeconds,
-      session,
-    });
-    if (adjacent === null) return null;
-    result = adjacent;
-  }
-  return result;
-}
-
-function logicalIndexForSessionTimestamp(
-  target: number,
-  bars: AggregatedMarketBarData[],
-  displayIntervalSeconds: number,
-  options: ChartTimelineProjectionOptions,
-) {
-  for (let index = 0; index < bars.length; index += 1) {
-    const start = new Date(bars[index].timestamp).getTime();
-    const end = new Date(bars[index].bucketEnd).getTime();
-    if (target >= start && target < end) return index;
-  }
-
-  const firstTime = new Date(bars[0].timestamp).getTime();
-  const lastIndex = bars.length - 1;
-  const lastTime = new Date(bars[lastIndex].timestamp).getTime();
-  if (target > lastTime) {
-    let index = lastIndex;
-    let cursor = lastTime;
-    while (cursor < target && index - lastIndex <= 100_000) {
-      const next = adjacentAggregationBucketStart({
-        timestampMs: cursor,
-        direction: 1,
-        displayIntervalSeconds,
-        session: options.session,
-      });
-      if (next === null) return null;
-      index += 1;
-      if (target < next) return index;
-      const bucket = getAggregationBucket(
-        next,
-        options.sourceIntervalSeconds,
-        displayIntervalSeconds,
-        options.session,
-      );
-      if (bucket && target < bucket.end) return index;
-      cursor = next;
-    }
-    return index;
-  }
-  if (target < firstTime) {
-    let index = 0;
-    let cursor = firstTime;
-    while (cursor > target && -index <= 100_000) {
-      const previous = adjacentAggregationBucketStart({
-        timestampMs: cursor,
-        direction: -1,
-        displayIntervalSeconds,
-        session: options.session,
-      });
-      if (previous === null) return null;
-      index -= 1;
-      const bucket = getAggregationBucket(
-        previous,
-        options.sourceIntervalSeconds,
-        displayIntervalSeconds,
-        options.session,
-      );
-      if (target > previous || (bucket && target >= bucket.start && target < bucket.end)) return index;
-      cursor = previous;
-    }
-    return index;
-  }
-  return null;
+  return new AggregationCalendar(displayIntervalSeconds, session).timestampAtOffset(timestampMs, bucketOffset);
 }
 
 export type ChartTimelineAnchor = {
@@ -475,8 +381,7 @@ export function logicalIndexForTimelineAnchor(
   const target = new Date(anchor.timestamp).getTime();
   if (!Number.isFinite(target)) return null;
   if (options) {
-    const sessionIndex = logicalIndexForSessionTimestamp(target, bars, displayIntervalSeconds, options);
-    if (sessionIndex !== null) return sessionIndex;
+    return drawingTimelineLocator(bars, displayIntervalSeconds, options).logicalIndexForTimestamp(target);
   }
   const firstTime = new Date(bars[0].timestamp).getTime();
   const lastTime = new Date(bars.at(-1)!.timestamp).getTime();
@@ -499,13 +404,7 @@ export function logicalIndexForAnchor(
   displayIntervalSeconds: number,
   options?: ChartTimelineProjectionOptions,
 ) {
-  if (anchor.sourceSequence !== null) {
-    const containingBarIndex = bars.findIndex((bar) => (
-      anchor.sourceSequence! >= bar.firstSequence && anchor.sourceSequence! <= bar.lastSequence
-    ));
-    if (containingBarIndex >= 0) return containingBarIndex;
-  }
-  return logicalIndexForTimelineAnchor(anchor, bars, displayIntervalSeconds, options);
+  return drawingTimelineLocator(bars, displayIntervalSeconds, options).logicalIndexForAnchor(anchor);
 }
 
 export function snapScreenPointTo45(
