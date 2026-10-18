@@ -1971,6 +1971,12 @@ export function ReplayChart({
 
       {contextMenu ? (
         <div ref={contextMenuRef} data-context-menu role="menu" className="absolute z-40 max-h-[calc(100%-1rem)] w-[220px] max-w-[calc(100%-1rem)] overflow-y-auto rounded-lg border border-slate-200 bg-white p-1.5 shadow-xl" style={{ left: contextMenu.x, top: contextMenu.y }}>
+          {!readOnly ? (
+            <button type="button" role="menuitem" data-testid="context-reset-chart-view" className="flex w-full items-center gap-2 rounded-md px-2 py-2 text-left text-sm font-medium text-slate-700 hover:bg-slate-100 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-600" onClick={resetChartView}>
+              <RotateCcw className="h-4 w-4" />
+              {copy.marketReplay.resetChartView}
+            </button>
+          ) : null}
           {contextMenu.hideAfter ? <Button type="button" role="menuitem" variant="ghost" data-testid="context-hide-subsequent-bars"
             className="w-full justify-start px-2 text-left font-medium text-slate-700"
             onClick={() => { const target = contextMenu.hideAfter; if (target) setHiddenBoundary({ scope: visibilityScope, target }); setContextMenu(null); setAbrTooltip(null); }}>
@@ -1978,10 +1984,6 @@ export function ReplayChart({
           </Button> : null}
           {!readOnly ? <>
           <div className="mb-1 border-b pb-1">
-            <button type="button" role="menuitem" data-testid="context-reset-chart-view" className="flex w-full items-center gap-2 rounded-md px-2 py-2 text-left text-sm font-medium text-slate-700 hover:bg-slate-100 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-600" onClick={resetChartView}>
-              <RotateCcw className="h-4 w-4" />
-              {copy.marketReplay.resetChartView}
-            </button>
             {onToggleGrid ? (
               <Button
                 type="button"
