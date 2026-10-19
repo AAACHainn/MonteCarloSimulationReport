@@ -3,15 +3,28 @@ import { hasVisibleReplayDialog, replayDrawingShortcutKey } from "./keyboard-sho
 
 afterEach(() => vi.unstubAllGlobals());
 describe("rectangle shortcut", () => {
-  const key = { key: "r", code: "KeyR", altKey: true, ctrlKey: false, metaKey: false, shiftKey: false, isComposing: false, defaultPrevented: false };
-  it("uses the physical key with Option and supports unidentified keyboards", () => {
-    expect(replayDrawingShortcutKey({ ...key, key: "®" })).toBe("r");
+  const key = { key: "R", code: "KeyR", altKey: false, ctrlKey: false, metaKey: false, shiftKey: true, isComposing: false, defaultPrevented: false };
+  it("uses Shift + R with physical keys and unidentified keyboards", () => {
+    expect(replayDrawingShortcutKey(key)).toBe("r");
     expect(replayDrawingShortcutKey({ ...key, code: "Unidentified" })).toBe("r");
-    expect(replayDrawingShortcutKey({ ...key, code: "KeyT" })).toBe("t");
-    expect(replayDrawingShortcutKey({ ...key, code: "KeyF" })).toBe("f");
+    expect(replayDrawingShortcutKey({ ...key, code: "" })).toBe("r");
   });
-  it.each(["ctrlKey", "shiftKey", "metaKey", "isComposing", "defaultPrevented"])("ignores %s", modifier => {
+  it.each(["altKey", "ctrlKey", "metaKey", "isComposing", "defaultPrevented"])("ignores %s", modifier => {
     expect(replayDrawingShortcutKey({ ...key, [modifier]: true })).toBeNull();
+  });
+  it("releases Alt + R and ignores unmodified letters and Shift + T/F", () => {
+    expect(replayDrawingShortcutKey({ ...key, shiftKey: false, altKey: true })).toBeNull();
+    expect(replayDrawingShortcutKey({ ...key, shiftKey: false })).toBeNull();
+    expect(replayDrawingShortcutKey({ ...key, code: "KeyT" })).toBeNull();
+    expect(replayDrawingShortcutKey({ ...key, code: "KeyF" })).toBeNull();
+    expect(replayDrawingShortcutKey({ ...key, code: "KeyA" })).toBeNull();
+  });
+  it("preserves Alt + T/F, including Option-modified keys on macOS", () => {
+    const alt = { ...key, altKey: true, shiftKey: false, key: "†" };
+    expect(replayDrawingShortcutKey({ ...alt, code: "KeyT" })).toBe("t");
+    expect(replayDrawingShortcutKey({ ...alt, code: "KeyF" })).toBe("f");
+    expect(replayDrawingShortcutKey({ ...alt, code: "Unidentified", key: "t" })).toBe("t");
+    expect(replayDrawingShortcutKey({ ...alt, code: "KeyT", shiftKey: true })).toBeNull();
   });
 });
 function dialog({ hidden = false, visible = true } = {}) {

@@ -42,6 +42,7 @@ import { DateTimePicker, type DateTimePickerHandle } from "@/components/ui/date-
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
+import { LINE_STYLE_OPTIONS, StyleChoiceField, StyleColorField, StyleLineWidthField, StyleOpacityField, StyleTemplateField } from "@/components/ui/style-controls";
 import { copy } from "@/lib/i18n";
 import {
   createReplayState,
@@ -311,7 +312,6 @@ export function MarketReplayClient({ dataset: initialDataset, initialJournalFocu
   const [selectedDrawingId, setSelectedDrawingId] = useState<string | null>(null);
   const [drawingObjectsOpen, setDrawingObjectsOpen] = useState(false);
   const [rectangleStyleId, setRectangleStyleId] = useState<string | null>(null);
-  const [rectangleDeleteId, setRectangleDeleteId] = useState<string | null>(null);
   const [styleDrawingId, setStyleDrawingId] = useState<string | null>(null);
   const [styleDraft, setStyleDraft] = useState<TrendLineStyle | FibonacciRetracementStyle | null>(null);
   const [styleDraftError, setStyleDraftError] = useState<string | null>(null);
@@ -567,7 +567,7 @@ export function MarketReplayClient({ dataset: initialDataset, initialJournalFocu
     }
   }, [dataset.id, drawings, pendingDrawingIds, setDrawingPending, fetch]);
 
-  const removeDrawing = useCallback(async (id: string) => {
+  const deleteDrawing = useCallback(async (id: string) => {
     const index = drawings.findIndex((drawing) => drawing.id === id);
     if (index < 0 || id.startsWith("temporary-") || pendingDrawingIds.has(id)) return;
     const previous = drawings[index];
@@ -593,11 +593,6 @@ export function MarketReplayClient({ dataset: initialDataset, initialJournalFocu
       setDrawingPending(id, false);
     }
   }, [dataset.id, drawings, pendingDrawingIds, setDrawingPending, styleDrawingId, fetch]);
-
-  const deleteDrawing = useCallback((id: string) => {
-    if (drawings.find(d => d.id === id)?.type === DRAWING_TYPE_RECTANGLE) setRectangleDeleteId(id);
-    else void removeDrawing(id);
-  }, [drawings, removeDrawing]);
 
   const openDrawingStyle = useCallback((id: string) => {
     const drawing = drawings.find((item) => item.id === id);
@@ -1812,12 +1807,12 @@ export function MarketReplayClient({ dataset: initialDataset, initialJournalFocu
         || isReplayShortcutInputTarget(event.target)
       ) return;
       event.preventDefault();
-      if (event.repeat || rectangleStyleId || rectangleDeleteId) return;
+      if (event.repeat || rectangleStyleId) return;
       if (key === "r") armDrawing(DRAWING_TYPE_RECTANGLE); else if (key === "f") armFibonacciRetracement(); else armTrendLine();
     };
     window.addEventListener("keydown", onKeyDown);
     return () => window.removeEventListener("keydown", onKeyDown);
-  }, [armDrawing, rectangleStyleId, rectangleDeleteId, armFibonacciRetracement, armTrendLine, confirmAction, gateDialogOpen, checkingOrder, settingsDialog, startDialogOpen, styleDrawingId]);
+  }, [armDrawing, rectangleStyleId, armFibonacciRetracement, armTrendLine, confirmAction, gateDialogOpen, checkingOrder, settingsDialog, startDialogOpen, styleDrawingId]);
 
   function changeSpeed(value: number) {
     const current = latestReplayRef.current;
@@ -2497,8 +2492,7 @@ export function MarketReplayClient({ dataset: initialDataset, initialJournalFocu
                   <span className="font-medium">{copy.marketReplay.fibonacciRetracement}</span>
                   <kbd className="ml-auto whitespace-nowrap font-mono text-[11px] text-slate-400">{shortcuts.fibonacciRetracement}</kbd>
                 </button>
-                <RectangleToolOption shortcut={shortcuts.rectangle} templates={rectangleTemplates}
-                  onArm={() => armDrawing(DRAWING_TYPE_RECTANGLE)} onTemplate={setDefaultRectangleStyle} />
+                <RectangleToolOption shortcut={shortcuts.rectangle} onArm={() => armDrawing(DRAWING_TYPE_RECTANGLE)} />
               </Popover.Content>
             </Popover.Portal>
           </Popover.Root>
@@ -2717,9 +2711,6 @@ export function MarketReplayClient({ dataset: initialDataset, initialJournalFocu
           templates={rectangleTemplates} onTemplatesChange={setRectangleTemplates} onClose={() => setRectangleStyleId(null)}
           onSave={async style => { const saved = await updateDrawing(drawing.id, { style }); if (saved) setDefaultRectangleStyle({ ...style }); return saved; }} /> : null;
       })()}
-      <ConfirmDialog open={Boolean(rectangleDeleteId)} title={copy.marketReplay.rectangleDelete}
-        description={copy.marketReplay.rectangleDeleteDescription} isLoading={Boolean(rectangleDeleteId && pendingDrawingIds.has(rectangleDeleteId))}
-        onCancel={() => setRectangleDeleteId(null)} onConfirm={() => { if (rectangleDeleteId) void removeDrawing(rectangleDeleteId).then(() => setRectangleDeleteId(null)); }} />
       <Dialog
         open={settingsDialog === "candlesticks"}
         title={copy.marketReplay.candlestickSettings}
@@ -2851,12 +2842,8 @@ export function MarketReplayClient({ dataset: initialDataset, initialJournalFocu
           const templates = isFibonacci ? fibonacciTemplates : trendLineTemplates;
           return (
           <div className="space-y-5">
-            <div className="grid grid-cols-[7rem_1fr] items-center gap-3">
-              <Label>{copy.marketReplay.drawingTemplate}</Label>
-              <div className="flex min-w-0 gap-2">
-                <Select
-                  value={selectedTemplateId || "__none"}
-                  onValueChange={(value) => {
+            <StyleTemplateField value={selectedTemplateId} templates={templates}
+                  onChange={(value) => {
                     if (value === "__none") return;
                     const template = templates.find((item) => item.id === value);
                     if (!template) return;
@@ -2865,99 +2852,16 @@ export function MarketReplayClient({ dataset: initialDataset, initialJournalFocu
                     setStyleDraft(isFibonacci
                       ? cloneFibonacciStyle(template.style as FibonacciRetracementStyle)
                       : { ...template.style as TrendLineStyle });
-                  }}
-                >
-                  <SelectTrigger className="min-w-0 flex-1">
-                    <SelectValue />
-                  </SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="__none" disabled>
-                      {templates.length ? copy.marketReplay.chooseDrawingTemplate : copy.marketReplay.noDrawingTemplates}
-                    </SelectItem>
-                    {templates.map((template) => (
-                      <SelectItem key={template.id} value={template.id}>{template.name}</SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
-                <Button
-                  type="button"
-                  variant="ghost"
-                  size="icon"
-                  disabled={!selectedTemplateId}
-                  aria-label={copy.marketReplay.deleteDrawingTemplate}
-                  onClick={deleteSelectedDrawingTemplate}
-                  className="shrink-0 text-slate-500 hover:text-red-600"
-                >
-                  <Trash2 className="h-4 w-4" />
-                </Button>
-              </div>
-            </div>
-            {!isFibonacci && "color" in styleDraft ? <div className="grid grid-cols-[7rem_1fr] items-center gap-3">
-              <Label htmlFor="trend-line-color">{copy.marketReplay.lineColor}</Label>
-              <div className="flex items-center gap-2">
-                <Input
-                  id="trend-line-color"
-                  type="color"
-                  value={styleDraft.color}
-                  onChange={(event) => setStyleDraft((current) => current && "color" in current ? { ...current, color: event.target.value.toUpperCase() } : current)}
-                  className="h-9 w-14 cursor-pointer p-1"
-                />
-                <span className="font-mono text-xs text-slate-500">{styleDraft.color.toUpperCase()}</span>
-              </div>
-            </div> : null}
-            {!isFibonacci && "opacity" in styleDraft ? <div className="grid grid-cols-[7rem_1fr] items-center gap-3">
-              <Label htmlFor="trend-line-opacity">{copy.marketReplay.lineOpacity}</Label>
-              <div className="flex items-center gap-3">
-                <Input
-                  id="trend-line-opacity"
-                  type="range"
-                  min="0"
-                  max="100"
-                  step="1"
-                  value={styleDraft.opacity}
-                  onChange={(event) => setStyleDraft((current) => current && "opacity" in current ? { ...current, opacity: Number(event.target.value) } : current)}
-                  className="h-8 flex-1 border-0 px-0"
-                />
-                <span className="w-10 text-right text-xs tabular-nums text-slate-500">{styleDraft.opacity}%</span>
-              </div>
-            </div> : null}
+                  }} onDelete={deleteSelectedDrawingTemplate} />
+            {!isFibonacci && "color" in styleDraft ? <StyleColorField label={copy.marketReplay.lineColor} value={styleDraft.color}
+              onChange={color => setStyleDraft(current => current && "color" in current ? { ...current, color } : current)} /> : null}
+            {!isFibonacci && "opacity" in styleDraft ? <StyleOpacityField label={copy.marketReplay.lineOpacity} value={styleDraft.opacity}
+              onChange={opacity => setStyleDraft(current => current && "opacity" in current ? { ...current, opacity } : current)} /> : null}
             {isFibonacci ? <p className="text-sm font-medium text-slate-800">{copy.marketReplay.horizontalLineStyle}</p> : null}
-            <div className="grid grid-cols-[7rem_1fr] items-center gap-3">
-              <Label>{copy.marketReplay.lineWidth}</Label>
-              <div className="flex gap-1">
-                {[1, 2, 3, 4].map((width) => (
-                  <button
-                    key={width}
-                    type="button"
-                    aria-pressed={styleDraft.width === width}
-                    onClick={() => setStyleDraft((current) => current ? { ...current, width } : current)}
-                    className={`flex h-9 w-10 items-center justify-center rounded-md border ${styleDraft.width === width ? "border-blue-600 bg-blue-50" : "border-slate-200 hover:bg-slate-50"}`}
-                  >
-                    <span className="block w-5 bg-slate-700" style={{ height: width }} />
-                  </button>
-                ))}
-              </div>
-            </div>
-            <div className="grid grid-cols-[7rem_1fr] items-center gap-3">
-              <Label>{copy.marketReplay.lineStyle}</Label>
-              <div className="grid grid-cols-3 gap-1">
-                {([
-                  ["SOLID", copy.marketReplay.lineSolid],
-                  ["DASHED", copy.marketReplay.lineDashed],
-                  ["DOTTED", copy.marketReplay.lineDotted],
-                ] as const).map(([lineStyle, label]) => (
-                  <button
-                    key={lineStyle}
-                    type="button"
-                    aria-pressed={styleDraft.lineStyle === lineStyle}
-                    onClick={() => setStyleDraft((current) => current ? { ...current, lineStyle } : current)}
-                    className={`rounded-md border px-2 py-2 text-xs ${styleDraft.lineStyle === lineStyle ? "border-blue-600 bg-blue-50 text-blue-700" : "border-slate-200 text-slate-600 hover:bg-slate-50"}`}
-                  >
-                    {label}
-                  </button>
-                ))}
-              </div>
-            </div>
+            <StyleLineWidthField label={copy.marketReplay.lineWidth} value={styleDraft.width}
+              onChange={width => setStyleDraft(current => current ? { ...current, width } : current)} />
+            <StyleChoiceField label={copy.marketReplay.lineStyle} value={styleDraft.lineStyle} options={LINE_STYLE_OPTIONS}
+              onChange={lineStyle => setStyleDraft(current => current ? { ...current, lineStyle } : current)} />
             {!isFibonacci && "showStartPrice" in styleDraft ? <div className="space-y-2 rounded-md border bg-slate-50 p-3">
               <label className="flex items-center gap-2 text-sm text-slate-700">
                 <input

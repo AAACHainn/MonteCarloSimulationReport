@@ -7,51 +7,19 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Dialog } from "@/components/ui/dialog";
 import { ConfirmDialog } from "@/components/ui/confirm-dialog";
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
-import { DEFAULT_FIBONACCI_RETRACEMENT_STYLE, rectangleStyleSchema,
+import { LINE_STYLE_OPTIONS, StyleChoiceField, StyleColorField, StyleLineWidthField, StyleOpacityField, StyleTemplateField } from "@/components/ui/style-controls";
+import { rectangleStyleSchema,
   type RectangleDrawing, type RectangleStyle, type RectangleTemplate } from "@/lib/market-replay/chart-drawings";
 import { copy } from "@/lib/i18n";
 import { createUuid } from "@/lib/uuid";
 
-export function RectangleToolOption({ shortcut, templates, onArm, onTemplate }: {
-  shortcut: string; templates: RectangleTemplate[]; onArm: () => void; onTemplate: (style: RectangleStyle) => void;
+export function RectangleToolOption({ shortcut, onArm }: {
+  shortcut: string; onArm: () => void;
 }) {
-  const id = useId();
-  return <div>
-    <Button type="button" variant="ghost" className="w-full justify-start gap-3" aria-keyshortcuts="Alt+r" onClick={onArm}>
-      <Square className="h-4 w-4 shrink-0" aria-hidden="true" />{copy.marketReplay.rectangle}
-      <kbd className="ml-auto whitespace-nowrap font-mono text-xs text-slate-500">{shortcut}</kbd>
-    </Button>
-    <div className="px-3 pb-2 pt-1">
-      <Label htmlFor={id} className="sr-only">{copy.marketReplay.rectanglePreset}</Label>
-      <Select value="__default" disabled={!templates.length} onValueChange={value => {
-        const template = templates.find(t => t.id === value);
-        if (template) { onTemplate({ ...template.style }); onArm(); }
-      }}>
-        <SelectTrigger id={id}><SelectValue /></SelectTrigger>
-        <SelectContent>
-          <SelectItem value="__default" disabled>{templates.length ? copy.marketReplay.rectanglePresetDefault : copy.marketReplay.noDrawingTemplates}</SelectItem>
-          {templates.map(t => <SelectItem key={t.id} value={t.id}>{t.name}</SelectItem>)}
-        </SelectContent>
-      </Select>
-    </div>
-  </div>;
-}
-
-function RectangleColorField({ label, value, disabled, onChange }: {
-  label: string; value: string; disabled?: boolean; onChange: (color: string) => void;
-}) {
-  const id = useId();
-  const colors = [...new Set(DEFAULT_FIBONACCI_RETRACEMENT_STYLE.levels.map(l => l.color))].slice(0, 6);
-  return <div className="space-y-2">
-    <Label htmlFor={id}>{label}</Label>
-    <div className="flex flex-wrap items-center gap-2">
-      <Input id={id} type="color" value={value} disabled={disabled} onChange={e => onChange(e.target.value.toUpperCase())} className="w-14 cursor-pointer p-1" />
-      {colors.map(color => <Button key={color} type="button" variant="outline" size="icon" disabled={disabled}
-        aria-label={copy.marketReplay.rectanglePresetColor(color)} aria-pressed={color.toLowerCase() === value.toLowerCase()}
-        onClick={() => onChange(color)}><span className="h-4 w-4 rounded-sm" style={{ backgroundColor: color }} aria-hidden="true" /></Button>)}
-    </div>
-  </div>;
+  return <Button type="button" variant="ghost" className="w-full justify-start gap-3" aria-keyshortcuts="Shift+R" onClick={onArm}>
+    <Square className="h-4 w-4 shrink-0" aria-hidden="true" />{copy.marketReplay.rectangle}
+    <kbd className="ml-auto whitespace-nowrap font-mono text-xs text-slate-500">{shortcut}</kbd>
+  </Button>;
 }
 
 export function RectangleSettingsDialog({ drawing, templates, onTemplatesChange, onSave, onClose }: {
@@ -60,114 +28,98 @@ export function RectangleSettingsDialog({ drawing, templates, onTemplatesChange,
 }) {
   const prefix = useId();
   const [draft, setDraft] = useState<RectangleStyle>(() => ({ ...drawing.style }));
-  const [opacityInput, setOpacityInput] = useState(String(drawing.style.fillOpacity));
-  const [widthInput, setWidthInput] = useState(String(drawing.style.borderWidth));
   const [templateId, setTemplateId] = useState("");
+  const [templateDialogOpen, setTemplateDialogOpen] = useState(false);
   const [name, setName] = useState("");
   const [error, setError] = useState<string | null>(null);
+  const [templateError, setTemplateError] = useState<string | null>(null);
   const [status, setStatus] = useState("");
   const [busy, setBusy] = useState(false);
-  const [confirmation, setConfirmation] = useState<{ kind: "overwrite" | "delete"; template: RectangleTemplate; style?: RectangleStyle } | null>(null);
+  const [confirmation, setConfirmation] = useState<{ template: RectangleTemplate; style: RectangleStyle } | null>(null);
   const valid = rectangleStyleSchema.safeParse(draft).success;
+  const finishTemplateSave = (template: RectangleTemplate) => {
+    onTemplatesChange(templates.some(item => item.id === template.id)
+      ? templates.map(item => item.id === template.id ? template : item)
+      : [...templates, template]);
+    setTemplateId(template.id); setName(""); setTemplateDialogOpen(false); setConfirmation(null);
+    setError(null); setTemplateError(null); setStatus(copy.marketReplay.rectangleTemplateSaved);
+  };
   const saveTemplate = () => {
-    setStatus("");
-    if (!valid) { setError(copy.marketReplay.rectangleInvisible); return; }
     const trimmed = name.trim();
-    if (!trimmed) return;
+    if (!valid || !trimmed || trimmed.length > 50) return;
+    setStatus(""); setTemplateError(null);
     const existing = templates.find(t => t.name.toLocaleLowerCase("zh-CN") === trimmed.toLocaleLowerCase("zh-CN"));
-    if (existing) { setConfirmation({ kind: "overwrite", template: existing, style: { ...draft } }); return; }
-    if (templates.length >= 50) { setError(copy.marketReplay.drawingTemplateLimit); return; }
-    const template = { id: createUuid(), name: trimmed, style: { ...draft } };
-    onTemplatesChange([...templates, template]); setTemplateId(template.id); setName("");
-    setError(null); setStatus(copy.marketReplay.rectangleTemplateSaved);
+    if (existing) { setConfirmation({ template: existing, style: { ...draft } }); return; }
+    if (templates.length >= 50) { setTemplateError(copy.marketReplay.drawingTemplateLimit); return; }
+    finishTemplateSave({ id: createUuid(), name: trimmed, style: { ...draft } });
   };
   return <>
-    <Dialog open title={copy.marketReplay.rectangleSettings} description={copy.marketReplay.rectangleSettingsDescription}
-      className="max-w-xl" onClose={() => { if (!busy && !confirmation) onClose(); }}>
+    <Dialog open={!templateDialogOpen} title={copy.marketReplay.rectangleSettings} description={copy.marketReplay.rectangleSettingsDescription}
+      className="max-w-md" onClose={() => { if (!busy) onClose(); }}>
       <div className="space-y-5" aria-busy={busy}>
-        <fieldset disabled={busy || Boolean(confirmation)} className="min-w-0 space-y-5">
-          <div className="space-y-2">
-            <Label htmlFor={`${prefix}-template`}>{copy.marketReplay.drawingTemplate}</Label>
-            <Select value={templateId || "__none"} onValueChange={value => {
+        <fieldset disabled={busy} className="min-w-0 space-y-5">
+          <StyleTemplateField value={templateId} templates={templates} onChange={value => {
               const template = templates.find(t => t.id === value);
               if (template) {
                 setTemplateId(value); setDraft({ ...template.style });
-                setOpacityInput(String(template.style.fillOpacity)); setWidthInput(String(template.style.borderWidth));
                 setError(null); setStatus("");
               }
-            }}>
-              <SelectTrigger id={`${prefix}-template`}><SelectValue /></SelectTrigger>
-              <SelectContent>
-                <SelectItem value="__none" disabled>{templates.length ? copy.marketReplay.chooseDrawingTemplate : copy.marketReplay.noDrawingTemplates}</SelectItem>
-                {templates.map(t => <SelectItem key={t.id} value={t.id}>{t.name}</SelectItem>)}
-              </SelectContent>
-            </Select>
-            {templateId ? <Button type="button" variant="outline" onClick={() => {
-              const template = templates.find(t => t.id === templateId);
-              if (template) setConfirmation({ kind: "delete", template });
-            }}>{copy.marketReplay.deleteDrawingTemplate}</Button> : null}
-          </div>
-          <RectangleColorField label={copy.marketReplay.rectangleFillColor} value={draft.fillColor} onChange={fillColor => setDraft(s => ({ ...s, fillColor }))} />
-          <div className="space-y-2">
-            <Label htmlFor={`${prefix}-opacity`}>{copy.marketReplay.rectangleFillOpacity}</Label>
-            <Input id={`${prefix}-opacity`} type="number" min={0} max={100} step={1} value={opacityInput}
-              aria-invalid={!valid} aria-describedby={`${prefix}-error`} onChange={e => {
-                setOpacityInput(e.target.value); setDraft(s => ({ ...s, fillOpacity: e.target.valueAsNumber }));
-              }} />
-          </div>
-          <div className="space-y-2">
-            <Label htmlFor={`${prefix}-border`}>{copy.marketReplay.rectangleBorder}</Label>
-            <Select value={draft.borderStyle} onValueChange={value => setDraft(s => ({ ...s, borderStyle: value as RectangleStyle["borderStyle"] }))}>
-              <SelectTrigger id={`${prefix}-border`}><SelectValue /></SelectTrigger>
-              <SelectContent>
-                <SelectItem value="NONE">{copy.marketReplay.rectangleNoBorder}</SelectItem>
-                <SelectItem value="SOLID">{copy.marketReplay.lineSolid}</SelectItem>
-                <SelectItem value="DASHED">{copy.marketReplay.lineDashed}</SelectItem>
-                <SelectItem value="DOTTED">{copy.marketReplay.lineDotted}</SelectItem>
-              </SelectContent>
-            </Select>
-          </div>
+            }} onDelete={() => {
+              onTemplatesChange(templates.filter(template => template.id !== templateId));
+              setTemplateId(""); setStatus(""); setError(null);
+            }} />
+          <StyleColorField label={copy.marketReplay.rectangleFillColor} value={draft.fillColor} onChange={fillColor => setDraft(s => ({ ...s, fillColor }))} />
+          <StyleOpacityField label={copy.marketReplay.rectangleFillOpacity} value={draft.fillOpacity}
+            invalid={!valid} describedBy={!valid ? `${prefix}-error` : undefined} onChange={fillOpacity => setDraft(s => ({ ...s, fillOpacity }))} />
+          <StyleChoiceField label={copy.marketReplay.rectangleBorder} value={draft.borderStyle}
+            options={[{ value: "NONE", label: copy.marketReplay.rectangleNoBorder }, ...LINE_STYLE_OPTIONS]}
+            onChange={borderStyle => setDraft(s => ({ ...s, borderStyle }))} />
           {draft.borderStyle !== "NONE" ? <>
-            <RectangleColorField label={copy.marketReplay.rectangleBorderColor} value={draft.borderColor} onChange={borderColor => setDraft(s => ({ ...s, borderColor }))} />
-            <div className="space-y-2"><Label htmlFor={`${prefix}-width`}>{copy.marketReplay.rectangleBorderWidth}</Label>
-              <Input id={`${prefix}-width`} type="number" min={1} max={4} step={1} value={widthInput} aria-invalid={!valid}
-                aria-describedby={`${prefix}-error`} onChange={e => { setWidthInput(e.target.value); setDraft(s => ({ ...s, borderWidth: e.target.valueAsNumber })); }} />
-            </div>
+            <StyleColorField label={copy.marketReplay.rectangleBorderColor} value={draft.borderColor} onChange={borderColor => setDraft(s => ({ ...s, borderColor }))} />
+            <StyleLineWidthField label={copy.marketReplay.rectangleBorderWidth} value={draft.borderWidth} onChange={borderWidth => setDraft(s => ({ ...s, borderWidth }))} />
           </> : null}
-          <div className="space-y-2 border-t pt-4">
-            <Label htmlFor={`${prefix}-name`}>{copy.marketReplay.drawingTemplateName}</Label>
-            <Input id={`${prefix}-name`} value={name} maxLength={50} placeholder={copy.marketReplay.rectangleTemplatePlaceholder}
-              onChange={e => setName(e.target.value)} />
-            <Button type="button" variant="outline" disabled={!name.trim() || !valid} onClick={saveTemplate}>{copy.marketReplay.saveDrawingTemplate}</Button>
-          </div>
         </fieldset>
-        <p className="text-xs text-slate-500">{copy.marketReplay.rectangleTemplateHint}</p>
-        <p id={`${prefix}-error`} role={error || !valid ? "alert" : undefined} className="text-sm text-red-600">{error || (!valid ? copy.marketReplay.rectangleInvisible : "")}</p>
+        {error || !valid ? <p id={`${prefix}-error`} role="alert" className="text-sm text-red-600">{error || copy.marketReplay.rectangleInvisible}</p> : null}
         {status ? <p role="status" className="text-sm text-emerald-700">{status}</p> : null}
-        <div className="flex justify-end gap-2 border-t pt-4">
-          <Button type="button" variant="outline" disabled={busy} onClick={onClose}>{copy.marketReplay.drawingCancel}</Button>
-          <Button type="button" disabled={busy || !valid} onClick={async () => {
-            setBusy(true); setError(null);
-            try { if (await onSave({ ...draft })) onClose(); else setError(copy.marketReplay.drawingSaveError); }
-            catch { setError(copy.marketReplay.drawingSaveError); }
-            finally { setBusy(false); }
-          }}>{busy ? <Loader2 className="h-4 w-4 animate-spin" aria-hidden="true" /> : null}{copy.marketReplay.drawingConfirm}</Button>
+        <p className="text-xs text-slate-500">{copy.marketReplay.rectangleTemplateHint}</p>
+        <div className="flex flex-wrap items-center justify-between gap-3 border-t pt-4">
+          <Button type="button" variant="outline" disabled={busy || !valid} onClick={() => {
+            setName(""); setTemplateError(null); setTemplateDialogOpen(true);
+          }}>{copy.marketReplay.saveDrawingTemplate}</Button>
+          <div className="ml-auto flex gap-2">
+            <Button type="button" variant="outline" disabled={busy} onClick={onClose}>{copy.marketReplay.drawingCancel}</Button>
+            <Button type="button" disabled={busy || !valid} onClick={async () => {
+              setBusy(true); setError(null);
+              try { if (await onSave({ ...draft })) onClose(); else setError(copy.marketReplay.drawingSaveError); }
+              catch { setError(copy.marketReplay.drawingSaveError); }
+              finally { setBusy(false); }
+            }}>{busy ? <Loader2 className="h-4 w-4 animate-spin" aria-hidden="true" /> : null}{copy.marketReplay.drawingConfirm}</Button>
+          </div>
         </div>
       </div>
     </Dialog>
+    <Dialog open={templateDialogOpen} title={copy.marketReplay.saveDrawingTemplateTitle} className="max-w-md"
+      onClose={() => { if (!confirmation) { setTemplateDialogOpen(false); setName(""); setTemplateError(null); } }}>
+      <form className="space-y-5" onSubmit={event => { event.preventDefault(); if (!confirmation) saveTemplate(); }}>
+        <fieldset disabled={Boolean(confirmation)} className="space-y-2">
+          <Label htmlFor={`${prefix}-name`}>{copy.marketReplay.drawingTemplateName}</Label>
+          <Input id={`${prefix}-name`} value={name} maxLength={50} autoFocus placeholder={copy.marketReplay.rectangleTemplatePlaceholder}
+            aria-invalid={Boolean(templateError)} aria-describedby={templateError ? `${prefix}-template-error` : undefined}
+            onChange={event => setName(event.target.value)}
+            onKeyDown={event => { if (event.key === "Enter" && event.nativeEvent.isComposing) event.preventDefault(); }} />
+        </fieldset>
+        {templateError ? <p id={`${prefix}-template-error`} role="alert" className="text-sm text-red-600">{templateError}</p> : null}
+        <div className="flex justify-end gap-2 border-t pt-4">
+          <Button type="button" variant="outline" disabled={Boolean(confirmation)} onClick={() => { setTemplateDialogOpen(false); setName(""); setTemplateError(null); }}>{copy.marketReplay.drawingCancel}</Button>
+          <Button type="submit" disabled={!name.trim() || name.trim().length > 50 || !valid || Boolean(confirmation)}>{copy.marketReplay.saveDrawingTemplate}</Button>
+        </div>
+      </form>
+    </Dialog>
     <ConfirmDialog open={Boolean(confirmation)} layerClassName="z-[80]"
-      title={confirmation?.kind === "overwrite" ? copy.marketReplay.rectangleTemplateOverwrite : copy.marketReplay.deleteDrawingTemplate}
-      description={confirmation?.kind === "overwrite" ? copy.marketReplay.rectangleTemplateOverwriteDescription(confirmation.template.name)
-        : copy.marketReplay.rectangleTemplateDeleteDescription(confirmation?.template.name ?? "")}
+      title={copy.marketReplay.rectangleTemplateOverwrite}
+      description={copy.marketReplay.rectangleTemplateOverwriteDescription(confirmation?.template.name ?? "")}
       onCancel={() => setConfirmation(null)} onConfirm={() => {
-        if (!confirmation) return;
-        if (confirmation.kind === "delete") {
-          onTemplatesChange(templates.filter(t => t.id !== confirmation.template.id)); setTemplateId("");
-        } else {
-          onTemplatesChange(templates.map(t => t.id === confirmation.template.id ? { ...t, style: { ...confirmation.style! } } : t));
-          setTemplateId(confirmation.template.id); setName(""); setStatus(copy.marketReplay.rectangleTemplateSaved);
-        }
-        setError(null); setConfirmation(null);
+        if (confirmation) finishTemplateSave({ ...confirmation.template, style: { ...confirmation.style } });
       }} />
   </>;
 }

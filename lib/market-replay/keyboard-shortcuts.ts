@@ -46,14 +46,12 @@ export function createReplayStepShortcut() {
 }
 
 export function replayDrawingShortcutKey(event: ShortcutKeyEvent): "t" | "f" | "r" | null {
-  if (event.defaultPrevented || event.isComposing || !event.altKey || event.ctrlKey || event.metaKey || event.shiftKey) return null;
-  // Option changes event.key on macOS; match the physical T/F keys instead.
-  if (event.code === "KeyT") return "t";
-  if (event.code === "KeyF") return "f";
-  if (event.code === "KeyR") return "r";
-  if (event.code && event.code !== "Unidentified") return null;
-  const key = event.key.toLowerCase();
-  return key === "t" || key === "f" || key === "r" ? key : null;
+  if (event.defaultPrevented || event.isComposing || event.ctrlKey || event.metaKey) return null;
+  // Option changes event.key on macOS; prefer physical keys for all drawing tools.
+  const key = event.code === "KeyT" ? "t" : event.code === "KeyF" ? "f" : event.code === "KeyR" ? "r"
+    : !event.code || event.code === "Unidentified" ? event.key.toLowerCase() : null;
+  if (key === "r") return event.shiftKey && !event.altKey ? "r" : null;
+  return event.altKey && !event.shiftKey && (key === "t" || key === "f") ? key : null;
 }
 
 export function isReplayDrawingDeleteShortcut(event: ShortcutKeyEvent) {
