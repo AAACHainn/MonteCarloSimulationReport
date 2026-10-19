@@ -268,6 +268,7 @@ lib/
 prisma/                 数据模型与迁移
 scripts/                数据库初始化、后台 worker 与专项验证
 public/templates/       CSV 模板
+doc/logs/               开发周报、近期日记录与完整 Git 提交索引
 docs/                   使用、开发与升级说明
 ```
 
@@ -287,6 +288,7 @@ Windows 下若 Prisma query engine DLL 被占用，请先确认并停止本项�
 
 | 文档 | 内容 |
 | --- | --- |
+| [开发日志](doc/logs/README.md) | main 分支开发历史：早期按周、近期按天及完整提交索引 |
 | [现有安装升级与跨机器部署](docs/upgrade.md) | 备份、迁移路径、密钥保留、生产部署检查、验收与回退 |
 | [行情增量同步](docs/market-data-sync.md) | Databento 连接、自动计划、预算与冲突处理 |
 | [模拟训练交易关卡](docs/training-gate.md) | 策略清单、连亏触发、计数与会话恢复 |
