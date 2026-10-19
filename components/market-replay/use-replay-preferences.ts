@@ -9,6 +9,10 @@ import {
 import {
   DEFAULT_FIBONACCI_RETRACEMENT_STYLE,
   DEFAULT_TREND_LINE_STYLE,
+  DEFAULT_RECTANGLE_STYLE,
+  parseRectanglePreferences,
+  type RectangleStyle,
+  type RectangleTemplate,
   parseFibonacciRetracementPreferences,
   parseTrendLinePreferences,
   type FibonacciRetracementStyle,
@@ -52,6 +56,7 @@ const BAR_COUNT_SETTINGS_STORAGE_KEY = "market-replay-bar-count-settings-v1";
 const DISPLAY_TIMEZONE_STORAGE_KEY = "market-replay-display-timezone-v1";
 const CANDLESTICK_STYLE_STORAGE_KEY = "market-replay-candlestick-style-v1";
 const TREND_LINE_PREFERENCES_STORAGE_KEY = "market-replay-trend-line-preferences-v1";
+const RECTANGLE_PREFERENCES_STORAGE_KEY = "market-replay-rectangle-preferences-v1";
 const FIBONACCI_PREFERENCES_STORAGE_KEY = "market-replay-fibonacci-preferences-v1";
 const CHART_VISIBILITY_STORAGE_KEY = "market-replay-chart-visibility-v1";
 
@@ -133,6 +138,8 @@ export function useReplayPreferences(dataset: { id: string; startTime: string; t
   const [trendLineTemplates, setTrendLineTemplates] = useState<TrendLineTemplate[]>([]);
   const [defaultFibonacciStyle, setDefaultFibonacciStyle] = useState<FibonacciRetracementStyle>(() => cloneFibonacciStyle(DEFAULT_FIBONACCI_RETRACEMENT_STYLE));
   const [fibonacciTemplates, setFibonacciTemplates] = useState<FibonacciRetracementTemplate[]>([]);
+  const [defaultRectangleStyle, setDefaultRectangleStyle] = useState<RectangleStyle>(() => ({ ...DEFAULT_RECTANGLE_STYLE }));
+  const [rectangleTemplates, setRectangleTemplates] = useState<RectangleTemplate[]>([]);
   const [drawingPreferencesLoaded, setDrawingPreferencesLoaded] = useState(false);
   const [displayUtcOffsetMinutes, setDisplayUtcOffsetMinutes] = useState(() => (
     utcOffsetMinutesForTimezone(dataset.startTime, dataset.timezone)
@@ -308,7 +315,9 @@ export function useReplayPreferences(dataset: { id: string; startTime: string; t
   useEffect(() => {
     let preferences = parseTrendLinePreferences(null);
     let fibonacciPreferences = parseFibonacciRetracementPreferences(null);
+    let rectanglePreferences = parseRectanglePreferences(null);
     try {
+      rectanglePreferences = parseRectanglePreferences(window.localStorage.getItem(RECTANGLE_PREFERENCES_STORAGE_KEY));
       preferences = parseTrendLinePreferences(window.localStorage.getItem(TREND_LINE_PREFERENCES_STORAGE_KEY));
       fibonacciPreferences = parseFibonacciRetracementPreferences(window.localStorage.getItem(FIBONACCI_PREFERENCES_STORAGE_KEY));
     } catch {
@@ -318,12 +327,15 @@ export function useReplayPreferences(dataset: { id: string; startTime: string; t
     setTrendLineTemplates(preferences.templates);
     setDefaultFibonacciStyle(cloneFibonacciStyle(fibonacciPreferences.defaultStyle));
     setFibonacciTemplates(fibonacciPreferences.templates);
+    setDefaultRectangleStyle(rectanglePreferences.defaultStyle);
+    setRectangleTemplates(rectanglePreferences.templates);
     setDrawingPreferencesLoaded(true);
   }, []);
 
   useEffect(() => {
     if (!drawingPreferencesLoaded) return;
     try {
+      window.localStorage.setItem(RECTANGLE_PREFERENCES_STORAGE_KEY, JSON.stringify({ defaultStyle: defaultRectangleStyle, templates: rectangleTemplates }));
       window.localStorage.setItem(TREND_LINE_PREFERENCES_STORAGE_KEY, JSON.stringify({
         defaultStyle: defaultTrendLineStyle,
         templates: trendLineTemplates,
@@ -335,7 +347,7 @@ export function useReplayPreferences(dataset: { id: string; startTime: string; t
     } catch {
       // Drawing preferences still apply until this page closes.
     }
-  }, [defaultFibonacciStyle, defaultTrendLineStyle, drawingPreferencesLoaded, fibonacciTemplates, trendLineTemplates]);
+  }, [defaultRectangleStyle, rectangleTemplates, defaultFibonacciStyle, defaultTrendLineStyle, drawingPreferencesLoaded, fibonacciTemplates, trendLineTemplates]);
 
   return {
     candlestickStyle,
@@ -360,6 +372,10 @@ export function useReplayPreferences(dataset: { id: string; startTime: string; t
     setBarCountConfig,
     chartVisibility,
     setChartVisibility,
+    defaultRectangleStyle,
+    setDefaultRectangleStyle,
+    rectangleTemplates,
+    setRectangleTemplates,
     defaultTrendLineStyle,
     setDefaultTrendLineStyle,
     trendLineTemplates,

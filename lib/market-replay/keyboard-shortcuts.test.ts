@@ -1,7 +1,19 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { hasVisibleReplayDialog } from "./keyboard-shortcuts";
+import { hasVisibleReplayDialog, replayDrawingShortcutKey } from "./keyboard-shortcuts";
 
 afterEach(() => vi.unstubAllGlobals());
+describe("rectangle shortcut", () => {
+  const key = { key: "r", code: "KeyR", altKey: true, ctrlKey: false, metaKey: false, shiftKey: false, isComposing: false, defaultPrevented: false };
+  it("uses the physical key with Option and supports unidentified keyboards", () => {
+    expect(replayDrawingShortcutKey({ ...key, key: "®" })).toBe("r");
+    expect(replayDrawingShortcutKey({ ...key, code: "Unidentified" })).toBe("r");
+    expect(replayDrawingShortcutKey({ ...key, code: "KeyT" })).toBe("t");
+    expect(replayDrawingShortcutKey({ ...key, code: "KeyF" })).toBe("f");
+  });
+  it.each(["ctrlKey", "shiftKey", "metaKey", "isComposing", "defaultPrevented"])("ignores %s", modifier => {
+    expect(replayDrawingShortcutKey({ ...key, [modifier]: true })).toBeNull();
+  });
+});
 function dialog({ hidden = false, visible = true } = {}) {
   return { closest: () => hidden ? {} : null, getClientRects: () => visible ? [{}] : [] };
 }

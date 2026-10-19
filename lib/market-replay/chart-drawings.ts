@@ -7,8 +7,9 @@ import type { AggregatedMarketBarData, TradingSessionConfig } from "@/lib/market
 
 export const DRAWING_TYPE_TREND_LINE = "TREND_LINE" as const;
 export const DRAWING_TYPE_FIB_RETRACEMENT = "FIB_RETRACEMENT" as const;
+export const DRAWING_TYPE_RECTANGLE = "RECTANGLE" as const;
 export const TREND_LINE_STYLES = ["SOLID", "DASHED", "DOTTED"] as const;
-export const DRAWING_TYPES = [DRAWING_TYPE_TREND_LINE, DRAWING_TYPE_FIB_RETRACEMENT] as const;
+export const DRAWING_TYPES = [DRAWING_TYPE_TREND_LINE, DRAWING_TYPE_FIB_RETRACEMENT, DRAWING_TYPE_RECTANGLE] as const;
 
 export type DrawingType = (typeof DRAWING_TYPES)[number];
 export type DrawingTool = DrawingType;
@@ -65,8 +66,25 @@ export type FibonacciRetracementDrawing = {
   updatedAt: string;
 };
 
-export type MarketDrawing = TrendLineDrawing | FibonacciRetracementDrawing;
-export type MarketDrawingStyle = TrendLineStyle | FibonacciRetracementStyle;
+export type RectangleStyle = {
+  fillColor: string;
+  fillOpacity: number;
+  borderStyle: "NONE" | (typeof TREND_LINE_STYLES)[number];
+  borderColor: string;
+  borderWidth: number;
+};
+export type RectangleDrawing = Omit<TrendLineDrawing, "type" | "style"> & {
+  type: typeof DRAWING_TYPE_RECTANGLE;
+  style: RectangleStyle;
+};
+export type RectangleTemplate = { id: string; name: string; style: RectangleStyle };
+export type RectanglePreferences = { defaultStyle: RectangleStyle; templates: RectangleTemplate[] };
+export const DEFAULT_RECTANGLE_STYLE: RectangleStyle = {
+  fillColor: "#2962FF", fillOpacity: 15, borderStyle: "NONE", borderColor: "#2962FF", borderWidth: 1,
+};
+
+export type MarketDrawing = TrendLineDrawing | FibonacciRetracementDrawing | RectangleDrawing;
+export type MarketDrawingStyle = TrendLineStyle | FibonacciRetracementStyle | RectangleStyle;
 
 export type TrendLineTemplate = {
   id: string;
@@ -137,6 +155,35 @@ export const trendLineStyleSchema = z.object({
   showEndPrice: z.boolean(),
 }).strict();
 
+export const rectangleStyleSchema = z.object({
+  fillColor: z.string().regex(/^#[0-9a-f]{6}$/i),
+  fillOpacity: z.number().int().min(0).max(100),
+  borderStyle: z.enum(["NONE", ...TREND_LINE_STYLES]),
+  borderColor: z.string().regex(/^#[0-9a-f]{6}$/i),
+  borderWidth: z.number().int().min(1).max(4),
+}).strict().refine(style => style.fillOpacity > 0 || style.borderStyle !== "NONE", {
+  message: "Rectangle must have a visible fill or border", path: ["fillOpacity"],
+});
+
+export function isValidRectangleGeometry(geometry: TrendLineGeometry) {
+  return geometry.start.price !== geometry.end.price
+    && Date.parse(geometry.start.timestamp) !== Date.parse(geometry.end.timestamp);
+}
+
+export const rectanglePreferencesSchema = z.object({
+  defaultStyle: rectangleStyleSchema,
+  templates: z.array(z.object({ id: z.string().min(1), name: z.string().trim().min(1).max(50),
+    style: rectangleStyleSchema }).strict()).max(50),
+}).strict();
+
+export function parseRectanglePreferences(value: string | null): RectanglePreferences {
+  try {
+    const parsed = rectanglePreferencesSchema.safeParse(value ? JSON.parse(value) : null);
+    if (parsed.success) return parsed.data;
+  } catch { /* Invalid storage uses defaults. */ }
+  return { defaultStyle: { ...DEFAULT_RECTANGLE_STYLE }, templates: [] };
+}
+
 export const fibonacciLevelSchema = z.object({
   value: finiteNumber.min(-10).max(10),
   enabled: z.boolean(),
@@ -177,6 +224,11 @@ export const fibonacciRetracementPreferencesSchema = z.object({
 
 export const createMarketDrawingSchema = z.discriminatedUnion("type", [
   z.object({
+    type: z.literal(DRAWING_TYPE_RECTANGLE),
+    geometry: trendLineGeometrySchema.refine(isValidRectangleGeometry),
+    style: rectangleStyleSchema.default(DEFAULT_RECTANGLE_STYLE),
+  }).strict(),
+  z.object({
     type: z.literal(DRAWING_TYPE_TREND_LINE),
     geometry: trendLineGeometrySchema,
     style: trendLineStyleSchema.default(DEFAULT_TREND_LINE_STYLE),
@@ -190,7 +242,7 @@ export const createMarketDrawingSchema = z.discriminatedUnion("type", [
 
 export const updateMarketDrawingSchema = z.object({
   geometry: trendLineGeometrySchema.optional(),
-  style: z.union([trendLineStyleSchema, fibonacciRetracementStyleSchema]).optional(),
+  style: z.union([trendLineStyleSchema, fibonacciRetracementStyleSchema, rectangleStyleSchema]).optional(),
 }).strict().refine((value) => value.geometry !== undefined || value.style !== undefined);
 
 type StoredDrawing = {
@@ -221,6 +273,9 @@ export function serializeMarketDrawing(record: StoredDrawing): MarketDrawing {
     type: DRAWING_TYPE_FIB_RETRACEMENT,
     style: fibonacciRetracementStyleSchema.parse(JSON.parse(record.style)),
   };
+  if (record.type === DRAWING_TYPE_RECTANGLE) return {
+    ...base, type: DRAWING_TYPE_RECTANGLE, style: rectangleStyleSchema.parse(JSON.parse(record.style)),
+  };
   throw new Error("Unsupported drawing type");
 }
 
@@ -247,6 +302,7 @@ export function parseFibonacciRetracementPreferences(value: string | null): Fibo
 }
 
 export function drawingStyleMatchesType(type: DrawingType, style: MarketDrawingStyle) {
+  if (type === DRAWING_TYPE_RECTANGLE) return rectangleStyleSchema.safeParse(style).success;
   return type === DRAWING_TYPE_TREND_LINE
     ? trendLineStyleSchema.safeParse(style).success
     : fibonacciRetracementStyleSchema.safeParse(style).success;

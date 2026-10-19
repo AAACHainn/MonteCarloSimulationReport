@@ -52,6 +52,10 @@ import {
   anchorForLogicalIndex,
   DRAWING_TYPE_FIB_RETRACEMENT,
   DRAWING_TYPE_TREND_LINE,
+  DRAWING_TYPE_RECTANGLE,
+  isValidRectangleGeometry,
+  type RectangleDrawing,
+  type RectangleStyle,
   snapScreenPointTo45,
   type DrawingAnchor,
   type DrawingTool,
@@ -62,6 +66,7 @@ import {
   type TrendLineGeometry,
 } from "@/lib/market-replay/chart-drawings";
 import { drawingTimelineBars, DrawingTimelineLocator } from "@/lib/market-replay/drawing-timeline";
+import { RectanglePrimitive, resizeRectangleGeometry, type RectangleHandle } from "@/lib/market-replay/rectangle-primitive";
 import { TrendLinePrimitive } from "@/lib/market-replay/trend-line-primitive";
 import { FibonacciRetracementPrimitive } from "@/lib/market-replay/fibonacci-retracement-primitive";
 import { formatUtcDateTime, formatUtcOffset } from "@/lib/market-replay/display-timezone";
@@ -242,7 +247,7 @@ function bracketPriceLineTitle(reference: PriceRReference | null, price: number,
 export function ReplayChart({
   datasetId, priceTickSize, bars, warmupBars, displayUtcOffsetMinutes, displayIntervalSeconds, measurementArmed,
   candlestickStyle, gridVisible = true, onToggleGrid,
-  onMeasurementArmedChange, drawingTool, onDrawingToolChange, trendLineDraftStyle, fibonacciDraftStyle, drawings, selectedDrawingId,
+  onMeasurementArmedChange, drawingTool, onDrawingToolChange, trendLineDraftStyle, fibonacciDraftStyle, rectangleDraftStyle, drawings, selectedDrawingId,
   onSelectedDrawingIdChange, onCreateDrawing, onUpdateDrawing, onDeleteDrawing,
   onOpenDrawingStyle, emaEnabled, emaIndicators, abrEnabled, abrLength, volumeVisible,
   displaySession, barCountSession, barCountConfig, paperSnapshot,
@@ -267,6 +272,7 @@ export function ReplayChart({
   measurementArmed: boolean;
   candlestickStyle: CandlestickStyle;
   onMeasurementArmedChange: (armed: boolean) => void;
+  rectangleDraftStyle: RectangleStyle;
   drawingTool: DrawingTool | null;
   onDrawingToolChange: (tool: DrawingTool | null) => void;
   trendLineDraftStyle: TrendLineDrawing["style"];
@@ -328,6 +334,7 @@ export function ReplayChart({
   const tradeAnnotationPrimitiveRef = useRef<ReplayTradeAnnotationPrimitive | null>(null);
   const barCountPrimitiveRef = useRef<BarCountPrimitive | null>(null);
   const candleCountdownPrimitiveRef = useRef<CandleCountdownPrimitive | null>(null);
+  const rectanglePrimitiveRef = useRef<RectanglePrimitive | null>(null);
   const trendLinePrimitiveRef = useRef<TrendLinePrimitive | null>(null);
   const fibonacciPrimitiveRef = useRef<FibonacciRetracementPrimitive | null>(null);
   const lastDataRef = useRef<AggregatedMarketBarData[]>([]);
@@ -360,12 +367,25 @@ export function ReplayChart({
   priceTickSizeRef.current = priceTickSize;
   const trendLineDraftStyleRef = useRef(trendLineDraftStyle);
   trendLineDraftStyleRef.current = trendLineDraftStyle;
+  const rectangleDraftStyleRef = useRef(rectangleDraftStyle);
+  rectangleDraftStyleRef.current = rectangleDraftStyle;
   const fibonacciDraftStyleRef = useRef(fibonacciDraftStyle);
   fibonacciDraftStyleRef.current = fibonacciDraftStyle;
   const measurementArmedRef = useRef(measurementArmed);
   const onMeasurementArmedChangeRef = useRef(onMeasurementArmedChange);
   const drawingToolRef = useRef(drawingTool);
   const drawingsRef = useRef(drawings);
+  const drawingGroups = useMemo(() => {
+    const trend: TrendLineDrawing[] = [], fibonacci: FibonacciRetracementDrawing[] = [], rectangle: RectangleDrawing[] = [];
+    for (const drawing of drawings) {
+      if (drawing.type === DRAWING_TYPE_RECTANGLE) rectangle.push(drawing);
+      else if (drawing.type === DRAWING_TYPE_TREND_LINE) trend.push(drawing);
+      else fibonacci.push(drawing);
+    }
+    return { trend, fibonacci, rectangle };
+  }, [drawings]);
+  const drawingGroupsRef = useRef(drawingGroups);
+  drawingGroupsRef.current = drawingGroups;
   const selectedDrawingIdRef = useRef(selectedDrawingId);
   const onDrawingToolChangeRef = useRef(onDrawingToolChange);
   const onSelectedDrawingIdChangeRef = useRef(onSelectedDrawingIdChange);
@@ -448,7 +468,7 @@ export function ReplayChart({
         sourceIntervalSeconds: sourceIntervalSecondsRef.current, session: drawingSessionRef.current,
       }, drawingScopeRef.current);
       trendLinePrimitiveRef.current?.setDrawings({
-        drawings: drawingsRef.current.filter((drawing): drawing is TrendLineDrawing => drawing.type === DRAWING_TYPE_TREND_LINE),
+        drawings: drawingGroupsRef.current.trend,
         selectedDrawingId: selectedDrawingIdRef.current,
         preview: drawingPreviewRef.current,
         draft: drawingToolRef.current === DRAWING_TYPE_TREND_LINE ? drawingDraftRef.current : null,
@@ -460,8 +480,18 @@ export function ReplayChart({
         session: drawingSessionRef.current,
         priceTickSize: priceTickSizeRef.current,
       });
+      rectanglePrimitiveRef.current?.setDrawings({
+        drawings: drawingGroupsRef.current.rectangle,
+        selectedDrawingId: selectedDrawingIdRef.current,
+        preview: drawingPreviewRef.current,
+        draft: drawingToolRef.current === DRAWING_TYPE_RECTANGLE ? drawingDraftRef.current : null,
+        draftStyle: rectangleDraftStyleRef.current,
+        bars: projectionBarsRef.current, timeline,
+        displayIntervalSeconds: displayIntervalSecondsRef.current,
+        sourceIntervalSeconds: sourceIntervalSecondsRef.current, session: drawingSessionRef.current,
+      });
       fibonacciPrimitiveRef.current?.setDrawings({
-        drawings: drawingsRef.current.filter((drawing): drawing is FibonacciRetracementDrawing => drawing.type === DRAWING_TYPE_FIB_RETRACEMENT),
+        drawings: drawingGroupsRef.current.fibonacci,
         selectedDrawingId: selectedDrawingIdRef.current,
         preview: drawingPreviewRef.current,
         draft: drawingToolRef.current === DRAWING_TYPE_FIB_RETRACEMENT ? drawingDraftRef.current : null,
@@ -670,6 +700,8 @@ export function ReplayChart({
     const tradeAnnotationPrimitive = new ReplayTradeAnnotationPrimitive();
     const barCountPrimitive = new BarCountPrimitive();
     const candleCountdownPrimitive = new CandleCountdownPrimitive();
+    const rectanglePrimitive = new RectanglePrimitive();
+    candles.attachPrimitive(rectanglePrimitive);
     candles.attachPrimitive(trendLinePrimitive);
     candles.attachPrimitive(fibonacciPrimitive);
     candles.attachPrimitive(tradeAnnotationPrimitive);
@@ -691,6 +723,7 @@ export function ReplayChart({
     chart.timeScale().subscribeVisibleLogicalRangeChange(syncMeasurementCoordinates);
     chart.timeScale().subscribeVisibleLogicalRangeChange(syncVisibleSequenceRange);
     chartRef.current = chart; candleRef.current = candles; volumeRef.current = null;
+    rectanglePrimitiveRef.current = rectanglePrimitive;
     trendLinePrimitiveRef.current = trendLinePrimitive;
     fibonacciPrimitiveRef.current = fibonacciPrimitive;
     tradeAnnotationPrimitiveRef.current = tradeAnnotationPrimitive;
@@ -706,11 +739,13 @@ export function ReplayChart({
       chart.timeScale().unsubscribeVisibleLogicalRangeChange(syncLineActionCoordinates);
       chart.timeScale().unsubscribeVisibleLogicalRangeChange(syncMeasurementCoordinates);
       chart.timeScale().unsubscribeVisibleLogicalRangeChange(syncVisibleSequenceRange);
+      candles.detachPrimitive(rectanglePrimitive);
       candles.detachPrimitive(trendLinePrimitive);
       candles.detachPrimitive(fibonacciPrimitive);
       candles.detachPrimitive(tradeAnnotationPrimitive);
       candles.detachPrimitive(barCountPrimitive);
       candles.detachPrimitive(candleCountdownPrimitive);
+      rectanglePrimitiveRef.current = null;
       trendLinePrimitiveRef.current = null;
       fibonacciPrimitiveRef.current = null;
       tradeAnnotationPrimitiveRef.current = null;
@@ -771,7 +806,7 @@ export function ReplayChart({
 
   useEffect(() => {
     syncDrawingPrimitive();
-  }, [fibonacciDraftStyle, syncDrawingPrimitive, trendLineDraftStyle]);
+  }, [fibonacciDraftStyle, rectangleDraftStyle, syncDrawingPrimitive, trendLineDraftStyle]);
 
   useEffect(() => {
     const chart = chartRef.current; const series = candleRef.current;
@@ -1007,7 +1042,7 @@ export function ReplayChart({
     type PositionedAnchor = { anchor: DrawingAnchor; coordinate: { x: number; y: number } };
     let dragging: {
       id: string;
-      kind: "start" | "end" | "line";
+      kind: "start" | "end" | "line" | RectangleHandle;
       clientX: number;
       clientY: number;
       geometry: TrendLineGeometry;
@@ -1065,13 +1100,13 @@ export function ReplayChart({
     const hitDrawingAt = (point: { x: number; y: number }) => {
       const trend = trendLinePrimitiveRef.current?.hitTestAt(point) ?? null;
       const fibonacci = fibonacciPrimitiveRef.current?.hitTestAt(point) ?? null;
-      if (!trend) return fibonacci;
-      if (!fibonacci) return trend;
-      if (trend.priority !== fibonacci.priority) return trend.priority > fibonacci.priority ? trend : fibonacci;
-      return trend.distance <= fibonacci.distance ? trend : fibonacci;
+      const rectangle = rectanglePrimitiveRef.current?.hitTestAt(point) ?? null;
+      return [trend, fibonacci, rectangle].filter(item => item !== null)
+        .sort((a, b) => b.priority - a.priority || a.distance - b.distance)[0] ?? null;
     };
     const drawingCoordinates = (drawing: MarketDrawing) => (
-      drawing.type === DRAWING_TYPE_TREND_LINE
+      drawing.type === DRAWING_TYPE_RECTANGLE ? rectanglePrimitiveRef.current?.getDrawingCoordinates(drawing.id)
+        : drawing.type === DRAWING_TYPE_TREND_LINE
         ? trendLinePrimitiveRef.current?.getDrawingCoordinates(drawing.id)
         : fibonacciPrimitiveRef.current?.getDrawingCoordinates(drawing.id)
     );
@@ -1106,7 +1141,9 @@ export function ReplayChart({
           });
           end = pointAtCoordinate(snapped.x, snapped.y, false) ?? initial;
         }
-        onCreateDrawingRef.current(activeTool, { start: current.start, end: end.anchor });
+        const geometry = { start: current.start, end: end.anchor };
+        if (activeTool === DRAWING_TYPE_RECTANGLE && !isValidRectangleGeometry(geometry)) return;
+        onCreateDrawingRef.current(activeTool, geometry);
         commitDraft(null, null);
         drawingToolRef.current = null;
         onDrawingToolChangeRef.current(null);
@@ -1115,6 +1152,8 @@ export function ReplayChart({
       }
 
       const rect = container.getBoundingClientRect();
+      // Let existing order controls and measurement gestures take precedence over zones.
+      if (measurementArmedRef.current || event.shiftKey) return;
       const hit = hitDrawingAt({
         x: event.clientX - rect.left,
         y: event.clientY - rect.top,
@@ -1123,6 +1162,11 @@ export function ReplayChart({
         if (!event.shiftKey) onSelectedDrawingIdChangeRef.current(null);
         return;
       }
+      if (drawingsRef.current.find(d => d.id === hit.drawingId)?.type === DRAWING_TYPE_RECTANGLE
+        && [...lineTargetsRef.current.values()].some(target => {
+          const y = series.priceToCoordinate(target.price);
+          return y !== null && Math.abs(Number(y) - (event.clientY - rect.top)) <= 8;
+        })) return;
       const id = hit.drawingId;
       const drawing = drawingsRef.current.find((item) => item.id === id);
       const coordinate = drawing ? drawingCoordinates(drawing) : null;
@@ -1144,7 +1188,7 @@ export function ReplayChart({
       setChartCursor(dragging.kind === "line" ? "move" : "crosshair");
     };
 
-    const move = (event: PointerEvent) => {
+    const processDrawingMove = (event: PointerEvent) => {
       const draft = drawingDraftRef.current;
       if (drawingToolRef.current && draft) {
         const initial = pointAt(event.clientX, event.clientY);
@@ -1174,7 +1218,19 @@ export function ReplayChart({
         const dy = event.clientY - dragging.clientY;
         const start = pointAtCoordinate(dragging.start.x + dx, dragging.start.y + dy, false);
         const end = pointAtCoordinate(dragging.end.x + dx, dragging.end.y + dy, false);
-        if (start && end) geometry = { start: start.anchor, end: end.anchor };
+        if (start && end) {
+          geometry = { start: start.anchor, end: end.anchor };
+          if (drawingsRef.current.find(item => item.id === dragging!.id)?.type === DRAWING_TYPE_RECTANGLE) {
+            if (start.coordinate.x === dragging.start.x) geometry.start = { ...geometry.start,
+              timestamp: dragging.geometry.start.timestamp, sourceSequence: dragging.geometry.start.sourceSequence };
+            if (end.coordinate.x === dragging.end.x) geometry.end = { ...geometry.end,
+              timestamp: dragging.geometry.end.timestamp, sourceSequence: dragging.geometry.end.sourceSequence };
+          }
+        }
+      } else if (dragging.kind !== "start" && dragging.kind !== "end") {
+        const rect = container.getBoundingClientRect();
+        geometry = resizeRectangleGeometry(dragging.geometry, dragging.start, dragging.end, dragging.kind,
+          { x: event.clientX - rect.left, y: event.clientY - rect.top }, point => pointAtCoordinate(point.x, point.y, false)?.anchor ?? null);
       } else {
         const movingStart = dragging.kind === "start";
         const otherCoordinate = movingStart ? dragging.end : dragging.start;
@@ -1190,14 +1246,39 @@ export function ReplayChart({
             : { start: dragging.geometry.start, end: point.anchor };
         }
       }
-      if (geometry) commitPreview({ id: dragging.id, geometry });
+      if (geometry && (drawingsRef.current.find(item => item.id === dragging!.id)?.type !== DRAWING_TYPE_RECTANGLE
+        || isValidRectangleGeometry(geometry))) commitPreview({ id: dragging.id, geometry });
     };
 
+    let pointerFrame: number | null = null;
+    let pendingPointer: PointerEvent | null = null;
+    const clearPointerFrame = () => {
+      if (pointerFrame !== null) cancelAnimationFrame(pointerFrame);
+      pointerFrame = null;
+      pendingPointer = null;
+    };
+    const move = (event: PointerEvent) => {
+      if (!dragging && !(drawingToolRef.current && drawingDraftRef.current)) return;
+      stopEvent(event);
+      pendingPointer = event;
+      if (pointerFrame !== null) return;
+      pointerFrame = requestAnimationFrame(() => {
+        const pointer = pendingPointer;
+        clearPointerFrame();
+        if (pointer) processDrawingMove(pointer);
+      });
+    };
     const finish = (event: PointerEvent) => {
       if (!dragging) return;
+      const moved = pendingPointer !== null || event.clientX !== dragging.clientX || event.clientY !== dragging.clientY;
+      clearPointerFrame();
+      if (moved) processDrawingMove(event);
       stopEvent(event);
       const preview = drawingPreviewRef.current;
-      if (preview?.id === dragging.id) onUpdateDrawingRef.current(preview.id, preview.geometry);
+      if (preview?.id === dragging.id && (["start", "end"] as const).some(part => {
+        const before = dragging!.geometry[part], after = preview.geometry[part];
+        return before.price !== after.price || before.timestamp !== after.timestamp || before.sourceSequence !== after.sourceSequence;
+      })) onUpdateDrawingRef.current(preview.id, preview.geometry);
       dragging = null;
       requestAnimationFrame(() => commitPreview(null));
       if (interaction.hasPointerCapture(event.pointerId)) interaction.releasePointerCapture(event.pointerId);
@@ -1205,6 +1286,7 @@ export function ReplayChart({
       setChartCursor("");
     };
     const cancelDrag = () => {
+      clearPointerFrame();
       dragging = null;
       commitPreview(null);
       chart.applyOptions({ handleScroll: true });
@@ -1253,6 +1335,7 @@ export function ReplayChart({
     interaction.addEventListener("dblclick", doubleClick, true);
     window.addEventListener("keydown", key, true);
     return () => {
+      clearPointerFrame();
       interaction.removeEventListener("pointerdown", down, true);
       window.removeEventListener("pointermove", move, true);
       window.removeEventListener("pointerup", finish, true);

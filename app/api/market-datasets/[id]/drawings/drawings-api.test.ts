@@ -28,7 +28,7 @@ vi.mock("@/lib/db", () => ({
 
 import { GET, POST } from "@/app/api/market-datasets/[id]/drawings/route";
 import { DELETE, PATCH } from "@/app/api/market-datasets/[id]/drawings/[drawingId]/route";
-import { DEFAULT_FIBONACCI_RETRACEMENT_STYLE, DEFAULT_TREND_LINE_STYLE } from "@/lib/market-replay/chart-drawings";
+import { DEFAULT_FIBONACCI_RETRACEMENT_STYLE, DEFAULT_TREND_LINE_STYLE, DEFAULT_RECTANGLE_STYLE } from "@/lib/market-replay/chart-drawings";
 
 const geometry = {
   start: { timestamp: "2026-01-01T00:00:00.000Z", sourceSequence: 10, price: 100 },
@@ -110,6 +110,32 @@ describe("market drawing API", () => {
     }), collectionContext);
     expect(response.status).toBe(400);
     expect(mocks.drawingCreate).not.toHaveBeenCalled();
+  });
+
+  it("creates and lists rectangles without changing storage format", async () => {
+    const rectangle = { ...record, type: "RECTANGLE", style: JSON.stringify(DEFAULT_RECTANGLE_STYLE) };
+    mocks.drawingCreate.mockResolvedValueOnce(rectangle);
+    const response = await POST(new Request("http://localhost/api/drawings", {
+      method: "POST", body: JSON.stringify({ type: "RECTANGLE", geometry }),
+    }), collectionContext);
+    expect(response.status).toBe(201);
+    expect(await response.json()).toMatchObject({ drawing: { type: "RECTANGLE", geometry, style: DEFAULT_RECTANGLE_STYLE } });
+    mocks.drawingFindMany.mockResolvedValueOnce([record, rectangle]);
+    expect((await (await GET(new Request("http://localhost/api/drawings"), collectionContext)).json()).drawings).toHaveLength(2);
+  });
+
+  it("updates rectangle style and rejects mismatched styles and collapsed geometry", async () => {
+    const rectangle = { ...record, type: "RECTANGLE", style: JSON.stringify(DEFAULT_RECTANGLE_STYLE) };
+    mocks.drawingFindFirst.mockResolvedValue(rectangle); mocks.drawingUpdate.mockResolvedValue(rectangle);
+    const patch = (body: unknown) => PATCH(new Request("http://localhost/api/drawings/rect", { method: "PATCH", body: JSON.stringify(body) }), itemContext);
+    expect((await patch({ style: { ...DEFAULT_RECTANGLE_STYLE, borderStyle: "DASHED" } })).status).toBe(200);
+    mocks.drawingUpdate.mockClear();
+    expect((await patch({ style: DEFAULT_TREND_LINE_STYLE })).status).toBe(400);
+    expect((await patch({ geometry: { ...geometry, end: { ...geometry.end, price: geometry.start.price } } })).status).toBe(400);
+    expect((await patch({ style: { ...DEFAULT_RECTANGLE_STYLE, fillOpacity: 0 } })).status).toBe(400);
+    expect(mocks.drawingUpdate).not.toHaveBeenCalled();
+    mocks.drawingFindFirst.mockResolvedValue(record);
+    expect((await patch({ style: DEFAULT_RECTANGLE_STYLE })).status).toBe(400);
   });
 
   it("updates geometry or style only for an owned drawing", async () => {
