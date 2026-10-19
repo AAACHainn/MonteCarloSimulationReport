@@ -1,5 +1,5 @@
 "use client";
-import { useReplayFetch, useReplaySession } from "./replay-session-context";
+import { useReplayFetch } from "./replay-session-context";
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { ListTree, Loader2, Palette, Ruler, Settings2, Trash2, TrendingUp, X } from "lucide-react";
@@ -9,7 +9,7 @@ import { IndicatorSettingsDialog } from "@/components/market-replay/indicator-se
 import { ChartVisibilityMenu } from "@/components/market-replay/chart-visibility-menu";
 import { DisplayIntervalControls } from "@/components/market-replay/display-interval-controls";
 import { useReplayPreferences } from "@/components/market-replay/use-replay-preferences";
-import { createUuid } from "@/lib/uuid";
+import { useHistoricalDrawings } from "./use-historical-drawings";
 import { RectangleSettingsDialog, RectangleToolOption } from "./rectangle-controls";
 import { useReplayShortcuts } from "@/components/market-replay/use-replay-shortcuts";
 import { isReplayShortcutInputTarget, replayDrawingShortcutKey } from "@/lib/market-replay/keyboard-shortcuts";
@@ -28,9 +28,7 @@ import {
   DRAWING_TYPE_RECTANGLE,
   rectangleStyleSchema,
   type RectangleStyle,
-  createMarketDrawingSchema,
   type DrawingTool,
-  type MarketDrawing,
   type TrendLineGeometry,
 } from "@/lib/market-replay/chart-drawings";
 import { historicalWindowFocusSequence, mergeHistoricalBars } from "@/lib/market-replay/historical-window";
@@ -76,38 +74,6 @@ const VISIBLE_BAR_COUNT = 1_200;
 const noOp = () => undefined;
 const noOpAsync = async () => false;
 
-function historicalDrawingStorageKey(datasetId: string, sessionId: string) {
-  return `market-replay-history-drawings-v1:${datasetId}:${sessionId}`;
-}
-
-function parseStoredDrawings(value: string | null, datasetId: string): MarketDrawing[] {
-  if (!value) return [];
-  try {
-    const candidates = JSON.parse(value) as unknown;
-    if (!Array.isArray(candidates)) return [];
-    return candidates.flatMap((candidate) => {
-      if (!candidate || typeof candidate !== "object") return [];
-      const record = candidate as Partial<MarketDrawing>;
-      const parsed = createMarketDrawingSchema.safeParse({
-        type: record.type,
-        geometry: record.geometry,
-        style: record.style,
-      });
-      if (!parsed.success || typeof record.id !== "string") return [];
-      const timestamp = new Date().toISOString();
-      return [{
-        id: record.id,
-        datasetId,
-        ...parsed.data,
-        createdAt: typeof record.createdAt === "string" ? record.createdAt : timestamp,
-        updatedAt: typeof record.updatedAt === "string" ? record.updatedAt : timestamp,
-      } as MarketDrawing];
-    });
-  } catch {
-    return [];
-  }
-}
-
 export function HistoricalReplayClient({
   dataset,
   session,
@@ -118,7 +84,6 @@ export function HistoricalReplayClient({
   focusSequence: number;
 }) {
   const fetch = useReplayFetch();
-  const replaySession = useReplaySession();
   const shortcuts = useReplayShortcuts();
   const [displayIntervalSeconds, setDisplayIntervalSeconds] = useState(session.displayIntervalSeconds);
   const requestedIntervalRef = useRef(session.displayIntervalSeconds);
@@ -135,10 +100,8 @@ export function HistoricalReplayClient({
   const [drawingToolOpen, setDrawingToolOpen] = useState(false);
   const [drawingTool, setDrawingTool] = useState<DrawingTool | null>(null);
   const [drawingObjectsOpen, setDrawingObjectsOpen] = useState(false);
-  const [drawings, setDrawings] = useState<MarketDrawing[]>([]);
-  const [drawingsLoaded, setDrawingsLoaded] = useState(false);
-  const lastStoredDrawingsRef = useRef<MarketDrawing[] | null>(null);
-  const [drawingError, setDrawingError] = useState<string | null>(null);
+  const drawingState = useHistoricalDrawings({ datasetId: dataset.id, fetch });
+  const { drawings, loaded: drawingsLoaded, busy: drawingBusy, error: drawingError } = drawingState;
   const [rectangleStyleId, setRectangleStyleId] = useState<string | null>(null);
   const [selectedDrawingId, setSelectedDrawingId] = useState<string | null>(null);
   const [settingsDialog, setSettingsDialog] = useState<"candlesticks" | "indicators" | null>(null);
@@ -250,60 +213,14 @@ export function HistoricalReplayClient({
     [dataset, session.displaySession],
   );
 
-  useEffect(() => {
-    const controller = new AbortController();
-    if (replaySession) {
-      void fetch(`/api/market-datasets/${dataset.id}/drawings`, { signal: controller.signal }).then(async (response) => {
-        const data = await response.json();
-        if (!response.ok) throw new Error(data.error ?? copy.marketReplay.invalidDrawing);
-        const local = parseStoredDrawings(window.localStorage.getItem(historicalDrawingStorageKey(dataset.id, session.id)), dataset.id);
-        const merged = new Map<string, MarketDrawing>(data.drawings.map((drawing: MarketDrawing) => [drawing.id, drawing]));
-        for (const drawing of local) merged.set(drawing.id, drawing);
-        setDrawings([...merged.values()]);
-        setDrawingsLoaded(true);
-      }).catch((error) => {
-        if (!controller.signal.aborted) { setError(error instanceof Error ? error.message : copy.marketReplay.invalidDrawing); setDrawingsLoaded(true); }
-      });
-      return () => controller.abort();
-    }
-    try {
-      setDrawings(parseStoredDrawings(
-        window.localStorage.getItem(historicalDrawingStorageKey(dataset.id, session.id)),
-        dataset.id,
-      ));
-    } finally {
-      setDrawingsLoaded(true);
-    }
-  }, [dataset.id, session.id, fetch, replaySession]);
-
-  useEffect(() => {
-    if (!drawingsLoaded || lastStoredDrawingsRef.current === drawings) return;
-    try {
-      window.localStorage.setItem(
-        historicalDrawingStorageKey(dataset.id, session.id),
-        JSON.stringify(drawings),
-      );
-      lastStoredDrawingsRef.current = drawings;
-    } catch {
-      // Browser storage is optional; drawings remain available for this page lifetime.
-    }
-  }, [dataset.id, drawings, drawingsLoaded, session.id]);
-
-  const commitHistoricalDrawings = useCallback((next: MarketDrawing[]) => {
-    try {
-      window.localStorage.setItem(historicalDrawingStorageKey(dataset.id, session.id), JSON.stringify(next));
-    } catch { setDrawingError(copy.marketReplay.drawingSaveError); return false; }
-    lastStoredDrawingsRef.current = next;
-    setDrawings(next); setDrawingError(null); return true;
-  }, [dataset.id, session.id]);
-
   const armDrawing = useCallback((tool: DrawingTool) => {
+    if (!drawingsLoaded || drawingBusy) return;
     setMeasurementArmed(false);
     setChartVisibility((current) => current.drawings ? current : { ...current, drawings: true });
     setDrawingTool(tool);
     setDrawingToolOpen(false);
     setSelectedDrawingId(null);
-  }, [setChartVisibility]);
+  }, [setChartVisibility, drawingsLoaded, drawingBusy]);
 
   const changeChartVisibility = useCallback((next: ReplayChartVisibility) => {
     setChartVisibility(next);
@@ -315,38 +232,29 @@ export function HistoricalReplayClient({
     }
   }, [setChartVisibility]);
 
-  const createDrawing = useCallback((type: DrawingTool, geometry: TrendLineGeometry) => {
-    const now = new Date().toISOString();
-    const drawing = {
-      id: `history-${session.id}-${createUuid()}`,
+  const createDrawing = async (type: DrawingTool, geometry: TrendLineGeometry) => {
+    const drawing = await drawingState.create({
       datasetId: dataset.id,
       type,
       geometry,
       style: type === DRAWING_TYPE_RECTANGLE ? { ...defaultRectangleStyle } : type === DRAWING_TYPE_TREND_LINE
         ? { ...defaultTrendLineStyle }
         : { ...defaultFibonacciStyle, levels: defaultFibonacciStyle.levels.map((level) => ({ ...level })) },
-      createdAt: now,
-      updatedAt: now,
-    } as MarketDrawing;
-    if (commitHistoricalDrawings([...drawings, drawing])) setSelectedDrawingId(drawing.id);
-  }, [dataset.id, defaultRectangleStyle, defaultFibonacciStyle, defaultTrendLineStyle, session.id, drawings, commitHistoricalDrawings]);
+    });
+    if (drawing) setSelectedDrawingId(drawing.id);
+  };
 
-  const updateDrawing = useCallback((id: string, geometry: TrendLineGeometry) => {
-    commitHistoricalDrawings(drawings.map((drawing) => drawing.id === id
-      ? { ...drawing, geometry, updatedAt: new Date().toISOString() }
-      : drawing));
-  }, [drawings, commitHistoricalDrawings]);
+  const updateDrawing = (id: string, geometry: TrendLineGeometry) => { void drawingState.update(id, { geometry }); };
 
-  const deleteDrawing = useCallback((id: string) => {
-    if (commitHistoricalDrawings(drawings.filter((drawing) => drawing.id !== id))) {
+  const deleteDrawing = async (id: string) => {
+    if (await drawingState.remove(id)) {
       setSelectedDrawingId((current) => current === id ? null : current);
     }
-  }, [drawings, commitHistoricalDrawings]);
+  };
 
   const saveRectangleStyle = async (id: string, style: RectangleStyle) => {
     if (!rectangleStyleSchema.safeParse(style).success) return false;
-    const next = drawings.map(d => d.id === id ? { ...d, style: { ...style }, updatedAt: new Date().toISOString() } as MarketDrawing : d);
-    if (!commitHistoricalDrawings(next)) return false;
+    if (!await drawingState.update(id, { style })) return false;
     setDefaultRectangleStyle({ ...style }); return true;
   };
 
@@ -459,13 +367,13 @@ export function HistoricalReplayClient({
   useEffect(() => {
     const onKeyDown = (event: KeyboardEvent) => {
       const key = replayDrawingShortcutKey(event);
-      if (!key || event.repeat || settingsDialog || rectangleStyleId || isReplayShortcutInputTarget(event.target)) return;
+      if (!key || event.repeat || settingsDialog || rectangleStyleId || drawingBusy || !drawingsLoaded || isReplayShortcutInputTarget(event.target)) return;
       event.preventDefault();
       armDrawing(key === "r" ? DRAWING_TYPE_RECTANGLE : key === "t" ? DRAWING_TYPE_TREND_LINE : DRAWING_TYPE_FIB_RETRACEMENT);
     };
     window.addEventListener("keydown", onKeyDown);
     return () => window.removeEventListener("keydown", onKeyDown);
-  }, [armDrawing, settingsDialog, rectangleStyleId]);
+  }, [armDrawing, settingsDialog, rectangleStyleId, drawingBusy, drawingsLoaded]);
 
   function updateAbrLength(value: number) {
     if (!Number.isInteger(value) || value < ABR_LENGTH_MIN || value > ABR_LENGTH_MAX) {
@@ -552,7 +460,7 @@ export function HistoricalReplayClient({
         />
         <Popover.Root open={drawingToolOpen} onOpenChange={setDrawingToolOpen}>
           <Popover.Trigger asChild>
-            <Button type="button" variant={drawingTool ? "secondary" : "ghost"} size="sm" className="h-8" aria-pressed={Boolean(drawingTool)} aria-label={copy.marketReplay.drawingToolsHint}>
+            <Button type="button" disabled={!drawingsLoaded || drawingBusy} variant={drawingTool ? "secondary" : "ghost"} size="sm" className="h-8" aria-pressed={Boolean(drawingTool)} aria-label={copy.marketReplay.drawingToolsHint}>
               <TrendingUp className="h-4 w-4" />{copy.marketReplay.drawingTools}
             </Button>
           </Popover.Trigger>
@@ -582,8 +490,8 @@ export function HistoricalReplayClient({
           <Settings2 className="h-4 w-4" />{copy.marketReplay.indicators}
         </Button>
       </div>
-      <div className="relative min-h-0 flex-1" aria-busy={windowLoading}>
-        {drawingError ? <Alert className="absolute left-3 top-3 z-50 w-auto border-red-200 bg-red-50" role="alert"><AlertTitle>{copy.common.error}</AlertTitle><AlertDescription>{drawingError}</AlertDescription></Alert> : null}
+      <div className="relative min-h-0 flex-1" aria-busy={windowLoading || drawingBusy}>
+        {drawingError ? <Alert className="absolute left-3 top-3 z-50 w-auto border-red-200 bg-red-50" role="alert"><AlertTitle>{copy.marketReplay.drawingSyncErrorTitle}</AlertTitle><AlertDescription>{drawingError}</AlertDescription></Alert> : null}
         {windowLoading ? <div className="absolute left-3 top-3 z-50 flex items-center gap-2 rounded-md border bg-white px-3 py-2 text-xs text-slate-600" role="status"><Loader2 className="h-4 w-4 animate-spin" aria-hidden="true" />{copy.marketReplay.loading}</div> : null}
         {windowError ? <Alert className="absolute left-3 top-3 z-50 w-auto border-red-200 bg-red-50" role="alert"><AlertTitle>{copy.common.error}</AlertTitle><AlertDescription>{windowError}</AlertDescription></Alert> : null}
         <ReplayChart
@@ -597,7 +505,7 @@ export function HistoricalReplayClient({
           measurementArmed={measurementArmed}
           candlestickStyle={candlestickStyleDraft ?? candlestickStyle}
           onMeasurementArmedChange={setMeasurementArmed}
-          drawingTool={drawingTool}
+          drawingTool={drawingsLoaded && !drawingBusy ? drawingTool : null}
           onDrawingToolChange={setDrawingTool}
           trendLineDraftStyle={defaultTrendLineStyle}
           fibonacciDraftStyle={defaultFibonacciStyle}
@@ -637,6 +545,9 @@ export function HistoricalReplayClient({
         {drawingObjectsOpen ? <aside className="absolute right-3 top-3 z-50 flex max-h-[calc(100%-1.5rem)] w-72 flex-col overflow-hidden rounded-lg border border-slate-200 bg-white/95 shadow-xl backdrop-blur">
           <header className="flex items-center gap-2 border-b px-3 py-2.5">
             <ListTree className="h-4 w-4 text-slate-500" /><h3 className="text-sm font-semibold text-slate-950">{copy.marketReplay.drawingObjects}</h3>
+            <Button type="button" variant="ghost" size="sm" disabled={!drawingsLoaded || drawingBusy || !drawings.length}
+              aria-label={copy.marketReplay.clearDrawings} className="ml-auto text-red-600 hover:bg-red-50 hover:text-red-700"
+              onClick={async () => { if (await drawingState.clear()) { setSelectedDrawingId(null); setRectangleStyleId(null); } }}>{copy.marketReplay.clearDrawingsShort}</Button>
             <button type="button" className="ml-auto rounded p-1 text-slate-400 hover:bg-slate-100 hover:text-slate-700 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-600" aria-label={copy.marketReplay.closeDrawingObjects} onClick={() => setDrawingObjectsOpen(false)}><X className="h-4 w-4" /></button>
           </header>
           <div className="min-h-0 flex-1 overflow-y-auto p-1.5">
@@ -644,10 +555,12 @@ export function HistoricalReplayClient({
               <button type="button" className="min-w-0 flex-1 truncate text-left font-medium focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-600" onClick={() => setSelectedDrawingId(drawing.id)}>
                 {drawing.type === DRAWING_TYPE_RECTANGLE ? copy.marketReplay.rectangleObjectName(index + 1) : drawing.type === DRAWING_TYPE_TREND_LINE ? copy.marketReplay.trendLineObjectName(index + 1) : copy.marketReplay.fibonacciObjectName(index + 1)}
               </button>
-              {drawing.type === DRAWING_TYPE_RECTANGLE ? <Button type="button" variant="ghost" size="icon" aria-label={copy.marketReplay.rectangleSettings} onClick={() => setRectangleStyleId(drawing.id)}><Settings2 className="h-4 w-4" aria-hidden="true" /></Button> : null}
-              <button type="button" aria-label={drawing.type === DRAWING_TYPE_RECTANGLE ? copy.marketReplay.rectangleDelete : drawing.type === DRAWING_TYPE_TREND_LINE ? copy.marketReplay.trendLineDelete : copy.marketReplay.fibonacciDelete} className="rounded p-1 text-slate-400 hover:bg-red-50 hover:text-red-600 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-red-600" onClick={() => deleteDrawing(drawing.id)}><Trash2 className="h-3.5 w-3.5" /></button>
+              {drawing.type === DRAWING_TYPE_RECTANGLE ? <Button type="button" disabled={drawingBusy} variant="ghost" size="icon" aria-label={copy.marketReplay.rectangleSettings} onClick={() => setRectangleStyleId(drawing.id)}><Settings2 className="h-4 w-4" aria-hidden="true" /></Button> : null}
+              <Button type="button" disabled={drawingBusy} variant="ghost" size="icon" aria-label={drawing.type === DRAWING_TYPE_RECTANGLE ? copy.marketReplay.rectangleDelete : drawing.type === DRAWING_TYPE_TREND_LINE ? copy.marketReplay.trendLineDelete : copy.marketReplay.fibonacciDelete} className="text-slate-400 hover:bg-red-50 hover:text-red-600" onClick={() => void deleteDrawing(drawing.id)}><Trash2 className="h-4 w-4" aria-hidden="true" /></Button>
             </div>) : <p className="p-3 text-xs text-slate-500">{copy.marketReplay.drawingObjectsEmpty}</p>}
           </div>
+          {drawingBusy ? <p role="status" className="border-t px-3 py-2 text-xs text-slate-500">{copy.marketReplay.drawingSaving}</p> : null}
+          {!drawingsLoaded && !drawingBusy ? <Button type="button" variant="outline" className="m-3" onClick={() => void drawingState.refresh()}>{copy.marketReplay.drawingRetry}</Button> : null}
         </aside> : null}
       </div>
     </div>

@@ -308,6 +308,8 @@ export function MarketReplayClient({ dataset: initialDataset, initialJournalFocu
   const [drawingToolOpen, setDrawingToolOpen] = useState(false);
   const [drawingTool, setDrawingTool] = useState<DrawingTool | null>(null);
   const [drawings, setDrawings] = useState<MarketDrawing[]>([]);
+  const [clearingDrawings, setClearingDrawings] = useState(false);
+  const clearingDrawingsRef = useRef(false);
   const [drawingError, setDrawingError] = useState<string | null>(null);
   const [selectedDrawingId, setSelectedDrawingId] = useState<string | null>(null);
   const [drawingObjectsOpen, setDrawingObjectsOpen] = useState(false);
@@ -506,6 +508,7 @@ export function MarketReplayClient({ dataset: initialDataset, initialJournalFocu
   const armFibonacciRetracement = useCallback(() => armDrawing(DRAWING_TYPE_FIB_RETRACEMENT), [armDrawing]);
 
   const createDrawing = useCallback(async (type: DrawingTool, geometry: TrendLineGeometry) => {
+    if (clearingDrawingsRef.current) return;
     const temporaryId = createLocalDrawingId("temporary");
     const now = new Date().toISOString();
     const style = type === DRAWING_TYPE_RECTANGLE ? { ...defaultRectangleStyle } : type === DRAWING_TYPE_TREND_LINE
@@ -542,7 +545,7 @@ export function MarketReplayClient({ dataset: initialDataset, initialJournalFocu
     patch: { geometry?: TrendLineGeometry; style?: MarketDrawingStyle },
   ) => {
     const previous = drawings.find((drawing) => drawing.id === id);
-    if (!previous || id.startsWith("temporary-") || pendingDrawingIds.has(id)) return false;
+    if (clearingDrawingsRef.current || !previous || id.startsWith("temporary-") || pendingDrawingIds.has(id)) return false;
     if (patch.style && !drawingStyleMatchesType(previous.type, patch.style)) return false;
     const optimistic = { ...previous, ...patch, updatedAt: new Date().toISOString() } as MarketDrawing;
     setDrawings((current) => current.map((drawing) => drawing.id === id ? optimistic : drawing));
@@ -569,7 +572,7 @@ export function MarketReplayClient({ dataset: initialDataset, initialJournalFocu
 
   const deleteDrawing = useCallback(async (id: string) => {
     const index = drawings.findIndex((drawing) => drawing.id === id);
-    if (index < 0 || id.startsWith("temporary-") || pendingDrawingIds.has(id)) return;
+    if (clearingDrawingsRef.current || index < 0 || id.startsWith("temporary-") || pendingDrawingIds.has(id)) return;
     const previous = drawings[index];
     setDrawings((current) => current.filter((drawing) => drawing.id !== id));
     setSelectedDrawingId((current) => current === id ? null : current);
@@ -593,6 +596,22 @@ export function MarketReplayClient({ dataset: initialDataset, initialJournalFocu
       setDrawingPending(id, false);
     }
   }, [dataset.id, drawings, pendingDrawingIds, setDrawingPending, styleDrawingId, fetch]);
+
+  const clearDrawings = async () => {
+    if (clearingDrawingsRef.current || pendingDrawingIds.size || !drawings.length) return;
+    const previous = drawings;
+    clearingDrawingsRef.current = true; setClearingDrawings(true); setDrawingError(null);
+    setDrawingTool(null); setDrawings([]); setSelectedDrawingId(null);
+    try {
+      const response = await fetch(`/api/market-datasets/${dataset.id}/drawings`, {
+        method: "DELETE", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ ids: previous.map(drawing => drawing.id) }),
+      });
+      const data = await response.json() as { drawings?: MarketDrawing[]; error?: string };
+      if (!response.ok || !data.drawings) throw new Error(data.error);
+      setDrawings(data.drawings);
+    } catch { setDrawings(previous); setDrawingError(copy.marketReplay.drawingDeleteError); }
+    finally { clearingDrawingsRef.current = false; setClearingDrawings(false); }
+  };
 
   const openDrawingStyle = useCallback((id: string) => {
     const drawing = drawings.find((item) => item.id === id);
@@ -2620,9 +2639,12 @@ export function MarketReplayClient({ dataset: initialDataset, initialJournalFocu
               <header className="flex items-center gap-2 border-b px-3 py-2.5">
                 <ListTree className="h-4 w-4 text-slate-500" />
                 <h3 className="text-sm font-semibold text-slate-950">{copy.marketReplay.drawingObjects}</h3>
+                <Button type="button" variant="ghost" size="sm" disabled={clearingDrawings || Boolean(pendingDrawingIds.size) || !drawings.length}
+                  aria-label={copy.marketReplay.clearDrawings} className="ml-auto text-red-600 hover:bg-red-50 hover:text-red-700"
+                  onClick={() => void clearDrawings()}>{copy.marketReplay.clearDrawingsShort}</Button>
                 <button
                   type="button"
-                  className="ml-auto rounded p-1 text-slate-400 hover:bg-slate-100 hover:text-slate-700"
+                  className="rounded p-1 text-slate-400 hover:bg-slate-100 hover:text-slate-700"
                   aria-label={copy.marketReplay.closeDrawingObjects}
                   onClick={() => setDrawingObjectsOpen(false)}
                 >
@@ -2631,7 +2653,7 @@ export function MarketReplayClient({ dataset: initialDataset, initialJournalFocu
               </header>
               <div className="min-h-0 flex-1 overflow-y-auto p-1.5">
                 {drawings.length ? drawings.map((drawing, index) => {
-                  const pending = pendingDrawingIds.has(drawing.id);
+                  const pending = clearingDrawings || pendingDrawingIds.has(drawing.id);
                   const selected = selectedDrawingId === drawing.id;
                   const drawingColor = drawing.type === DRAWING_TYPE_RECTANGLE ? drawing.style.fillColor : drawing.type === DRAWING_TYPE_TREND_LINE
                     ? drawing.style.color

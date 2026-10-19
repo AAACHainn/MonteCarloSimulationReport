@@ -15,6 +15,10 @@ const mocks = vi.hoisted(() => ({
 
 vi.mock("@/lib/db", () => ({
   prisma: {
+    $transaction: async (work: (tx: unknown) => unknown) => {
+      const { prisma } = await import("@/lib/db");
+      return work(prisma);
+    },
     marketDataset: { findUnique: mocks.datasetFindUnique },
     marketDrawing: {
       findMany: mocks.drawingFindMany,

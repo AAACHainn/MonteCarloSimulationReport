@@ -69,6 +69,18 @@ export async function assertReplayWritable(tx: Prisma.TransactionClient, checkHi
   if (checkHistory && session.activeProjection?.historyVersion !== session.dataset.historyVersion) throw new ReplaySessionError("HISTORY_CHANGED", 409, copy.marketSync.historyChanged);
 }
 
+/** Archived charts remain editable annotations; trading writes keep their existing guard. */
+export async function assertReplayDrawingWritable(tx: Prisma.TransactionClient) {
+  const scope = getReplayScope();
+  if (!scope) return;
+  if (scope.status !== "ARCHIVED") return assertReplayWritable(tx);
+  const session = await tx.replaySession.findUnique({ where: { id: scope.id } });
+  if (!session || session.status !== "ARCHIVED" || session.activeProjectionId !== scope.projectionId || session.version !== scope.version) {
+    throw new ReplaySessionError("SESSION_CONFLICT", 409, copy.replaySessions.conflict);
+  }
+  if (session.pendingCorrectionId) throw new ReplaySessionError("CORRECTION_PENDING", 409, copy.replaySessions.busy);
+}
+
 export async function markReplayMutation(tx: Prisma.TransactionClient, currentSequence?: number) {
   const scope = getReplayScope();
   if (!scope) return;
@@ -86,7 +98,7 @@ export function replayErrorResponse(error: unknown) {
 
 export function withReplaySessionRoute<P extends { id: string }>(
   handler: (request: Request, context: { params: Promise<P> }) => Promise<Response>,
-  options: { write?: boolean; annotation?: boolean; allowHistoryChange?: boolean } = {},
+  options: { write?: boolean; annotation?: boolean; allowHistoryChange?: boolean; drawing?: boolean } = {},
 ) {
   return async (request: Request, context: { params: Promise<P> }) => {
     try {
@@ -104,7 +116,8 @@ export function withReplaySessionRoute<P extends { id: string }>(
           if (request.headers.get("X-Replay-Projection") !== scope.projectionId) {
             throw new ReplaySessionError("SESSION_CONFLICT", 409, copy.replaySessions.conflict);
           }
-          await assertReplayWritable(prisma, !options.allowHistoryChange);
+          if (options.drawing) await assertReplayDrawingWritable(prisma);
+          else await assertReplayWritable(prisma, !options.allowHistoryChange);
         }
         return handler(request, context);
       });

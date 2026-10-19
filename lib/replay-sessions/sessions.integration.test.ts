@@ -22,11 +22,12 @@ import { POST as accountPOST } from "@/app/api/market-datasets/[id]/paper-sessio
 import { POST as orderPOST } from "@/app/api/market-datasets/[id]/paper-session/orders/route";
 import { DELETE as entryDELETE, PATCH as entryPATCH } from "@/app/api/market-datasets/[id]/paper-journal/entries/[entryId]/route";
 import { POST as advancePOST } from "@/app/api/market-datasets/[id]/replay/advance/route";
-import { POST as drawingPOST, GET as drawingsGET } from "@/app/api/market-datasets/[id]/drawings/route";
+import { POST as drawingPOST, GET as drawingsGET, DELETE as drawingsDELETE } from "@/app/api/market-datasets/[id]/drawings/route";
+import { PATCH as drawingPATCH, DELETE as drawingDELETE } from "@/app/api/market-datasets/[id]/drawings/[drawingId]/route";
 import { DELETE as sessionDELETE, GET as sessionGET, PATCH as sessionPATCH } from "@/app/api/replay-sessions/[sessionId]/route";
 import { DELETE as journalSessionDELETE } from "@/app/api/market-datasets/[id]/paper-journal/sessions/[sessionId]/route";
 import { getPaperSessionSnapshot } from "@/lib/paper-trading/serialize";
-import { DEFAULT_TREND_LINE_STYLE } from "@/lib/market-replay/chart-drawings";
+import { DEFAULT_TREND_LINE_STYLE, DEFAULT_RECTANGLE_STYLE, DEFAULT_FIBONACCI_RETRACEMENT_STYLE } from "@/lib/market-replay/chart-drawings";
 import { createCorrection, commitCorrection, cancelCorrection, readCorrection } from "./corrections";
 import { runReplayCorrection } from "./correction-runner";
 import { GET as journalGET } from "@/app/api/market-datasets/[id]/paper-journal/route";
@@ -72,6 +73,62 @@ function request(session: { id: string; activeProjectionId: string | null }, met
     ...(body === undefined ? {} : { body: JSON.stringify(body) }),
   });
 }
+
+describe("session drawing persistence", () => {
+  const geometry = { start: { timestamp: base.toISOString(), sourceSequence: 0, price: 100 },
+    end: { timestamp: new Date(base.getTime() + 60_000).toISOString(), sourceSequence: 1, price: 101 } };
+  const itemContext = (id: string) => ({ params: Promise.resolve({ id: "shared", drawingId: id }) });
+  async function archive(session: Awaited<ReturnType<typeof create>>) {
+    const response = await sessionPATCH(new Request("http://localhost/api/session", { method: "PATCH", headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ expectedVersion: (await loadReplayScope(session.id)).version, status: "ARCHIVED" }) }), { params: Promise.resolve({ sessionId: session.id }) });
+    expect(response.status).toBe(200);
+  }
+  async function read(session: Awaited<ReturnType<typeof create>>) { return (await drawingsGET(request(session, "GET"), context)).json(); }
+  it.each([
+    { type: "TREND_LINE", style: DEFAULT_TREND_LINE_STYLE },
+    { type: "RECTANGLE", style: DEFAULT_RECTANGLE_STYLE },
+    { type: "FIB_RETRACEMENT", style: DEFAULT_FIBONACCI_RETRACEMENT_STYLE },
+  ].flatMap(drawing => (["ACTIVE", "ARCHIVED"] as const).map(status => ({ ...drawing, status }))))("retains and edits $status $type drawings without changing trading records", async ({ type, style, status }) => {
+    const session = await create("LIVE_REPLAY"), sibling = await create("TRAINING");
+    expect((await accountPOST(request(session, "POST", { initialCapital: 10000, currency: "USD", commissionBps: 0, slippageBps: 0 }), context)).status).toBe(201);
+    const beforeArchive = await drawingPOST(request(session, "POST", { type, style, geometry }), context);
+    expect(beforeArchive.status).toBe(201);
+    const original = (await beforeArchive.json()).drawing;
+    if (status === "ARCHIVED") await archive(session);
+    const frozen = await prisma.replaySession.findUnique({ where: { id: session.id }, include: {
+      progress: true, commands: true, journal: { include: { entries: true } }, projections: { include: { account: { include: { orders: true, fills: true, equityPoints: true } } } },
+    } });
+    expect((await read(session)).drawings.map((item: { id: string }) => item.id)).toEqual([original.id]);
+    const created = await drawingPOST(request(session, "POST", { type, style, geometry }), context);
+    expect(created.status).toBe(201);
+    const nextGeometry = { ...geometry, end: { ...geometry.end, price: 103 } };
+    expect((await drawingPATCH(request(session, "PATCH", { geometry: nextGeometry }), itemContext(original.id))).status).toBe(200);
+    expect((await read(session)).drawings.find((item: { id: string }) => item.id === original.id).geometry).toEqual(nextGeometry);
+    expect((await drawingDELETE(request(session, "DELETE"), itemContext(original.id))).status).toBe(200);
+    expect((await read(session)).drawings.map((item: { id: string }) => item.id)).not.toContain(original.id);
+    expect((await read(sibling)).drawings).toEqual([]);
+    if (status === "ARCHIVED") {
+      expect((await advancePOST(request(session, "POST", { count: 1, expectedCurrentSequence: -1, expectedVersion: 1 }), context)).status).toBe(409);
+      expect((await orderPOST(request(session, "POST", { side: "BUY", type: "MARKET", quantity: 1, price: null, expectedVersion: 1 }), context)).status).toBe(409);
+    }
+    expect(await prisma.replaySession.findUnique({ where: { id: session.id }, include: {
+      progress: true, commands: true, journal: { include: { entries: true } }, projections: { include: { account: { include: { orders: true, fills: true, equityPoints: true } } } },
+    } })).toEqual(frozen);
+  });
+  it("isolates individual deletion and clear, retaining unseen concurrent objects and sibling sessions", async () => {
+    const a = await create("TRAINING"), b = await create("TRAINING");
+    const add = async (session: typeof a) => (await (await drawingPOST(request(session, "POST", { type: "RECTANGLE", style: DEFAULT_RECTANGLE_STYLE, geometry }), context)).json()).drawing;
+    const first = await add(a), foreign = await add(b); await archive(a); await archive(b);
+    expect((await drawingDELETE(request(a, "DELETE"), itemContext(foreign.id))).status).toBe(404);
+    expect((await drawingPATCH(request(a, "PATCH", { geometry }), itemContext(foreign.id))).status).toBe(404);
+    const concurrent = await add(a);
+    expect((await drawingsDELETE(request(a, "DELETE", { ids: [first.id, foreign.id] }), context)).status).toBe(200);
+    expect((await read(a)).drawings.map((item: { id: string }) => item.id)).toEqual([concurrent.id]);
+    expect((await read(b)).drawings.map((item: { id: string }) => item.id)).toEqual([foreign.id]);
+    expect((await drawingPOST(request({ ...a, activeProjectionId: "old" }, "POST", { type: "RECTANGLE", geometry }), context)).status).toBe(409);
+  });
+
+});
 
 describe("multiple replay sessions on shared market data", () => {
   it("requires explicit identity and isolates progress, accounts, commands and drawings", async () => {

@@ -9,6 +9,7 @@ export const replayRouteBusinessScope = {
   entryProjectionWhere: () => ({}),
   journalScopeWhere: () => ({}),
   assertReplayWritable: async () => undefined,
+  assertReplayDrawingWritable: async () => undefined,
   markReplayMutation: async () => undefined,
   getReplayScope: () => undefined,
   storageId: (id: string) => id,
