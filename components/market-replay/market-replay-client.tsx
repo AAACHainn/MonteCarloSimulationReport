@@ -31,6 +31,7 @@ import type { CandlestickStyle } from "@/lib/market-replay/candlestick-style";
 import { PaperAccountStrip, PaperTradingPanel } from "@/components/market-replay/paper-trading-panel";
 import { ReplayPlaybackBar } from "@/components/market-replay/replay-playback-bar";
 import { RectangleSettingsDialog, RectangleToolOption } from "./rectangle-controls";
+import { LineSettingsDialog } from "./line-settings-dialog";
 import { useReplayShortcuts } from "@/components/market-replay/use-replay-shortcuts";
 import { createReplayStepShortcut, isReplayPlaybackShortcut, isReplayShortcutInputTarget, replayDrawingShortcutKey } from "@/lib/market-replay/keyboard-shortcuts";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
@@ -42,7 +43,6 @@ import { DateTimePicker, type DateTimePickerHandle } from "@/components/ui/date-
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
-import { LINE_STYLE_OPTIONS, StyleChoiceField, StyleColorField, StyleLineWidthField, StyleOpacityField, StyleTemplateField } from "@/components/ui/style-controls";
 import { copy } from "@/lib/i18n";
 import {
   createReplayState,
@@ -119,15 +119,12 @@ import {
   DRAWING_TYPE_TREND_LINE,
   DRAWING_TYPE_RECTANGLE,
   drawingStyleMatchesType,
-  hasDuplicateEnabledFibonacciLevels,
   type DrawingTool,
   type FibonacciRetracementStyle,
-  type FibonacciRetracementTemplate,
   type MarketDrawing,
   type MarketDrawingStyle,
   type TrendLineGeometry,
   type TrendLineStyle,
-  type TrendLineTemplate,
 } from "@/lib/market-replay/chart-drawings";
 import {
   EMA_COLORS,
@@ -316,10 +313,6 @@ export function MarketReplayClient({ dataset: initialDataset, initialJournalFocu
   const [rectangleStyleId, setRectangleStyleId] = useState<string | null>(null);
   const [styleDrawingId, setStyleDrawingId] = useState<string | null>(null);
   const [styleDraft, setStyleDraft] = useState<TrendLineStyle | FibonacciRetracementStyle | null>(null);
-  const [styleDraftError, setStyleDraftError] = useState<string | null>(null);
-  const [selectedTemplateId, setSelectedTemplateId] = useState("");
-  const [templateDialogOpen, setTemplateDialogOpen] = useState(false);
-  const [templateName, setTemplateName] = useState("");
   const [pendingDrawingIds, setPendingDrawingIds] = useState<Set<string>>(() => new Set());
   useEffect(() => {
     if (!webFullscreen) return;
@@ -622,50 +615,7 @@ export function MarketReplayClient({ dataset: initialDataset, initialJournalFocu
     setStyleDraft(drawing.type === DRAWING_TYPE_TREND_LINE
       ? { ...drawing.style }
       : cloneFibonacciStyle(drawing.style));
-    setStyleDraftError(null);
-    setSelectedTemplateId("");
   }, [drawings]);
-
-  const saveDrawingTemplate = useCallback(() => {
-    const name = templateName.trim();
-    if (!name || !styleDraft) return;
-    const drawing = drawings.find((item) => item.id === styleDrawingId);
-    if (!drawing || !drawingStyleMatchesType(drawing.type, styleDraft)) return;
-    const isTrendLine = drawing.type === DRAWING_TYPE_TREND_LINE;
-    const templates = isTrendLine ? trendLineTemplates : fibonacciTemplates;
-    const existing = templates.find((template) => template.name.toLocaleLowerCase("zh-CN") === name.toLocaleLowerCase("zh-CN"));
-    if (!existing && templates.length >= 50) {
-      setDrawingError(copy.marketReplay.drawingTemplateLimit);
-      return;
-    }
-    const id = existing?.id ?? createLocalDrawingId("template");
-    if (isTrendLine) {
-      const template: TrendLineTemplate = { id, name, style: { ...styleDraft } as TrendLineStyle };
-      setTrendLineTemplates((current) => existing
-        ? current.map((item) => item.id === existing.id ? template : item)
-        : [...current, template]);
-    } else {
-      const template: FibonacciRetracementTemplate = { id, name, style: cloneFibonacciStyle(styleDraft as FibonacciRetracementStyle) };
-      setFibonacciTemplates((current) => existing
-        ? current.map((item) => item.id === existing.id ? template : item)
-        : [...current, template]);
-    }
-    setSelectedTemplateId(id);
-    setTemplateName("");
-    setTemplateDialogOpen(false);
-    setDrawingError(null);
-  }, [drawings, fibonacciTemplates, setFibonacciTemplates, setTrendLineTemplates, styleDraft, styleDrawingId, templateName, trendLineTemplates]);
-
-  const deleteSelectedDrawingTemplate = useCallback(() => {
-    if (!selectedTemplateId) return;
-    const drawing = drawings.find((item) => item.id === styleDrawingId);
-    if (drawing?.type === DRAWING_TYPE_FIB_RETRACEMENT) {
-      setFibonacciTemplates((current) => current.filter((template) => template.id !== selectedTemplateId));
-    } else {
-      setTrendLineTemplates((current) => current.filter((template) => template.id !== selectedTemplateId));
-    }
-    setSelectedTemplateId("");
-  }, [drawings, selectedTemplateId, setFibonacciTemplates, setTrendLineTemplates, styleDrawingId]);
 
   const displayedDrawings = useMemo(() => (
     styleDrawingId && styleDraft
@@ -2840,203 +2790,22 @@ export function MarketReplayClient({ dataset: initialDataset, initialJournalFocu
           {journalReview ? null : <PaperTradingPanel priceTickSize={dataset.priceTickSize} snapshot={paperSnapshot} currentBar={currentBar} busy={paperBusy || correctionPending || dateForwarding} error={paperError} onCreate={createPaperAccount} onSubmit={submitPaperOrder} onCancel={cancelPaperOrder} onUpdate={updatePaperOrder} onCancelScope={cancelPaperScope} onClear={() => requestConfirmation("paper-clear")} />}
         </div>
       </Dialog>
-      <Dialog
-        open={Boolean(styleDrawingId && styleDraft && !templateDialogOpen)}
-        title={drawings.find((drawing) => drawing.id === styleDrawingId)?.type === DRAWING_TYPE_FIB_RETRACEMENT
-          ? copy.marketReplay.fibonacciSettings
-          : copy.marketReplay.trendLineSettings}
-        description={drawings.find((drawing) => drawing.id === styleDrawingId)?.type === DRAWING_TYPE_FIB_RETRACEMENT
-          ? copy.marketReplay.fibonacciSettingsDescription
-          : copy.marketReplay.trendLineSettingsDescription}
-        className={drawings.find((drawing) => drawing.id === styleDrawingId)?.type === DRAWING_TYPE_FIB_RETRACEMENT ? "max-w-2xl" : "max-w-md"}
-        onClose={() => {
-          setStyleDrawingId(null);
-          setStyleDraft(null);
-          setStyleDraftError(null);
-          setSelectedTemplateId("");
-        }}
-      >
-        {styleDraft && (() => {
-          const styleDrawing = drawings.find((drawing) => drawing.id === styleDrawingId);
-          if (!styleDrawing) return null;
-          const isFibonacci = styleDrawing.type === DRAWING_TYPE_FIB_RETRACEMENT;
-          if (isFibonacci ? !("levels" in styleDraft) : !("color" in styleDraft)) return null;
-          const templates = isFibonacci ? fibonacciTemplates : trendLineTemplates;
-          return (
-          <div className="space-y-5">
-            <StyleTemplateField value={selectedTemplateId} templates={templates}
-                  onChange={(value) => {
-                    if (value === "__none") return;
-                    const template = templates.find((item) => item.id === value);
-                    if (!template) return;
-                    setSelectedTemplateId(value);
-                    setStyleDraftError(null);
-                    setStyleDraft(isFibonacci
-                      ? cloneFibonacciStyle(template.style as FibonacciRetracementStyle)
-                      : { ...template.style as TrendLineStyle });
-                  }} onDelete={deleteSelectedDrawingTemplate} />
-            {!isFibonacci && "color" in styleDraft ? <StyleColorField label={copy.marketReplay.lineColor} value={styleDraft.color}
-              onChange={color => setStyleDraft(current => current && "color" in current ? { ...current, color } : current)} /> : null}
-            {!isFibonacci && "opacity" in styleDraft ? <StyleOpacityField label={copy.marketReplay.lineOpacity} value={styleDraft.opacity}
-              onChange={opacity => setStyleDraft(current => current && "opacity" in current ? { ...current, opacity } : current)} /> : null}
-            {isFibonacci ? <p className="text-sm font-medium text-slate-800">{copy.marketReplay.horizontalLineStyle}</p> : null}
-            <StyleLineWidthField label={copy.marketReplay.lineWidth} value={styleDraft.width}
-              onChange={width => setStyleDraft(current => current ? { ...current, width } : current)} />
-            <StyleChoiceField label={copy.marketReplay.lineStyle} value={styleDraft.lineStyle} options={LINE_STYLE_OPTIONS}
-              onChange={lineStyle => setStyleDraft(current => current ? { ...current, lineStyle } : current)} />
-            {!isFibonacci && "showStartPrice" in styleDraft ? <div className="space-y-2 rounded-md border bg-slate-50 p-3">
-              <label className="flex items-center gap-2 text-sm text-slate-700">
-                <input
-                  type="checkbox"
-                  checked={styleDraft.showStartPrice}
-                  onChange={(event) => setStyleDraft((current) => current && "showStartPrice" in current ? { ...current, showStartPrice: event.target.checked } : current)}
-                  className="h-4 w-4 rounded border-slate-300"
-                />
-                {copy.marketReplay.showStartPrice}
-              </label>
-              <label className="flex items-center gap-2 text-sm text-slate-700">
-                <input
-                  type="checkbox"
-                  checked={styleDraft.showEndPrice}
-                  onChange={(event) => setStyleDraft((current) => current && "showEndPrice" in current ? { ...current, showEndPrice: event.target.checked } : current)}
-                  className="h-4 w-4 rounded border-slate-300"
-                />
-                {copy.marketReplay.showEndPrice}
-              </label>
-            </div> : null}
-            {isFibonacci && "levels" in styleDraft ? (
-              <div className="space-y-2">
-                <p className="text-sm font-medium text-slate-800">{copy.marketReplay.fibonacciLevels}</p>
-                <div className="grid grid-cols-1 gap-2 rounded-md border bg-slate-50 p-3 sm:grid-cols-2">
-                  {styleDraft.levels.map((level, index) => (
-                    <div key={index} className="flex items-center gap-2">
-                      <input
-                        type="checkbox"
-                        checked={level.enabled}
-                        aria-label={copy.marketReplay.fibonacciLevelToggle(level.value)}
-                        onChange={(event) => {
-                          setStyleDraftError(null);
-                          setStyleDraft((current) => current && "levels" in current ? {
-                            ...current,
-                            levels: current.levels.map((item, itemIndex) => itemIndex === index ? { ...item, enabled: event.target.checked } : item),
-                          } : current);
-                        }}
-                        className="h-4 w-4 shrink-0 rounded border-slate-300"
-                      />
-                      <Input
-                        type="number"
-                        min="-10"
-                        max="10"
-                        step="0.001"
-                        value={level.value}
-                        aria-label={copy.marketReplay.fibonacciLevelValue(index + 1)}
-                        onChange={(event) => {
-                          const value = Number(event.target.value);
-                          if (!Number.isFinite(value) || value < -10 || value > 10) return;
-                          setStyleDraftError(null);
-                          setStyleDraft((current) => current && "levels" in current ? {
-                            ...current,
-                            levels: current.levels.map((item, itemIndex) => itemIndex === index ? { ...item, value } : item),
-                          } : current);
-                        }}
-                        className="h-9 min-w-0 flex-1 font-mono text-xs"
-                      />
-                      <Input
-                        type="color"
-                        value={level.color}
-                        aria-label={copy.marketReplay.fibonacciLevelColor(level.value)}
-                        onChange={(event) => setStyleDraft((current) => current && "levels" in current ? {
-                          ...current,
-                          levels: current.levels.map((item, itemIndex) => itemIndex === index ? { ...item, color: event.target.value.toUpperCase() } : item),
-                        } : current)}
-                        className="h-9 w-11 shrink-0 cursor-pointer p-1"
-                      />
-                    </div>
-                  ))}
-                </div>
-              </div>
-            ) : null}
-            {styleDraftError ? <p role="alert" className="text-sm text-red-600">{styleDraftError}</p> : null}
-            <p className="text-xs text-slate-500">{isFibonacci ? copy.marketReplay.nextFibonacciStyleHint : copy.marketReplay.nextTrendLineStyleHint}</p>
-            <div className="flex items-center justify-between gap-3 border-t pt-4">
-              <Button type="button" variant="outline" onClick={() => {
-                setTemplateName("");
-                setTemplateDialogOpen(true);
-              }}>{copy.marketReplay.saveDrawingTemplate}</Button>
-              <div className="flex gap-2">
-                <Button type="button" variant="outline" onClick={() => {
-                  setStyleDrawingId(null);
-                  setStyleDraft(null);
-                  setStyleDraftError(null);
-                  setSelectedTemplateId("");
-                }}>{copy.marketReplay.drawingCancel}</Button>
-                <Button type="button" onClick={() => {
-                  if (!styleDrawingId) return;
-                  const id = styleDrawingId;
-                  const drawing = drawings.find((item) => item.id === id);
-                  if (drawing?.type === DRAWING_TYPE_FIB_RETRACEMENT && "levels" in styleDraft
-                    && hasDuplicateEnabledFibonacciLevels(styleDraft)) {
-                    setStyleDraftError(copy.marketReplay.fibonacciDuplicateEnabledLevels);
-                    return;
-                  }
-                  if (!drawing || !drawingStyleMatchesType(drawing.type, styleDraft)) return;
-                  const style = drawing.type === DRAWING_TYPE_FIB_RETRACEMENT
-                    ? cloneFibonacciStyle(styleDraft as FibonacciRetracementStyle)
-                    : { ...styleDraft as TrendLineStyle };
-                  if (drawing.type === DRAWING_TYPE_FIB_RETRACEMENT) {
-                    setDefaultFibonacciStyle(cloneFibonacciStyle(style as FibonacciRetracementStyle));
-                  } else {
-                    setDefaultTrendLineStyle({ ...style as TrendLineStyle });
-                  }
-                  void updateDrawing(id, { style });
-                  setStyleDrawingId(null);
-                  setStyleDraft(null);
-                  setStyleDraftError(null);
-                  setSelectedTemplateId("");
-                }}>{copy.marketReplay.drawingConfirm}</Button>
-              </div>
-            </div>
-          </div>
-        ); })()}
-      </Dialog>
-      <Dialog
-        open={templateDialogOpen}
-        title={copy.marketReplay.saveDrawingTemplateTitle}
-        className="max-w-md"
-        onClose={() => {
-          setTemplateDialogOpen(false);
-          setTemplateName("");
-        }}
-      >
-        <div className="space-y-5">
-          <div className="space-y-2">
-            <Label htmlFor="trend-line-template-name">{copy.marketReplay.drawingTemplateName}</Label>
-            <Input
-              id="trend-line-template-name"
-              value={templateName}
-              maxLength={50}
-              autoFocus
-              placeholder={copy.marketReplay.drawingTemplateNamePlaceholder}
-              onChange={(event) => setTemplateName(event.target.value)}
-              onKeyDown={(event) => {
-                if (event.key === "Enter" && templateName.trim()) {
-                  event.preventDefault();
-                  saveDrawingTemplate();
-                }
-              }}
-            />
-          </div>
-          <div className="flex justify-end gap-2 border-t pt-4">
-            <Button type="button" variant="outline" onClick={() => {
-              setTemplateDialogOpen(false);
-              setTemplateName("");
-            }}>{copy.marketReplay.drawingCancel}</Button>
-            <Button type="button" disabled={!templateName.trim()} onClick={saveDrawingTemplate}>
-              {copy.marketReplay.saveDrawingTemplate}
-            </Button>
-          </div>
-        </div>
-      </Dialog>
+      {(() => {
+        const drawing = drawings.find(item => item.id === styleDrawingId);
+        return drawing && drawing.type !== DRAWING_TYPE_RECTANGLE && styleDraft ? <LineSettingsDialog key={drawing.id}
+          drawing={drawing} draft={styleDraft} onDraftChange={setStyleDraft}
+          templates={drawing.type === DRAWING_TYPE_FIB_RETRACEMENT ? fibonacciTemplates : trendLineTemplates}
+          onTemplatesChange={templates => {
+            if (drawing.type === DRAWING_TYPE_FIB_RETRACEMENT) setFibonacciTemplates(templates as typeof fibonacciTemplates);
+            else setTrendLineTemplates(templates as typeof trendLineTemplates);
+          }} onClose={() => { setStyleDrawingId(null); setStyleDraft(null); }}
+          onSave={async style => {
+            if (!await updateDrawing(drawing.id, { style })) return false;
+            if (drawing.type === DRAWING_TYPE_FIB_RETRACEMENT) setDefaultFibonacciStyle(cloneFibonacciStyle(style as FibonacciRetracementStyle));
+            else setDefaultTrendLineStyle({ ...style as TrendLineStyle });
+            return true;
+          }} /> : null;
+      })()}
       <ConfirmDialog
         open={Boolean(confirmAction)}
         title={confirmAction === "paper-clear" ? copy.replaySessions.archiveTitle : copy.replaySessions.restartTitle}

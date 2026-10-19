@@ -11,6 +11,7 @@ import { DisplayIntervalControls } from "@/components/market-replay/display-inte
 import { useReplayPreferences } from "@/components/market-replay/use-replay-preferences";
 import { useHistoricalDrawings } from "./use-historical-drawings";
 import { RectangleSettingsDialog, RectangleToolOption } from "./rectangle-controls";
+import { LineSettingsDialog, cloneLineDrawingStyle, type LineDrawingStyle } from "./line-settings-dialog";
 import { useReplayShortcuts } from "@/components/market-replay/use-replay-shortcuts";
 import { isReplayShortcutInputTarget, replayDrawingShortcutKey } from "@/lib/market-replay/keyboard-shortcuts";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
@@ -27,6 +28,9 @@ import {
   DRAWING_TYPE_TREND_LINE,
   DRAWING_TYPE_RECTANGLE,
   rectangleStyleSchema,
+  drawingStyleMatchesType,
+  type MarketDrawing,
+  type FibonacciRetracementStyle,
   type RectangleStyle,
   type DrawingTool,
   type TrendLineGeometry,
@@ -103,6 +107,8 @@ export function HistoricalReplayClient({
   const drawingState = useHistoricalDrawings({ datasetId: dataset.id, fetch });
   const { drawings, loaded: drawingsLoaded, busy: drawingBusy, error: drawingError } = drawingState;
   const [rectangleStyleId, setRectangleStyleId] = useState<string | null>(null);
+  const [styleDrawingId, setStyleDrawingId] = useState<string | null>(null);
+  const [styleDraft, setStyleDraft] = useState<LineDrawingStyle | null>(null);
   const [selectedDrawingId, setSelectedDrawingId] = useState<string | null>(null);
   const [settingsDialog, setSettingsDialog] = useState<"candlesticks" | "indicators" | null>(null);
   const [candlestickStyleDraft, setCandlestickStyleDraft] = useState<CandlestickStyle | null>(null);
@@ -134,15 +140,18 @@ export function HistoricalReplayClient({
     setChartVisibility,
     defaultRectangleStyle, setDefaultRectangleStyle, rectangleTemplates, setRectangleTemplates,
     defaultTrendLineStyle,
+    setDefaultTrendLineStyle, trendLineTemplates, setTrendLineTemplates,
     defaultFibonacciStyle,
+    setDefaultFibonacciStyle, fibonacciTemplates, setFibonacciTemplates,
     displayUtcOffsetMinutes,
   } = useReplayPreferences(dataset);
   const visibleBarCountConfig = useMemo(() => (
     chartVisibility.indicators ? barCountConfig : { ...barCountConfig, enabled: false }
   ), [barCountConfig, chartVisibility.indicators]);
   const visibleDrawings = useMemo(
-    () => chartVisibility.drawings ? drawings : [],
-    [chartVisibility.drawings, drawings],
+    () => chartVisibility.drawings ? drawings.map(drawing => drawing.id === styleDrawingId && styleDraft && drawingStyleMatchesType(drawing.type, styleDraft)
+      ? { ...drawing, style: styleDraft } as MarketDrawing : drawing) : [],
+    [chartVisibility.drawings, drawings, styleDrawingId, styleDraft],
   );
   const indicatorWarmupCount = Math.max(
     abrEnabled ? abrLength : 0,
@@ -246,9 +255,18 @@ export function HistoricalReplayClient({
 
   const updateDrawing = (id: string, geometry: TrendLineGeometry) => { void drawingState.update(id, { geometry }); };
 
+  const openDrawingStyle = useCallback((id: string) => {
+    const drawing = drawings.find(item => item.id === id);
+    if (!drawing || drawingBusy || id.startsWith("temporary-")) return;
+    setSelectedDrawingId(id);
+    if (drawing.type === DRAWING_TYPE_RECTANGLE) { setRectangleStyleId(id); return; }
+    setStyleDrawingId(id); setStyleDraft(cloneLineDrawingStyle(drawing.style));
+  }, [drawings, drawingBusy]);
+
   const deleteDrawing = async (id: string) => {
     if (await drawingState.remove(id)) {
       setSelectedDrawingId((current) => current === id ? null : current);
+      if (styleDrawingId === id) { setStyleDrawingId(null); setStyleDraft(null); }
     }
   };
 
@@ -367,13 +385,13 @@ export function HistoricalReplayClient({
   useEffect(() => {
     const onKeyDown = (event: KeyboardEvent) => {
       const key = replayDrawingShortcutKey(event);
-      if (!key || event.repeat || settingsDialog || rectangleStyleId || drawingBusy || !drawingsLoaded || isReplayShortcutInputTarget(event.target)) return;
+      if (!key || event.repeat || settingsDialog || rectangleStyleId || styleDrawingId || drawingBusy || !drawingsLoaded || isReplayShortcutInputTarget(event.target)) return;
       event.preventDefault();
       armDrawing(key === "r" ? DRAWING_TYPE_RECTANGLE : key === "t" ? DRAWING_TYPE_TREND_LINE : DRAWING_TYPE_FIB_RETRACEMENT);
     };
     window.addEventListener("keydown", onKeyDown);
     return () => window.removeEventListener("keydown", onKeyDown);
-  }, [armDrawing, settingsDialog, rectangleStyleId, drawingBusy, drawingsLoaded]);
+  }, [armDrawing, settingsDialog, rectangleStyleId, styleDrawingId, drawingBusy, drawingsLoaded]);
 
   function updateAbrLength(value: number) {
     if (!Number.isInteger(value) || value < ABR_LENGTH_MIN || value > ABR_LENGTH_MAX) {
@@ -516,7 +534,7 @@ export function HistoricalReplayClient({
           onCreateDrawing={createDrawing}
           onUpdateDrawing={updateDrawing}
           onDeleteDrawing={deleteDrawing}
-          onOpenDrawingStyle={id => { setSelectedDrawingId(id); if (drawings.find(d => d.id === id)?.type === DRAWING_TYPE_RECTANGLE) setRectangleStyleId(id); }}
+          onOpenDrawingStyle={openDrawingStyle}
           emaEnabled={chartVisibility.indicators && emaEnabled}
           emaIndicators={emaIndicators}
           abrEnabled={chartVisibility.indicators && abrEnabled}
@@ -547,15 +565,17 @@ export function HistoricalReplayClient({
             <ListTree className="h-4 w-4 text-slate-500" /><h3 className="text-sm font-semibold text-slate-950">{copy.marketReplay.drawingObjects}</h3>
             <Button type="button" variant="ghost" size="sm" disabled={!drawingsLoaded || drawingBusy || !drawings.length}
               aria-label={copy.marketReplay.clearDrawings} className="ml-auto text-red-600 hover:bg-red-50 hover:text-red-700"
-              onClick={async () => { if (await drawingState.clear()) { setSelectedDrawingId(null); setRectangleStyleId(null); } }}>{copy.marketReplay.clearDrawingsShort}</Button>
+              onClick={async () => { if (await drawingState.clear()) { setSelectedDrawingId(null); setRectangleStyleId(null); setStyleDrawingId(null); setStyleDraft(null); } }}>{copy.marketReplay.clearDrawingsShort}</Button>
             <button type="button" className="ml-auto rounded p-1 text-slate-400 hover:bg-slate-100 hover:text-slate-700 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-600" aria-label={copy.marketReplay.closeDrawingObjects} onClick={() => setDrawingObjectsOpen(false)}><X className="h-4 w-4" /></button>
           </header>
           <div className="min-h-0 flex-1 overflow-y-auto p-1.5">
             {drawings.length ? drawings.map((drawing, index) => <div key={drawing.id} className={`flex items-center gap-2 rounded-md px-2 py-2 text-sm ${selectedDrawingId === drawing.id ? "bg-blue-50 text-blue-800" : "text-slate-700 hover:bg-slate-100"}`}>
-              <button type="button" className="min-w-0 flex-1 truncate text-left font-medium focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-600" onClick={() => setSelectedDrawingId(drawing.id)}>
+              <button type="button" className="min-w-0 flex-1 truncate text-left font-medium focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-600" onClick={() => setSelectedDrawingId(drawing.id)} onDoubleClick={() => openDrawingStyle(drawing.id)}>
                 {drawing.type === DRAWING_TYPE_RECTANGLE ? copy.marketReplay.rectangleObjectName(index + 1) : drawing.type === DRAWING_TYPE_TREND_LINE ? copy.marketReplay.trendLineObjectName(index + 1) : copy.marketReplay.fibonacciObjectName(index + 1)}
               </button>
-              {drawing.type === DRAWING_TYPE_RECTANGLE ? <Button type="button" disabled={drawingBusy} variant="ghost" size="icon" aria-label={copy.marketReplay.rectangleSettings} onClick={() => setRectangleStyleId(drawing.id)}><Settings2 className="h-4 w-4" aria-hidden="true" /></Button> : null}
+              <Button type="button" disabled={drawingBusy} variant="ghost" size="icon"
+                aria-label={drawing.type === DRAWING_TYPE_RECTANGLE ? copy.marketReplay.rectangleSettings : drawing.type === DRAWING_TYPE_TREND_LINE ? copy.marketReplay.trendLineSettings : copy.marketReplay.fibonacciSettings}
+                onClick={() => openDrawingStyle(drawing.id)}><Settings2 className="h-4 w-4" aria-hidden="true" /></Button>
               <Button type="button" disabled={drawingBusy} variant="ghost" size="icon" aria-label={drawing.type === DRAWING_TYPE_RECTANGLE ? copy.marketReplay.rectangleDelete : drawing.type === DRAWING_TYPE_TREND_LINE ? copy.marketReplay.trendLineDelete : copy.marketReplay.fibonacciDelete} className="text-slate-400 hover:bg-red-50 hover:text-red-600" onClick={() => void deleteDrawing(drawing.id)}><Trash2 className="h-4 w-4" aria-hidden="true" /></Button>
             </div>) : <p className="p-3 text-xs text-slate-500">{copy.marketReplay.drawingObjectsEmpty}</p>}
           </div>
@@ -569,6 +589,22 @@ export function HistoricalReplayClient({
       const drawing = drawings.find(d => d.id === rectangleStyleId);
       return drawing?.type === DRAWING_TYPE_RECTANGLE ? <RectangleSettingsDialog key={drawing.id} drawing={drawing} templates={rectangleTemplates}
         onTemplatesChange={setRectangleTemplates} onClose={() => setRectangleStyleId(null)} onSave={style => saveRectangleStyle(drawing.id, style)} /> : null;
+    })()}
+    {(() => {
+      const drawing = drawings.find(item => item.id === styleDrawingId);
+      return drawing && drawing.type !== DRAWING_TYPE_RECTANGLE && styleDraft ? <LineSettingsDialog key={drawing.id}
+        drawing={drawing} draft={styleDraft} onDraftChange={setStyleDraft}
+        templates={drawing.type === DRAWING_TYPE_FIB_RETRACEMENT ? fibonacciTemplates : trendLineTemplates}
+        onTemplatesChange={templates => {
+          if (drawing.type === DRAWING_TYPE_FIB_RETRACEMENT) setFibonacciTemplates(templates as typeof fibonacciTemplates);
+          else setTrendLineTemplates(templates as typeof trendLineTemplates);
+        }} onClose={() => { setStyleDrawingId(null); setStyleDraft(null); }}
+        onSave={async style => {
+          if (!await drawingState.update(drawing.id, { style })) return false;
+          if (drawing.type === DRAWING_TYPE_FIB_RETRACEMENT) setDefaultFibonacciStyle(cloneLineDrawingStyle(style) as FibonacciRetracementStyle);
+          else if ("color" in style) setDefaultTrendLineStyle({ ...style });
+          return true;
+        }} /> : null;
     })()}
     <Dialog open={settingsDialog === "candlesticks"} title={copy.marketReplay.candlestickSettings} description={copy.marketReplay.candlestickSettingsDescription} className="max-w-md" onClose={() => { setCandlestickStyleDraft(null); setSettingsDialog(null); }}>
       {candlestickStyleDraft ? <div className="space-y-5">
