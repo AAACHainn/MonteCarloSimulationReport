@@ -17,6 +17,32 @@ export function replayDatasetUpdate(current: MarketDatasetSummary, next: MarketD
   return "none";
 }
 
+/** Keep a display revision pending until its window is actually applied. Retry
+ * failed, aborted or stale reads serially; disposing fences a late completion.
+ */
+export function startDisplayMetadataRefresh(options: {
+  load: (isActive: () => boolean) => Promise<boolean>;
+  applied: () => void;
+  failed: (error: unknown) => void;
+  shouldRetry?: () => boolean;
+}) {
+  let active = true;
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  async function attempt() {
+    if (!active || options.shouldRetry?.() === false) return;
+    try {
+      const applied = await options.load(() => active);
+      if (!active) return;
+      if (applied) { options.applied(); return; }
+    } catch (error) {
+      if (active) options.failed(error);
+    }
+    if (active && options.shouldRetry?.() !== false) timer = setTimeout(() => { void attempt(); }, 5000);
+  }
+  void attempt();
+  return () => { active = false; clearTimeout(timer); };
+}
+
 /** Reclassify retained historical candles as well as the fresh tail. Keeping the
  * loaded prefix lets the chart preserve a manually panned viewport during refresh.
  */

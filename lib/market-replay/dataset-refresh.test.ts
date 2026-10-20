@@ -1,5 +1,5 @@
-import { describe, expect, it } from "vitest";
-import { mergeRefreshedReplayWindow, replayDatasetUpdate, replayDisplayMetadataKey } from "./dataset-refresh";
+import { afterEach, describe, expect, it, vi } from "vitest";
+import { mergeRefreshedReplayWindow, replayDatasetUpdate, replayDisplayMetadataKey, startDisplayMetadataRefresh } from "./dataset-refresh";
 import { aggregateMarketBars, mergeSourceBarInto } from "./aggregation";
 import { displayBarScopeKey, marketChunkKey } from "./bar-cache";
 import { canUpdateReplayTail, chartCandleData } from "./chart-data";
@@ -56,5 +56,126 @@ describe("opened replay display refresh (AR-03)", () => {
       open: 1, high: 2, low: 0, close: 1, volume: null, sourceCount: 2, expectedCount: 5, phase: "CLOSED", quality: "GAP", status: "INCOMPLETE", confirmedGap: true } as AggregatedMarketBarData;
     const result = mergeRefreshedReplayWindow([bar, { ...bar, timestamp: new Date(5000).toISOString(), firstSequence: 2, lastSequence: 3 }], [], [], [], 0, "TRADE_DRIVEN", 1);
     expect(result.bars).toEqual([{ ...bar, emissionMode: "TRADE_DRIVEN" }]);
+  });
+});
+
+describe("pending display refresh recovery", () => {
+  afterEach(() => { vi.useRealTimers(); });
+
+  it("keeps the signature pending after a read failure and retries even if dataset polling sees no change", async () => {
+    vi.useFakeTimers();
+    const next = { ...dataset, barEmissionMode: "TRADE_DRIVEN" as const };
+    const wanted = replayDisplayMetadataKey(next);
+    let displayed = replayDisplayMetadataKey(dataset);
+    const load = vi.fn().mockRejectedValueOnce(new Error("offline")).mockResolvedValueOnce(true);
+    const failed = vi.fn();
+    const applied = vi.fn(() => { displayed = wanted; });
+    const stop = startDisplayMetadataRefresh({ load, failed, applied });
+    expect(displayed).not.toBe(wanted);
+    await vi.advanceTimersByTimeAsync(0);
+    expect(failed).toHaveBeenCalledTimes(1);
+    expect(applied).not.toHaveBeenCalled();
+    expect(replayDatasetUpdate(next, { ...next })).toBe("none");
+    await vi.advanceTimersByTimeAsync(4999);
+    expect(load).toHaveBeenCalledTimes(1);
+    await vi.advanceTimersByTimeAsync(1);
+    expect(displayed).toBe(wanted);
+    expect(applied).toHaveBeenCalledTimes(1);
+    await vi.advanceTimersByTimeAsync(20000);
+    expect(load).toHaveBeenCalledTimes(2);
+    stop();
+  });
+
+  it("retries a window discarded after the replay cursor moves and reads the latest cursor", async () => {
+    vi.useFakeTimers();
+    let cursor = 10;
+    let finishRead!: () => void;
+    const firstRead = new Promise<void>(resolve => { finishRead = resolve; });
+    const seen: number[] = [];
+    const load = vi.fn(async () => {
+      const requested = cursor;
+      seen.push(requested);
+      if (seen.length === 1) await firstRead;
+      return requested === cursor;
+    });
+    const applied = vi.fn();
+    const failed = vi.fn();
+    const stop = startDisplayMetadataRefresh({ load, applied, failed });
+    cursor = 11;
+    finishRead();
+    await vi.advanceTimersByTimeAsync(0);
+    expect(applied).not.toHaveBeenCalled();
+    await vi.advanceTimersByTimeAsync(5000);
+    expect(seen).toEqual([10, 11]);
+    expect(applied).toHaveBeenCalledTimes(1);
+    expect(failed).not.toHaveBeenCalled();
+    stop();
+  });
+
+  it.each([true, false])("fences a late read after effect cleanup (result=%s)", async result => {
+    vi.useFakeTimers();
+    let finishRead!: (value: boolean) => void;
+    let activeDuringRead!: () => boolean;
+    const load = vi.fn((isActive: () => boolean) => {
+      activeDuringRead = isActive;
+      return new Promise<boolean>(resolve => { finishRead = resolve; });
+    });
+    const applied = vi.fn();
+    const failed = vi.fn();
+    const stop = startDisplayMetadataRefresh({ load, applied, failed });
+    expect(activeDuringRead()).toBe(true);
+    stop();
+    expect(activeDuringRead()).toBe(false);
+    finishRead(result);
+    await vi.advanceTimersByTimeAsync(20000);
+    expect(applied).not.toHaveBeenCalled();
+    expect(failed).not.toHaveBeenCalled();
+    expect(load).toHaveBeenCalledTimes(1);
+  });
+
+  it("cancels a scheduled retry on cleanup and never overlaps outstanding reads", async () => {
+    vi.useFakeTimers();
+    let finishRead!: (value: boolean) => void;
+    const load = vi.fn(() => new Promise<boolean>(resolve => { finishRead = resolve; }));
+    const applied = vi.fn();
+    const stop = startDisplayMetadataRefresh({ load, applied, failed: vi.fn() });
+    await vi.advanceTimersByTimeAsync(20000);
+    expect(load).toHaveBeenCalledTimes(1);
+    finishRead(false);
+    await vi.advanceTimersByTimeAsync(0);
+    stop();
+    await vi.advanceTimersByTimeAsync(20000);
+    expect(load).toHaveBeenCalledTimes(1);
+    expect(applied).not.toHaveBeenCalled();
+  });
+
+  it("does not let a cancelled revision's late error override a newer successful refresh", async () => {
+    vi.useFakeTimers();
+    let failOldRead!: (error: Error) => void;
+    const oldApplied = vi.fn();
+    const failed = vi.fn();
+    const stopOld = startDisplayMetadataRefresh({ load: () => new Promise<boolean>((_resolve, reject) => { failOldRead = reject; }), applied: oldApplied, failed });
+    stopOld();
+    const newApplied = vi.fn();
+    const stopNew = startDisplayMetadataRefresh({ load: async () => true, applied: newApplied, failed });
+    await vi.advanceTimersByTimeAsync(0);
+    failOldRead(new Error("old revision went offline"));
+    await vi.advanceTimersByTimeAsync(20000);
+    expect(newApplied).toHaveBeenCalledTimes(1);
+    expect(oldApplied).not.toHaveBeenCalled();
+    expect(failed).not.toHaveBeenCalled();
+    stopNew();
+  });
+
+  it("does not retry when a source history conflict makes recovery unsafe", async () => {
+    vi.useFakeTimers();
+    let allowed = true;
+    const load = vi.fn(async () => { allowed = false; return false; });
+    const applied = vi.fn();
+    const stop = startDisplayMetadataRefresh({ load, applied, failed: vi.fn(), shouldRetry: () => allowed });
+    await vi.advanceTimersByTimeAsync(20000);
+    expect(load).toHaveBeenCalledTimes(1);
+    expect(applied).not.toHaveBeenCalled();
+    stop();
   });
 });

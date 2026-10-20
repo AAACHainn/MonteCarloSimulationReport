@@ -53,7 +53,7 @@ import {
 } from "@/lib/market-replay/engine";
 import { aggregateMarketBars, getAggregationBucket, mergeSourceBarInto } from "@/lib/market-replay/aggregation";
 import { closeAggregatedBar } from "@/lib/market-replay/bar-quality";
-import { mergeRefreshedReplayWindow, replayDatasetUpdate, replayDisplayMetadataKey } from "@/lib/market-replay/dataset-refresh";
+import { mergeRefreshedReplayWindow, replayDatasetUpdate, replayDisplayMetadataKey, startDisplayMetadataRefresh } from "@/lib/market-replay/dataset-refresh";
 import { canAdvanceFlatAccount } from "@/lib/paper-trading/flat-advance";
 import { calculateLatestAbr } from "@/lib/market-replay/abr";
 import { isValidBarCountInterval, isValidBarCountRecentTradingDays } from "@/lib/market-replay/bar-count";
@@ -695,7 +695,8 @@ export function MarketReplayClient({ dataset: initialDataset, initialJournalFocu
     reviewOnly = false,
     focusJournalNo: number | null = null,
     preserveHistory = false,
-  ) => {
+    canApply: () => boolean = () => true,
+  ): Promise<boolean> => {
     const windowStartedAt = performance.now();
     const expectedGeneration = latestReplayRef.current?.generation ?? null;
     historyEpochRef.current += 1;
@@ -722,7 +723,7 @@ export function MarketReplayClient({ dataset: initialDataset, initialJournalFocu
         data = body as WindowPayload;
         windowCache.current.set(cacheKey, data);
       } catch (error) {
-        if (controller.signal.aborted) return;
+        if (controller.signal.aborted) return false;
         throw error;
       } finally {
         if (windowAbortRef.current === controller) windowAbortRef.current = null;
@@ -733,14 +734,14 @@ export function MarketReplayClient({ dataset: initialDataset, initialJournalFocu
       end: performance.now(),
     });
     performance.clearMeasures(cacheHit ? "market-replay-window-cache" : "market-replay-window-network");
-    if (requestId !== windowRequestRef.current) return;
+    if (!canApply() || requestId !== windowRequestRef.current) return false;
     if (!reviewOnly) {
       const live = latestReplayRef.current;
       if (!live
         || live.generation !== expectedGeneration
         || live.currentSequence !== endSequence
         || live.displayIntervalSeconds !== displayIntervalSeconds
-        || live.displaySession !== displaySession) return;
+        || live.displaySession !== displaySession) return false;
     }
     const closeCompletedBucket = (bar: AggregatedMarketBarData) => (
       bar.timestamp === completedDisplayBucketStart
@@ -772,6 +773,7 @@ export function MarketReplayClient({ dataset: initialDataset, initialJournalFocu
       const anchor = tradingDayForTimestamp(data.lastSourceBar?.timestamp ?? dataset.startTime, marketSession);
       marketCache.prefetch(anchor);
     }
+    return true;
   }, [dataset, getDisplayCache, latestReplayRef, loadTradeAnnotations, marketCache, marketSession, windowCache, fetch, confirmedPaperSnapshotRef, paperSessionLoadedRef]);
 
   const primeWindow = useCallback(async (
@@ -1255,32 +1257,37 @@ export function MarketReplayClient({ dataset: initialDataset, initialJournalFocu
   useEffect(() => {
     const metadata = replayDisplayMetadataKey(dataset);
     if (isLoading || metadata === displayedMetadataRef.current) return;
-    displayedMetadataRef.current = metadata;
     // Fence responses requested with the old display semantics immediately.
     windowRequestRef.current += 1;
     windowAbortRef.current?.abort();
     historyEpochRef.current += 1;
     historyAbortRef.current?.abort();
-    const suspension = suspendPlayback();
-    let cancelled = false;
-    void (async () => {
-      try {
-        await advanceCompletionRef.current;
-        await paperMutationChainRef.current;
-        const current = latestReplayRef.current;
-        if (cancelled || !current || historyConflictRef.current) return;
-        const reviewOnly = chartWindowDetachedRef.current || journalReview !== null;
-        const end = reviewOnly ? barsRef.current.at(-1)?.lastSequence ?? current.currentSequence : current.currentSequence;
-        await loadWindow(end, current.displayIntervalSeconds, current.displaySession, indicatorWarmupCountRef.current,
-          null, null, reviewOnly, journalReview?.globalNo ?? null, true);
-      } catch (error) {
-        if (!cancelled) {
-          setPaperError(error instanceof Error ? error.message : copy.marketReplay.loadError);
-          autoPausePlayback("operation-failed");
-        }
-      } finally { restorePlayback(suspension); }
-    })();
-    return () => { cancelled = true; };
+    let refreshError: string | null = null;
+    return startDisplayMetadataRefresh({
+      shouldRetry: () => !historyConflictRef.current,
+      load: async isActive => {
+        const suspension = suspendPlayback();
+        try {
+          await advanceCompletionRef.current;
+          await paperMutationChainRef.current;
+          const current = latestReplayRef.current;
+          if (!isActive() || !current || historyConflictRef.current) return false;
+          const reviewOnly = chartWindowDetachedRef.current || journalReview !== null;
+          const end = reviewOnly ? barsRef.current.at(-1)?.lastSequence ?? current.currentSequence : current.currentSequence;
+          return await loadWindow(end, current.displayIntervalSeconds, current.displaySession, indicatorWarmupCountRef.current,
+            null, null, reviewOnly, journalReview?.globalNo ?? null, true, isActive);
+        } finally { restorePlayback(suspension); }
+      },
+      applied: () => {
+        displayedMetadataRef.current = metadata;
+        if (refreshError !== null) setPaperError(current => current === refreshError ? null : current);
+      },
+      failed: error => {
+        refreshError = error instanceof Error ? error.message : copy.marketReplay.loadError;
+        setPaperError(refreshError);
+        autoPausePlayback("operation-failed");
+      },
+    });
   }, [autoPausePlayback, dataset, isLoading, journalReview, latestReplayRef, loadWindow, paperMutationChainRef, restorePlayback, suspendPlayback]);
 
   useEffect(() => {
