@@ -1,80 +1,31 @@
 import { prisma } from "@/lib/db";
-import { aggregateMarketSegments, getAggregationBucket, getAdjacentAggregationBucketStart, type AggregationSegment } from "./aggregation";
-import { marketBarBlockSizeForMultiplier } from "./history";
-import type { AggregatedMarketBarData, TradingSessionConfig } from "./types";
+import { getAggregationBucket, getAdjacentAggregationBucketStart } from "./aggregation";
+import { accountQuery, readAggregationRanges, WindowSourceBudgetError, type TimeRange, type AggregationReadMetrics } from "./aggregation-reader";
+import type { MarketDataset } from "@prisma/client";
+import { REPLAY_HISTORY_RAW_SOURCE_BUDGET } from "./types";
+import type { TradingSessionConfig } from "./types";
+import { activeAggregation } from "./aggregation-storage";
 import type { PdfWindow } from "@/lib/paper-trading/pdf-types";
 
-type Options = { datasetId: string; anchorSequence: number; direction: "forward" | "backward"; count: number; warmupCount: number; endSequence: number; finalSequence?: number; sourceSeconds: number; displaySeconds: number; session: TradingSessionConfig; signal?: AbortSignal; budget?: { rows: number; queries: number } };
-function checkpoint(o: Options, rows = 0) {
-  o.signal?.throwIfAborted();
-  if (o.budget) {
-    o.budget.rows -= rows; o.budget.queries--;
-    if (o.budget.rows < 0 || o.budget.queries < 0) throw new Error("EXPORT_WINDOW_BUDGET");
-  }
-}
-const select = { sequence: true, timestamp: true, open: true, high: true, low: true, close: true, volume: true } as const;
-
-/** Read only existing summaries, and stream uncovered rows in bounded chunks. */
-async function bucketBar(o: Options, start: number, end: number) {
-  checkpoint(o);
-  const size = marketBarBlockSizeForMultiplier(o.displaySeconds / o.sourceSeconds);
-  const blocks = size === null ? [] : await prisma.marketBarBlock.findMany({
-    where: { datasetId: o.datasetId, blockSize: size, startTime: { gte: new Date(start) }, endTime: { lt: new Date(end) }, endSequence: { lte: o.endSequence } },
-    orderBy: { startSequence: "asc" },
-  });
-  const segments: AggregationSegment[] = blocks.map((b) => ({
-    firstSequence: b.startSequence, lastSequence: b.endSequence, timestamp: b.startTime.toISOString(), endTimestamp: b.endTime.toISOString(),
-    open: b.open, high: b.high, low: b.low, close: b.close, volume: b.volumeCount ? b.volume : null, sourceCount: b.barCount,
-  }));
-  checkpoint(o, blocks.length);
-  const ranges: { start: number; end: number }[] = [];
-  let cursor = start;
-  for (const b of blocks) {
-    const time = b.startTime.getTime();
-    if (cursor < time) ranges.push({ start: cursor, end: time });
-    cursor = b.endTime.getTime() + o.sourceSeconds * 1000;
-  }
-  if (cursor < end) ranges.push({ start: cursor, end });
-  for (const range of ranges) {
-    let time = range.start;
-    let combined: AggregationSegment | null = null;
-    while (time < range.end) {
-      checkpoint(o);
-      const rows = await prisma.marketBar.findMany({
-        where: { datasetId: o.datasetId, sequence: { lte: o.endSequence }, timestamp: { gte: new Date(time), lt: new Date(range.end) } },
-        orderBy: { timestamp: "asc" }, take: 4096, select,
-      });
-      checkpoint(o, rows.length);
-      if (!rows.length) break;
-      for (const b of rows) {
-        if (!combined) combined = { firstSequence: b.sequence, lastSequence: b.sequence, timestamp: b.timestamp.toISOString(), endTimestamp: b.timestamp.toISOString(), open: b.open, high: b.high, low: b.low, close: b.close, volume: b.volume, sourceCount: 1 };
-        else {
-          combined.lastSequence = b.sequence; combined.endTimestamp = b.timestamp.toISOString(); combined.high = Math.max(combined.high, b.high);
-          combined.low = Math.min(combined.low, b.low); combined.close = b.close; combined.sourceCount++;
-          if (b.volume !== null) combined.volume = (combined.volume ?? 0) + b.volume;
-        }
-      }
-      time = rows.at(-1)!.timestamp.getTime() + 1;
-      if (rows.length < 4096) break;
-    }
-    if (combined) segments.push(combined);
-  }
-  return aggregateMarketSegments({ segments: segments.sort((a, b) => a.firstSequence - b.firstSequence), sourceSeconds: o.sourceSeconds, displaySeconds: o.displaySeconds, session: o.session, currentSequence: o.endSequence, finalSequence: o.finalSequence ?? o.endSequence })[0] ?? null;
-}
+type Options = { datasetId: string; anchorSequence: number; direction: "forward" | "backward"; count: number; warmupCount: number; endSequence: number; finalSequence?: number; sourceSeconds: number; displaySeconds: number; session: TradingSessionConfig; signal?: AbortSignal; budget?: { rows: number; queries: number }; dataset?: MarketDataset; revealedEndTime?: number; metrics?: AggregationReadMetrics };
+function checkpoint(o: Options) { accountQuery(o); }
 
 /** Walk real buckets via the timestamp index, jumping closures and data gaps. */
 async function collect(o: Options, time: number, direction: 1 | -1, count: number) {
-  const bars: AggregatedMarketBarData[] = [];
-  while (bars.length < count) {
+  const dataset = o.dataset ?? await prisma.marketDataset.findUniqueOrThrow({ where: { id: o.datasetId } });
+  const parts: import("./types").AggregatedMarketBarData[][] = [];
+  const rawBudget = { remaining: REPLAY_HISTORY_RAW_SOURCE_BUDGET };
+  let collected = 0;
+  while (collected < count) {
     checkpoint(o);
     const row = await prisma.marketBar.findFirst({
-      where: { datasetId: o.datasetId, sequence: { lte: o.endSequence }, timestamp: direction === 1 ? { gte: new Date(time) } : { lt: new Date(time) } },
+      where: { datasetId: o.datasetId, sequence: { lte: o.endSequence }, timestamp: direction === 1 ? { gte: new Date(time), lte: new Date(o.revealedEndTime!) } : { lt: new Date(Math.min(time, o.revealedEndTime! + 1)) } },
       orderBy: { timestamp: direction === 1 ? "asc" : "desc" }, select: { timestamp: true },
     });
     o.signal?.throwIfAborted();
     if (!row) break;
     const timestamp = row.timestamp.getTime();
-    const bucket = getAggregationBucket(timestamp, o.sourceSeconds, o.displaySeconds, o.session);
+    let bucket = getAggregationBucket(timestamp, o.sourceSeconds, o.displaySeconds, o.session);
     if (!bucket) {
       const adjacent = getAdjacentAggregationBucketStart(timestamp, direction, o.displaySeconds, o.session);
       if (adjacent === null) break;
@@ -83,14 +34,43 @@ async function collect(o: Options, time: number, direction: 1 | -1, count: numbe
       time = direction === 1 ? next.start : next.end;
       continue;
     }
-    const bar = await bucketBar(o, bucket.start, bucket.end);
-    if (bar) bars.push(bar);
-    time = direction === 1 ? bucket.end : bucket.start;
+    const ranges: TimeRange[] = [];
+    while (bucket && ranges.length < count - collected && bucket.end > dataset.startTime.getTime() && bucket.start <= o.revealedEndTime!) {
+      ranges.push({ start: bucket.start, end: bucket.end });
+      const adjacent = getAdjacentAggregationBucketStart(bucket.start, direction, o.displaySeconds, o.session);
+      bucket = adjacent === null ? null : getAggregationBucket(adjacent, o.sourceSeconds, o.displaySeconds, o.session);
+    }
+    if (!ranges.length) break;
+    let selected = direction === 1 ? ranges : ranges.reverse();
+    let shortened = false;
+    for (;;) {
+      try {
+        const bars = await readAggregationRanges({ ...o, dataset, rawBudget }, selected);
+        parts.push(bars); collected += bars.length;
+        break;
+      } catch (error) {
+        if (!(error instanceof WindowSourceBudgetError)) throw error;
+        if (selected.length <= 1) {
+          if (!collected) throw error;
+          shortened = true; break;
+        }
+        shortened = true;
+        const size = Math.max(1, Math.floor(selected.length / 2));
+        selected = direction === 1 ? selected.slice(0, size) : selected.slice(-size);
+      }
+    }
+    time = direction === 1 ? selected.at(-1)!.end : selected[0].start;
+    if (shortened) break;
   }
-  return direction === 1 ? bars : bars.reverse();
+  return (direction === 1 ? parts : parts.reverse()).flat();
 }
 
 export async function readExportWindow(o: Options): Promise<PdfWindow> {
+  o = { ...o, dataset: o.dataset ?? await prisma.marketDataset.findUniqueOrThrow({ where: { id: o.datasetId } }) };
+  if (o.displaySeconds > o.sourceSeconds) await activeAggregation(o.dataset!);
+  const last = await prisma.marketBar.findUnique({ where: { datasetId_sequence: { datasetId: o.datasetId, sequence: o.endSequence } }, select: { timestamp: true } });
+  if (!last) return { bars: [], warmupBars: [], previousSequence: null, nextSequence: null };
+  o.revealedEndTime = last.timestamp.getTime();
   const anchor = await prisma.marketBar.findUnique({ where: { datasetId_sequence: { datasetId: o.datasetId, sequence: o.anchorSequence } }, select: { timestamp: true } });
   if (!anchor) return { bars: [], warmupBars: [], previousSequence: null, nextSequence: null };
   const time = anchor.timestamp.getTime();

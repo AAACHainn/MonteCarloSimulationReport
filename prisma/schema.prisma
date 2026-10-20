@@ -271,7 +271,7 @@ model MarketDataset {
   historyVersion        Int     @default(1)
   replayGeneration      Int     @default(0)
   nextReplayJournalNo   Int     @default(0)
-  barBlockBuildCursor   Int     @default(-1)
+  activeAggregationId   String?
   sourceIntervalSeconds Int?
   priceTickSize         Float   @default(0.01)
   sessionMode           String  @default("TWENTY_FOUR_SEVEN")
@@ -282,8 +282,8 @@ model MarketDataset {
   startTime    DateTime
   endTime      DateTime
   bars         MarketBar[]
-  barBlocks    MarketBarBlock[]
-  barBlockBuildStates MarketBarBlockBuildState[]
+  aggregationGenerations MarketAggregationGeneration[]
+  aggregationJobs MarketAggregationJob[]
   importJobs   MarketDatasetImport[]
   progress     ReplayProgress[]
   paperSession PaperTradingSession[]
@@ -384,34 +384,62 @@ model MarketDrawing {
   @@index([replaySessionId, createdAt])
 }
 
-model MarketBarBlock {
-  datasetId    String
-  dataset      MarketDataset @relation(fields: [datasetId], references: [id], onDelete: Cascade)
-  blockSize     Int           @default(4096)
-  startSequence Int
-  endSequence   Int
-  startTime     DateTime
-  endTime       DateTime
-  open           Float
-  high           Float
-  low            Float
-  close          Float
-  volume         Float?
-  volumeCount    Int
-  barCount       Int
-
-  @@id([datasetId, blockSize, startSequence])
-  @@index([datasetId, blockSize, startTime, endTime])
+model MarketAggregationGeneration {
+  id String @id @default(cuid())
+  datasetId String
+  dataset MarketDataset @relation(fields: [datasetId], references: [id], onDelete: Cascade)
+  ruleVersion Int
+  historyVersion Int
+  fingerprint String
+  cursor Int @default(-1)
+  tailState String @default("{}")
+  status String @default("BUILDING")
+  bars MarketAggregatedBar[]
+  jobs MarketAggregationJob[]
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+  @@index([datasetId, createdAt])
 }
 
-model MarketBarBlockBuildState {
-  datasetId  String
-  dataset    MarketDataset @relation(fields: [datasetId], references: [id], onDelete: Cascade)
-  blockSize  Int
-  cursor     Int           @default(-1)
-  updatedAt  DateTime      @updatedAt
+model MarketAggregatedBar {
+  generationId String
+  generation MarketAggregationGeneration @relation(fields: [generationId], references: [id], onDelete: Cascade)
+  scope String
+  intervalSeconds Int
+  bucketStart DateTime
+  bucketEnd DateTime
+  firstSequence Int
+  lastSequence Int
+  firstTime DateTime
+  lastTime DateTime
+  open Float
+  high Float
+  low Float
+  close Float
+  volume Float?
+  volumeCount Int
+  sourceCount Int
+  expectedCount Int
+  @@id([generationId, scope, intervalSeconds, bucketStart])
+}
 
-  @@id([datasetId, blockSize])
+model MarketAggregationJob {
+  id String @id @default(cuid())
+  datasetId String
+  dataset MarketDataset @relation(fields: [datasetId], references: [id], onDelete: Cascade)
+  activeDatasetId String? @unique
+  generationId String?
+  generation MarketAggregationGeneration? @relation(fields: [generationId], references: [id], onDelete: SetNull)
+  status String @default("QUEUED")
+  targetSequence Int
+  cursor Int @default(-1)
+  cancelRequested Boolean @default(false)
+  workerToken String?
+  leaseUntil DateTime?
+  error String?
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+  @@index([datasetId, createdAt])
 }
 
 model MarketDatasetImport {

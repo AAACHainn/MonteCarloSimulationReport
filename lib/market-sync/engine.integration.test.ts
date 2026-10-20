@@ -6,6 +6,7 @@ vi.mock("@/lib/db", async () => {
   const { PrismaClient } = await import("@prisma/client"); const { tmpdir } = await import("node:os"); const { join } = await import("node:path");
   return { prisma: new PrismaClient({ datasourceUrl: `file:${join(tmpdir(), "market-sync-" + randomUUID() + ".db")}` }), replayDatabaseQueryCount: () => null };
 });
+import { queueAggregation, processAggregationJob } from "@/lib/market-replay/aggregation-jobs";
 import { prisma } from "@/lib/db";
 import { configView, enqueueSync, saveConfig, saveConnection, getConnection } from "./service";
 import { executeSyncRun } from "./engine";
@@ -32,6 +33,7 @@ async function fixture(budget = 10) {
   const id = randomUUID();
   await prisma.marketDataset.create({ data: { id, name: "ES", symbol: "ES", timeframe: "1m", timezone: "UTC", sourceIntervalSeconds: 60, barCount: 2, startTime: new Date(base), endTime: new Date(base + 60000) } });
   await prisma.marketBar.createMany({ data: [0, 1].map((i) => { const { symbol: _symbol, ...value } = bar(i); void _symbol; return { ...value, datasetId: id, sequence: i }; }) });
+  await processAggregationJob((await queueAggregation(id)).id);
   await saveConfig(id, { mode: "MANUAL", profile: { root: "ES", interval: 60, contractMode: "CONTINUOUS", contract: "" }, schedule: defaultSchedule(), perRunBudget: budget, dailyBudget: budget });
   return id;
 }
@@ -51,6 +53,8 @@ describe("persistent incremental market synchronization", () => {
     await executeSyncRun(run.id, new AbortController().signal, provider());
     expect(await prisma.marketDataset.findUnique({ where: { id } })).toMatchObject({ barCount: 4, dataVersion: 2, historyVersion: 1 });
     expect((await prisma.replayProgress.findFirst({ where: { datasetId: id } }))?.currentSequence).toBe(0);
+    const active = await prisma.marketDataset.findUniqueOrThrow({ where: { id } });
+    expect(await prisma.marketAggregationGeneration.findUniqueOrThrow({ where: { id: active.activeAggregationId! } })).toMatchObject({ status: "READY", cursor: 3 });
     expect((await prisma.marketDatasetSyncConfig.findUnique({ where: { datasetId: id } }))?.checkedThrough).toEqual(new Date(base + 240000));
     const next = await enqueueSync(id); const noData = provider(); const fetchBars = vi.spyOn(noData, "bars");
     await executeSyncRun(next.id, new AbortController().signal, noData); expect(fetchBars).not.toHaveBeenCalled();

@@ -19,6 +19,7 @@ vi.mock("@/lib/db", async () => {
 
 import { prisma } from "@/lib/db";
 import { processImportJob } from "./import-jobs";
+import * as timeAggregation from "./time-aggregation";
 import { DELETE as cancelImportJob } from "@/app/api/market-dataset-imports/[jobId]/route";
 
 vi.setConfig({ testTimeout: 30_000 });
@@ -66,6 +67,17 @@ const csv = [
 ].join("\n");
 
 describe("market dataset streaming import", () => {
+  it("retains successfully parsed raw data when aggregation alone fails", async () => {
+    const job = await makeImportJob([standardHeader, standardRow(0), standardRow(1)].join("\n"), { ...metadata, symbol: "MGC", sourceIntervalSeconds: 60 });
+    const failed = vi.spyOn(timeAggregation, "aggregateTimeChunk").mockImplementationOnce(() => { throw new Error("aggregation-only failure"); });
+    try { await processImportJob(job.id); } finally { failed.mockRestore(); }
+    const imported = await prisma.marketDatasetImport.findUniqueOrThrow({ where: { id: job.id } });
+    expect(imported.status).toBe("COMPLETED");
+    const dataset = await prisma.marketDataset.findUniqueOrThrow({ where: { id: imported.datasetId! } });
+    expect(dataset).toMatchObject({ status: "READY", barCount: 2, activeAggregationId: null });
+    expect(await prisma.marketBar.count({ where: { datasetId: dataset.id } })).toBe(2);
+    expect(await prisma.marketAggregationGeneration.findFirst({ where: { datasetId: dataset.id } })).toMatchObject({ status: "FAILED" });
+  });
   it.each([
     ["CSV", false],
     ["CSV.GZ", true],
@@ -90,7 +102,7 @@ describe("market dataset streaming import", () => {
     const job = await prisma.marketDatasetImport.findUniqueOrThrow({ where: { id: jobId } });
     const dataset = await prisma.marketDataset.findUniqueOrThrow({ where: { id: job.datasetId! } });
     const bars = await prisma.marketBar.findMany({ where: { datasetId: dataset.id }, orderBy: { sequence: "asc" } });
-    const blocks = await prisma.marketBarBlock.findMany({ where: { datasetId: dataset.id } });
+    const generation = await prisma.marketAggregationGeneration.findUniqueOrThrow({ where: { id: dataset.activeAggregationId! } });
 
     expect(job).toMatchObject({
       status: "COMPLETED", stage: "COMPLETED", processedRows: 4, totalRows: 4,
@@ -99,16 +111,13 @@ describe("market dataset streaming import", () => {
     expect(job.stageProcessedBytes).toBe(job.stageTotalBytes);
     expect(Number(job.peakWorkerRssBytes)).toBeGreaterThan(0);
     expect(dataset).toMatchObject({
-      symbol: "ES", timeframe: "1m", sourceIntervalSeconds: 60, barCount: 2, barBlockBuildCursor: 1,
+      symbol: "ES", timeframe: "1m", sourceIntervalSeconds: 60, barCount: 2, activeAggregationId: expect.any(String),
     });
     expect(bars.map((bar) => ({ sequence: bar.sequence, close: bar.close, volume: bar.volume }))).toEqual([
       { sequence: 0, close: 4538.25, volume: 576 },
       { sequence: 1, close: 4538, volume: 367 },
     ]);
-    expect(blocks).toHaveLength(3);
-    expect(blocks).toEqual(expect.arrayContaining([64, 512, 4_096].map((blockSize) => expect.objectContaining({
-      blockSize, startSequence: 0, endSequence: 1, barCount: 2, volume: 943, volumeCount: 2,
-    }))));
+    expect(generation).toMatchObject({ cursor: 1, status: "READY" });
   });
 
   it("infers an ordinary CSV's source interval from its timestamp cadence", async () => {
@@ -252,22 +261,21 @@ describe("market dataset append import", () => {
     expect(result).toMatchObject({ status: "COMPLETED", datasetId: target.id, importedBars: 2, totalRows: 5 });
     expect(JSON.parse(result.metadata).preview).toMatchObject({ overlappingRows: 2, duplicateRows: 1, gapCount: 0 });
     const dataset = await prisma.marketDataset.findUniqueOrThrow({ where: { id: target.id } });
-    expect(dataset).toMatchObject({ barCount: 65, dataVersion: target.dataVersion + 1, startTime: target.startTime, endTime: new Date(appendBaseTime + 64 * 60_000), barBlockBuildCursor: 64 });
+    expect(dataset).toMatchObject({ barCount: 65, dataVersion: target.dataVersion + 1, startTime: target.startTime, endTime: new Date(appendBaseTime + 64 * 60_000), activeAggregationId: target.activeAggregationId });
     const bars = await prisma.marketBar.findMany({ where: { datasetId: target.id }, orderBy: { sequence: "asc" } });
     expect(bars.slice(0, 63)).toEqual(oldBars);
     expect(bars.map((bar) => bar.sequence)).toEqual(Array.from({ length: 65 }, (_, i) => i));
     expect(await prisma.replayProgress.findFirst({ where: { datasetId: target.id } })).toEqual(progress);
     expect(await prisma.paperTradingSession.findFirst({ where: { datasetId: target.id } })).toEqual(account);
-    const blocks = await prisma.marketBarBlock.findMany({ where: { datasetId: target.id } });
-    expect(blocks).toEqual(expect.arrayContaining([
-      expect.objectContaining({ blockSize: 64, startSequence: 0, endSequence: 63, barCount: 64, volume: 320 }),
-      expect.objectContaining({ blockSize: 64, startSequence: 64, endSequence: 64, barCount: 1, volume: 5 }),
-      expect.objectContaining({ blockSize: 512, startSequence: 0, endSequence: 64, barCount: 65, volume: 325 }),
-    ]));
+    const generation = await prisma.marketAggregationGeneration.findUniqueOrThrow({ where: { id: dataset.activeAggregationId! } });
+    expect(generation).toMatchObject({ cursor: 64, status: "READY" });
+    const summaries = await prisma.marketAggregatedBar.findMany({ where: { generationId: generation.id, scope: "BASE", intervalSeconds: 300 }, orderBy: { bucketStart: "asc" } });
+    expect(summaries).toHaveLength(13);
+    expect(summaries.every((bar) => bar.sourceCount === 5 && bar.volume === 25)).toBe(true);
     expect(await prisma.marketDataset.count({ where: { status: "IMPORTING" } })).toBe(0);
   });
 
-  it("deduplicates repeated chunks and rebuilds every partial block across 4,096 bars", async () => {
+  it("deduplicates repeated chunks and continues the checkpointed time buckets across batches", async () => {
     const target = await makeAppendTarget(4095);
     const lines = Array.from({ length: 1002 }, (_, i) => standardRow(4095 + i));
     const job = await makeImportJob([standardHeader, ...lines, ...lines.slice(0, 1000)].join("\n"), appendMetadata(target));
@@ -275,9 +283,12 @@ describe("market dataset append import", () => {
     const result = await prisma.marketDatasetImport.findUniqueOrThrow({ where: { id: job.id } });
     expect(result).toMatchObject({ status: "COMPLETED", importedBars: 1002 });
     expect(JSON.parse(result.metadata).preview.duplicateRows).toBe(1000);
-    const blocks = await prisma.marketBarBlock.findMany({ where: { datasetId: target.id, blockSize: 4096 }, orderBy: { startSequence: "asc" } });
-    expect(blocks).toMatchObject([{ startSequence: 0, endSequence: 4095, barCount: 4096, volume: 20480 }, { startSequence: 4096, endSequence: 5096, barCount: 1001, volume: 5005 }]);
-    expect(await prisma.marketBarBlockBuildState.findMany({ where: { datasetId: target.id } })).toEqual(expect.arrayContaining([64, 512, 4096].map((blockSize) => expect.objectContaining({ blockSize, cursor: 5096 }))));
+    const dataset = await prisma.marketDataset.findUniqueOrThrow({ where: { id: target.id } });
+    const generation = await prisma.marketAggregationGeneration.findUniqueOrThrow({ where: { id: dataset.activeAggregationId! } });
+    expect(generation).toMatchObject({ cursor: 5096, status: "READY" });
+    const bars = await prisma.marketAggregatedBar.findMany({ where: { generationId: generation.id, scope: "BASE", intervalSeconds: 300 } });
+    expect(bars.every((bar) => bar.sourceCount === 5 && bar.volume === 25)).toBe(true);
+    expect(bars).toHaveLength(Math.floor(5097 / 5));
   });
 
   it("stages boundary and internal gaps until the user confirms", async () => {

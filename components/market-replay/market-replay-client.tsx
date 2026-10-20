@@ -155,7 +155,7 @@ type TradeAnnotationsPayload = {
 const REPLAY_SYNC_BATCH_SIZE = 100;
 
 function replayWindowRequest(
-  dataset: Pick<MarketDatasetSummary, "id" | "dataVersion">,
+  dataset: Pick<MarketDatasetSummary, "id" | "dataVersion" | "aggregationGenerationId" | "aggregationRuleVersion">,
   endSequence: number,
   displayIntervalSeconds: number,
   displaySession: DisplaySession,
@@ -164,7 +164,7 @@ function replayWindowRequest(
 ) {
   const limitedWarmup = Math.min(EMA_LENGTH_MAX, warmupCount);
   const cacheKey = [
-    dataset.id, dataset.dataVersion, endSequence, displayIntervalSeconds, displaySession,
+    "time-aggregation-v1", dataset.aggregationRuleVersion, dataset.aggregationGenerationId, dataset.id, dataset.dataVersion, endSequence, displayIntervalSeconds, displaySession,
     DEFAULT_REPLAY_MAX_VISIBLE_BARS, limitedWarmup, focusSequence ?? "live",
   ].join(":");
   const params = new URLSearchParams({

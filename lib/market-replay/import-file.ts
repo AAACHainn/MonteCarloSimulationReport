@@ -5,28 +5,11 @@ import { parse } from "csv-parse";
 import { prisma } from "@/lib/db";
 import { copy } from "@/lib/i18n";
 import { createCsvColumnIndexes, databentoSourceIntervalSeconds, inspectMarketCsvHeaders, parseFiniteNumber,
-  parseMarketTimestamp, readCsvValue, type CsvColumnIndexes, type CsvValues, type MarketCsvFormat, type ParsedMarketBar } from "./parse-market-bars";
+  parseMarketTimestamp, readCsvValue, type CsvColumnIndexes, type CsvValues, type MarketCsvFormat } from "./parse-market-bars";
 import { MAX_MARKET_EXPANDED_BYTES, formatInterval } from "./types";
 import { addCmeDailyVolume, buildCmeVolumeLeadMap, normalizeCmeOutrightSymbol, type CmeDailyVolumes } from "./cme-contracts";
 export const INSERT_CHUNK_SIZE = 1_000;
 export const PROGRESS_UPDATE_MS = 1_000;
-
-export type BlockAccumulator = {
-  startSequence: number; endSequence: number; startTime: Date; endTime: Date;
-  open: number; high: number; low: number; close: number; volume: number | null; volumeCount: number; barCount: number;
-};
-
-export function addToBlock(block: BlockAccumulator | null, bar: ParsedMarketBar) {
-  if (!block) return {
-    startSequence: bar.sequence, endSequence: bar.sequence, startTime: bar.timestamp, endTime: bar.timestamp,
-    open: bar.open, high: bar.high, low: bar.low, close: bar.close, volume: bar.volume,
-    volumeCount: bar.volume === null ? 0 : 1, barCount: 1,
-  };
-  block.endSequence = bar.sequence; block.endTime = bar.timestamp; block.high = Math.max(block.high, bar.high);
-  block.low = Math.min(block.low, bar.low); block.close = bar.close; block.barCount += 1;
-  if (bar.volume !== null) { block.volume = (block.volume ?? 0) + bar.volume; block.volumeCount += 1; }
-  return block;
-}
 
 export function countedCsvStream(path: string, fileName: string) {
   let rawBytes = 0;

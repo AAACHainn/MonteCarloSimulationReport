@@ -39,6 +39,8 @@ export type StoredMarketChunk = MarketBarDayChunk & {
 type StoredMarketChunkMetadata = Pick<StoredMarketChunk, "key" | "serializedBytes" | "writtenAt">;
 
 export type DisplayBarCacheScope = {
+  aggregationGenerationId?: string | null;
+  aggregationRuleVersion?: number;
   datasetId: string;
   dataVersion: number;
   displayIntervalSeconds: number;
@@ -61,7 +63,7 @@ type StoredDisplayScope = {
 };
 
 export function displayBarScopeKey(scope: DisplayBarCacheScope) {
-  return [scope.datasetId, scope.dataVersion, scope.displayIntervalSeconds, scope.displaySession, scope.sessionFingerprint]
+  return ["time-aggregation-v1", scope.aggregationRuleVersion ?? 1, scope.aggregationGenerationId ?? "pending", scope.datasetId, scope.dataVersion, scope.displayIntervalSeconds, scope.displaySession, scope.sessionFingerprint]
     .map(encodeURIComponent).join("|");
 }
 

@@ -85,6 +85,7 @@ async function patchDataset(request: Request, context: RouteContext) {
       priceTickSize: parsed.data.priceTickSize,
       dataVersion: sourceIntervalChanged || parsed.data.priceTickSize !== dataset.priceTickSize ? { increment: 1 } : undefined,
       historyVersion: sourceIntervalChanged || parsed.data.priceTickSize !== dataset.priceTickSize ? { increment: 1 } : undefined,
+      activeAggregationId: sourceIntervalChanged || parsed.data.priceTickSize !== dataset.priceTickSize ? null : undefined,
       progress: progressUpdate,
     } });
     return NextResponse.json({
@@ -116,6 +117,7 @@ async function patchDataset(request: Request, context: RouteContext) {
     tradingWeekdays: parsed.data.tradingWeekdays.join(","),
     dataVersion: { increment: 1 },
     historyVersion: { increment: 1 },
+    activeAggregationId: null,
   } });
   return NextResponse.json({ ok: true });
 }

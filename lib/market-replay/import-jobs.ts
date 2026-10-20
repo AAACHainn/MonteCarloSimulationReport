@@ -4,11 +4,12 @@ import { parse } from "csv-parse";
 import { prisma } from "@/lib/db";
 import { copy } from "@/lib/i18n";
 import { parseMarketCsvRow, type CsvColumnIndexes, type CsvValues, type MarketCsvFormat, type MarketCsvIssue, type ParsedMarketBar } from "./parse-market-bars";
-import { MARKET_BAR_BLOCK_SIZES, MAX_MARKET_BARS, formatInterval } from "./types";
+import { MAX_MARKET_BARS, formatInterval } from "./types";
 import { marketDatasetImportSchema, marketDatasetSchema } from "@/lib/validations";
 import { calculateImportProgress } from "./import-progress";
-import { addToBlock, countedCsvStream, inspectHeaders, inspectImportFile, memorySnapshot, startWorkerHeartbeat,
-  INSERT_CHUNK_SIZE, PROGRESS_UPDATE_MS, type BlockAccumulator, type WorkerMemory } from "./import-file";
+import { countedCsvStream, inspectHeaders, inspectImportFile, memorySnapshot, startWorkerHeartbeat,
+  INSERT_CHUNK_SIZE, PROGRESS_UPDATE_MS, type WorkerMemory } from "./import-file";
+import { createAggregationGeneration, writeAggregationChunk } from "./aggregation-storage";
 import { processAppendImportJob } from "./append-import";
 import type { AppendImportMetadata } from "./append-import-types";
 
@@ -146,10 +147,8 @@ export async function processImportJob(jobId: string) {
     let firstTime: Date | null = null;
     let lastTime: Date | null = null;
     let chunk: Array<ParsedMarketBar & { datasetId: string }> = [];
-    let blocks: Array<BlockAccumulator & { blockSize: number }> = [];
-    const blockAccumulators = new Map<number, BlockAccumulator | null>(
-      MARKET_BAR_BLOCK_SIZES.map((blockSize) => [blockSize, null]),
-    );
+    const aggregation = await createAggregationGeneration(prisma, dataset);
+    let aggregationFailed = false;
     let lastProgressAt = 0;
 
     const persistProgress = async (force = false) => {
@@ -168,12 +167,20 @@ export async function processImportJob(jobId: string) {
 
     const flush = async (forceProgress = false) => {
       if (chunk.length) {
-        await prisma.marketBar.createMany({ data: chunk });
+        if (!aggregationFailed) {
+          try {
+            await prisma.$transaction(async (tx) => {
+              await tx.marketBar.createMany({ data: chunk });
+              await writeAggregationChunk(tx, aggregation.id, dataset, chunk);
+            }, { maxWait: 30000, timeout: 30000 });
+          } catch {
+            // The transaction rolled back the raw chunk too. Retain valid raw data and allow an independent rebuild.
+            aggregationFailed = true;
+            await prisma.marketAggregationGeneration.update({ where: { id: aggregation.id }, data: { status: "FAILED" } });
+            await prisma.marketBar.createMany({ data: chunk });
+          }
+        } else await prisma.marketBar.createMany({ data: chunk });
         chunk = [];
-      }
-      if (blocks.length) {
-        await prisma.marketBarBlock.createMany({ data: blocks.map((item) => ({ ...item, datasetId: dataset.id })) });
-        blocks = [];
       }
       await persistProgress(forceProgress);
     };
@@ -208,21 +215,10 @@ export async function processImportJob(jobId: string) {
         importedBarCount += 1;
         firstTime ??= parsed.bar.timestamp; lastTime = parsed.bar.timestamp;
         chunk.push({ ...parsed.bar, datasetId: dataset.id });
-        for (const blockSize of MARKET_BAR_BLOCK_SIZES) {
-          const nextBlock = addToBlock(blockAccumulators.get(blockSize) ?? null, parsed.bar);
-          if (nextBlock.barCount === blockSize) {
-            blocks.push({ ...nextBlock, blockSize });
-            blockAccumulators.set(blockSize, null);
-          } else {
-            blockAccumulators.set(blockSize, nextBlock);
-          }
-        }
+
       }
       if (rowCount % INSERT_CHUNK_SIZE === 0) await flush();
       if (totalIssues > 1_000) break;
-    }
-    for (const [blockSize, pendingBlock] of blockAccumulators) {
-      if (pendingBlock) blocks.push({ ...pendingBlock, blockSize });
     }
     await flush(true);
     if (importedBarCount < 2) {
@@ -247,7 +243,7 @@ export async function processImportJob(jobId: string) {
         where: { id: dataset.id },
         data: {
           status: "READY", barCount: importedBarCount, startTime: firstTime, endTime: lastTime,
-          barBlockBuildCursor: importedBarCount - 1, dataVersion: { increment: 1 },
+          activeAggregationId: aggregationFailed ? null : aggregation.id, dataVersion: { increment: 1 },
         },
       }),
       prisma.marketDatasetImport.update({
@@ -259,13 +255,9 @@ export async function processImportJob(jobId: string) {
           workerPid: null, ...memorySnapshot(memory),
         },
       }),
-      prisma.marketBarBlockBuildState.createMany({
-        data: MARKET_BAR_BLOCK_SIZES.map((blockSize) => ({
-          datasetId: dataset.id, blockSize, cursor: importedBarCount - 1,
-        })),
-      }),
+      prisma.marketAggregationGeneration.update({ where: { id: aggregation.id }, data: { status: aggregationFailed ? "FAILED" : "READY" } }),
     ]);
-    await rm(job.storedPath, { force: true });
+    await rm(job.storedPath, { force: true }).catch(() => undefined);
   } catch (error) {
     if (datasetId) await prisma.marketDataset.deleteMany({ where: { id: datasetId, status: "IMPORTING" } });
     const fallback = error instanceof Error ? error.message : copy.marketReplay.importError;

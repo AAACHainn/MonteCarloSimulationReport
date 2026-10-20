@@ -4,6 +4,7 @@ import { useEffect, useRef, useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
 import { ChartCandlestick, Loader2, PencilLine, Trash2, Upload } from "lucide-react";
 import { ReplaySessionEntry } from "./replay-session-entry";
+import { MarketAggregationControl } from "./market-aggregation-control";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
@@ -401,6 +402,7 @@ export function MarketDatasetDashboard({ datasets }: { datasets: MarketDatasetSu
                     </div>
                   </div>
                   <MarketSyncSummary dataset={dataset} />
+                  <MarketAggregationControl datasetId={dataset.id} />
                   <div className="flex flex-wrap justify-end gap-2">
                     <Button type="button" variant="outline" size="sm" className="min-h-10 sm:min-h-0" disabled={isImporting || isPending} onClick={() => {
                       setMessage(null); setIssues([]); setMessageIsError(true);

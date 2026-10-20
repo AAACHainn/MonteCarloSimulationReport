@@ -1,7 +1,6 @@
 import { describe, expect, it } from "vitest";
 import {
   contiguousCachedHistoryBefore,
-  marketBarBlockSizeForMultiplier,
   mergeReplayHistory,
   nextHistoryEndSequence,
   replayHistoryPageSize,
@@ -35,15 +34,9 @@ describe("replay history", () => {
   it("caps adaptive pages by both displayed and estimated source bars", () => {
     expect(replayHistoryPageSize(60, 60)).toBe(2_000);
     expect(replayHistoryPageSize(1, 60)).toBe(416);
-    expect(replayHistoryPageSize(1, 86_400)).toBe(1);
+    expect(replayHistoryPageSize(1, 86_400)).toBe(176);
   });
 
-  it("chooses a block level small enough to stay inside most display buckets", () => {
-    expect(marketBarBlockSizeForMultiplier(60)).toBeNull();
-    expect(marketBarBlockSizeForMultiplier(300)).toBe(64);
-    expect(marketBarBlockSizeForMultiplier(3_600)).toBe(512);
-    expect(marketBarBlockSizeForMultiplier(20_000)).toBe(4_096);
-  });
 
   it("returns a backward cursor without crossing dataset start", () => {
     expect(nextHistoryEndSequence([bar(10)])).toBe(9);

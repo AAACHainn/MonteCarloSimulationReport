@@ -5,15 +5,29 @@ import { SyncError } from "./security";
 import { randomUUID } from "node:crypto";
 export const LEASE_MS = 120000;
 type LeaseDb = Prisma.TransactionClient | PrismaClient;
+export async function activeAggregationJob(db: LeaseDb, datasetId: string, now = new Date()) {
+  const job = await db.marketAggregationJob.findUnique({ where: { activeDatasetId: datasetId } });
+  if (job && ((job.status === "RUNNING" && job.leaseUntil && job.leaseUntil <= now)
+    || (job.status === "QUEUED" && job.updatedAt.getTime() <= now.getTime() - LEASE_MS))) {
+    const interrupted = await db.marketAggregationJob.updateMany({ where: { id: job.id, updatedAt: job.updatedAt }, data: {
+      status: "INTERRUPTED", activeDatasetId: null, workerToken: null, leaseUntil: null,
+    } });
+    return interrupted.count ? null : db.marketAggregationJob.findUnique({ where: { activeDatasetId: datasetId } });
+  }
+  return job;
+}
 export async function acquireDatasetLease(db: LeaseDb, datasetId: string, owner: string, now = new Date()) {
+  const aggregation = await activeAggregationJob(db, datasetId, now);
+  if (aggregation && !owner.startsWith(`aggregation_${aggregation.id}_`)) throw new SyncError(copy.marketSync.busy, 409, "BUSY");
   await db.marketDatasetUpdateLease.upsert({ where: { datasetId }, create: { datasetId, owner: "", expiresAt: new Date(0) }, update: {} });
   const claimed = await db.marketDatasetUpdateLease.updateMany({ where: { datasetId, OR: [{ owner }, { expiresAt: { lte: now } }] }, data: { owner, expiresAt: new Date(now.getTime() + LEASE_MS) } });
   if (!claimed.count) throw new SyncError(copy.marketSync.busy, 409, "BUSY");
 }
-export async function assertDatasetIdle(datasetId: string) {
-  const lease = await prisma.marketDatasetUpdateLease.findUnique({ where: { datasetId } });
+export async function assertDatasetIdle(datasetId: string, db: LeaseDb = prisma) {
+  if (await activeAggregationJob(db, datasetId)) throw new SyncError(copy.marketSync.busy, 409, "BUSY");
+  const lease = await db.marketDatasetUpdateLease.findUnique({ where: { datasetId } });
   if (lease && lease.expiresAt > new Date()) throw new SyncError(copy.marketSync.busy, 409, "BUSY");
-  const active = await prisma.marketDataSyncRun.findFirst({ where: { datasetId, status: { in: ["QUEUED", "RUNNING", "INTERRUPTED"] } } });
+  const active = await db.marketDataSyncRun.findFirst({ where: { datasetId, status: { in: ["QUEUED", "RUNNING", "INTERRUPTED"] } } });
   if (active) throw new SyncError(copy.marketSync.busy, 409, "BUSY");
 }
 export async function releaseDatasetLease(datasetId: string, owner: string) { await prisma.marketDatasetUpdateLease.deleteMany({ where: { datasetId, owner } }); }

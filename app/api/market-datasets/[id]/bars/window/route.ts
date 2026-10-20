@@ -1,18 +1,16 @@
 import { NextResponse } from "next/server";
 import { prisma, replayDatabaseQueryCount } from "@/lib/db";
 import { copy } from "@/lib/i18n";
-import { aggregateMarketSegments, getAggregationBucket, type AggregationSegment } from "@/lib/market-replay/aggregation";
+import { readExportWindow } from "@/lib/market-replay/export-window";
+import { AggregationNotReadyError } from "@/lib/market-replay/aggregation-storage";
 import { resolveDisplaySession } from "@/lib/market-replay/chart-sessions";
 import { datasetSourceInterval, serializeSourceBar } from "@/lib/market-replay/dataset";
 import {
   isValidDisplayInterval,
   type AggregatedMarketBarData,
 } from "@/lib/market-replay/types";
-import { scheduleMarketBarBlockBuild } from "@/lib/market-replay/bar-blocks";
-import { marketBarBlockSizeForMultiplier } from "@/lib/market-replay/history";
 import { replayWindowSchema } from "@/lib/validations";
 import { attachReplayDiagnostics } from "@/lib/market-replay/server-diagnostics";
-import { readSequentialRawWindow, readSessionRawWindow } from "@/lib/market-replay/window-service";
 
 type RouteContext = { params: Promise<{ id: string }> };
 const SOURCE_BAR_SELECT = {
@@ -54,73 +52,23 @@ export async function GET(request: Request, context: RouteContext) {
 
   const session = resolveDisplaySession(dataset, parsed.data.displaySession);
   if (!session) return NextResponse.json({ error: copy.marketReplay.unsupportedDisplaySession }, { status: 400 });
-  const multiplier = parsed.data.displayIntervalSeconds / sourceSeconds;
-  const blockSize = marketBarBlockSizeForMultiplier(multiplier);
   const wanted = parsed.data.visibleCount + parsed.data.warmupCount;
   const lastSourceBar = serializeSourceBar(await prisma.marketBar.findUniqueOrThrow({
     where: { datasetId_sequence: { datasetId: id, sequence: endSequence } },
     select: SOURCE_BAR_SELECT,
   }));
   let aggregated: AggregatedMarketBarData[];
-  let strategy: "raw-sequential" | "raw-session-indexed" | "block-aggregate";
+  const strategy = "time-aggregate";
   const windowStartedAt = performance.now();
-
-  if (blockSize === null) {
-    strategy = session.mode === "TWENTY_FOUR_SEVEN" ? "raw-sequential" : "raw-session-indexed";
-    aggregated = session.mode === "TWENTY_FOUR_SEVEN"
-      ? await readSequentialRawWindow({
-          datasetId: id, endSequence, wanted, sourceSeconds,
-          displaySeconds: parsed.data.displayIntervalSeconds, session, finalSequence: dataset.barCount - 1,
-        })
-      : await readSessionRawWindow({
-          datasetId: id, datasetStart: dataset.startTime, endSequence, endBar: lastSourceBar,
-          wanted, sourceSeconds, displaySeconds: parsed.data.displayIntervalSeconds,
-          session, finalSequence: dataset.barCount - 1,
-        });
-  } else {
-    strategy = "block-aggregate";
-    const aggregateCount = wanted + 2;
-    let sourceTake = Math.min(endSequence + 1, Math.max(1, Math.ceil(aggregateCount * multiplier)));
-    void scheduleMarketBarBlockBuild(id, dataset.barCount, [blockSize]).catch(() => undefined);
-    aggregated = [];
-    while (true) {
-      const fromSequence = endSequence - sourceTake + 1;
-      const blocks = await prisma.marketBarBlock.findMany({
-        where: { datasetId: id, blockSize, startSequence: { gte: fromSequence }, endSequence: { lte: endSequence } },
-        orderBy: { startSequence: "asc" },
-      });
-      const acceptedBlocks = blocks.filter((block) => {
-        const first = getAggregationBucket(block.startTime.getTime(), sourceSeconds, parsed.data.displayIntervalSeconds, session);
-        const last = getAggregationBucket(block.endTime.getTime(), sourceSeconds, parsed.data.displayIntervalSeconds, session);
-        return first && last && first.start === last.start;
-      });
-      const rawRanges: Array<{ from: number; to: number }> = [];
-      let cursor = fromSequence;
-      for (const block of acceptedBlocks) {
-        if (cursor < block.startSequence) rawRanges.push({ from: cursor, to: block.startSequence - 1 });
-        cursor = block.endSequence + 1;
-      }
-      if (cursor <= endSequence) rawRanges.push({ from: cursor, to: endSequence });
-      const sourceBars: ReturnType<typeof serializeSourceBar>[] = [];
-      for (let index = 0; index < rawRanges.length; index += 50) {
-        const records = await prisma.marketBar.findMany({
-          where: { datasetId: id, OR: rawRanges.slice(index, index + 50).map((range) => ({ sequence: { gte: range.from, lte: range.to } })) },
-          orderBy: { sequence: "asc" },
-          select: SOURCE_BAR_SELECT,
-        });
-        for (const record of records) sourceBars.push(serializeSourceBar(record));
-      }
-      const segments: AggregationSegment[] = [
-        ...sourceBars.map((bar) => ({ firstSequence: bar.sequence, lastSequence: bar.sequence, timestamp: bar.timestamp, endTimestamp: bar.timestamp, open: bar.open, high: bar.high, low: bar.low, close: bar.close, volume: bar.volume, sourceCount: 1 })),
-        ...acceptedBlocks.map((block) => ({ firstSequence: block.startSequence, lastSequence: block.endSequence, timestamp: block.startTime.toISOString(), endTimestamp: block.endTime.toISOString(), open: block.open, high: block.high, low: block.low, close: block.close, volume: block.volumeCount ? block.volume : null, sourceCount: block.barCount })),
-      ].sort((a, b) => a.firstSequence - b.firstSequence);
-      aggregated = aggregateMarketSegments({
-        segments, sourceSeconds, displaySeconds: parsed.data.displayIntervalSeconds, session,
-        currentSequence: endSequence, finalSequence: dataset.barCount - 1,
-      });
-      if (aggregated.length >= wanted || fromSequence === 0) break;
-      sourceTake = Math.min(endSequence + 1, sourceTake * 2);
-    }
+  const metrics = { sourceRows: 0, summaryRows: 0 };
+  try {
+    const result = await readExportWindow({ dataset, datasetId: id, anchorSequence: endSequence,
+      direction: "backward", count: wanted, warmupCount: 0, endSequence,
+      sourceSeconds, displaySeconds: parsed.data.displayIntervalSeconds, session, finalSequence: dataset.barCount - 1, metrics });
+    aggregated = result.bars;
+  } catch (error) {
+    if (error instanceof AggregationNotReadyError) return NextResponse.json({ error: error.message, code: error.code }, { status: 409 });
+    throw error;
   }
   const window = aggregated.slice(-wanted);
   const visibleFrom = Math.max(0, window.length - parsed.data.visibleCount);
@@ -133,10 +81,13 @@ export async function GET(request: Request, context: RouteContext) {
     lastSourceBar,
     nextEndSequence,
     hasEarlierBars: nextEndSequence !== null,
+    aggregationGenerationId: dataset.activeAggregationId,
     focusBarIndex: focusSequence === null ? null : window.slice(visibleFrom).findIndex((bar) => (
       focusSequence >= bar.firstSequence && focusSequence <= bar.lastSequence
     )),
   });
+  response.headers.set("X-Replay-Source-Rows", String(metrics.sourceRows));
+  response.headers.set("X-Replay-Summary-Rows", String(metrics.summaryRows));
   return attachReplayDiagnostics(response, {
     startedAt,
     queryStart,

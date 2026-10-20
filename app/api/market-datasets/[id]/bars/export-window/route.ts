@@ -5,6 +5,7 @@ import { copy } from "@/lib/i18n";
 import { datasetSourceInterval } from "@/lib/market-replay/dataset";
 import { resolveDisplaySession } from "@/lib/market-replay/chart-sessions";
 import { isValidDisplayInterval } from "@/lib/market-replay/types";
+import { AggregationNotReadyError } from "@/lib/market-replay/aggregation-storage";
 import { readExportWindow } from "@/lib/market-replay/export-window";
 
 const query = z.object({
@@ -26,7 +27,12 @@ export async function GET(request: Request, context: { params: Promise<{ id: str
   const session = resolveDisplaySession(dataset, q.displaySession);
   if (!sourceSeconds || !session || !isValidDisplayInterval(sourceSeconds, q.displayIntervalSeconds))
     return NextResponse.json({ error: copy.marketReplay.invalidDisplayInterval }, { status: 400 });
-  const window = await readExportWindow({ datasetId: id, ...q, sourceSeconds, displaySeconds: q.displayIntervalSeconds, session });
+  let window;
+  try { window = await readExportWindow({ dataset, datasetId: id, ...q, sourceSeconds, displaySeconds: q.displayIntervalSeconds, session }); }
+  catch (error) {
+    if (error instanceof AggregationNotReadyError) return NextResponse.json({ error: error.message, code: error.code }, { status: 409 });
+    throw error;
+  }
   const current = await prisma.marketDataset.findUnique({ where: { id }, select: { dataVersion: true } });
   if (!current) return NextResponse.json({ error: copy.marketReplay.datasetNotFound }, { status: 404 });
   if (current.dataVersion !== q.dataVersion) return NextResponse.json({ error: copy.paperTrading.pdf.versionConflict }, { status: 409 });

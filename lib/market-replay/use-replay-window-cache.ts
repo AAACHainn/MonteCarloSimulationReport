@@ -8,12 +8,14 @@ import type { DisplaySession, MarketDatasetSummary } from "./types";
 export function useReplayWindowCaches<T>(dataset: MarketDatasetSummary) {
   const marketCache = useMemo(() => new MarketBarCache(dataset), [dataset]);
   const sessionFingerprint = useMemo(() => JSON.stringify({
+    aggregationGenerationId: dataset.aggregationGenerationId,
+    aggregationRuleVersion: dataset.aggregationRuleVersion,
     timezone: dataset.timezone,
     sessionMode: dataset.sessionMode,
     sessionOpenMinute: dataset.sessionOpenMinute,
     sessionCloseMinute: dataset.sessionCloseMinute,
     tradingWeekdays: dataset.tradingWeekdays,
-  }), [dataset.sessionCloseMinute, dataset.sessionMode, dataset.sessionOpenMinute, dataset.timezone, dataset.tradingWeekdays]);
+  }), [dataset.aggregationGenerationId, dataset.aggregationRuleVersion, dataset.sessionCloseMinute, dataset.sessionMode, dataset.sessionOpenMinute, dataset.timezone, dataset.tradingWeekdays]);
   const displayCachesRef = useRef(new Map<string, DisplayBarCache>());
   const windowCache = useRef(new ReplayWindowMemoryCache<T>());
 
@@ -24,6 +26,8 @@ export function useReplayWindowCaches<T>(dataset: MarketDatasetSummary) {
       cache = new DisplayBarCache({
         datasetId: dataset.id,
         dataVersion: dataset.dataVersion,
+        aggregationGenerationId: dataset.aggregationGenerationId,
+        aggregationRuleVersion: dataset.aggregationRuleVersion,
         displayIntervalSeconds,
         displaySession,
         sessionFingerprint,
@@ -31,7 +35,7 @@ export function useReplayWindowCaches<T>(dataset: MarketDatasetSummary) {
       displayCachesRef.current.set(key, cache);
     }
     return cache;
-  }, [dataset.dataVersion, dataset.id, sessionFingerprint]);
+  }, [dataset.aggregationGenerationId, dataset.aggregationRuleVersion, dataset.dataVersion, dataset.id, sessionFingerprint]);
 
   useEffect(() => () => {
     marketCache.dispose();

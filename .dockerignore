@@ -11,6 +11,10 @@ node_modules
 *.sqlite3
 prisma/dev.db*
 storage/
+tmp/
+.market-imports/
+*.db-wal
+*.db-shm
 coverage/
 dist/
 build/

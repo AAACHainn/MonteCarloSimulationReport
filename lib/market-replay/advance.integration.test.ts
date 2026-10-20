@@ -41,7 +41,8 @@ import { resolveDisplaySession } from "./chart-sessions";
 import { aggregateMarketBars, getAggregationBucket, mergeSourceBarInto } from "./aggregation";
 import { calculateLatestAbr } from "./abr";
 import { appendContextRun, type ReplayContextRun } from "@/lib/replay-sessions/context-runs";
-import { buildMarketBarBlocks } from "./bar-blocks";
+import { queueAggregation, processAggregationJob } from "./aggregation-jobs";
+async function buildAggregations(id: string) { const job = await queueAggregation(id); await processAggregationJob(job.id); }
 import { readLaterHistoryWindow, mergeHistoricalBars } from "./historical-window";
 import type { AggregatedMarketBarData } from "./types";
 import type { ReplayServerResult } from "./server-sync-types";
@@ -127,6 +128,7 @@ async function seed(
         open: close, high: close + 1, low: close - 1, close, volume: 10 };
     }) });
   }
+  await buildAggregations(id);
   const replay = await prisma.replaySession.create({ data: { datasetId: id, name: id, mode: "TRAINING", legacy: true } });
   const projection = await prisma.replayProjection.create({ data: { replaySessionId: replay.id, status: "CURRENT", historyVersion: 1, currentSequence: start } });
   await prisma.replaySession.update({ where: { id: replay.id }, data: { activeProjectionId: projection.id } });
@@ -360,17 +362,17 @@ describe("replay advance with real SQLite", () => {
     expect(await prisma.paperFill.count({ where: { sessionId: account.id } })).toBe(1);
   });
 
-  it("resumes legacy block construction from the persisted cursor", async () => {
+  it("atomically replaces a time aggregation generation without duplicating active summaries", async () => {
     const id = "block-resume";
     await seed(id, 1, 5_000, -1, false);
-    await buildMarketBarBlocks(id, 5_000);
-    expect(await prisma.marketBarBlock.count({ where: { datasetId: id } })).toBe(2);
+    await buildAggregations(id);
+    expect(await prisma.marketAggregatedBar.count({ where: { generation: { datasetId: id, status: "READY" } } })).toBeGreaterThan(0);
     expect(await prisma.marketDataset.findUniqueOrThrow({ where: { id } })).toMatchObject({
-      barBlockBuildCursor: 4_999,
+      activeAggregationId: expect.any(String),
     });
 
-    await buildMarketBarBlocks(id, 5_000);
-    expect(await prisma.marketBarBlock.count({ where: { datasetId: id } })).toBe(2);
+    await buildAggregations(id);
+    expect(await prisma.marketAggregatedBar.count({ where: { generation: { datasetId: id, status: "READY" } } })).toBeGreaterThan(0);
   });
 
   it("returns source bars as daily cache chunks and records empty weekly dates", async () => {
@@ -874,7 +876,7 @@ describe("replay advance with real SQLite", () => {
       `http://localhost/api/window?displayIntervalSeconds=60&displaySession=RTH&endSequence=${count - 1}&visibleCount=500&warmupCount=100`,
     ), context("cme-window"));
     expect(rthResponse.status).toBe(200);
-    expect(rthResponse.headers.get("X-Replay-Window-Strategy")).toBe("raw-session-indexed");
+    expect(rthResponse.headers.get("X-Replay-Window-Strategy")).toBe("time-aggregate");
     expect(rthResponse.headers.get("Server-Timing")).toContain("window;dur=");
     const rthBody = await rthResponse.json();
     expect(rthBody.visibleBars).toHaveLength(500);

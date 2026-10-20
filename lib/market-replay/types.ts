@@ -1,8 +1,6 @@
 export const MAX_MARKET_UPLOAD_BYTES = 5 * 1024 * 1024 * 1024;
 export const MAX_MARKET_EXPANDED_BYTES = 5 * 1024 * 1024 * 1024;
 export const MAX_MARKET_BARS = 20_000_000;
-export const MARKET_BAR_BLOCK_SIZE = 4_096;
-export const MARKET_BAR_BLOCK_SIZES = [64, 512, MARKET_BAR_BLOCK_SIZE] as const;
 export const REPLAY_HISTORY_BARS = 200;
 export const REPLAY_INITIAL_VISIBLE_BARS = 300;
 export const REPLAY_HISTORY_BAR_LIMIT = 25_000;
@@ -86,20 +84,6 @@ export type MarketBarData = {
   volume: number | null;
 };
 
-export type MarketBarBlockData = {
-  startSequence: number;
-  endSequence: number;
-  startTime: string;
-  endTime: string;
-  open: number;
-  high: number;
-  low: number;
-  close: number;
-  volume: number | null;
-  volumeCount: number;
-  barCount: number;
-};
-
 export type AggregatedMarketBarData = {
   timestamp: string;
   bucketEnd: string;
@@ -127,6 +111,9 @@ export type ReplayProgressData = {
 };
 
 export type MarketDatasetSummary = {
+  aggregationGenerationId?: string | null;
+  aggregationRuleVersion?: number;
+  aggregationStatus?: "READY" | "PENDING";
   id: string;
   name: string;
   description: string | null;

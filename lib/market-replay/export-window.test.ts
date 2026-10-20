@@ -1,8 +1,14 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { pdfBars } from "@/lib/paper-trading/pdf-test-fixtures";
+import { aggregateMarketBars } from "./aggregation";
 import { resolveDisplaySession } from "./chart-sessions";
 const mocks = vi.hoisted(() => ({ unique: vi.fn(), first: vi.fn(), many: vi.fn(), blocks: vi.fn() }));
-vi.mock("@/lib/db", () => ({ prisma: { marketBar: { findUnique: mocks.unique, findFirst: mocks.first, findMany: mocks.many }, marketBarBlock: { findMany: mocks.blocks } } }));
+vi.mock("@/lib/db", () => ({ prisma: { marketBar: { findUnique: mocks.unique, findFirst: mocks.first, findMany: mocks.many }, marketDataset: { findUniqueOrThrow: vi.fn(() => ({ id: "d", barCount: 30, startTime: new Date(0) })) } } }));
+vi.mock("./aggregation-storage", () => ({ activeAggregation: vi.fn(async () => ({})) }));
+vi.mock("./aggregation-reader", () => ({
+  accountQuery: vi.fn(), WindowSourceBudgetError: class extends Error {},
+  readAggregationRanges: vi.fn(async (o, ranges) => aggregateMarketBars({ bars: rows.filter((r) => r.sequence <= o.endSequence && ranges.some((range: { start: number; end: number }) => r.timestamp.getTime() >= range.start && r.timestamp.getTime() < range.end)).map((r) => ({ ...r, timestamp: r.timestamp.toISOString() })), sourceSeconds: o.sourceSeconds, displaySeconds: o.displaySeconds, session: o.session, currentSequence: o.endSequence, finalSequence: o.finalSequence ?? o.endSequence })),
+}));
 import { readExportWindow } from "./export-window";
 
 let rows: { sequence: number; timestamp: Date; open: number; high: number; low: number; close: number; volume: number | null }[];
@@ -29,7 +35,7 @@ describe("read-only export window", () => {
     expect(result.warmupBars.map((b) => b.firstSequence)).toEqual([0]);
     expect(result.bars.every((b) => b.status === "COMPLETE")).toBe(true);
     expect(result.nextSequence).toBe(12); expect(result.previousSequence).toBe(2);
-    expect(mocks.many.mock.calls.every(([q]) => q.take === 4096)).toBe(true);
+
   });
   it("returns backwards bars chronologically and never reads past the snapshot", async () => {
     const result = await readExportWindow({ ...options, direction: "backward", anchorSequence: 7, endSequence: 7, warmupCount: 0 });
@@ -44,14 +50,5 @@ describe("read-only export window", () => {
     const result = await readExportWindow({ ...options, anchorSequence: 1, endSequence: 4, sourceSeconds: 60, displaySeconds: 60, session });
     expect(result.bars.map((b) => b.firstSequence)).toEqual([1,3,4]);
     expect(result.warmupBars.map((b) => b.firstSequence)).toEqual([0]);
-  });
-  it("uses existing blocks without building summaries or reading covered raw rows", async () => {
-    const start = Date.UTC(2026,8,8);
-    rows = [0,4095].map((n) => ({ sequence:n, timestamp:new Date(start+n*1000),open:100,high:101,low:99,close:100,volume:1 }));
-    mocks.blocks.mockResolvedValue(Array.from({ length:8 },(_,i) => ({ startSequence:i*512,endSequence:i*512+511,startTime:new Date(start+i*512000),endTime:new Date(start+(i*512+511)*1000),open:100,high:101,low:99,close:100,volume:512,volumeCount:512,barCount:512 })));
-    const result = await readExportWindow({ ...options, anchorSequence: 0, endSequence: 20_000_000-1, sourceSeconds:1,displaySeconds:4096,count:1,warmupCount:0 });
-    expect(result.bars[0].sourceCount).toBe(4096); expect(result.bars[0].status).toBe("COMPLETE");
-    expect(mocks.many).not.toHaveBeenCalled();
-    expect(mocks.blocks).toHaveBeenCalledWith(expect.objectContaining({ where: expect.objectContaining({ blockSize:512 }) }));
   });
 });

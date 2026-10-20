@@ -96,8 +96,8 @@ export function getAggregationBucket(
   const sessionStart = bounds.start;
   const sessionEnd = bounds.end;
   if (timestampMs < sessionStart || timestampMs >= sessionEnd || (timestampMs - sessionStart) % sourceMs !== 0) return null;
-  const start = sessionStart + Math.floor((timestampMs - sessionStart) / displayMs) * displayMs;
-  const end = Math.min(start + displayMs, sessionEnd);
+  const start = displaySeconds === 86400 ? sessionStart : sessionStart + Math.floor((timestampMs - sessionStart) / displayMs) * displayMs;
+  const end = displaySeconds === 86400 ? sessionEnd : Math.min(start + displayMs, sessionEnd);
   return { start, end, expectedCount: (end - start) / sourceMs };
 }
 
@@ -118,6 +118,11 @@ export function getAdjacentAggregationBucketStart(
     const bounds = tradingSessionBounds(tradingDate, session);
     if (!bounds) continue;
     const { start: sessionStart, end: sessionEnd } = bounds;
+
+    if (displaySeconds === 86400) {
+      if ((direction > 0 && sessionStart > timestampMs) || (direction < 0 && sessionStart < timestampMs)) return sessionStart;
+      continue;
+    }
 
     let candidate: number;
     if (direction > 0) {
@@ -166,7 +171,7 @@ export class AggregationCalendar {
     const bounds = tradingSessionBounds({ year: date.getUTCFullYear(),
       month: date.getUTCMonth() + 1, day: date.getUTCDate() }, this.session);
     return { start: bounds?.start ?? 0, end: bounds?.end ?? 0,
-      count: bounds ? Math.ceil((bounds.end - bounds.start) / this.displayMs) : 0, ordinal };
+      count: bounds ? this.displayMs === CALENDAR_DAY_MS ? 1 : Math.ceil((bounds.end - bounds.start) / this.displayMs) : 0, ordinal };
   }
 
   private ensureDay(day: number) {
@@ -205,7 +210,7 @@ export class AggregationCalendar {
       const entry = this.days.get(candidate)!;
       if (!entry.count) continue;
       if (timestamp >= entry.start && timestamp < entry.end) {
-        return entry.ordinal + Math.floor((timestamp - entry.start) / this.displayMs);
+        return entry.ordinal + Math.min(entry.count - 1, Math.floor((timestamp - entry.start) / this.displayMs));
       }
       if (direction > 0 && timestamp < entry.start) return entry.ordinal;
       if (direction < 0 && timestamp >= entry.end) return entry.ordinal + entry.count - 1;

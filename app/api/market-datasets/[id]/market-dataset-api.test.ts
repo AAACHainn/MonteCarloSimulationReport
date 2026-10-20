@@ -73,6 +73,7 @@ describe("market dataset settings API", () => {
         priceTickSize: 0.25,
         dataVersion: { increment: 1 },
         historyVersion: { increment: 1 },
+        activeAggregationId: null,
         progress: { update: [{ where: { id: "progress-1" }, data: {
           displayIntervalSeconds: 60,
           lastSyncRequestId: null,
@@ -111,6 +112,7 @@ describe("market dataset settings API", () => {
         priceTickSize: 0.25,
         dataVersion: { increment: 1 },
         historyVersion: { increment: 1 },
+        activeAggregationId: null,
         progress: undefined,
       },
     });

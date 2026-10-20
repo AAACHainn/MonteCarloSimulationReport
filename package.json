@@ -16,7 +16,8 @@
     "prisma:migrate": "prisma migrate dev",
     "db:init-sqlite": "node scripts/init-sqlite.mjs",
     "db:runtime": "node scripts/sqlite-runtime.mjs",
-    "db:prepare-sqlite": "node scripts/setup-sqlite-driver.mjs"
+    "db:prepare-sqlite": "node scripts/setup-sqlite-driver.mjs",
+    "benchmark:time-aggregation": "node --import tsx scripts/benchmark-time-aggregation.ts"
   },
   "dependencies": {
     "@date-fns/tz": "1.4.1",

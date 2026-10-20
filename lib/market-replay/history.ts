@@ -2,11 +2,11 @@ import {
   REPLAY_HISTORY_BAR_LIMIT,
   REPLAY_HISTORY_PAGE_LIMIT,
   REPLAY_HISTORY_RAW_SOURCE_BUDGET,
-  MARKET_BAR_BLOCK_SIZES,
   type AggregatedMarketBarData,
   type TradingSessionConfig,
 } from "./types";
 import { addCalendarDays, tradingDayBounds, tradingDayForTimestamp } from "./chunks";
+import { BASE_AGGREGATION_INTERVALS } from "./time-aggregation";
 
 export type ReplayHistorySlice = {
   bars: AggregatedMarketBarData[];
@@ -47,11 +47,10 @@ export function mergeReplayHistory(
 
 export function replayHistoryPageSize(sourceSeconds: number, displaySeconds: number) {
   const multiplier = Math.max(1, Math.floor(displaySeconds / sourceSeconds));
-  return Math.max(1, Math.min(REPLAY_HISTORY_PAGE_LIMIT, Math.floor(REPLAY_HISTORY_RAW_SOURCE_BUDGET / multiplier)));
-}
-
-export function marketBarBlockSizeForMultiplier(multiplier: number) {
-  return [...MARKET_BAR_BLOCK_SIZES].reverse().find((size) => size <= multiplier / 4) ?? null;
+  const layers = [...BASE_AGGREGATION_INTERVALS, 3600].filter((seconds) => seconds > sourceSeconds && seconds <= displaySeconds && seconds % sourceSeconds === 0);
+  const estimatedRows = layers.length ? Math.min(multiplier,
+    2 * (layers[0] / sourceSeconds - 1) + Math.ceil(displaySeconds / layers.at(-1)!)) : multiplier;
+  return Math.max(1, Math.min(REPLAY_HISTORY_PAGE_LIMIT, Math.floor(REPLAY_HISTORY_RAW_SOURCE_BUDGET / estimatedRows)));
 }
 
 export function nextHistoryEndSequence(bars: AggregatedMarketBarData[]) {

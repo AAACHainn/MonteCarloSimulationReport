@@ -4,10 +4,11 @@ import type { MarketDatasetImport } from "@prisma/client";
 import { prisma } from "@/lib/db";
 import { copy } from "@/lib/i18n";
 import { marketDatasetSchema } from "@/lib/validations";
-import { MARKET_BAR_BLOCK_SIZE, MARKET_BAR_BLOCK_SIZES, MAX_MARKET_BARS, formatInterval } from "./types";
+import { MAX_MARKET_BARS, formatInterval } from "./types";
 import { parseMarketCsvRow, parseMarketTimestamp, readCsvValue, type CsvValues, type ParsedMarketBar, type MarketCsvIssue } from "./parse-market-bars";
-import { addToBlock, countedCsvStream, inspectHeaders, inspectImportFile, memorySnapshot, startWorkerHeartbeat,
-  INSERT_CHUNK_SIZE, type BlockAccumulator } from "./import-file";
+import { countedCsvStream, inspectHeaders, inspectImportFile, memorySnapshot, startWorkerHeartbeat,
+  INSERT_CHUNK_SIZE } from "./import-file";
+import { prepareAggregationAppend, publishAggregationAppend, writeAggregationChunk } from "./aggregation-storage";
 import type { AppendImportMetadata, AppendPreview } from "./append-import-types";
 import { acquireDatasetLease, releaseDatasetLease, LEASE_MS } from "@/lib/market-sync/lease";
 
@@ -27,21 +28,9 @@ async function publishAppend(job: MarketDatasetImport, metadata: AppendImportMet
     }
     if (preview.importedBars) {
       await tx.marketBar.updateMany({ where: { datasetId: stagingId }, data: { datasetId: target.id } });
-      for (const blockSize of MARKET_BAR_BLOCK_SIZES) {
-        const prefixStart = Math.floor(snapshot.barCount / blockSize) * blockSize;
-        await tx.marketBarBlock.deleteMany({ where: { datasetId: target.id, blockSize, startSequence: { gte: prefixStart } } });
-        const state = await tx.marketBarBlockBuildState.findUnique({ where: { datasetId_blockSize: { datasetId: target.id, blockSize } } });
-        const oldCursor = Math.max(state?.cursor ?? -1, blockSize === MARKET_BAR_BLOCK_SIZE ? target.barBlockBuildCursor : -1);
-        const cursor = oldCursor >= snapshot.barCount - 1 ? finalCount - 1 : oldCursor;
-        await tx.marketBarBlockBuildState.upsert({
-          where: { datasetId_blockSize: { datasetId: target.id, blockSize } },
-          create: { datasetId: target.id, blockSize, cursor }, update: { cursor },
-        });
-      }
-      await tx.marketBarBlock.updateMany({ where: { datasetId: stagingId }, data: { datasetId: target.id } });
+      await publishAggregationAppend(tx, target, stagingId, finalCount - 1);
       await tx.marketDataset.update({ where: { id: target.id }, data: {
         barCount: finalCount, endTime: new Date(preview.lastTime!), dataVersion: { increment: 1 },
-        barBlockBuildCursor: target.barBlockBuildCursor >= snapshot.barCount - 1 ? finalCount - 1 : target.barBlockBuildCursor,
       } });
     }
     await tx.marketDatasetImport.update({ where: { id: job.id }, data: {
@@ -121,17 +110,7 @@ async function processLockedAppendImportJob(job: MarketDatasetImport) {
     } });
     const preview: AppendPreview = { importedBars: 0, overlappingRows: 0, duplicateRows: 0, skippedRows: 0,
       gapCount: 0, missingBars: 0, gaps: [], firstTime: null, lastTime: null };
-    const accumulators = new Map<number, BlockAccumulator | null>();
-    // Only read each old partial block (at most 4,095 bars), not the full history.
-    for (const size of MARKET_BAR_BLOCK_SIZES) {
-      const start = Math.floor(target.barCount / size) * size;
-      const bars = start < target.barCount ? await prisma.marketBar.findMany({
-        where: { datasetId: target.id, sequence: { gte: start, lt: target.barCount } }, orderBy: { sequence: "asc" },
-      }) : [];
-      let block: BlockAccumulator | null = null;
-      for (const bar of bars) block = addToBlock(block, bar);
-      accumulators.set(size, block);
-    }
+    const aggregation = await prepareAggregationAppend(target, staging.id);
     const source = countedCsvStream(job.storedPath!, job.fileName);
     const parser = source.stream.pipe(parse({ bom: true, trim: true, skip_empty_lines: true }));
     let header: ReturnType<typeof inspectHeaders> | null = null;
@@ -151,7 +130,6 @@ async function processLockedAppendImportJob(job: MarketDatasetImport) {
       }) : [];
       const seen = new Set(alreadyStaged.map((bar) => bar.timestamp.getTime()));
       const bars: Array<ParsedMarketBar & { datasetId: string }> = [];
-      const blocks: Array<BlockAccumulator & { blockSize: number; datasetId: string }> = [];
       for (const [time, { rowNumber, ...bar }] of unique) {
         if (seen.has(time)) { preview.duplicateRows += 1; continue; }
         if (time <= previousTime) throw new Error(copy.marketReplay.errorRow(rowNumber, copy.marketReplay.validation.invalidOrder));
@@ -165,14 +143,12 @@ async function processLockedAppendImportJob(job: MarketDatasetImport) {
         bars.push({ ...bar, datasetId: staging.id });
         preview.importedBars += 1; previousTime = time;
         preview.firstTime ??= bar.timestamp.toISOString(); preview.lastTime = bar.timestamp.toISOString();
-        for (const size of MARKET_BAR_BLOCK_SIZES) {
-          const block = addToBlock(accumulators.get(size) ?? null, bar);
-          if (block.barCount === size) { blocks.push({ ...block, blockSize: size, datasetId: staging.id }); accumulators.set(size, null); }
-          else accumulators.set(size, block);
-        }
+
       }
-      if (bars.length) await prisma.marketBar.createMany({ data: bars });
-      if (blocks.length) await prisma.marketBarBlock.createMany({ data: blocks });
+      if (bars.length) await prisma.$transaction(async (tx) => {
+        await tx.marketBar.createMany({ data: bars });
+        if (aggregation) await writeAggregationChunk(tx, aggregation.id, target, bars);
+      }, { maxWait: 30000, timeout: 30000 });
       pending = [];
       if (force || Date.now() - lastProgressAt >= 1_000) {
         lastProgressAt = Date.now();
@@ -207,8 +183,6 @@ async function processLockedAppendImportJob(job: MarketDatasetImport) {
     }
     await flush(true);
     if (totalErrors) throw new Error(issues[0]?.reason ?? copy.marketReplay.importError);
-    const partials = [...accumulators].flatMap(([blockSize, block]) => block && preview.importedBars ? [{ ...block, blockSize, datasetId: staging.id }] : []);
-    if (partials.length) await prisma.marketBarBlock.createMany({ data: partials });
     metadata.preview = preview;
     await prisma.marketDatasetImport.update({ where: { id: job.id }, data: {
       metadata: JSON.stringify(metadata), status: preview.gapCount ? "AWAITING_CONFIRMATION" : "PROCESSING",

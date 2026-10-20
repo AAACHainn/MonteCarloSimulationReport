@@ -3,8 +3,8 @@ import { setTimeout as delay } from "node:timers/promises";
 import type { MarketBar, MarketDataset, MarketDataSyncRun } from "@prisma/client";
 import { prisma } from "@/lib/db";
 import { copy } from "@/lib/i18n";
-import { MARKET_BAR_BLOCK_SIZES, MAX_MARKET_BARS } from "@/lib/market-replay/types";
-import { addToBlock, type BlockAccumulator } from "@/lib/market-replay/import-file";
+import { MAX_MARKET_BARS } from "@/lib/market-replay/types";
+import { prepareAggregationAppend, publishAggregationAppend, writeAggregationChunk } from "@/lib/market-replay/aggregation-storage";
 import { budgetDay } from "./schedule";
 import { acquireDatasetLease, LEASE_MS, releaseDatasetLease } from "./lease";
 import { DatabentoProvider, type MarketProvider } from "./databento";
@@ -49,25 +49,8 @@ async function publishSegment(run: MarketDataSyncRun, owner: string, target: Mar
     if (currentRun.leaseOwner !== owner || currentRun.status !== "RUNNING" || current.dataVersion !== target.dataVersion || current.barCount !== target.barCount) throw new SyncError(copy.marketSync.changed, 409, "CHANGED");
     if (count) {
       await tx.marketBar.updateMany({ where: { datasetId: stagingId }, data: { datasetId: target.id } });
-      // Rebuild only the old partial block and the new tail, in bounded batches.
-      for (const blockSize of MARKET_BAR_BLOCK_SIZES) {
-        const start = Math.floor(target.barCount / blockSize) * blockSize;
-        await tx.marketBarBlock.deleteMany({ where: { datasetId: target.id, blockSize, startSequence: { gte: start } } });
-        for (let from = start; from < target.barCount + count; from += 16384) {
-          const bars = await tx.marketBar.findMany({ where: { datasetId: target.id, sequence: { gte: from, lt: Math.min(from + 16384, target.barCount + count) } }, orderBy: { sequence: "asc" } });
-          let block: BlockAccumulator | null = null;
-          const blocks: Array<BlockAccumulator & { datasetId: string; blockSize: number }> = [];
-          for (const bar of bars) {
-            block = addToBlock(block, bar);
-            if (block.barCount === blockSize) { blocks.push({ ...block, datasetId: target.id, blockSize }); block = null; }
-          }
-          if (block) blocks.push({ ...block, datasetId: target.id, blockSize });
-          if (blocks.length) await tx.marketBarBlock.createMany({ data: blocks });
-        }
-        const state = await tx.marketBarBlockBuildState.findUnique({ where: { datasetId_blockSize: { datasetId: target.id, blockSize } } });
-        if ((state?.cursor ?? -1) >= target.barCount - 1) await tx.marketBarBlockBuildState.update({ where: { datasetId_blockSize: { datasetId: target.id, blockSize } }, data: { cursor: target.barCount + count - 1 } });
-      }
-      await tx.marketDataset.update({ where: { id: target.id }, data: { barCount: { increment: count }, endTime: last!, dataVersion: { increment: 1 }, ...(target.barBlockBuildCursor >= target.barCount - 1 ? { barBlockBuildCursor: target.barCount + count - 1 } : {}) } });
+      await publishAggregationAppend(tx, target, stagingId, target.barCount + count - 1);
+      await tx.marketDataset.update({ where: { id: target.id }, data: { barCount: { increment: count }, endTime: last!, dataVersion: { increment: 1 } } });
     }
     await tx.marketDatasetSyncConfig.update({ where: { datasetId: target.id }, data: { checkedThrough: through, verified: true } });
     await tx.marketDataSyncRun.update({ where: { id: run.id }, data: { cursor: through, addedBars: { increment: count }, mappings: JSON.stringify(mappings) } });
@@ -82,6 +65,7 @@ async function downloadSegment(provider: MarketProvider, settings: SyncSettings,
     await prisma.marketDataset.deleteMany({ where: { id: stagingId, status: "IMPORTING" } });
     await prisma.marketDataset.create({ data: { id: stagingId, name: "sync staging", symbol: target.symbol, timeframe: target.timeframe, timezone: target.timezone, sourceIntervalSeconds: target.sourceIntervalSeconds, status: "IMPORTING", barCount: 0, startTime: start, endTime: end } });
     try {
+      const aggregation = await prepareAggregationAppend(target, stagingId);
       const cost = await provider.cost(settings.profile, start, end, signal);
       await reserveCost(run.id, settings, cost, owner);
       await prisma.marketDataSyncRun.update({ where: { id: run.id }, data: { stage: "DOWNLOADING" } });
@@ -107,7 +91,10 @@ async function downloadSegment(provider: MarketProvider, settings: SyncSettings,
           if (mappings[day] && mappings[day] !== bar.symbol) throw new SyncError(copy.marketSync.conflict, 400, "CONFLICT");
           mappings[day] = bar.symbol;
         }
-        if (additions.length) await prisma.marketBar.createMany({ data: additions });
+        if (additions.length) await prisma.$transaction(async (tx) => {
+          await tx.marketBar.createMany({ data: additions });
+          if (aggregation) await writeAggregationChunk(tx, aggregation.id, target, additions);
+        }, { maxWait: 30000, timeout: 30000 });
         pending = [];
       };
       for await (const bar of provider.bars(settings.profile, start, end, signal)) {

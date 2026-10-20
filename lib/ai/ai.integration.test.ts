@@ -11,6 +11,7 @@ vi.mock("@/lib/db", async () => {
   return { prisma: new PrismaClient({ datasourceUrl: "file:" + join(tmpdir(), "ai-test-" + randomUUID() + ".db") }) };
 });
 import { prisma } from "@/lib/db";
+import { queueAggregation, processAggregationJob } from "@/lib/market-replay/aggregation-jobs";
 import { defaultSettings } from "./prompts";
 import { saveSettings, readSettings, publicSettings, endpointUrls, protectKey, revealKey, resolveModel } from "./config";
 import { createContext, readContext, sessionMetrics } from "./context";
@@ -49,6 +50,7 @@ beforeAll(async () => {
     open: sequence > 4 ? 987654321 : 100 + sequence, high: sequence > 4 ? 987654322 : 102 + sequence,
     low: sequence > 4 ? 987654320 : 99 + sequence, close: sequence > 4 ? 987654321 : 101 + sequence,
   })) });
+  await processAggregationJob((await queueAggregation("market")).id);
   const s = await createReplaySession("market", { name: "AI fixture", mode: "TRAINING", timestamp: base.toISOString(), playbackRate: 1, displayIntervalSeconds: 300, displaySession: "ETH" });
   sessionId = s.id; projectionId = s.activeProjectionId!;
   await prisma.replayProjection.update({ where: { id: projectionId }, data: { currentSequence: 3 } });
@@ -561,6 +563,7 @@ describe("B: frozen multi-period charts", () => {
     const datasetId = "image-pagination", count = 430;
     await prisma.marketDataset.create({ data: { id: datasetId, name: datasetId, symbol: "PAGE", timeframe: "1m", timezone: "UTC", sourceIntervalSeconds: 60, barCount: count, startTime: base, endTime: new Date(+base + (count - 1) * 60000) } });
     await prisma.marketBar.createMany({ data: Array.from({ length: count }, (_, sequence) => ({ datasetId, sequence, timestamp: new Date(+base + sequence * 60000), open: 100, high: 102, low: 99, close: 101 })) });
+    await processAggregationJob((await queueAggregation(datasetId)).id);
     const session = await createReplaySession(datasetId, { name: datasetId, mode: "TRAINING", timestamp: base.toISOString(), playbackRate: 1, displayIntervalSeconds: 60, displaySession: "ETH" });
     await prisma.replayProjection.update({ where: { id: session.activeProjectionId! }, data: { currentSequence: count - 1 } });
     const journal = await prisma.replayJournalSession.create({ data: { datasetId, replaySessionId: session.id, replayGeneration: 1, initialCapital: 10000, currency: "USD", commissionBps: 0, slippageBps: 0 } });

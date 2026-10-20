@@ -1,7 +1,12 @@
 import { describe, expect, it, vi } from "vitest";
-import { MarketBarCache, marketChunkKey, selectFifoEvictions } from "./bar-cache";
+import { MarketBarCache, marketChunkKey, selectFifoEvictions, displayBarScopeKey } from "./bar-cache";
 
 describe("market bar cache metadata", () => {
+  it("isolates display caches by aggregation rule and generation without changing raw keys", () => {
+    const scope = { datasetId: "a", dataVersion: 1, displayIntervalSeconds: 3600, displaySession: "ETH" as const, sessionFingerprint: "UTC", aggregationRuleVersion: 1, aggregationGenerationId: "first" };
+    expect(new Set([displayBarScopeKey(scope), displayBarScopeKey({ ...scope, aggregationGenerationId: "second" }), displayBarScopeKey({ ...scope, aggregationRuleVersion: 2 })]).size).toBe(3);
+    expect(displayBarScopeKey(scope).startsWith("time-aggregation-v1|")).toBe(true);
+  });
   it("isolates dataset, version, symbol, interval and trading day", () => {
     const base = { datasetId: "a", dataVersion: 1, symbol: "BTC/USD", sourceIntervalSeconds: 1, tradingDay: "2026-09-06" };
     const keys = [
