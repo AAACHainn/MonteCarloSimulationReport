@@ -6,7 +6,7 @@ import { prisma, replayDatabaseQueryCount } from "@/lib/db";
 import { copy } from "@/lib/i18n";
 import { planDisplayAdvance } from "@/lib/market-replay/display-advance";
 import { aggregateMarketBars, getAggregationBucket } from "@/lib/market-replay/aggregation";
-import { aggregatePhase, barEmissionMode, closeAggregatedBar } from "@/lib/market-replay/bar-quality";
+import { barEmissionMode, closeAggregatedBar } from "@/lib/market-replay/bar-quality";
 import { resolveDisplaySession } from "@/lib/market-replay/chart-sessions";
 import { datasetSourceInterval, serializeSourceBar } from "@/lib/market-replay/dataset";
 import type { ReplayServerResult } from "@/lib/market-replay/server-sync-types";
@@ -122,9 +122,7 @@ async function handlePOST(request: Request, context: RouteContext) {
     session: displaySessionConfig!,
     currentSequence: targetSequence,
     finalSequence: dataset.barCount - 1,
-  }).map((bar) => aggregatePhase(bar) === "FORMING" && (reachedVisibleBucket
-      || Date.parse(bar.bucketEnd) <= (advanced.at(-1)?.timestamp.getTime() ?? 0) + datasetSourceInterval(dataset)! * 1000)
-      ? closeAggregatedBar(bar) : bar);
+  }).map((bar) => bar.timestamp === completedDisplayBucketStart ? closeAggregatedBar(bar) : bar);
 
   const response = NextResponse.json({
     ...outcome.response,

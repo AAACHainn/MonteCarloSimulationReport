@@ -35,7 +35,17 @@ describe("bounded display advance planning", () => {
   });
   it("finishes at actual data end and handles an empty candidate range", async () => {
     const result = await planDisplayAdvance({ currentSequence: -1, barCount: 120, sourceSeconds: 1, displaySeconds: 300, session, count: 1 }, reader(120));
-    expect(result).toMatchObject({ targetSequence: 119, reachedVisibleBucket: true });
+    expect(result).toMatchObject({ targetSequence: 119, reachedVisibleBucket: true, completedDisplayBucketStart: null });
     expect(await planDisplayAdvance({ currentSequence: -1, barCount: 120, sourceSeconds: 1, displaySeconds: 300, session, count: 1 }, async () => [])).toBeNull();
+  });
+  it("closes a real time boundary at EOF, and a bucket crossed by revealed hidden-session time", async () => {
+    expect(await planDisplayAdvance({ currentSequence: -1, barCount: 5, sourceSeconds: 1, displaySeconds: 5, session, count: 1 }, reader(5)))
+      .toMatchObject({ targetSequence: 4, reachedVisibleBucket: true, completedDisplayBucketStart: new Date(0).toISOString() });
+    const start = Date.parse("2026-10-19T09:30:00Z");
+    const rth = { ...session, mode: "DAILY_SESSION" as const, openMinute: 570, closeMinute: 571 };
+    const rows = [0, 2, 61].map((seconds, sequence) => ({ sequence, timestamp: new Date(start + seconds * 1000) }));
+    expect(await planDisplayAdvance({ currentSequence: -1, barCount: rows.length, sourceSeconds: 1, displaySeconds: 5, session: rth, count: 1 },
+      async (after, take) => rows.slice(after + 1, after + 1 + take)))
+      .toMatchObject({ targetSequence: 2, reachedVisibleBucket: true, completedDisplayBucketStart: new Date(start).toISOString() });
   });
 });

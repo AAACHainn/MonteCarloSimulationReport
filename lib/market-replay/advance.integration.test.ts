@@ -171,6 +171,40 @@ describe("replay advance with real SQLite", () => {
       displaySession: "ETH", count: 1, abrLength: 2, displayUtcOffsetMinutes: 0 };
   }
 
+  it.each([
+    { name: "short-sparse", seconds: [0, 2], phase: "FORMING", quality: "NORMAL" },
+    { name: "closed-sparse", seconds: [0, 4], phase: "CLOSED", quality: "GAP" },
+    { name: "closed-dense", seconds: [0, 1, 2, 3, 4], phase: "CLOSED", quality: "NORMAL" },
+  ] as const)("keeps EOF $name identical across ordinary, flat, refreshed and incremental candles (AR-02)", async scenario => {
+    const results: AggregatedMarketBarData[][] = [];
+    for (const flatOnly of [false, true]) {
+      const id = `eof-${scenario.name}-${flatOnly}`;
+      await seed(id, 1, scenario.seconds.length, -1, true, { startTimeMs: 0 });
+      // Update backwards so sparse fixture timestamps never collide with an existing later row.
+      for (let i = scenario.seconds.length - 1; i >= 0; i--) await prisma.marketBar.update({ where: { datasetId_sequence: { datasetId: id, sequence: i } }, data: { timestamp: new Date(scenario.seconds[i] * 1000) } });
+      await prisma.marketDataset.update({ where: { id }, data: { barEmissionMode: "DENSE", endTime: new Date(scenario.seconds.at(-1)! * 1000) } });
+      await buildAggregations(id);
+      const response = await POST(request({ ...await flatBody(id, 5), flatOnly }), context(id));
+      expect(response.status).toBe(200);
+      const data = await response.json();
+      expect(data.currentSequence).toBe(scenario.seconds.length - 1);
+      expect(data.reachedVisibleBucket).toBe(true); // EOF stops the step, even when its bucket is still forming.
+      expect(data.completedDisplayBucketStart).toBe(scenario.phase === "CLOSED" ? new Date(0).toISOString() : null);
+      expect(data.aggregatedBars[0]).toMatchObject({ phase: scenario.phase, quality: scenario.quality });
+      const refreshed = await windowGET(new Request(`http://localhost/api/window?endSequence=${data.currentSequence}&displayIntervalSeconds=5&displaySession=ETH&visibleCount=5&warmupCount=0`), context(id));
+      expect(refreshed.status).toBe(200);
+      expect((await refreshed.json()).visibleBars).toEqual(data.aggregatedBars);
+      const raw = await prisma.marketBar.findMany({ where: { datasetId: id }, orderBy: { sequence: "asc" } });
+      const dataset = await prisma.marketDataset.findUniqueOrThrow({ where: { id } });
+      const incremental: AggregatedMarketBarData[] = [];
+      for (const bar of raw) mergeSourceBarInto(incremental, serializeSourceBar(bar), { sourceSeconds: 1, displaySeconds: 5,
+        session: resolveDisplaySession(dataset, "ETH")!, emissionMode: "DENSE", finalSequence: raw.length - 1 });
+      expect(incremental).toEqual(data.aggregatedBars);
+      results.push(data.aggregatedBars);
+    }
+    expect(results[0]).toEqual(results[1]);
+  }, 15_000);
+
   it("advances an empty 1s account through 1H using summaries and preserves all manual equity samples", async () => {
     for (const id of ["flat-reference", "flat-summary"]) {
       await seed(id, 1, 5000);

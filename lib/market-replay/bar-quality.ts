@@ -3,6 +3,13 @@ import type { AggregatedMarketBarData, AggregateBarPhase, AggregateBarQuality, B
 /** Display classification changes do not invalidate or rebuild OHLCV generations. */
 export const BAR_QUALITY_RULE_VERSION = 1;
 
+/** Exhausting a file is not a time boundary. A planner may also probe only the
+ * timestamp of the following source record, without revealing its price data.
+ */
+export function isAggregationBucketClosed(bucketEnd: number, revealedThrough: number, nextSourceTime?: number) {
+  return revealedThrough >= bucketEnd || (nextSourceTime !== undefined && nextSourceTime >= bucketEnd);
+}
+
 export function barEmissionMode(value?: string | null): BarEmissionMode {
   return value === "DENSE" || value === "TRADE_DRIVEN" ? value : "UNKNOWN";
 }

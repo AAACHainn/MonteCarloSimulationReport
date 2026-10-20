@@ -1,5 +1,6 @@
 import type { Prisma } from "@prisma/client";
 import { getAggregationBucket, getAdjacentAggregationBucketStart } from "./aggregation";
+import { isAggregationBucketClosed } from "./bar-quality";
 import type { TimeRange } from "./aggregation-reader";
 import type { TradingSessionConfig } from "./types";
 
@@ -53,8 +54,8 @@ export async function planFlatDisplayAdvance(db: Prisma.TransactionClient, o: {
     const lookahead = cursor < o.barCount - 1 ? await db.marketBar.findUniqueOrThrow({
       where: { datasetId_sequence: { datasetId: o.datasetId, sequence: cursor + 1 } }, select: { timestamp: true } }) : null;
     if (o.metrics) o.metrics.sourceRows += Number(Boolean(lookahead));
-    const closed = last.timestamp.getTime() + o.sourceSeconds * 1000 >= bucket.end
-      || (lookahead !== null && lookahead.timestamp.getTime() >= bucket.end);
+    const closed = isAggregationBucketClosed(bucket.end,
+      last.timestamp.getTime() + o.sourceSeconds * 1000, lookahead?.timestamp.getTime());
     if (closed) completedDisplayBucketStart = new Date(bucket.start).toISOString();
     visible++;
     if (visible >= o.count) { reachedVisibleBucket = closed || cursor === o.barCount - 1; break; }

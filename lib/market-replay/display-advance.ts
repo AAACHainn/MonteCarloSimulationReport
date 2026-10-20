@@ -1,4 +1,5 @@
 import { getAggregationBucket } from "./aggregation";
+import { isAggregationBucketClosed } from "./bar-quality";
 import { MAX_DISPLAY_ADVANCE_SOURCE_BARS, type TradingSessionConfig } from "./types";
 
 type Candidate = { sequence: number; timestamp: Date };
@@ -16,6 +17,8 @@ export async function planDisplayAdvance(options: {
   let targetSequence = currentSequence;
   let firstBucket: number | null = null;
   let lastBucket: number | null = null;
+  let lastBucketEnd: number | null = null;
+  let revealedThrough = Number.NEGATIVE_INFINITY;
   let previousVisibleSequence: number | null = null;
   let bucketCount = 0;
   let cachedBucket: ReturnType<typeof getAggregationBucket> = null;
@@ -32,12 +35,14 @@ export async function planDisplayAdvance(options: {
       cachedBucket = bucket;
       if (bucket && bucket.start !== lastBucket && bucketCount >= count) {
         return { targetSequence: previousVisibleSequence!, aggregationStart: new Date(firstBucket!),
-          completedDisplayBucketStart: new Date(lastBucket!).toISOString(), reachedVisibleBucket: true };
+          completedDisplayBucketStart: isAggregationBucketClosed(lastBucketEnd!, revealedThrough, time) ? new Date(lastBucket!).toISOString() : null,
+          reachedVisibleBucket: true };
       }
       if (candidate.sequence > cap) break;
       targetSequence = candidate.sequence;
+      revealedThrough = time + sourceSeconds * 1000;
       if (!bucket) continue;
-      if (bucket.start !== lastBucket) { firstBucket ??= bucket.start; lastBucket = bucket.start; bucketCount++; }
+      if (bucket.start !== lastBucket) { firstBucket ??= bucket.start; lastBucket = bucket.start; lastBucketEnd = bucket.end; bucketCount++; }
       previousVisibleSequence = candidate.sequence;
     }
     cursor = candidates.at(-1)!.sequence;
@@ -47,5 +52,6 @@ export async function planDisplayAdvance(options: {
   if (targetSequence === currentSequence) return null;
   const reachedVisibleBucket = targetSequence === barCount - 1 && bucketCount >= count;
   return { targetSequence, aggregationStart: firstBucket === null ? null : new Date(firstBucket),
-    completedDisplayBucketStart: reachedVisibleBucket ? new Date(lastBucket!).toISOString() : null, reachedVisibleBucket };
+    completedDisplayBucketStart: lastBucketEnd !== null && isAggregationBucketClosed(lastBucketEnd, revealedThrough)
+      ? new Date(lastBucket!).toISOString() : null, reachedVisibleBucket };
 }
