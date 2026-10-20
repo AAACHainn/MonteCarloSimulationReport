@@ -71,6 +71,7 @@ describe("market dataset settings API", () => {
         sourceIntervalSeconds: 60,
         timeframe: "1m",
         priceTickSize: 0.25,
+        barEmissionMode: "UNKNOWN",
         dataVersion: { increment: 1 },
         historyVersion: { increment: 1 },
         activeAggregationId: null,
@@ -99,6 +100,14 @@ describe("market dataset settings API", () => {
     expect(mocks.datasetUpdate).not.toHaveBeenCalled();
   });
 
+  it("changes source emission semantics without rebuilding prices or resetting replay", async () => {
+    const response = await PATCH(request({ barEmissionMode: "TRADE_DRIVEN" }), context);
+    expect(response.status).toBe(200);
+    expect(mocks.barFindMany).not.toHaveBeenCalled();
+    expect(mocks.datasetUpdate.mock.calls[0][0].data).toMatchObject({ barEmissionMode: "TRADE_DRIVEN" });
+    for (const key of ["dataVersion", "historyVersion", "activeAggregationId", "progress"]) expect(mocks.datasetUpdate.mock.calls[0][0].data[key]).toBeUndefined();
+  });
+
   it("versions price semantics without rescanning bars", async () => {
     const response = await PATCH(request({ priceTickSize: 0.25 }), context);
 
@@ -110,6 +119,7 @@ describe("market dataset settings API", () => {
         sourceIntervalSeconds: 1,
         timeframe: "1s",
         priceTickSize: 0.25,
+        barEmissionMode: "UNKNOWN",
         dataVersion: { increment: 1 },
         historyVersion: { increment: 1 },
         activeAggregationId: null,

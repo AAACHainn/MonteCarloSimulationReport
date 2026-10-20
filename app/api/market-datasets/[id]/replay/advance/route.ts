@@ -6,6 +6,7 @@ import { prisma, replayDatabaseQueryCount } from "@/lib/db";
 import { copy } from "@/lib/i18n";
 import { planDisplayAdvance } from "@/lib/market-replay/display-advance";
 import { aggregateMarketBars, getAggregationBucket } from "@/lib/market-replay/aggregation";
+import { aggregatePhase, barEmissionMode, closeAggregatedBar } from "@/lib/market-replay/bar-quality";
 import { resolveDisplaySession } from "@/lib/market-replay/chart-sessions";
 import { datasetSourceInterval, serializeSourceBar } from "@/lib/market-replay/dataset";
 import type { ReplayServerResult } from "@/lib/market-replay/server-sync-types";
@@ -13,6 +14,7 @@ import { syncReplayToTarget } from "@/lib/market-replay/replay-sync";
 import { MAX_DISPLAY_ADVANCE_SOURCE_BARS, isValidDisplayInterval } from "@/lib/market-replay/types";
 import { paperAdvanceSchema } from "@/lib/validations";
 import { attachReplayDiagnostics } from "@/lib/market-replay/server-diagnostics";
+import { tryFlatDisplayAdvance } from "@/lib/market-replay/flat-advance";
 
 type RouteContext = { params: Promise<{ id: string }> };
 
@@ -22,6 +24,16 @@ async function handlePOST(request: Request, context: RouteContext) {
   const { id } = await context.params;
   const parsed = paperAdvanceSchema.safeParse(await request.json());
   if (!parsed.success) return NextResponse.json({ error: parsed.error.issues[0]?.message }, { status: 400 });
+  if (parsed.data.flatOnly) {
+    const outcome = await tryFlatDisplayAdvance(id, parsed.data);
+    const response = outcome.status === 200 ? NextResponse.json(outcome.response)
+      : NextResponse.json({ error: outcome.error, code: outcome.code }, { status: outcome.status });
+    if (outcome.status === 200 && outcome.metrics) {
+      response.headers.set("X-Replay-Source-Rows", String(outcome.metrics.sourceRows));
+      response.headers.set("X-Replay-Summary-Rows", String(outcome.metrics.summaryRows));
+    }
+    return attachReplayDiagnostics(response, { startedAt, queryStart, strategy: "flat-display-advance" });
+  }
 
   const [dataset, progress] = await Promise.all([
     prisma.marketDataset.findUnique({ where: { id } }),
@@ -103,18 +115,16 @@ async function handlePOST(request: Request, context: RouteContext) {
     })
     : [];
   const aggregatedBars = parsed.data.displayIntervalSeconds === undefined ? [] : aggregateMarketBars({
+    emissionMode: barEmissionMode(dataset.barEmissionMode),
     bars: [...prefix, ...advanced].map(serializeSourceBar),
     sourceSeconds: datasetSourceInterval(dataset)!,
     displaySeconds: parsed.data.displayIntervalSeconds,
     session: displaySessionConfig!,
     currentSequence: targetSequence,
     finalSequence: dataset.barCount - 1,
-  }).map((bar) => ({
-    ...bar,
-    status: bar.status === "FORMING" && (reachedVisibleBucket
+  }).map((bar) => aggregatePhase(bar) === "FORMING" && (reachedVisibleBucket
       || Date.parse(bar.bucketEnd) <= (advanced.at(-1)?.timestamp.getTime() ?? 0) + datasetSourceInterval(dataset)! * 1000)
-      ? "INCOMPLETE" as const : bar.status,
-  }));
+      ? closeAggregatedBar(bar) : bar);
 
   const response = NextResponse.json({
     ...outcome.response,

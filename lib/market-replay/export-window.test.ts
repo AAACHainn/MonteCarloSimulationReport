@@ -40,7 +40,7 @@ describe("read-only export window", () => {
   it("returns backwards bars chronologically and never reads past the snapshot", async () => {
     const result = await readExportWindow({ ...options, direction: "backward", anchorSequence: 7, endSequence: 7, warmupCount: 0 });
     expect(result.bars.map((b) => b.firstSequence)).toEqual([0,3,6]);
-    expect(result.bars.at(-1)!.lastSequence).toBe(7); expect(result.bars.at(-1)!.status).toBe("INCOMPLETE");
+    expect(result.bars.at(-1)!.lastSequence).toBe(7); expect(result.bars.at(-1)!.status).toBe("FORMING");
     expect(result.nextSequence).toBeNull();
   });
   it("counts real RTH bars across a weekend and daylight-saving transition", async () => {

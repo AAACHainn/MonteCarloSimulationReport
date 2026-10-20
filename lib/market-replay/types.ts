@@ -35,6 +35,10 @@ export type PlaybackRate = number;
 export type SessionMode = "TWENTY_FOUR_SEVEN" | "DAILY_SESSION" | "OVERNIGHT_SESSION";
 export type DisplaySession = "ETH" | "RTH";
 export type AggregateBarStatus = "FORMING" | "COMPLETE" | "INCOMPLETE";
+export const BAR_EMISSION_MODES = ["UNKNOWN", "TRADE_DRIVEN", "DENSE"] as const;
+export type BarEmissionMode = typeof BAR_EMISSION_MODES[number];
+export type AggregateBarPhase = "FORMING" | "CLOSED";
+export type AggregateBarQuality = "NORMAL" | "UNKNOWN" | "GAP";
 export type EmaLineWidth = (typeof EMA_LINE_WIDTHS)[number];
 export type EmaLineStyle = (typeof EMA_LINE_STYLES)[number];
 
@@ -97,6 +101,10 @@ export type AggregatedMarketBarData = {
   sourceCount: number;
   expectedCount: number;
   status: AggregateBarStatus;
+  phase?: AggregateBarPhase;
+  quality?: AggregateBarQuality;
+  emissionMode?: BarEmissionMode;
+  confirmedGap?: boolean;
 };
 
 export type ReplayProgressData = {
@@ -111,6 +119,7 @@ export type ReplayProgressData = {
 };
 
 export type MarketDatasetSummary = {
+  barEmissionMode?: BarEmissionMode;
   aggregationGenerationId?: string | null;
   aggregationRuleVersion?: number;
   aggregationStatus?: "READY" | "PENDING";

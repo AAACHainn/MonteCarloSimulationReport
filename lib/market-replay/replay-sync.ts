@@ -8,6 +8,7 @@ import { resolveDisplaySession } from "@/lib/market-replay/chart-sessions";
 import { isValidDisplayInterval, MAX_REPLAY_SYNC_SOURCE_BARS } from "@/lib/market-replay/types";
 import { createDeterministicEventIdFactory } from "@/lib/paper-trading/deterministic-id";
 import { advancePaperTrading } from "@/lib/paper-trading/engine";
+import { advanceFlatAccount, canAdvanceFlatAccount, flatEquityPoint } from "@/lib/paper-trading/flat-advance";
 import {
   ensurePaperTradeStats,
   getPaperSessionSnapshot,
@@ -125,7 +126,17 @@ export async function syncReplayToTarget(
         const chunkFills: PaperFillData[] = [];
         const entries: ReplayJournalEntryDraft[] = [];
         const equityPoints: PaperEquityPointData[] = [];
+        const flat = canAdvanceFlatAccount(state, orders.length, lots.length);
         for (const dbBar of bars) {
+          if (flat) {
+            if (dbBar.sequence === input.targetSequence || dbBar.sequence === dataset.barCount - 1
+              || dbBar.sequence % account.equitySampleStride === 0
+              || (input.preserveSyncSamples && (dbBar.sequence - progress.currentSequence) % MAX_REPLAY_SYNC_SOURCE_BARS === 0)) {
+              state = advanceFlatAccount(state, dbBar.sequence);
+              equityPoints.push(flatEquityPoint(state, dbBar.sequence, dbBar.timestamp.toISOString()));
+            }
+            continue;
+          }
           const bar = serializeSourceBar(dbBar);
           while (input.contextRuns?.[contextIndex] && input.contextRuns[contextIndex].toSequence < bar.sequence) contextIndex++;
           const journalContext = input.contextRuns ? input.contextRuns[contextIndex].context : input.journalContext;
@@ -139,6 +150,7 @@ export async function syncReplayToTarget(
             || bar.sequence % account.equitySampleStride === 0
             || (input.preserveSyncSamples && (bar.sequence - progress.currentSequence) % MAX_REPLAY_SYNC_SOURCE_BARS === 0)) equityPoints.push(result.equityPoint);
         }
+        if (flat && state.lastProcessedSequence < bars.at(-1)!.sequence) state = advanceFlatAccount(state, bars.at(-1)!.sequence);
         account = await persistDerivedBatch(tx, account, progress.generation, { state, orders: [...changed.values()], fills: chunkFills, lots, entries, equityPoints },
           { previousLots, updateProjection: false });
         fills.push(...chunkFills);

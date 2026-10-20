@@ -41,6 +41,9 @@ import { resolveDisplaySession } from "./chart-sessions";
 import { aggregateMarketBars, getAggregationBucket, mergeSourceBarInto } from "./aggregation";
 import { calculateLatestAbr } from "./abr";
 import { appendContextRun, type ReplayContextRun } from "@/lib/replay-sessions/context-runs";
+import { materializeFlatContexts } from "@/lib/replay-sessions/flat-context";
+import { createCorrection, commitCorrection, readCorrection } from "@/lib/replay-sessions/corrections";
+import { runReplayCorrection } from "@/lib/replay-sessions/correction-runner";
 import { queueAggregation, processAggregationJob } from "./aggregation-jobs";
 async function buildAggregations(id: string) { const job = await queueAggregation(id); await processAggregationJob(job.id); }
 import { readLaterHistoryWindow, mergeHistoricalBars } from "./historical-window";
@@ -160,6 +163,187 @@ async function serverSyncBody(id: string, targetSequence: number, requestId: str
 }
 
 describe("replay advance with real SQLite", () => {
+
+  async function flatBody(id: string, displayIntervalSeconds = 3600, requestId = `flat-${id}`) {
+    const progress = await prisma.replayProgress.findFirstOrThrow({ where: { datasetId: id } });
+    return { flatOnly: true, requestId, historyVersion: 1, expectedCurrentSequence: progress.currentSequence,
+      expectedVersion: (await getPaperSessionSnapshot(id))?.session.version ?? null, displayIntervalSeconds,
+      displaySession: "ETH", count: 1, abrLength: 2, displayUtcOffsetMinutes: 0 };
+  }
+
+  it("advances an empty 1s account through 1H using summaries and preserves all manual equity samples", async () => {
+    for (const id of ["flat-reference", "flat-summary"]) {
+      await seed(id, 1, 5000);
+      await prisma.paperTradingSession.updateMany({ where: { datasetId: id }, data: { equitySampleStride: 113,
+        realizedPnl: -100, totalFees: 25, peakEquity: 100500, maxDrawdown: 0.001 } });
+    }
+    for (const target of [999, 1999, 2999, 3599]) {
+      const body = await serverSyncBody("flat-reference", target, `reference-${target}`);
+      expect((await syncPOST(syncRequest({ ...body, batchMode: "BULK" }), context("flat-reference"))).status).toBe(200);
+    }
+    const body = await flatBody("flat-summary");
+    const response = await POST(request(body), context("flat-summary"));
+    expect(response.status).toBe(200);
+    const result = await response.json();
+    expect(result).toMatchObject({ currentSequence: 3599, reachedVisibleBucket: true, fills: [] });
+    expect(result.aggregatedBars).toHaveLength(1);
+    expect(result.aggregatedBars[0]).toMatchObject({ sourceCount: 3600, lastSequence: 3599, phase: "CLOSED" });
+    expect(Number(response.headers.get("X-Replay-Source-Rows"))).toBeLessThan(150);
+    expect(Number(response.headers.get("X-Replay-Summary-Rows"))).toBeGreaterThan(0);
+    const fast = (await getPaperSessionSnapshot("flat-summary"))!;
+    const reference = (await getPaperSessionSnapshot("flat-reference"))!;
+    expect({ ...fast.session, id: "same", datasetId: "same" }).toEqual({ ...reference.session, id: "same", datasetId: "same" });
+    expect(fast.stats).toEqual(reference.stats);
+    const equity = async (id: string) => prisma.paperEquityPoint.findMany({ where: { session: { datasetId: id } },
+      orderBy: { sequence: "asc" }, select: { sequence: true, timestamp: true, balance: true, equity: true, drawdown: true } });
+    expect(await equity("flat-summary")).toEqual(await equity("flat-reference"));
+    const points = await equity("flat-summary");
+    const replay = await POST(request(body), context("flat-summary"));
+    expect(await replay.json()).toEqual(result);
+    expect(await equity("flat-summary")).toEqual(points);
+    const changed = await POST(request({ ...body, displayIntervalSeconds: 300 }), context("flat-summary"));
+    expect(changed.status).toBe(409);
+  }, 20_000);
+
+  it.each([7, 61, 420, 3900])("keeps a custom %is interval and bounded sampling without future prices", async seconds => {
+    const id = `flat-custom-${seconds}`;
+    await seed(id, 1, seconds + 2, -1, true, { startTimeMs: 0 });
+    const response = await POST(request(await flatBody(id, seconds)), context(id));
+    const data = await response.json();
+    expect(response.status).toBe(200);
+    expect(data.currentSequence).toBe(seconds - 1);
+    expect(data.lastSourceBar.sequence).toBe(seconds - 1);
+    expect(data.aggregatedBars.every((bar: AggregatedMarketBarData) => bar.lastSequence <= data.currentSequence)).toBe(true);
+    const raw = await prisma.marketBar.findMany({ where: { datasetId: id, sequence: { lte: data.currentSequence } }, orderBy: { sequence: "asc" } });
+    const dataset = await prisma.marketDataset.findUniqueOrThrow({ where: { id } });
+    expect(data.aggregatedBars).toEqual(aggregateMarketBars({ bars: raw.map(serializeSourceBar), sourceSeconds: 1,
+      displaySeconds: seconds, session: resolveDisplaySession(dataset, "ETH")!, currentSequence: data.currentSequence, finalSequence: seconds + 1 }));
+  }, 15_000);
+
+  it.each([
+    { type: "MARKET", isProtective: false, activeFromSequence: 0 },
+    { type: "LIMIT", isProtective: false, activeFromSequence: 0 },
+    { type: "STOP", isProtective: true, activeFromSequence: 500 },
+  ] as const)("does not bypass pending $type orders, including future protective orders", async order => {
+    const id = `flat-pending-${order.type}`;
+    await seed(id, 1, 400);
+    const account = await prisma.paperTradingSession.findFirstOrThrow({ where: { datasetId: id } });
+    await seedOrder({ id: `pending-${id}`, sessionId: account.id, side: "BUY", quantity: 1,
+      type: order.type, isProtective: order.isProtective, activeFromSequence: order.activeFromSequence,
+      price: order.type === "MARKET" ? null : 100, createdSequence: -1 });
+    expect(await (await POST(request(await flatBody(id, 300)), context(id))).json()).toEqual({ flatAdvanceUnavailable: true });
+    expect((await prisma.replayProgress.findFirstOrThrow({ where: { datasetId: id } })).currentSequence).toBe(-1);
+  });
+
+  it("does not bypass a position without protective orders, or leak writes on failure", async () => {
+    await seed("flat-position", 1, 400);
+    await prisma.paperTradingSession.updateMany({ where: { datasetId: "flat-position" }, data: { netQuantity: 1, averageEntryPrice: 100 } });
+    expect(await (await POST(request(await flatBody("flat-position", 300)), context("flat-position"))).json()).toEqual({ flatAdvanceUnavailable: true });
+    await seed("flat-failure", 1, 400);
+    await prisma.$executeRawUnsafe(`CREATE TRIGGER flat_failure BEFORE UPDATE ON ReplayProgress WHEN OLD.datasetId='flat-failure' BEGIN SELECT RAISE(ABORT,'injected flat failure'); END`);
+    try {
+      expect((await POST(request(await flatBody("flat-failure", 300)), context("flat-failure"))).status).toBe(500);
+      expect((await getPaperSessionSnapshot("flat-failure"))!.session.lastProcessedSequence).toBe(-1);
+      expect(await prisma.paperEquityPoint.count({ where: { session: { datasetId: "flat-failure" } } })).toBe(0);
+      expect(await prisma.replayContextRun.count({ where: { projection: { replaySession: { datasetId: "flat-failure" } } } })).toBe(0);
+    } finally { await prisma.$executeRawUnsafe("DROP TRIGGER flat_failure"); }
+  });
+
+  it("materializes exact pre-source ABR after a fast advance and can rewind inside it", async () => {
+    const id = "flat-context";
+    await seed(id, 1, 1500, 119, true, { startTimeMs: 0 });
+    const replay = await prisma.replaySession.findUniqueOrThrow({ where: { id: fixtureSessions.get(id)! } });
+    await prisma.replaySession.update({ where: { id: replay.id }, data: { mode: "LIVE_REPLAY", legacy: false } });
+    const response = await POST(request(await flatBody(id, 61)), context(id));
+    expect(response.status).toBe(200);
+    const data = await response.json();
+    expect(data.currentSequence).toBe(121);
+    const dataset = await prisma.marketDataset.findUniqueOrThrow({ where: { id } });
+    const raw = await prisma.marketBar.findMany({ where: { datasetId: id, sequence: { lte: 121 } }, orderBy: { sequence: "asc" } });
+    const runs = await prisma.replayContextRun.findMany({ where: { projectionId: replay.activeProjectionId! } });
+    const expanded = await materializeFlatContexts(dataset, raw.filter(bar => bar.sequence > 119), runs);
+    const aggregates: AggregatedMarketBarData[] = [];
+    for (const bar of raw) {
+      if (bar.sequence >= 120) {
+        const run = expanded.find(run => run.fromSequence <= bar.sequence && run.toSequence >= bar.sequence)!;
+        expect(JSON.parse(run.context).context.abrValue).toBe(calculateLatestAbr([], aggregates, 2));
+      }
+      mergeSourceBarInto(aggregates, serializeSourceBar(bar), { sourceSeconds: 1, displaySeconds: 61,
+        session: resolveDisplaySession(dataset, "ETH")!, finalSequence: 1499 });
+    }
+    const job = await createCorrection(replay.id, { requestId: "flat-rewind", type: "REWIND", targetSequence: 120,
+      expectedVersion: (await loadReplayScope(replay.id)).version });
+    await runReplayCorrection(job.id);
+    expect((await readCorrection(replay.id, job.id)).status).toBe("READY");
+    await commitCorrection(replay.id, job.id);
+    expect((await getPaperSessionSnapshot(id))!.session).toMatchObject({ lastProcessedSequence: 120, netQuantity: 0 });
+  }, 15_000);
+
+  it.each([["ETH", 44], ["RTH", 1094]] as const)("seeks %s session boundaries for 1min sources without walking the hidden interval", async (displaySession, target) => {
+    const id = `flat-session-${displaySession}`;
+    await seed(id, 60, 1500, -1, true, { symbol: "ES1!", startTimeMs: Date.parse("2026-09-14T20:15:00Z") });
+    await prisma.paperTradingSession.updateMany({ where: { datasetId: id }, data: { equitySampleStride: 113 } });
+    const response = await POST(request({ ...await flatBody(id), displaySession }), context(id));
+    const data = await response.json();
+    expect(response.status).toBe(200);
+    expect(data.currentSequence).toBe(target);
+    expect(Number(response.headers.get("X-Replay-Source-Rows"))).toBeLessThan(100);
+    expect(data.aggregatedBars.at(-1).timestamp).toBe(displaySession === "ETH" ? "2026-09-14T20:00:00.000Z" : "2026-09-15T13:30:00.000Z");
+    expect(data.lastSourceBar.sequence).toBe(target);
+    const samples = await prisma.paperEquityPoint.findMany({ where: { session: { datasetId: id } }, orderBy: { sequence: "asc" }, select: { sequence: true } });
+    if (displaySession === "RTH") expect(samples.map(row => row.sequence)).toEqual([...Array.from({ length: Math.floor(target / 113) + 1 }, (_, i) => i * 113), target]);
+  }, 15_000);
+
+  it("resumes bounded dense sampling and leaves a short EOF candle forming", async () => {
+    const id = "flat-bounded";
+    await seed(id, 1, 5001, -1, true, { startTimeMs: 0 });
+    const first = await POST(request(await flatBody(id, 7200, "flat-bounded-first")), context(id));
+    const partial = await first.json();
+    expect(partial).toMatchObject({ currentSequence: 3999, reachedVisibleBucket: false });
+    expect(partial.aggregatedBars.at(-1).phase).toBe("FORMING");
+    const next = await POST(request(await flatBody(id, 7200, "flat-bounded-next")), context(id));
+    const finished = await next.json();
+    expect(finished).toMatchObject({ currentSequence: 5000, reachedVisibleBucket: true, completedDisplayBucketStart: null });
+    expect(finished.aggregatedBars.at(-1)).toMatchObject({ phase: "FORMING", sourceCount: 5001 });
+    expect(await prisma.paperEquityPoint.count({ where: { session: { datasetId: id } } })).toBe(5001);
+    const checkpoint = await prisma.replayCheckpoint.findFirstOrThrow({ where: { projectionId: (await loadReplayScope(fixtureSessions.get(id)!)).projectionId, sourceSequence: 4095 } });
+    expect(JSON.parse(checkpoint.state).account).toMatchObject({ lastProcessedSequence: 4095, version: 4097 });
+  }, 15_000);
+
+  it("preserves an initially short client ABR history across coalesced flat advances", async () => {
+    const id = "flat-short-history";
+    await seed(id, 1, 400, 119, true, { startTimeMs: 0 });
+    for (let i = 0; i < 2; i++) expect((await POST(request({ ...await flatBody(id, 61, `short-history-${i}`), abrHistoryStartSequence: 61 }), context(id))).status).toBe(200);
+    const dataset = await prisma.marketDataset.findUniqueOrThrow({ where: { id } });
+    const raw = await prisma.marketBar.findMany({ where: { datasetId: id, sequence: { gte: 61, lte: 182 } }, orderBy: { sequence: "asc" } });
+    const runs = await prisma.replayContextRun.findMany({ where: { projectionId: (await loadReplayScope(fixtureSessions.get(id)!)).projectionId } });
+    const contexts = await materializeFlatContexts(dataset, raw.filter(row => row.sequence >= 120), runs);
+    const bars: AggregatedMarketBarData[] = [];
+    for (const row of raw) {
+      if (row.sequence >= 120) {
+        const context = JSON.parse(contexts.find(run => run.fromSequence <= row.sequence && run.toSequence >= row.sequence)!.context).context;
+        expect(context.abrValue).toBe(calculateLatestAbr([], bars, 2));
+      }
+      mergeSourceBarInto(bars, serializeSourceBar(row), { sourceSeconds: 1, displaySeconds: 61,
+        session: resolveDisplaySession(dataset, "ETH")!, finalSequence: 399 });
+    }
+  });
+
+  it("restores long custom-period ABR through multiple source-budgeted history pages", async () => {
+    const id = "flat-long-history";
+    await seed(id, 1, 61500, 60999, true, { startTimeMs: 0 });
+    const response = await POST(request({ ...await flatBody(id, 61), abrLength: 1000, abrHistoryStartSequence: 0 }), context(id));
+    expect(response.status).toBe(200);
+    const dataset = await prisma.marketDataset.findUniqueOrThrow({ where: { id } });
+    const raw = await prisma.marketBar.findMany({ where: { datasetId: id, sequence: { lte: 61000 } }, orderBy: { sequence: "asc" } });
+    const runs = await prisma.replayContextRun.findMany({ where: { projectionId: (await loadReplayScope(fixtureSessions.get(id)!)).projectionId } });
+    const contexts = await materializeFlatContexts(dataset, raw.slice(-1), runs);
+    const bars = aggregateMarketBars({ bars: raw.slice(0, -1).map(serializeSourceBar), sourceSeconds: 1, displaySeconds: 61,
+      session: resolveDisplaySession(dataset, "ETH")!, currentSequence: 60999, finalSequence: 61499 });
+    const expected = calculateLatestAbr([], bars, 1000);
+    expect(expected).not.toBeNull();
+    expect(JSON.parse(contexts[0].context).context.abrValue).toBeCloseTo(expected!, 12);
+  }, 30_000);
 
   it("matches per-source ABR, FIFO, fees, OCO and every equity sample when coalescing a thousand source bars", async () => {
     // Different commit boundaries round-trip SQLite Float values a different number of times.
@@ -665,7 +849,7 @@ describe("replay advance with real SQLite", () => {
     const body = await response.json();
     expect(body.currentSequence).toBe(2);
     expect(body.aggregatedBars).toHaveLength(1);
-    expect(body.aggregatedBars[0]).toMatchObject({ firstSequence: 0, lastSequence: 2, sourceCount: 3, expectedCount: 5, volume: 30, status: "INCOMPLETE" });
+    expect(body.aggregatedBars[0]).toMatchObject({ firstSequence: 0, lastSequence: 2, sourceCount: 3, expectedCount: 5, volume: 30, status: "COMPLETE", phase: "CLOSED", quality: "UNKNOWN" });
     expect(body.lastSourceBar.sequence).toBe(2);
     expect(body.advancedBars).toEqual([]);
   });

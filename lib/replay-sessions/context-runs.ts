@@ -5,6 +5,18 @@ export type ReplayContextRun = {
   toSequence: number;
   generation: number;
   context: PaperJournalContext | null;
+  /** Server-only recipe; expanded to exact per-source ABR when correction replays this range. */
+  flatAdvance?: FlatAdvanceContext;
+};
+export type FlatAdvanceContext = {
+  kind: "FLAT_ADVANCE_V1";
+  historyVersion: number;
+  abrLength: number;
+  displayIntervalSeconds: number;
+  displaySession: "ETH" | "RTH";
+  displayUtcOffsetMinutes: number;
+  priceTickSize: number;
+  abrHistoryStartSequence: number;
 };
 export function appendContextRun(runs: ReplayContextRun[], sequence: number, context: PaperJournalContext | null, generation: number) {
   const last = runs.at(-1);

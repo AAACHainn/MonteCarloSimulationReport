@@ -9,6 +9,7 @@ import { applyRecordedCommand, type RecordedPayload } from "./replay-command";
 import { projectionRecordId } from "./identity";
 import { persistDerivedBatch } from "./persistence";
 import { persistContextRuns } from "./context-storage";
+import { materializeFlatContexts } from "./flat-context";
 import { advancePaperTrading } from "@/lib/paper-trading/engine";
 import { createDeterministicEventIdFactory } from "@/lib/paper-trading/deterministic-id";
 import { serializeSourceBar } from "@/lib/market-replay/dataset";
@@ -127,7 +128,8 @@ export async function runReplayCorrection(jobId: string) {
         if (bars.length !== end - cursor) throw new ReplaySessionError("HISTORY_MISSING", 409, copy.replaySessions.correctionHistoryMissing);
         const commandStream = commandsInRange(job.baseProjectionId, cursor + 1, end, 0);
         let nextCommand = await commandStream.next();
-        const contexts = await prisma.replayContextRun.findMany({ where: { projectionId: job.baseProjectionId, fromSequence: { lte: end }, toSequence: { gt: cursor } }, orderBy: { fromSequence: "asc" } });
+        const storedContexts = await prisma.replayContextRun.findMany({ where: { projectionId: job.baseProjectionId, fromSequence: { lte: end }, toSequence: { gt: cursor } }, orderBy: { fromSequence: "asc" } });
+        const contexts = await materializeFlatContexts(session.dataset, bars, storedContexts);
         let contextIndex = 0;
         for (let offset = 0; offset < bars.length;) {
           const changed = new Map<string, PaperOrderData>();

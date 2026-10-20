@@ -10,7 +10,8 @@ export async function persistContextRuns(tx: Prisma.TransactionClient, runs: Rep
   const additions: Prisma.ReplayContextRunCreateManyInput[] = [];
   let tail: { toSequence: number; context: string } | null = existingTail;
   for (const run of runs) {
-    const context = JSON.stringify({ generation: run.generation, context: run.context });
+    const context = JSON.stringify({ generation: run.generation, context: run.context,
+      ...(run.flatAdvance ? { flatAdvance: run.flatAdvance } : {}) });
     if (tail?.toSequence === run.fromSequence - 1 && tail.context === context) {
       tail.toSequence = run.toSequence;
     } else {

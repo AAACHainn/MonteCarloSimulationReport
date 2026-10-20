@@ -30,7 +30,7 @@ describe("market bar aggregation", () => {
   });
 
   it("marks a closed candle with missing source bars incomplete", () => {
-    const result = aggregateMarketBars({ bars: [bar(0, 0), bar(1, 2), bar(2, 5)], sourceSeconds: 1, displaySeconds: 5, session: always, currentSequence: 2, finalSequence: 99 });
+    const result = aggregateMarketBars({ bars: [bar(0, 0), bar(1, 2), bar(2, 5)], sourceSeconds: 1, displaySeconds: 5, session: always, currentSequence: 2, finalSequence: 99, emissionMode: "DENSE" });
     expect(result[0].status).toBe("INCOMPLETE");
     expect(result[1].status).toBe("FORMING");
   });
@@ -81,12 +81,12 @@ describe("market bar aggregation", () => {
     const result = aggregateMarketSegments({ segments, sourceSeconds: 1, displaySeconds: secondsPerDay, session: always, currentSequence: 19_999_999, finalSequence: 19_999_999 });
     expect(result).toHaveLength(dayCount);
     expect(result.slice(0, -1).every((item) => item.status === "COMPLETE")).toBe(true);
-    expect(result.at(-1)?.status).toBe("INCOMPLETE");
+    expect(result.at(-1)?.status).toBe("FORMING");
   });
 });
 
 describe("incremental replay aggregation", () => {
-  const options = { sourceSeconds: 1, displaySeconds: 5, session: always, finalSequence: 9 };
+  const options = { sourceSeconds: 1, displaySeconds: 5, session: always, finalSequence: 9, emissionMode: "DENSE" as const };
   it("replaces a partial bucket, remains immutable and ignores duplicate or older revisions", () => {
     const raw = Array.from({ length: 5 }, (_, i) => bar(i, i));
     const forming = aggregateMarketBars({ bars: raw.slice(0, 2), ...options, currentSequence: 1 });

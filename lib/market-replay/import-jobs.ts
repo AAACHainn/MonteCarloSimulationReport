@@ -124,6 +124,7 @@ export async function processImportJob(jobId: string) {
         name: metadata.name, description: metadata.description || null, symbol: metadata.symbol,
         timeframe: metadata.timeframe, timezone: metadata.timezone, status: "IMPORTING",
         sourceIntervalSeconds: metadata.sourceIntervalSeconds, priceTickSize: metadata.priceTickSize, sessionMode: metadata.sessionMode,
+        barEmissionMode: inspection.format === "DATABENTO_CME" ? "TRADE_DRIVEN" : metadata.barEmissionMode,
         sessionOpenMinute: metadata.sessionOpenMinute ?? null, sessionCloseMinute: metadata.sessionCloseMinute ?? null,
         tradingWeekdays: metadata.tradingWeekdays.join(","), barCount: 0,
         startTime: new Date(0), endTime: new Date(0),
@@ -134,6 +135,7 @@ export async function processImportJob(jobId: string) {
       where: { id: jobId },
       data: {
         datasetId, totalRows: inspection.rowCount, processedRows: 0, importedBars: 0,
+        metadata: JSON.stringify({ ...metadata, barEmissionMode: dataset.barEmissionMode, sourceFormat: inspection.format }),
         expandedBytes: inspection.expandedBytes, stage: "IMPORTING", stageProcessedBytes: 0,
         stageTotalBytes: job.compressedBytes, stageStartedAt: new Date(), ...memorySnapshot(memory),
       },

@@ -44,7 +44,7 @@ async function patchDataset(request: Request, context: RouteContext) {
   }
   const inputKeys = Object.keys(input);
   if (dataset.sourceIntervalSeconds !== null) {
-    const allowedKeys = new Set(["sourceIntervalSeconds", "priceTickSize"]);
+    const allowedKeys = new Set(["sourceIntervalSeconds", "priceTickSize", "barEmissionMode"]);
     if (!inputKeys.length || inputKeys.some((key) => !allowedKeys.has(key))) {
       return NextResponse.json({ error: copy.marketReplay.validation.metadataInvalid }, { status: 400 });
     }
@@ -83,6 +83,7 @@ async function patchDataset(request: Request, context: RouteContext) {
       sourceIntervalSeconds,
       timeframe: formatInterval(sourceIntervalSeconds),
       priceTickSize: parsed.data.priceTickSize,
+      barEmissionMode: parsed.data.barEmissionMode,
       dataVersion: sourceIntervalChanged || parsed.data.priceTickSize !== dataset.priceTickSize ? { increment: 1 } : undefined,
       historyVersion: sourceIntervalChanged || parsed.data.priceTickSize !== dataset.priceTickSize ? { increment: 1 } : undefined,
       activeAggregationId: sourceIntervalChanged || parsed.data.priceTickSize !== dataset.priceTickSize ? null : undefined,
@@ -94,6 +95,7 @@ async function patchDataset(request: Request, context: RouteContext) {
       timeframe: formatInterval(sourceIntervalSeconds),
       priceTickSize: parsed.data.priceTickSize,
       displayIntervalSeconds: sourceIntervalChanged ? sourceIntervalSeconds : null,
+      barEmissionMode: parsed.data.barEmissionMode,
     });
   }
   const parsed = marketDatasetSchema.safeParse({ ...dataset, ...input });
@@ -111,6 +113,7 @@ async function patchDataset(request: Request, context: RouteContext) {
   }
   await prisma.marketDataset.update({ where: { id }, data: {
     sourceIntervalSeconds: parsed.data.sourceIntervalSeconds, timeframe: formatInterval(parsed.data.sourceIntervalSeconds),
+    barEmissionMode: parsed.data.barEmissionMode,
     sessionMode: parsed.data.sessionMode,
     priceTickSize: parsed.data.priceTickSize,
     sessionOpenMinute: parsed.data.sessionOpenMinute ?? null, sessionCloseMinute: parsed.data.sessionCloseMinute ?? null,

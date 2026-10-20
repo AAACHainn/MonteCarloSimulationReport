@@ -1,4 +1,5 @@
 import { mergeAggregatedBars } from "./aggregation";
+import { closeAggregatedBar } from "./bar-quality";
 import { MAX_REPLAY_BULK_SOURCE_BARS, MAX_REPLAY_SYNC_SOURCE_BARS, REPLAY_HISTORY_BAR_LIMIT, REPLAY_HISTORY_COMPACT_TO, type AggregatedMarketBarData } from "./types";
 
 /** Only the tail touched by newly confirmed source candles needs an IndexedDB write. */
@@ -7,7 +8,7 @@ export function advancedDisplayBars(bars: AggregatedMarketBarData[], confirmedSe
   while (start > 0 && bars[start - 1].lastSequence > confirmedSequence) start--;
   // A new bucket can finalize an incomplete previous bucket without changing its source sequence.
   if (start > 0 && previousLast && bars[start - 1].timestamp === previousLast.timestamp
-    && bars[start - 1].status !== previousLast.status) start--;
+    && (bars[start - 1].status !== previousLast.status || bars[start - 1].phase !== previousLast.phase || bars[start - 1].quality !== previousLast.quality)) start--;
   return bars.slice(start);
 }
 
@@ -39,9 +40,9 @@ export function mergeDisplayAdvanceWindow(bars: AggregatedMarketBarData[], warmu
   updates: AggregatedMarketBarData[], warmupCount: number, finished: boolean) {
   let next = updates.length ? mergeAggregatedBars(bars, updates) : bars;
   const last = next.at(-1);
-  if (finished && last?.status === "FORMING") {
+  if (finished && last?.status === "FORMING" && last.sourceCount === last.expectedCount) {
     next = next.slice();
-    next[next.length - 1] = { ...last, status: last.sourceCount === last.expectedCount ? "COMPLETE" : "INCOMPLETE" };
+    next[next.length - 1] = closeAggregatedBar(last);
   }
   if (next.length <= REPLAY_HISTORY_BAR_LIMIT) return { bars: next, warmupBars };
   const dropped = next.slice(0, next.length - REPLAY_HISTORY_COMPACT_TO);

@@ -9,7 +9,7 @@ function aggregate(sequences: number[], displaySeconds = 300) {
     open: 100, high: 102, low: 99, close: 101, volume: null }));
   return aggregateMarketBars({ bars: source, sourceSeconds: 60, displaySeconds,
     session: { mode: "TWENTY_FOUR_SEVEN", timezone: "UTC", openMinute: null, closeMinute: null, weekdays: [] },
-    currentSequence: sequences.at(-1) ?? -1, finalSequence: 100 });
+    currentSequence: sequences.at(-1) ?? -1, finalSequence: 100, emissionMode: "DENSE" });
 }
 
 describe("chart context menu rewind selection", () => {

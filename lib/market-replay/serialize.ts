@@ -1,5 +1,6 @@
 import { availableDisplaySessions } from "./chart-sessions";
 import { AGGREGATION_RULE_VERSION } from "./time-aggregation";
+import { barEmissionMode } from "./bar-quality";
 import { parseSourceInterval, type DisplaySession, type MarketDatasetSummary, type SessionMode } from "./types";
 
 type DatasetRecord = {
@@ -14,6 +15,7 @@ type DatasetRecord = {
   historyVersion?: number;
   activeAggregationId?: string | null;
   sourceIntervalSeconds: number | null;
+  barEmissionMode?: string;
   priceTickSize: number;
   sessionMode: string;
   sessionOpenMinute: number | null;
@@ -47,6 +49,7 @@ export function serializeMarketDataset(dataset: DatasetRecord): MarketDatasetSum
     aggregationGenerationId: dataset.activeAggregationId ?? null,
     aggregationRuleVersion: AGGREGATION_RULE_VERSION,
     aggregationStatus: dataset.activeAggregationId ? "READY" : "PENDING",
+    barEmissionMode: barEmissionMode(dataset.barEmissionMode),
     startTime: dataset.startTime.toISOString(),
     endTime: dataset.endTime.toISOString(),
     createdAt: dataset.createdAt.toISOString(),

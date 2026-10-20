@@ -5,6 +5,7 @@ import { useRouter } from "next/navigation";
 import { ChartCandlestick, Loader2, PencilLine, Trash2, Upload } from "lucide-react";
 import { ReplaySessionEntry } from "./replay-session-entry";
 import { MarketAggregationControl } from "./market-aggregation-control";
+import { BarEmissionModeField } from "./bar-emission-mode-field";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
@@ -15,7 +16,7 @@ import { Label } from "@/components/ui/label";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Textarea } from "@/components/ui/textarea";
 import { copy } from "@/lib/i18n";
-import type { MarketDatasetSummary } from "@/lib/market-replay/types";
+import type { BarEmissionMode, MarketDatasetSummary } from "@/lib/market-replay/types";
 import { formatInterval } from "@/lib/market-replay/types";
 import { formatPriceForTick } from "@/lib/market-replay/price-ticks";
 import { MarketImportProgress, type ImportIssue, type ImportJob } from "./market-import-progress";
@@ -66,6 +67,8 @@ export function MarketDatasetDashboard({ datasets }: { datasets: MarketDatasetSu
   const [isDeleting, setIsDeleting] = useState(false);
   const [sessionMode, setSessionMode] = useState<"TWENTY_FOUR_SEVEN" | "DAILY_SESSION">("TWENTY_FOUR_SEVEN");
   const [timezone, setTimezone] = useState("Asia/Shanghai");
+  const [emissionMode, setEmissionMode] = useState<BarEmissionMode>("UNKNOWN");
+  const [settingsEmissionMode, setSettingsEmissionMode] = useState<BarEmissionMode>("UNKNOWN");
   const [importJobs, setImportJobs] = useState<ImportJob[]>([]);
   const [activeJobId, setActiveJobId] = useState<string | null>(null);
   const [uploadPercent, setUploadPercent] = useState<number | null>(null);
@@ -166,7 +169,7 @@ export function MarketDatasetDashboard({ datasets }: { datasets: MarketDatasetSu
     const metadata = {
       name: formData.get("name"), description: formData.get("description"), symbol: formData.get("symbol"),
       timeframe: sourceIntervalSeconds === null ? "auto" : formatInterval(sourceIntervalSeconds), timezone,
-      sourceIntervalSeconds, priceTickSize: Number(formData.get("priceTickSize")), sessionMode,
+      sourceIntervalSeconds, priceTickSize: Number(formData.get("priceTickSize")), sessionMode, barEmissionMode: emissionMode,
       sessionOpenMinute: sessionMode === "DAILY_SESSION" ? timeToMinute(formData.get("sessionOpen")) : null,
       sessionCloseMinute: sessionMode === "DAILY_SESSION" ? timeToMinute(formData.get("sessionClose")) : null,
       tradingWeekdays: sessionMode === "DAILY_SESSION" ? formData.getAll("tradingWeekdays").map(Number) : [1,2,3,4,5,6,7],
@@ -267,6 +270,7 @@ export function MarketDatasetDashboard({ datasets }: { datasets: MarketDatasetSu
       body: JSON.stringify({
         sourceIntervalSeconds: Number(settingsSourceInterval),
         priceTickSize: Number(settingsTickValue),
+        barEmissionMode: settingsEmissionMode,
       }),
     });
     const data = await response.json().catch(() => null);
@@ -326,6 +330,7 @@ export function MarketDatasetDashboard({ datasets }: { datasets: MarketDatasetSu
                 </Select>
                 <p className="text-xs text-slate-500">{copy.marketReplay.timezoneHint}</p>
               </div>
+              <BarEmissionModeField id="market-bar-emission-mode" value={emissionMode} onChange={setEmissionMode} disabled={isImporting} />
               <div className="space-y-2">
                 <Label htmlFor="market-session-mode">{copy.marketReplay.sessionMode}</Label>
                 <Select value={sessionMode} onValueChange={(value) => setSessionMode(value as typeof sessionMode)}>
@@ -412,6 +417,7 @@ export function MarketDatasetDashboard({ datasets }: { datasets: MarketDatasetSu
                     <Button type="button" variant="outline" size="sm" onClick={() => {
                       setSettingsDataset(dataset);
                       setSettingsSourceInterval(String(dataset.sourceIntervalSeconds ?? ""));
+                      setSettingsEmissionMode(dataset.barEmissionMode ?? "UNKNOWN");
                       setSettingsTickValue(String(dataset.priceTickSize));
                       setSettingsError(null);
                     }}>
@@ -470,6 +476,7 @@ export function MarketDatasetDashboard({ datasets }: { datasets: MarketDatasetSu
             <Input id="edit-source-interval" name="sourceIntervalSeconds" type="number" min="1" max="86400" step="1" required value={settingsSourceInterval} onChange={(event) => setSettingsSourceInterval(event.target.value)} />
             <p className="text-xs text-slate-500">{copy.marketReplay.editSourceIntervalHint}</p>
           </div>
+          <BarEmissionModeField id="edit-bar-emission-mode" value={settingsEmissionMode} onChange={setSettingsEmissionMode} disabled={isSavingSettings || isSavingSyncSettings} />
           <div className="space-y-2">
             <Label htmlFor="edit-price-tick-size">{copy.marketReplay.priceTickSize}</Label>
             <Input id="edit-price-tick-size" name="priceTickSize" type="number" min="0" step="any" required value={settingsTickValue} onChange={(event) => setSettingsTickValue(event.target.value)} />

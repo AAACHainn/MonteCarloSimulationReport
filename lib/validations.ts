@@ -66,6 +66,7 @@ const marketDatasetShape = {
   timeframe: z.string().trim().min(1, copy.marketReplay.validation.timeframeRequired).max(30),
   timezone: z.string().trim().min(1, copy.marketReplay.validation.timezoneRequired).max(100),
   priceTickSize: priceTickSizeSchema,
+  barEmissionMode: z.enum(["UNKNOWN", "TRADE_DRIVEN", "DENSE"]).default("UNKNOWN"),
   sessionMode: z.enum(["TWENTY_FOUR_SEVEN", "DAILY_SESSION"]).default("TWENTY_FOUR_SEVEN"),
   sessionOpenMinute: z.coerce.number().int().min(0).max(1_439).optional().nullable(),
   sessionCloseMinute: z.coerce.number().int().min(1).max(1_440).optional().nullable(),
@@ -179,6 +180,8 @@ export const paperOrderUpdateSchema = z.object({
 copy.paperTrading.orderUpdateRequired);
 
 export const paperAdvanceSchema = z.object({
+  flatOnly: z.boolean().optional(),
+  abrHistoryStartSequence: z.number().int().nonnegative().optional(),
   requestId: z.string().trim().min(1).max(120).optional(),
   historyVersion: z.coerce.number().int().positive().optional(),
   expectedCurrentSequence: z.coerce.number().int().min(-1),
@@ -189,6 +192,13 @@ export const paperAdvanceSchema = z.object({
   abrValue: z.coerce.number().finite().positive().optional().nullable(),
   abrLength: z.coerce.number().int().min(ABR_LENGTH_MIN).max(ABR_LENGTH_MAX).default(8),
   displayUtcOffsetMinutes: z.coerce.number().int().min(-840).max(840).default(0),
+}).superRefine((value, context) => {
+  if (value.flatOnly && (!value.requestId || value.displayIntervalSeconds === undefined)) {
+    context.addIssue({ code: z.ZodIssueCode.custom, message: copy.marketReplay.validation.progressInvalid });
+  }
+  if (value.abrHistoryStartSequence !== undefined && value.abrHistoryStartSequence > value.expectedCurrentSequence + 1) {
+    context.addIssue({ code: z.ZodIssueCode.custom, message: copy.marketReplay.validation.progressInvalid });
+  }
 });
 
 export const replayChunksSchema = z.object({

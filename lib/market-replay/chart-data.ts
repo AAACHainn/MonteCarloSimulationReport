@@ -1,6 +1,7 @@
 import { TickMarkType, type Time, type UTCTimestamp } from "lightweight-charts";
 import { utcDateParts } from "./display-timezone";
 import type { AggregatedMarketBarData } from "./types";
+import { aggregateHasGap } from "./bar-quality";
 
 export function formatChartTick(time: Time, type: TickMarkType, offset: number) {
   if (typeof time !== "number") return String(time);
@@ -12,9 +13,9 @@ export function formatChartTick(time: Time, type: TickMarkType, offset: number) 
 }
 export function chartCandleData(bar: AggregatedMarketBarData) {
   return { time: Math.floor(new Date(bar.timestamp).getTime() / 1000) as UTCTimestamp, open: bar.open, high: bar.high, low: bar.low, close: bar.close,
-    ...(bar.status === "INCOMPLETE" ? { borderColor: "#f59e0b", wickColor: "#f59e0b" } : {}) };
+    ...(aggregateHasGap(bar) ? { borderColor: "#f59e0b", wickColor: "#f59e0b" } : {}) };
 }
 export function chartVolumeData(bar: AggregatedMarketBarData, up = "rgba(22,163,74,.45)", down = "rgba(220,38,38,.45)") {
   return { time: Math.floor(new Date(bar.timestamp).getTime() / 1000) as UTCTimestamp, value: bar.volume ?? 0,
-    color: bar.status === "INCOMPLETE" ? "rgba(245,158,11,.5)" : bar.close >= bar.open ? up : down };
+    color: aggregateHasGap(bar) ? "rgba(245,158,11,.5)" : bar.close >= bar.open ? up : down };
 }

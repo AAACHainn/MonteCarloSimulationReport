@@ -2,6 +2,7 @@
 
 import { addCalendarDays, chunkRequestDates } from "./chunks";
 import { HistoryVersionConflict, marketVersionMatches } from "./history-version";
+import { BAR_QUALITY_RULE_VERSION, barEmissionMode } from "./bar-quality";
 import {
   MARKET_CACHE_BUDGET_BYTES,
   MARKET_CACHE_EVICT_TO_RATIO,
@@ -39,6 +40,7 @@ export type StoredMarketChunk = MarketBarDayChunk & {
 type StoredMarketChunkMetadata = Pick<StoredMarketChunk, "key" | "serializedBytes" | "writtenAt">;
 
 export type DisplayBarCacheScope = {
+  barEmissionMode?: string;
   aggregationGenerationId?: string | null;
   aggregationRuleVersion?: number;
   datasetId: string;
@@ -63,7 +65,7 @@ type StoredDisplayScope = {
 };
 
 export function displayBarScopeKey(scope: DisplayBarCacheScope) {
-  return ["time-aggregation-v1", scope.aggregationRuleVersion ?? 1, scope.aggregationGenerationId ?? "pending", scope.datasetId, scope.dataVersion, scope.displayIntervalSeconds, scope.displaySession, scope.sessionFingerprint]
+  return ["time-aggregation-v1", `quality-${BAR_QUALITY_RULE_VERSION}`, barEmissionMode(scope.barEmissionMode), scope.aggregationRuleVersion ?? 1, scope.aggregationGenerationId ?? "pending", scope.datasetId, scope.dataVersion, scope.displayIntervalSeconds, scope.displaySession, scope.sessionFingerprint]
     .map(encodeURIComponent).join("|");
 }
 

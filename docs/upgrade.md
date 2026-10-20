@@ -17,6 +17,8 @@
 
 ## 0. 时间聚合重构的升级要求（2026-10-20）
 
+后续来源质量规则包含迁移 `20261020150000_bar_emission_mode`，仅为 `MarketDataset` 增加 `barEmissionMode`，默认未知。保留已有聚合代次和 OHLCV，无需重新导入或重建；按原迁移路径升级结构并重新构建客户端即可。已有已确认的 Databento 数据在“编辑行情设置”选择“按成交输出”，新 Databento 导入会自动识别。其他来源不能仅按文件名推断输出模式。详情见[源记录输出方式与质量判定](time-aggregation.md#源记录输出方式与质量判定2026-10-20)。
+
 本次增加 `MarketAggregationGeneration`、`MarketAggregatedBar`、`MarketAggregationJob`，删除旧 `MarketBarBlock`、`MarketBarBlockBuildState` 和 `MarketDataset.barBlockBuildCursor`，新增活动代次指针。原始行情、源序号、回放、账户与交易记录保留。规则、面板和本机基准见[时间聚合说明](time-aggregation.md)。
 
 完成下文备份和副本验证后，按原安装方式选择 `migrate deploy` 或初始化兜底脚本，不能混用。迁移只调整结构，不转换旧摘要，也不自动扫描历史；升级后已有数据集显示“聚合待构建”，在行情面板逐个点击“构建聚合”。完成前源周期仍可读取，更高周期明确提示未就绪。新导入自动聚合，追加与同步维护已就绪聚合的尾部。自定义周期入口及合法范围保留。
@@ -249,6 +251,8 @@ services:
 不使用 computer use 进行本次升级验收；通过 CLI、隔离测试和只读 API 核对，实际界面由用户试用。不要把开发文档中的旧验收结果当成目标机器已经完成验收。
 
 ## 7. 回退
+
+空仓快速推进版本将延迟计算描述写入既有 `ReplayContextRun.context` 字符串，不新增表结构。使用后回退至不识别 `FLAT_ADVANCE_V1` 的旧代码，需要匹配备份或先展开为旧格式的上下文，不能直接沿用新记录进行纠错重演。详见[空仓快速推进与回退兼容](flat-replay-advance.md#纠错上下文与回退兼容)。
 
 先区分日志模式回退与数据库结构回退：
 

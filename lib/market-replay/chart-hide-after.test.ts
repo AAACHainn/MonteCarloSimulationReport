@@ -12,7 +12,7 @@ function aggregate(sequences: number[], displaySeconds = 300) {
   }));
   return aggregateMarketBars({ bars: source, sourceSeconds: 60, displaySeconds,
     session: { mode: "TWENTY_FOUR_SEVEN", timezone: "UTC", openMinute: null, closeMinute: null, weekdays: [] },
-    currentSequence: sequences.at(-1) ?? -1, finalSequence: 100 });
+    currentSequence: sequences.at(-1) ?? -1, finalSequence: 100, emissionMode: "DENSE" });
 }
 
 describe("temporary hiding of later chart candles", () => {

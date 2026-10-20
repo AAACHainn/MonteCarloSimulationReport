@@ -3,11 +3,14 @@
 import { useCallback, useEffect, useMemo, useRef } from "react";
 import { DisplayBarCache, MarketBarCache, ReplayWindowMemoryCache } from "./bar-cache";
 import type { DisplaySession, MarketDatasetSummary } from "./types";
+import { BAR_QUALITY_RULE_VERSION } from "./bar-quality";
 
 /** Owns all replaceable browser market-data caches and their connection lifecycle. */
 export function useReplayWindowCaches<T>(dataset: MarketDatasetSummary) {
   const marketCache = useMemo(() => new MarketBarCache(dataset), [dataset]);
   const sessionFingerprint = useMemo(() => JSON.stringify({
+    qualityVersion: BAR_QUALITY_RULE_VERSION,
+    barEmissionMode: dataset.barEmissionMode,
     aggregationGenerationId: dataset.aggregationGenerationId,
     aggregationRuleVersion: dataset.aggregationRuleVersion,
     timezone: dataset.timezone,
@@ -15,7 +18,7 @@ export function useReplayWindowCaches<T>(dataset: MarketDatasetSummary) {
     sessionOpenMinute: dataset.sessionOpenMinute,
     sessionCloseMinute: dataset.sessionCloseMinute,
     tradingWeekdays: dataset.tradingWeekdays,
-  }), [dataset.aggregationGenerationId, dataset.aggregationRuleVersion, dataset.sessionCloseMinute, dataset.sessionMode, dataset.sessionOpenMinute, dataset.timezone, dataset.tradingWeekdays]);
+  }), [dataset.barEmissionMode, dataset.aggregationGenerationId, dataset.aggregationRuleVersion, dataset.sessionCloseMinute, dataset.sessionMode, dataset.sessionOpenMinute, dataset.timezone, dataset.tradingWeekdays]);
   const displayCachesRef = useRef(new Map<string, DisplayBarCache>());
   const windowCache = useRef(new ReplayWindowMemoryCache<T>());
 
@@ -28,6 +31,7 @@ export function useReplayWindowCaches<T>(dataset: MarketDatasetSummary) {
         dataVersion: dataset.dataVersion,
         aggregationGenerationId: dataset.aggregationGenerationId,
         aggregationRuleVersion: dataset.aggregationRuleVersion,
+        barEmissionMode: dataset.barEmissionMode,
         displayIntervalSeconds,
         displaySession,
         sessionFingerprint,
@@ -35,7 +39,7 @@ export function useReplayWindowCaches<T>(dataset: MarketDatasetSummary) {
       displayCachesRef.current.set(key, cache);
     }
     return cache;
-  }, [dataset.aggregationGenerationId, dataset.aggregationRuleVersion, dataset.dataVersion, dataset.id, sessionFingerprint]);
+  }, [dataset.barEmissionMode, dataset.aggregationGenerationId, dataset.aggregationRuleVersion, dataset.dataVersion, dataset.id, sessionFingerprint]);
 
   useEffect(() => () => {
     marketCache.dispose();

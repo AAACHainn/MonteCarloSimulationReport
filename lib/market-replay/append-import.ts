@@ -99,6 +99,7 @@ async function processLockedAppendImportJob(job: MarketDatasetImport) {
     const staging = await prisma.marketDataset.create({ data: {
       name: metadata.name, description: metadata.description, symbol: metadata.symbol, timeframe: metadata.timeframe,
       timezone: metadata.timezone, status: "IMPORTING", sourceIntervalSeconds: metadata.sourceIntervalSeconds,
+        barEmissionMode: target.barEmissionMode,
       priceTickSize: metadata.priceTickSize, sessionMode: metadata.sessionMode,
       sessionOpenMinute: metadata.sessionOpenMinute, sessionCloseMinute: metadata.sessionCloseMinute,
       tradingWeekdays: metadata.tradingWeekdays.join(","), barCount: 0, startTime: new Date(0), endTime: new Date(0),
@@ -135,7 +136,7 @@ async function processLockedAppendImportJob(job: MarketDatasetImport) {
         if (time <= previousTime) throw new Error(copy.marketReplay.errorRow(rowNumber, copy.marketReplay.validation.invalidOrder));
         if (target.barCount + preview.importedBars >= MAX_MARKET_BARS) throw new Error(copy.marketReplay.validation.maximumRows(MAX_MARKET_BARS));
         const missingBars = Math.max(0, Math.ceil((time - previousTime) / (metadata.sourceIntervalSeconds * 1_000)) - 1);
-        if (missingBars) {
+          if (missingBars && target.barEmissionMode !== "TRADE_DRIVEN") {
           preview.gapCount += 1; preview.missingBars += missingBars;
           if (preview.gaps.length < 10) preview.gaps.push({ after: new Date(previousTime).toISOString(), before: bar.timestamp.toISOString(), missingBars });
         }

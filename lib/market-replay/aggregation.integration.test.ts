@@ -17,6 +17,7 @@ import { AggregationNotReadyError } from "./aggregation-storage";
 import { acquireDatasetLease, assertDatasetIdle, releaseDatasetLease } from "@/lib/market-sync/lease";
 import { POST as aggregationPOST, GET as aggregationGET } from "@/app/api/market-datasets/[id]/aggregation/route";
 import { GET as windowGET } from "@/app/api/market-datasets/[id]/bars/window/route";
+import { PATCH as datasetPATCH } from "@/app/api/market-datasets/[id]/route";
 
 let file = "";
 beforeAll(async () => {
@@ -34,6 +35,26 @@ async function seed(id: string, source: number, count: number) {
   return dataset;
 }
 describe("time aggregation lifecycle and indexed readers", () => {
+  it("reclassifies sparse source coverage without changing generations, OHLCV or replay identities", async () => {
+    const start = Date.parse("2026-10-19T22:00:00Z");
+    const dataset = await prisma.marketDataset.create({ data: { id: "quality", name: "quality", symbol: "ES", timeframe: "1s", timezone: "UTC", sourceIntervalSeconds: 1, barEmissionMode: "TRADE_DRIVEN", barCount: 320, startTime: new Date(start), endTime: new Date(start + 638000) } });
+    await prisma.marketBar.createMany({ data: Array.from({ length: 320 }, (_, sequence) => ({ datasetId: dataset.id, sequence, timestamp: new Date(start + sequence * 2000), open: 100, high: 101, low: 99, close: 100, volume: 1 })) });
+    await processAggregationJob((await queueAggregation(dataset.id)).id);
+    const initial = await prisma.marketDataset.findUniqueOrThrow({ where: { id: dataset.id } });
+    const read = async () => readExportWindow({ datasetId: dataset.id, anchorSequence: 319, endSequence: 319, direction: "backward", count: 3, warmupCount: 0, sourceSeconds: 1, displaySeconds: 300, session: resolveDisplaySession(dataset, "ETH")! });
+    const sparse = await read();
+    expect(sparse.bars[0]).toMatchObject({ phase: "CLOSED", quality: "NORMAL", sourceCount: 150, expectedCount: 300 });
+    expect(sparse.bars.at(-1)).toMatchObject({ phase: "FORMING", quality: "NORMAL" });
+    for (const [mode, quality] of [["DENSE", "GAP"], ["UNKNOWN", "UNKNOWN"]]) {
+      const changed = await datasetPATCH(new Request("http://localhost/api/dataset", { method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ barEmissionMode: mode }) }), { params: Promise.resolve({ id: dataset.id }) });
+      expect(changed.status).toBe(200);
+      const result = await read();
+      expect(result.bars[0]).toMatchObject({ phase: "CLOSED", quality });
+      const prices = (bars: typeof result.bars) => bars.map(({ timestamp, firstSequence, lastSequence, open, high, low, close, volume, sourceCount }) => ({ timestamp, firstSequence, lastSequence, open, high, low, close, volume, sourceCount }));
+      expect(prices(result.bars)).toEqual(prices(sparse.bars));
+      expect(await prisma.marketDataset.findUniqueOrThrow({ where: { id: dataset.id } })).toMatchObject({ activeAggregationId: initial.activeAggregationId, historyVersion: initial.historyVersion, dataVersion: initial.dataVersion, barCount: 320 });
+    }
+  });
   it("requires a generation for aggregated reads, while raw source reads stay available", async () => {
     const dataset = await seed("pending", 60, 100);
     const options = { dataset, datasetId: dataset.id, anchorSequence: 99, endSequence: 99, direction: "backward" as const, count: 10, warmupCount: 0, sourceSeconds: 60, displaySeconds: 300, session: resolveDisplaySession(dataset, "ETH")! };

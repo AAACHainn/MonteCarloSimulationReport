@@ -273,6 +273,7 @@ model MarketDataset {
   nextReplayJournalNo   Int     @default(0)
   activeAggregationId   String?
   sourceIntervalSeconds Int?
+  barEmissionMode      String  @default("UNKNOWN")
   priceTickSize         Float   @default(0.01)
   sessionMode           String  @default("TWENTY_FOUR_SEVEN")
   sessionOpenMinute     Int?

@@ -2,6 +2,7 @@ import { Prisma, type MarketDataset } from "@prisma/client";
 import { prisma } from "@/lib/db";
 import { aggregateMarketSegments, type AggregationSegment } from "./aggregation";
 import { activeAggregation } from "./aggregation-storage";
+import { barEmissionMode } from "./bar-quality";
 import { aggregationLayers, aggregationSessionKey } from "./time-aggregation";
 import type { TradingSessionConfig } from "./types";
 import { REPLAY_HISTORY_RAW_SOURCE_BUDGET } from "./types";
@@ -10,6 +11,7 @@ export type TimeRange = { start: number; end: number };
 export type AggregationReadMetrics = { sourceRows: number; summaryRows: number };
 export class WindowSourceBudgetError extends Error {}
 type ReadOptions = {
+  db?: Prisma.TransactionClient;
   dataset: MarketDataset; endSequence: number; sourceSeconds: number; displaySeconds: number;
   session: TradingSessionConfig; signal?: AbortSignal; budget?: { rows: number; queries: number }; finalSequence?: number;
   rawBudget?: { remaining: number };
@@ -26,7 +28,8 @@ export function accountQuery(o: Pick<ReadOptions, "signal" | "budget">, rows?: n
 
 /** Each UNION branch has its own lower/upper bound and index seek. Never a dataset-only OR scan. */
 export async function readAggregationRanges(o: ReadOptions, ranges: TimeRange[]) {
-  const generation = o.displaySeconds > o.sourceSeconds ? await activeAggregation(o.dataset) : null;
+  const db = o.db ?? prisma;
+  const generation = o.displaySeconds > o.sourceSeconds ? await activeAggregation(o.dataset, db) : null;
   const layers = aggregationLayers(o.dataset).filter((layer) => layer.seconds <= o.displaySeconds
     && (layer.scope === "BASE" || aggregationSessionKey(layer.session) === aggregationSessionKey(o.session)))
     .sort((a, b) => b.seconds - a.seconds);
@@ -42,7 +45,7 @@ export async function readAggregationRanges(o: ReadOptions, ranges: TimeRange[])
         AND "scope" = ${layer.scope} AND "intervalSeconds" = ${layer.seconds}
         AND "bucketStart" >= ${range.start} AND "bucketStart" < ${range.end}
         AND "bucketEnd" <= ${range.end} AND "lastSequence" <= ${o.endSequence}`);
-      const rows = await prisma.$queryRaw<typeof selected>(Prisma.sql`${Prisma.join(branches, " UNION ALL ")} ORDER BY "bucketStart"`);
+      const rows = await db.$queryRaw<typeof selected>(Prisma.sql`${Prisma.join(branches, " UNION ALL ")} ORDER BY "bucketStart"`);
       accountQuery(o, rows.length);
       if (o.metrics) o.metrics.summaryRows += rows.length;
       selected.push(...rows.map((row) => ({ ...row, firstSequence: Number(row.firstSequence), lastSequence: Number(row.lastSequence), sourceCount: Number(row.sourceCount) })));
@@ -81,7 +84,7 @@ export async function readAggregationRanges(o: ReadOptions, ranges: TimeRange[])
       SELECT "sequence", "timestamp", "open", "high", "low", "close", "volume" FROM "MarketBar"
       INDEXED BY "MarketBar_datasetId_timestamp_key" WHERE "datasetId" = ${o.dataset.id}
       AND "timestamp" >= ${range.start} AND "timestamp" < ${range.end} AND "sequence" <= ${o.endSequence}`);
-    const rows = await prisma.$queryRaw<Array<{ sequence: number; timestamp: Date; open: number; high: number; low: number; close: number; volume: number | null }>>(
+    const rows = await db.$queryRaw<Array<{ sequence: number; timestamp: Date; open: number; high: number; low: number; close: number; volume: number | null }>>(
       Prisma.sql`${Prisma.join(branches, " UNION ALL ")} ORDER BY "timestamp" LIMIT ${maximumRawRows - rawRows + 1}`);
     accountQuery(o, rows.length);
     if (o.metrics) o.metrics.sourceRows += rows.length;
@@ -104,5 +107,7 @@ export async function readAggregationRanges(o: ReadOptions, ranges: TimeRange[])
     segments.push(streams[selected][cursors[selected]++]);
   }
   return aggregateMarketSegments({ segments, sourceSeconds: o.sourceSeconds, displaySeconds: o.displaySeconds,
-    session: o.session, currentSequence: o.endSequence, finalSequence: o.finalSequence ?? o.endSequence });
+    session: o.session, currentSequence: o.endSequence, finalSequence: o.finalSequence ?? o.endSequence,
+    emissionMode: barEmissionMode(o.dataset.barEmissionMode),
+    revealedThroughMs: o.revealedEndTime === undefined ? undefined : o.revealedEndTime + o.sourceSeconds * 1000 });
 }

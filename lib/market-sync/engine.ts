@@ -63,7 +63,7 @@ async function downloadSegment(provider: MarketProvider, settings: SyncSettings,
     signal.throwIfAborted();
     const target = await prisma.marketDataset.findUniqueOrThrow({ where: { id: run.datasetId } });
     await prisma.marketDataset.deleteMany({ where: { id: stagingId, status: "IMPORTING" } });
-    await prisma.marketDataset.create({ data: { id: stagingId, name: "sync staging", symbol: target.symbol, timeframe: target.timeframe, timezone: target.timezone, sourceIntervalSeconds: target.sourceIntervalSeconds, status: "IMPORTING", barCount: 0, startTime: start, endTime: end } });
+    await prisma.marketDataset.create({ data: { id: stagingId, name: "sync staging", symbol: target.symbol, timeframe: target.timeframe, timezone: target.timezone, sourceIntervalSeconds: target.sourceIntervalSeconds, barEmissionMode: target.barEmissionMode, status: "IMPORTING", barCount: 0, startTime: start, endTime: end } });
     try {
       const aggregation = await prepareAggregationAppend(target, stagingId);
       const cost = await provider.cost(settings.profile, start, end, signal);

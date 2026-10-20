@@ -1,11 +1,12 @@
 import { TZDate } from "@date-fns/tz";
 import type {
-  AggregateBarStatus,
   AggregatedMarketBarData,
+  BarEmissionMode,
   MarketBarData,
   TradingSessionConfig,
 } from "./types";
 import { isValidDisplayInterval } from "./types";
+import { aggregatePhase, barEmissionMode, closeAggregatedBar, setAggregateState } from "./bar-quality";
 
 type Bucket = { start: number; end: number; expectedCount: number };
 const localPartFormatters = new Map<string, Intl.DateTimeFormat>();
@@ -13,6 +14,7 @@ const sessionBoundsCache = new Map<string, { start: number; end: number }>();
 export type AggregationSegment = {
   firstSequence: number; lastSequence: number; timestamp: string; endTimestamp: string;
   open: number; high: number; low: number; close: number; volume: number | null; sourceCount: number;
+  confirmedGap?: boolean;
 };
 
 function localParts(timestamp: number, timezone: string) {
@@ -256,6 +258,8 @@ export function aggregateMarketBars({
   session,
   currentSequence,
   finalSequence,
+  emissionMode,
+  revealedThroughMs,
 }: {
   bars: MarketBarData[];
   sourceSeconds: number;
@@ -263,17 +267,19 @@ export function aggregateMarketBars({
   session: TradingSessionConfig;
   currentSequence: number;
   finalSequence: number;
+  emissionMode?: BarEmissionMode;
+  revealedThroughMs?: number;
 }): AggregatedMarketBarData[] {
   return aggregateMarketSegments({
     segments: bars.map((bar) => ({
       firstSequence: bar.sequence, lastSequence: bar.sequence, timestamp: bar.timestamp, endTimestamp: bar.timestamp,
       open: bar.open, high: bar.high, low: bar.low, close: bar.close, volume: bar.volume, sourceCount: 1,
-    })), sourceSeconds, displaySeconds, session, currentSequence, finalSequence,
+    })), sourceSeconds, displaySeconds, session, currentSequence, finalSequence, emissionMode, revealedThroughMs,
   });
 }
 
 export function aggregateMarketSegments({
-  segments, sourceSeconds, displaySeconds, session, currentSequence, finalSequence,
+  segments, sourceSeconds, displaySeconds, session, currentSequence, finalSequence, emissionMode, revealedThroughMs,
 }: {
   segments: AggregationSegment[];
   sourceSeconds: number;
@@ -281,8 +287,12 @@ export function aggregateMarketSegments({
   session: TradingSessionConfig;
   currentSequence: number;
   finalSequence: number;
+  emissionMode?: BarEmissionMode;
+  revealedThroughMs?: number;
 }): AggregatedMarketBarData[] {
   const result: AggregatedMarketBarData[] = [];
+  const mode = barEmissionMode(emissionMode);
+  let through = revealedThroughMs ?? Number.NEGATIVE_INFINITY;
   let cachedBucket: Bucket | null = null;
   const resolveBucket = (timestamp: string) => {
     const time = new Date(timestamp).getTime();
@@ -292,7 +302,9 @@ export function aggregateMarketSegments({
     return cachedBucket;
   };
   for (const bar of segments) {
-    if (bar.firstSequence > currentSequence) break;
+    if (bar.firstSequence > Math.min(currentSequence, finalSequence)) break;
+    if (bar.lastSequence > Math.min(currentSequence, finalSequence)) throw new Error("Aggregation segment crosses the reveal boundary.");
+    through = Math.max(through, Date.parse(bar.endTimestamp) + sourceSeconds * 1000);
     const bucket = resolveBucket(bar.timestamp);
     if (!bucket) continue;
     const endBucket = resolveBucket(bar.endTimestamp);
@@ -304,6 +316,7 @@ export function aggregateMarketSegments({
         firstSequence: bar.firstSequence, lastSequence: bar.lastSequence,
         open: bar.open, high: bar.high, low: bar.low, close: bar.close,
         volume: bar.volume, sourceCount: bar.sourceCount, expectedCount: bucket.expectedCount, status: "FORMING",
+        ...(bar.confirmedGap ? { confirmedGap: true } : {}),
       });
     } else {
       last.lastSequence = bar.lastSequence;
@@ -311,17 +324,13 @@ export function aggregateMarketSegments({
       last.low = Math.min(last.low, bar.low);
       last.close = bar.close;
       last.sourceCount += bar.sourceCount;
+      if (bar.confirmedGap) last.confirmedGap = true;
       if (bar.volume !== null) last.volume = (last.volume ?? 0) + bar.volume;
     }
   }
 
-  const currentTime = result.length ? new Date(result.at(-1)!.timestamp).getTime() : Number.NEGATIVE_INFINITY;
   for (const bar of result) {
-    const closed = bar.sourceCount === bar.expectedCount
-      || new Date(bar.timestamp).getTime() < currentTime
-      || currentSequence >= finalSequence;
-    const status: AggregateBarStatus = !closed ? "FORMING" : bar.sourceCount === bar.expectedCount ? "COMPLETE" : "INCOMPLETE";
-    bar.status = status;
+    setAggregateState(bar, through >= Date.parse(bar.bucketEnd) ? "CLOSED" : "FORMING", mode);
   }
   return result;
 }
@@ -334,6 +343,7 @@ export function mergeSourceBar(
     displaySeconds: number;
     session: TradingSessionConfig;
     finalSequence: number;
+    emissionMode?: BarEmissionMode;
   },
 ) {
   const next = existing.slice();
@@ -350,26 +360,26 @@ export function mergeSourceBarInto(
     displaySeconds: number;
     session: TradingSessionConfig;
     finalSequence: number;
+    emissionMode?: BarEmissionMode;
   },
 ) {
-  const bucket = getAggregationBucket(
-    new Date(source.timestamp).getTime(), options.sourceSeconds, options.displaySeconds, options.session,
-  );
-  if (!bucket) return false;
+  const sourceTime = Date.parse(source.timestamp);
+  const through = sourceTime + options.sourceSeconds * 1000;
+  const mode = barEmissionMode(options.emissionMode);
+  const bucket = getAggregationBucket(sourceTime, options.sourceSeconds, options.displaySeconds, options.session);
   const previousLast = existing.at(-1);
   const last = previousLast ? { ...previousLast } : undefined;
   if (last) existing[existing.length - 1] = last;
+  if (last && through >= Date.parse(last.bucketEnd)) setAggregateState(last, "CLOSED", mode);
+  if (!bucket) return false;
   if (!last || new Date(last.timestamp).getTime() !== bucket.start) {
-    if (last && last.status === "FORMING") {
-      last.status = last.sourceCount === last.expectedCount ? "COMPLETE" : "INCOMPLETE";
-    }
-    existing.push({
+    existing.push(setAggregateState({
       timestamp: new Date(bucket.start).toISOString(), bucketEnd: new Date(bucket.end).toISOString(),
       firstSequence: source.sequence, lastSequence: source.sequence,
       open: source.open, high: source.high, low: source.low, close: source.close,
       volume: source.volume, sourceCount: 1, expectedCount: bucket.expectedCount,
-      status: bucket.expectedCount === 1 ? "COMPLETE" : source.sequence >= options.finalSequence ? "INCOMPLETE" : "FORMING",
-    });
+      status: "FORMING",
+    }, through >= bucket.end ? "CLOSED" : "FORMING", mode));
     return true;
   }
   last.lastSequence = source.sequence;
@@ -378,8 +388,7 @@ export function mergeSourceBarInto(
   last.close = source.close;
   last.sourceCount += 1;
   if (source.volume !== null) last.volume = (last.volume ?? 0) + source.volume;
-  if (last.sourceCount === last.expectedCount) last.status = "COMPLETE";
-  else if (source.sequence >= options.finalSequence) last.status = "INCOMPLETE";
+  setAggregateState(last, through >= bucket.end ? "CLOSED" : "FORMING", mode);
   return true;
 }
 
@@ -392,8 +401,8 @@ export function mergeAggregatedBars(existing: AggregatedMarketBarData[], updates
       if (next[index].lastSequence <= update.lastSequence) next[index] = update;
     } else if (!next.length || update.timestamp > next.at(-1)!.timestamp) {
       const last = next.at(-1);
-      if (last?.status === "FORMING") {
-        next[next.length - 1] = { ...last, status: last.sourceCount === last.expectedCount ? "COMPLETE" : "INCOMPLETE" };
+      if (last && aggregatePhase(last) === "FORMING") {
+        next[next.length - 1] = closeAggregatedBar(last);
       }
       next.push(update);
     }

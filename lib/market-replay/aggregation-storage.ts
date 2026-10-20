@@ -57,9 +57,9 @@ export class AggregationNotReadyError extends Error {
   constructor() { super(copy.marketReplay.aggregation.notReady); }
 }
 
-export async function activeAggregation(dataset: MarketDataset) {
+export async function activeAggregation(dataset: MarketDataset, db: Db = prisma) {
   const generation = dataset.activeAggregationId
-    ? await prisma.marketAggregationGeneration.findUnique({ where: { id: dataset.activeAggregationId } }) : null;
+    ? await db.marketAggregationGeneration.findUnique({ where: { id: dataset.activeAggregationId } }) : null;
   if (!generation || !generationMatches(dataset, generation, true)) throw new AggregationNotReadyError();
   return generation;
 }

@@ -5,6 +5,8 @@ import { createUuid } from "@/lib/uuid";
 import { useReplaySession } from "./replay-session-context";
 
 import { formatChartTick, chartCandleData as candle, chartVolumeData as volume } from "@/lib/market-replay/chart-data";
+import { aggregateHasGap, aggregatePhase } from "@/lib/market-replay/bar-quality";
+import { formatInteger } from "@/lib/format";
 
 import {
   useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState,
@@ -1608,7 +1610,7 @@ export function ReplayChart({
       const bar = currentBars[index];
       if (!bar) return null;
       const tooltipWidth = 196;
-      const tooltipHeight = abrEnabled ? 138 : 112;
+      const tooltipHeight = abrEnabled ? 204 : 178;
       const preferredLeft = x + 14;
       const left = preferredLeft + tooltipWidth <= paneWidth - 8
         ? preferredLeft
@@ -1974,6 +1976,12 @@ export function ReplayChart({
             <span className="font-mono font-semibold text-slate-950">{formatPriceForTick(abrTooltip.bar.low, priceTickSize)}</span>
             <span className="text-slate-600">{copy.marketReplay.abrClose}</span>
             <span className="font-mono font-semibold text-slate-950">{formatPriceForTick(abrTooltip.bar.close, priceTickSize)}</span>
+            <span className="text-slate-600">{copy.marketReplay.barEmission.phaseLabel}</span>
+            <span className="text-right text-slate-950">{copy.marketReplay.barEmission.phase[aggregatePhase(abrTooltip.bar)]}</span>
+            <span className="text-slate-600">{copy.marketReplay.barEmission.qualityLabel}</span>
+            <span className={aggregateHasGap(abrTooltip.bar) ? "text-right text-amber-800" : "text-right text-slate-950"}>{copy.marketReplay.barEmission.quality[abrTooltip.bar.quality ?? (aggregateHasGap(abrTooltip.bar) ? "GAP" : "UNKNOWN")]}</span>
+            <span className="text-slate-600">{copy.marketReplay.barEmission.records}</span>
+            <span className="text-right font-mono tabular-nums text-slate-950">{formatInteger(abrTooltip.bar.sourceCount)} / {formatInteger(abrTooltip.bar.expectedCount)}</span>
           </div>
         </div>
       ) : null}
@@ -2065,9 +2073,9 @@ export function ReplayChart({
         </div>
       ))}
 
-      {latest?.status !== "COMPLETE" ? (
-        <div className={`pointer-events-none absolute left-3 top-3 rounded-md px-2 py-1 text-xs shadow-sm ${latest?.status === "INCOMPLETE" ? "bg-amber-100 text-amber-900" : "bg-blue-50 text-blue-800"}`}>
-          {latest?.status === "INCOMPLETE" ? copy.marketReplay.incompleteBar(latest.sourceCount, latest.expectedCount) : latest ? copy.marketReplay.formingBar(latest.sourceCount, latest.expectedCount) : null}
+      {latest && (aggregatePhase(latest) === "FORMING" || aggregateHasGap(latest)) ? (
+        <div className={`pointer-events-none absolute left-3 top-3 rounded-md px-2 py-1 text-xs shadow-sm ${aggregateHasGap(latest) ? "bg-amber-100 text-amber-900" : "bg-blue-50 text-blue-800"}`}>
+          {aggregateHasGap(latest) ? copy.marketReplay.incompleteBar(latest.sourceCount, latest.expectedCount) : copy.marketReplay.formingBar(latest.sourceCount, latest.expectedCount)}
         </div>
       ) : null}
 

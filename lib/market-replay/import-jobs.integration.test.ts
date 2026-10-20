@@ -67,6 +67,16 @@ const csv = [
 ].join("\n");
 
 describe("market dataset streaming import", () => {
+  it("preserves an explicit dense-grid policy for generic CSV and overrides it for Databento", async () => {
+    const dense = await makeImportJob([standardHeader, standardRow(0), standardRow(2)].join("\n"), { ...metadata, sourceIntervalSeconds: 60, symbol: "MGC", barEmissionMode: "DENSE" });
+    await processImportJob(dense.id);
+    const denseJob = await prisma.marketDatasetImport.findUniqueOrThrow({ where: { id: dense.id } });
+    expect(await prisma.marketDataset.findUniqueOrThrow({ where: { id: denseJob.datasetId! } })).toMatchObject({ barEmissionMode: "DENSE", barCount: 2 });
+    const sparse = await makeImportJob(csv, { ...metadata, sourceIntervalSeconds: 60, barEmissionMode: "DENSE" });
+    await processImportJob(sparse.id);
+    const sparseJob = await prisma.marketDatasetImport.findUniqueOrThrow({ where: { id: sparse.id } });
+    expect(await prisma.marketDataset.findUniqueOrThrow({ where: { id: sparseJob.datasetId! } })).toMatchObject({ barEmissionMode: "TRADE_DRIVEN", barCount: 2 });
+  });
   it("retains successfully parsed raw data when aggregation alone fails", async () => {
     const job = await makeImportJob([standardHeader, standardRow(0), standardRow(1)].join("\n"), { ...metadata, symbol: "MGC", sourceIntervalSeconds: 60 });
     const failed = vi.spyOn(timeAggregation, "aggregateTimeChunk").mockImplementationOnce(() => { throw new Error("aggregation-only failure"); });
@@ -111,7 +121,7 @@ describe("market dataset streaming import", () => {
     expect(job.stageProcessedBytes).toBe(job.stageTotalBytes);
     expect(Number(job.peakWorkerRssBytes)).toBeGreaterThan(0);
     expect(dataset).toMatchObject({
-      symbol: "ES", timeframe: "1m", sourceIntervalSeconds: 60, barCount: 2, activeAggregationId: expect.any(String),
+      symbol: "ES", timeframe: "1m", sourceIntervalSeconds: 60, barCount: 2, activeAggregationId: expect.any(String), barEmissionMode: "TRADE_DRIVEN",
     });
     expect(bars.map((bar) => ({ sequence: bar.sequence, close: bar.close, volume: bar.volume }))).toEqual([
       { sequence: 0, close: 4538.25, volume: 576 },
@@ -250,6 +260,16 @@ async function confirmAppend(jobId: string) {
 }
 
 describe("market dataset append import", () => {
+  it("does not treat ordinary no-trade slots in a trade-driven source as confirmed missing data", async () => {
+    const target = await makeAppendTarget(2);
+    const sparse = await prisma.marketDataset.update({ where: { id: target.id }, data: { barEmissionMode: "TRADE_DRIVEN" } });
+    const job = await makeImportJob([standardHeader, standardRow(4)].join("\n"), appendMetadata(sparse));
+    await processImportJob(job.id);
+    const result = await prisma.marketDatasetImport.findUniqueOrThrow({ where: { id: job.id } });
+    expect(result.status).toBe("COMPLETED");
+    expect(JSON.parse(result.metadata).preview.gapCount).toBe(0);
+    expect(await prisma.marketDataset.findUniqueOrThrow({ where: { id: target.id } })).toMatchObject({ barEmissionMode: "TRADE_DRIVEN", barCount: 3, activeAggregationId: target.activeAggregationId });
+  });
   it.each([false, true])("trims overlap, deduplicates new bars and preserves replay and account state (gzip=%s)", async (compressed) => {
     const target = await makeAppendTarget();
     const progress = await prisma.replayProgress.create({ data: { datasetId: target.id, startSequence: 5, currentSequence: 42, playbackRate: 7, generation: 3 } });

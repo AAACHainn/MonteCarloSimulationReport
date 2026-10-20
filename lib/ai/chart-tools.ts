@@ -96,7 +96,7 @@ export async function executeChartTool(scope: ToolScope, contextId: string, raw:
         ...chartImageDescription(chart),
         displaySession: c.display.displaySession, cutoffSequence: plan.endSequence, asOfTime: new Date(Date.parse(subject.closedAt) + c.sourceSeconds * 1000).toISOString(),
         actualSourceRange: [bars[0].firstSequence, bars.at(-1)!.lastSequence], actualTimeRange: [chart.sourceTimes?.[String(bars[0].firstSequence)] ?? bars[0].timestamp, chart.sourceTimes?.[String(bars.at(-1)!.lastSequence)] ?? bars.at(-1)!.timestamp],
-        coverage: { visibleBars: bars.length, complete: !more, gapStatus: bars.some((b) => b.status === "INCOMPLETE") ? "INCOMPLETE" : "AS_RECORDED" },
+        coverage: { visibleBars: bars.length, complete: !more, gapStatus: bars.some((b) => b.quality === "GAP" || (b.quality === undefined && b.status === "INCOMPLETE")) ? "INCOMPLETE" : bars.some((b) => b.quality === "UNKNOWN") ? "UNKNOWN" : "AS_RECORDED" },
         indicators: c.chartPreferences?.emaEnabled ? c.chartPreferences.emaIndicators.filter((i) => i.visible).map((i) => ({ name: "EMA", length: i.length })) : [],
         imageStatus: asset ? "READY" : "IMAGE_NOT_PREPARED", image: asset ? { assetRef: asset.id, bytes: asset.bytes, contentHash: asset.contentHash, origin: "BROWSER_RECONSTRUCTED" } : null };
       if (chart.annotations?.truncated) warnings.push(normalized[index] + ":TRADE_ANNOTATIONS_TRUNCATED");
