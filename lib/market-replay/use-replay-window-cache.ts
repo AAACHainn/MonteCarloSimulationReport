@@ -7,7 +7,10 @@ import { BAR_QUALITY_RULE_VERSION } from "./bar-quality";
 
 /** Owns all replaceable browser market-data caches and their connection lifecycle. */
 export function useReplayWindowCaches<T>(dataset: MarketDatasetSummary) {
-  const marketCache = useMemo(() => new MarketBarCache(dataset), [dataset]);
+  const rawDataset = useMemo(() => ({ id: dataset.id, dataVersion: dataset.dataVersion,
+    historyVersion: dataset.historyVersion, symbol: dataset.symbol, sourceIntervalSeconds: dataset.sourceIntervalSeconds }),
+  [dataset.id, dataset.dataVersion, dataset.historyVersion, dataset.symbol, dataset.sourceIntervalSeconds]);
+  const marketCache = useMemo(() => new MarketBarCache(rawDataset), [rawDataset]);
   const sessionFingerprint = useMemo(() => JSON.stringify({
     qualityVersion: BAR_QUALITY_RULE_VERSION,
     barEmissionMode: dataset.barEmissionMode,
@@ -41,11 +44,11 @@ export function useReplayWindowCaches<T>(dataset: MarketDatasetSummary) {
     return cache;
   }, [dataset.barEmissionMode, dataset.aggregationGenerationId, dataset.aggregationRuleVersion, dataset.dataVersion, dataset.id, sessionFingerprint]);
 
+  useEffect(() => () => marketCache.dispose(), [marketCache]);
   useEffect(() => () => {
-    marketCache.dispose();
     for (const cache of displayCachesRef.current.values()) cache.dispose();
     displayCachesRef.current.clear();
-  }, [marketCache]);
+  }, [marketCache, sessionFingerprint]);
 
   return { marketCache, getDisplayCache, windowCache };
 }

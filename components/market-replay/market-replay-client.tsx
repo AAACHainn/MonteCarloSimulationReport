@@ -52,7 +52,8 @@ import {
   setPlaybackRate,
 } from "@/lib/market-replay/engine";
 import { aggregateMarketBars, getAggregationBucket, mergeSourceBarInto } from "@/lib/market-replay/aggregation";
-import { BAR_QUALITY_RULE_VERSION, closeAggregatedBar } from "@/lib/market-replay/bar-quality";
+import { closeAggregatedBar } from "@/lib/market-replay/bar-quality";
+import { mergeRefreshedReplayWindow, replayDatasetUpdate, replayDisplayMetadataKey } from "@/lib/market-replay/dataset-refresh";
 import { canAdvanceFlatAccount } from "@/lib/paper-trading/flat-advance";
 import { calculateLatestAbr } from "@/lib/market-replay/abr";
 import { isValidBarCountInterval, isValidBarCountRecentTradingDays } from "@/lib/market-replay/bar-count";
@@ -158,7 +159,7 @@ type TradeAnnotationsPayload = {
 const REPLAY_SYNC_BATCH_SIZE = 100;
 
 function replayWindowRequest(
-  dataset: Pick<MarketDatasetSummary, "id" | "dataVersion" | "aggregationGenerationId" | "aggregationRuleVersion" | "barEmissionMode">,
+  dataset: MarketDatasetSummary,
   endSequence: number,
   displayIntervalSeconds: number,
   displaySession: DisplaySession,
@@ -167,7 +168,7 @@ function replayWindowRequest(
 ) {
   const limitedWarmup = Math.min(EMA_LENGTH_MAX, warmupCount);
   const cacheKey = [
-    "time-aggregation-v1", BAR_QUALITY_RULE_VERSION, dataset.barEmissionMode, dataset.aggregationRuleVersion, dataset.aggregationGenerationId, dataset.id, dataset.dataVersion, endSequence, displayIntervalSeconds, displaySession,
+    "time-aggregation-v1", replayDisplayMetadataKey(dataset), dataset.id, dataset.dataVersion, endSequence, displayIntervalSeconds, displaySession,
     DEFAULT_REPLAY_MAX_VISIBLE_BARS, limitedWarmup, focusSequence ?? "live",
   ].join(":");
   const params = new URLSearchParams({
@@ -215,6 +216,7 @@ export function MarketReplayClient({ dataset: initialDataset, initialJournalFocu
   const [correctionPending, setCorrectionPending] = useState(Boolean(replaySession?.pendingCorrectionId));
   useEffect(() => { setCorrectionPending(Boolean(replaySession?.pendingCorrectionId)); }, [replaySession?.pendingCorrectionId]);
   const [dataset, setLiveDataset] = useState(initialDataset);
+  const displayedMetadataRef = useRef(replayDisplayMetadataKey(initialDataset));
   const initializedDatasetRef = useRef<string | null>(null);
   const historyConflictRef = useRef(false);
   const requestRetryingRef = useRef(false);
@@ -227,6 +229,7 @@ export function MarketReplayClient({ dataset: initialDataset, initialJournalFocu
   const shortcuts = useReplayShortcuts();
   const [webFullscreen, setWebFullscreen] = useState(false);
   const [bars, setBars] = useState<AggregatedMarketBarData[]>([]);
+  const [chartDataRevision, setChartDataRevision] = useState(replayDisplayMetadataKey(initialDataset));
   const [warmupBars, setWarmupBars] = useState<AggregatedMarketBarData[]>([]);
   const [currentSourceBar, setCurrentSourceBar] = useState<MarketBarData | null>(null);
   const [isLoading, setIsLoading] = useState(true);
@@ -691,6 +694,7 @@ export function MarketReplayClient({ dataset: initialDataset, initialJournalFocu
     focusSequence: number | null = null,
     reviewOnly = false,
     focusJournalNo: number | null = null,
+    preserveHistory = false,
   ) => {
     const windowStartedAt = performance.now();
     const expectedGeneration = latestReplayRef.current?.generation ?? null;
@@ -743,18 +747,23 @@ export function MarketReplayClient({ dataset: initialDataset, initialJournalFocu
         ? closeAggregatedBar(bar)
         : bar
     );
-    const visible = data.visibleBars.map(closeCompletedBucket);
+    const freshVisible = data.visibleBars.map(closeCompletedBucket);
+    const refreshed = preserveHistory ? mergeRefreshedReplayWindow(barsRef.current, warmupBarsRef.current,
+      freshVisible, data.warmupBars, warmupCount, dataset.barEmissionMode, endSequence)
+      : { bars: freshVisible, warmupBars: data.warmupBars };
+    const visible = refreshed.bars;
     barsRef.current = visible;
-    warmupBarsRef.current = data.warmupBars;
+    warmupBarsRef.current = refreshed.warmupBars;
     setBars(visible);
-    setWarmupBars(data.warmupBars);
+    setChartDataRevision(replayDisplayMetadataKey(dataset));
+    setWarmupBars(refreshed.warmupBars);
     void loadTradeAnnotations(visible, focusJournalNo);
     historyHasEarlierRef.current = data.hasEarlierBars ?? nextHistoryEndSequence(visible) !== null;
     if (!reviewOnly) {
       chartWindowDetachedRef.current = false;
       currentSourceBarRef.current = data.lastSourceBar;
       setCurrentSourceBar(data.lastSourceBar);
-      void getDisplayCache(displayIntervalSeconds, displaySession).persist([...data.warmupBars, ...visible]);
+      void getDisplayCache(displayIntervalSeconds, displaySession).persist([...refreshed.warmupBars, ...visible]);
     }
     const account = confirmedPaperSnapshotRef.current;
     const needsSourcePlayback = latestReplayRef.current?.status === "playing" || !paperSessionLoadedRef.current
@@ -1225,7 +1234,7 @@ export function MarketReplayClient({ dataset: initialDataset, initialJournalFocu
         const response = await fetch(`/api/market-datasets/${dataset.id}`, { cache: "no-store" });
         if (!response.ok || stopped) return;
         const next = await response.json() as MarketDatasetSummary;
-        if (next.dataVersion === dataset.dataVersion) return;
+        if (replayDatasetUpdate(dataset, next) === "none") return;
         suspension = suspendPlayback();
         await advanceCompletionRef.current;
         if ((next.historyVersion ?? 1) !== (dataset.historyVersion ?? 1)) {
@@ -1242,6 +1251,37 @@ export function MarketReplayClient({ dataset: initialDataset, initialJournalFocu
     const timer = window.setInterval(() => void refreshTail(), 15000);
     return () => { stopped = true; window.clearInterval(timer); };
   }, [autoPausePlayback, dataset, flushVisible, isLoading, paperMutationActiveRef, restorePlayback, setReplay, suspendPlayback, fetch]);
+
+  useEffect(() => {
+    const metadata = replayDisplayMetadataKey(dataset);
+    if (isLoading || metadata === displayedMetadataRef.current) return;
+    displayedMetadataRef.current = metadata;
+    // Fence responses requested with the old display semantics immediately.
+    windowRequestRef.current += 1;
+    windowAbortRef.current?.abort();
+    historyEpochRef.current += 1;
+    historyAbortRef.current?.abort();
+    const suspension = suspendPlayback();
+    let cancelled = false;
+    void (async () => {
+      try {
+        await advanceCompletionRef.current;
+        await paperMutationChainRef.current;
+        const current = latestReplayRef.current;
+        if (cancelled || !current || historyConflictRef.current) return;
+        const reviewOnly = chartWindowDetachedRef.current || journalReview !== null;
+        const end = reviewOnly ? barsRef.current.at(-1)?.lastSequence ?? current.currentSequence : current.currentSequence;
+        await loadWindow(end, current.displayIntervalSeconds, current.displaySession, indicatorWarmupCountRef.current,
+          null, null, reviewOnly, journalReview?.globalNo ?? null, true);
+      } catch (error) {
+        if (!cancelled) {
+          setPaperError(error instanceof Error ? error.message : copy.marketReplay.loadError);
+          autoPausePlayback("operation-failed");
+        }
+      } finally { restorePlayback(suspension); }
+    })();
+    return () => { cancelled = true; };
+  }, [autoPausePlayback, dataset, isLoading, journalReview, latestReplayRef, loadWindow, paperMutationChainRef, restorePlayback, suspendPlayback]);
 
   useEffect(() => {
     const gate = paperSnapshot?.session.trainingGate;
@@ -2542,6 +2582,7 @@ export function MarketReplayClient({ dataset: initialDataset, initialJournalFocu
           ) : null}
           <ReplayChart
             datasetId={dataset.id}
+            dataRevision={chartDataRevision}
             priceTickSize={dataset.priceTickSize}
             bars={bars}
             warmupBars={warmupBars}

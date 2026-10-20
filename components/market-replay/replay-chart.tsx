@@ -4,7 +4,7 @@ import { syncPriceLine } from "@/lib/market-replay/price-lines";
 import { createUuid } from "@/lib/uuid";
 import { useReplaySession } from "./replay-session-context";
 
-import { formatChartTick, chartCandleData as candle, chartVolumeData as volume } from "@/lib/market-replay/chart-data";
+import { canUpdateReplayTail, formatChartTick, chartCandleData as candle, chartVolumeData as volume } from "@/lib/market-replay/chart-data";
 import { aggregateHasGap, aggregatePhase } from "@/lib/market-replay/bar-quality";
 import { formatInteger } from "@/lib/format";
 
@@ -247,7 +247,7 @@ function bracketPriceLineTitle(reference: PriceRReference | null, price: number,
 }
 
 export function ReplayChart({
-  datasetId, priceTickSize, bars, warmupBars, displayUtcOffsetMinutes, displayIntervalSeconds, measurementArmed,
+  datasetId, dataRevision = "", priceTickSize, bars, warmupBars, displayUtcOffsetMinutes, displayIntervalSeconds, measurementArmed,
   candlestickStyle, gridVisible = true, onToggleGrid,
   onMeasurementArmedChange, drawingTool, onDrawingToolChange, trendLineDraftStyle, fibonacciDraftStyle, rectangleDraftStyle, drawings, selectedDrawingId,
   onSelectedDrawingIdChange, onCreateDrawing, onUpdateDrawing, onDeleteDrawing,
@@ -262,6 +262,7 @@ export function ReplayChart({
   onRewindToBar, rewindRange,
 }: {
   datasetId: string;
+  dataRevision?: string;
   priceTickSize: number;
   bars: AggregatedMarketBarData[];
   warmupBars: AggregatedMarketBarData[];
@@ -340,6 +341,7 @@ export function ReplayChart({
   const trendLinePrimitiveRef = useRef<TrendLinePrimitive | null>(null);
   const fibonacciPrimitiveRef = useRef<FibonacciRetracementPrimitive | null>(null);
   const lastDataRef = useRef<AggregatedMarketBarData[]>([]);
+  const lastDataRevisionRef = useRef(dataRevision);
   const lastHiddenAfterRef = useRef<ChartHideAfter | null>(null);
   const lastDataIntervalRef = useRef(displayIntervalSeconds);
   const lastDataSessionRef = useRef(displaySession);
@@ -826,9 +828,7 @@ export function ReplayChart({
     const volumeSeries = volumeRef.current;
     const candleWasAutoScaled = series.priceScale().options().autoScale;
     const volumeWasAutoScaled = volumeSeries?.priceScale().options().autoScale ?? true;
-    const samePrefix = previous.length > 0 && next.length >= previous.length
-      && previous[0].timestamp === next[0]?.timestamp
-      && previous.at(-1)?.timestamp === next[previous.length - 1]?.timestamp;
+    const samePrefix = canUpdateReplayTail(previous, next, lastDataRevisionRef.current, dataRevision);
     if (samePrefix && !hiddenAfter && !lastHiddenAfterRef.current) {
       const range = chart.timeScale().getVisibleLogicalRange();
       const previousLastIndex = previous.length - 1;
@@ -885,13 +885,14 @@ export function ReplayChart({
       volumeSeries.priceScale().applyOptions({ autoScale: false });
     }
     lastDataRef.current = next;
+    lastDataRevisionRef.current = dataRevision;
     lastHiddenAfterRef.current = hiddenAfter;
     lastDataIntervalRef.current = nextDisplayIntervalSeconds;
     lastDataSessionRef.current = nextDisplaySession;
     requestAnimationFrame(syncVisibleSequenceRange);
     requestAnimationFrame(syncMeasurementCoordinates);
     syncDrawingPrimitive();
-  }, [bars, projectionBars, visibleBars, hiddenAfter, readOnly, visibilityScope, displayIntervalSeconds, displaySession, barCountSession, sourceIntervalSeconds, syncDrawingPrimitive, syncMeasurementCoordinates, syncVisibleSequenceRange]);
+  }, [bars, dataRevision, projectionBars, visibleBars, hiddenAfter, readOnly, visibilityScope, displayIntervalSeconds, displaySession, barCountSession, sourceIntervalSeconds, syncDrawingPrimitive, syncMeasurementCoordinates, syncVisibleSequenceRange]);
 
   useEffect(() => {
     if (focusSequence === null) return;

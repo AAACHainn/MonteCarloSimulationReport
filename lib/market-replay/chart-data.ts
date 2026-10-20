@@ -3,6 +3,13 @@ import { utcDateParts } from "./display-timezone";
 import type { AggregatedMarketBarData } from "./types";
 import { aggregateHasGap } from "./bar-quality";
 
+export function canUpdateReplayTail(previous: AggregatedMarketBarData[], next: AggregatedMarketBarData[],
+  previousRevision: string, nextRevision: string) {
+  return previousRevision === nextRevision && previous.length > 0 && next.length >= previous.length
+    && previous[0].timestamp === next[0]?.timestamp
+    && previous.at(-1)?.timestamp === next[previous.length - 1]?.timestamp;
+}
+
 export function formatChartTick(time: Time, type: TickMarkType, offset: number) {
   if (typeof time !== "number") return String(time);
   const p = utcDateParts(time * 1000, offset);
