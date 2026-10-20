@@ -2,6 +2,8 @@
 
 日期：2026-10-20。依据：[独立审查](architecture-review-2026-10-20.md)；修复前计划见 [Fix Plan](fix-plan-2026-10-20.md)。
 
+第 1～7 节保留上一轮交付记录；后续只读审查发现的 P2 及最新修复版本见第 8 节。
+
 ## 1. 结果与版本
 
 本轮确认 AR-01～AR-04 的问题存在，完成 AR-01（P1）、AR-02/AR-03（P2），暂缓 AR-04（P2）。没有 P0/P3 修复，也没有扩展为新的聚合架构。
@@ -128,3 +130,44 @@ UI 规范检查：已完整阅读；未增加布局、控件、颜色或数值�
 本轮业务修复三个独立本地提交可按问题 ID 审查；审查/交接原文保持原样。AR-04 暂缓和标准构建限制均需在后续上线判断中保留，不能以全量测试通过代替。
 
 报告交付前执行 `git diff --check`，并直接检查新增文档相对链接与行尾空白；仅报告文件待提交时没有重跑业务测试或构建。
+
+## 8. 后续 P2：未应用窗口的显示刷新恢复（AR-03-R1）
+
+**是否确认**：确认。独立只读审查指出 `displayedMetadataRef` 在窗口应用前即更新；本轮核对 `loadWindow` 发现取消、请求失效和回放状态变化均可直接返回，而调用者无法判断成功。dataset 已更新后，轮询返回 none，原 effect 不再尝试相同签名。
+
+**根本原因**：将“已开始刷新”当作“新语义窗口已应用”，且缺少失败/失效后的独立重试机制。
+
+**修复 Commit**：`e1005b5896ab937d31ae59566442ff0a731d8482`，基于 `d9dbe51`。这是针对后续审查问题的单独业务提交，不改写上一轮三个修复的历史。
+
+**修复方式**：
+
+- `loadWindow` 显式返回应用结果：取消、过期、源进度/周期/时段变化返回 false；真正写入窗口后才返回 true。
+- 只在成功结果后提交显示签名；读取失败或返回 false 时保持待刷新，间隔 5 秒串行重试，不依赖 dataset 再次变化。
+- 重试重新读取最新回放状态，沿既有推进/下单串行链等待；源历史冲突时停止自动重试，保留原冲突处理。
+- effect 清理会取消待触发定时器并使旧任务失效；应用窗口前额外检查任务仍有效，防止旧版本迟到结果覆盖当前图表。旧任务迟到异常也不会更新错误区或版本标记。
+- 成功后仅清除本次刷新产生且仍匹配的错误；保留其他错误与原用户播放意图。
+
+**修改文件**：
+
+| 文件 | 用途 |
+| --- | --- |
+| `components/market-replay/market-replay-client.tsx` | 明确窗口应用结果、取消应用保护、成功标记及恢复接入 |
+| `lib/market-replay/dataset-refresh.ts` | 可取消、无并发重叠的显示刷新重试控制 |
+| `lib/market-replay/dataset-refresh.test.ts` | 新增 7 项异步/假时钟回归 |
+
+**测试证据（本轮实际执行）**：
+
+| 命令 | 结果 | 日志 |
+| --- | --- | --- |
+| `corepack pnpm exec vitest run lib/market-replay/dataset-refresh.test.ts lib/market-replay/playback-lifecycle.test.ts lib/market-replay/server-request.test.ts --maxWorkers=1 --minWorkers=1` | 首轮专项 32 项通过；当时新恢复测试为 6 项，后续新增第 7 项由最终全量覆盖 | `tmp/ar-03-recovery-tests.log` |
+| `corepack pnpm test --maxWorkers=4 --minWorkers=1` | 最终 126 文件通过、1 文件跳过；**1150 项通过、2 项跳过**，34.26 秒；刷新文件最终为 15 项（原 8 + 新 7） | `tmp/ar-03-recovery-full-tests.log` |
+| `corepack pnpm exec tsc --noEmit` | 最终代码通过 | `tmp/ar-03-recovery-types.log` |
+| `corepack pnpm lint` | 最终代码通过 | `tmp/ar-03-recovery-lint.log` |
+| `corepack pnpm exec next build D:/code/codex/ar-fixes-build-check-20261020` | 最终隔离源码构建通过，编译、类型/页面生成和追踪完成；仍有 Next ESLint plugin 识别警告 | `tmp/ar-03-recovery-build.log` |
+| `git diff --check` | 通过 | 交付时命令结果 |
+
+7 项新增回归覆盖：网络失败后即使轮询结果为 none 也会重试；序号变化导致窗口失效后改用最新序号；清理后屏蔽迟到成功/失败结果两种返回；取消待重试且读取不重叠；旧版本迟到错误不覆盖新版本成功；历史冲突停止重试。
+
+构建复用了仓库外隔离目录：核对 578 个受跟踪源码/配置路径，除本轮三份文件外与主仓库一致，再复制这三份文件并校验哈希。构建显式使用该隔离目录的测试库，禁用同步，使用已有 Prisma Client；本轮未执行标准 `pnpm run build` 或重复 `prisma generate`，不将此前 DLL rename EPERM 写成已解决。运行服务和主仓库 `.next` 未被构建替换。
+
+**剩余风险和边界**：持续网络故障会保留旧图表/错误并每 5 秒重试，不能保证离线时立即更新。新增验证为控制器及相关状态/请求回归，未进行浏览器 effect 交互、固定视口或网络故障注入验收；没有新增布局/控件，本轮沿用已有 UI 验收例外。外部 API、数据库、依赖、撮合与聚合规则均未变更，AR-04 暂缓状态不变。没有推送、合并或部署。
