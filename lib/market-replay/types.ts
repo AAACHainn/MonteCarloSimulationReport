@@ -8,6 +8,9 @@ export const REPLAY_HISTORY_COMPACT_TO = 24_000;
 export const REPLAY_HISTORY_PAGE_LIMIT = 2_000;
 export const REPLAY_HISTORY_PREFETCH_THRESHOLD = 300;
 export const REPLAY_HISTORY_RAW_SOURCE_BUDGET = 25_000;
+// A complete indicator window may span several bounded pages, including retries.
+export const REPLAY_WINDOW_READ_ROW_BUDGET = 250_000;
+export const REPLAY_WINDOW_READ_QUERY_BUDGET = 10_000;
 export const MAX_REPLAY_ADVANCE_COUNT = 100;
 export const MAX_DISPLAY_ADVANCE_SOURCE_BARS = 86_400;
 export const MAX_REPLAY_SYNC_SOURCE_BARS = 100;

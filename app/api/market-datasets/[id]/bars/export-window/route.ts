@@ -6,7 +6,8 @@ import { datasetSourceInterval } from "@/lib/market-replay/dataset";
 import { resolveDisplaySession } from "@/lib/market-replay/chart-sessions";
 import { isValidDisplayInterval } from "@/lib/market-replay/types";
 import { AggregationNotReadyError } from "@/lib/market-replay/aggregation-storage";
-import { readExportWindow } from "@/lib/market-replay/export-window";
+import { readCompleteWindow, readExportWindow, WindowVersionChangedError } from "@/lib/market-replay/export-window";
+import { WindowReadBudgetError, WindowSourceBudgetError } from "@/lib/market-replay/aggregation-reader";
 
 const query = z.object({
   anchorSequence: z.coerce.number().int().min(0), endSequence: z.coerce.number().int().min(0),
@@ -28,9 +29,12 @@ export async function GET(request: Request, context: { params: Promise<{ id: str
   if (!sourceSeconds || !session || !isValidDisplayInterval(sourceSeconds, q.displayIntervalSeconds))
     return NextResponse.json({ error: copy.marketReplay.invalidDisplayInterval }, { status: 400 });
   let window;
-  try { window = await readExportWindow({ dataset, datasetId: id, ...q, sourceSeconds, displaySeconds: q.displayIntervalSeconds, session }); }
+  try { window = await (q.warmupCount ? readCompleteWindow : readExportWindow)({ dataset, datasetId: id, ...q, sourceSeconds, displaySeconds: q.displayIntervalSeconds, session }); }
   catch (error) {
     if (error instanceof AggregationNotReadyError) return NextResponse.json({ error: error.message, code: error.code }, { status: 409 });
+    if (error instanceof WindowVersionChangedError) return NextResponse.json({ error: copy.paperTrading.pdf.versionConflict, code: "WINDOW_VERSION_CHANGED" }, { status: 409 });
+    if (error instanceof WindowReadBudgetError || error instanceof WindowSourceBudgetError)
+      return NextResponse.json({ error: copy.marketReplay.windowBudget, code: "WINDOW_BUDGET" }, { status: 422 });
     throw error;
   }
   const current = await prisma.marketDataset.findUnique({ where: { id }, select: { dataVersion: true } });

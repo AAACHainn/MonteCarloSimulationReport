@@ -337,6 +337,8 @@ export const dictionaries = {
       saveMetadata: "保存并启用聚合",
       metadataLocked: "该数据集的源周期已经锁定。",
       loadError: "无法读取行情数据。",
+      windowChanged: "行情或显示规则已变化，请重试读取。",
+      windowBudget: "该窗口超过行情读取安全预算，请缩小可见范围或指标长度后重试。",
       loading: "正在读取行情数据...",
       setupEyebrow: "回放设置",
       setupTitle: "选择回放起点",

@@ -2,10 +2,12 @@ import { prisma } from "@/lib/db";
 import { getAggregationBucket, getAdjacentAggregationBucketStart } from "./aggregation";
 import { accountQuery, readAggregationRanges, WindowSourceBudgetError, type TimeRange, type AggregationReadMetrics } from "./aggregation-reader";
 import type { MarketDataset } from "@prisma/client";
-import { REPLAY_HISTORY_RAW_SOURCE_BUDGET } from "./types";
+import { REPLAY_HISTORY_RAW_SOURCE_BUDGET, REPLAY_WINDOW_READ_ROW_BUDGET, REPLAY_WINDOW_READ_QUERY_BUDGET } from "./types";
 import type { TradingSessionConfig } from "./types";
 import { activeAggregation } from "./aggregation-storage";
 import type { PdfWindow } from "@/lib/paper-trading/pdf-types";
+import { replayHistoryPageSize } from "./history";
+import { aggregationFingerprint } from "./time-aggregation";
 
 type Options = { datasetId: string; anchorSequence: number; direction: "forward" | "backward"; count: number; warmupCount: number; endSequence: number; finalSequence?: number; sourceSeconds: number; displaySeconds: number; session: TradingSessionConfig; signal?: AbortSignal; budget?: { rows: number; queries: number }; dataset?: MarketDataset; revealedEndTime?: number; metrics?: AggregationReadMetrics };
 function checkpoint(o: Options) { accountQuery(o); }
@@ -80,6 +82,49 @@ export async function readExportWindow(o: Options): Promise<PdfWindow> {
   const bars = await collect(o, start, direction, o.count);
   const warmupBars = bars.length && o.warmupCount ? await collect(o, new Date(bars[0].timestamp).getTime(), -1, o.warmupCount) : [];
   return { bars, warmupBars, previousSequence: bars.length && bars[0].firstSequence > 0 ? bars[0].firstSequence - 1 : null, nextSequence: bars.length && bars.at(-1)!.lastSequence < o.endSequence ? bars.at(-1)!.lastSequence + 1 : null };
+}
+
+export class WindowVersionChangedError extends Error {}
+
+function windowVersion(dataset: MarketDataset) {
+  return JSON.stringify([dataset.dataVersion, dataset.historyVersion, dataset.activeAggregationId,
+    dataset.barEmissionMode, aggregationFingerprint(dataset)]);
+}
+
+/** Restore the complete requested indicator history without enlarging any raw page.
+ * Every page keeps the original revealed cutoff and shares a cumulative work budget.
+ * A budget or version failure rejects the whole window, never a false short history.
+ */
+export async function readCompleteWindow(o: Options): Promise<PdfWindow> {
+  const dataset = o.dataset ?? await prisma.marketDataset.findUniqueOrThrow({ where: { id: o.datasetId } });
+  const budget = o.budget ?? { rows: REPLAY_WINDOW_READ_ROW_BUDGET, queries: REPLAY_WINDOW_READ_QUERY_BUDGET };
+  const options = { ...o, dataset, budget };
+  const pageSize = replayHistoryPageSize(o.sourceSeconds, o.displaySeconds);
+  async function pages(anchor: number, direction: Options["direction"], count: number) {
+    const parts: import("./types").AggregatedMarketBarData[][] = [];
+    let remaining = count;
+    while (anchor >= 0 && remaining > 0) {
+      const page = await readExportWindow({ ...options, anchorSequence: anchor, direction,
+        count: Math.min(pageSize, remaining), warmupCount: 0 });
+      if (!page.bars.length) break; // The real source/session history is exhausted.
+      parts.push(page.bars);
+      remaining -= page.bars.length;
+      const next = direction === "backward" ? page.previousSequence : page.nextSequence;
+      if (next === null) break;
+      if (direction === "backward" ? next >= anchor : next <= anchor) throw new Error("Window cursor did not advance.");
+      anchor = next;
+    }
+    return (direction === "backward" ? parts.reverse() : parts).flat();
+  }
+  const bars = await pages(o.anchorSequence, o.direction, o.count);
+  const warmupBars = bars.length && o.warmupCount
+    ? await pages(bars[0].firstSequence - 1, "backward", o.warmupCount) : [];
+  o.signal?.throwIfAborted();
+  const current = await prisma.marketDataset.findUnique({ where: { id: o.datasetId } });
+  if (!current || windowVersion(current) !== windowVersion(dataset)) throw new WindowVersionChangedError();
+  return { bars, warmupBars,
+    previousSequence: bars.length && bars[0].firstSequence > 0 ? bars[0].firstSequence - 1 : null,
+    nextSequence: bars.length && bars.at(-1)!.lastSequence < o.endSequence ? bars.at(-1)!.lastSequence + 1 : null };
 }
 
 /** Freeze the start of a background window using indexed identities, without aggregating its OHLC. */

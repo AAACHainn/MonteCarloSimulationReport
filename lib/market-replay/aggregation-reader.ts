@@ -10,6 +10,9 @@ import { REPLAY_HISTORY_RAW_SOURCE_BUDGET } from "./types";
 export type TimeRange = { start: number; end: number };
 export type AggregationReadMetrics = { sourceRows: number; summaryRows: number };
 export class WindowSourceBudgetError extends Error {}
+export class WindowReadBudgetError extends Error {
+  constructor() { super("EXPORT_WINDOW_BUDGET"); }
+}
 type ReadOptions = {
   db?: Prisma.TransactionClient;
   dataset: MarketDataset; endSequence: number; sourceSeconds: number; displaySeconds: number;
@@ -22,7 +25,7 @@ export function accountQuery(o: Pick<ReadOptions, "signal" | "budget">, rows?: n
   o.signal?.throwIfAborted();
   if (o.budget) {
     if (rows === undefined) o.budget.queries--; else o.budget.rows -= rows;
-    if (o.budget.rows < 0 || o.budget.queries < 0) throw new Error("EXPORT_WINDOW_BUDGET");
+    if (o.budget.rows < 0 || o.budget.queries < 0) throw new WindowReadBudgetError();
   }
 }
 

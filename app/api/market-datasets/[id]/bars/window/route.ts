@@ -1,7 +1,8 @@
 import { NextResponse } from "next/server";
 import { prisma, replayDatabaseQueryCount } from "@/lib/db";
 import { copy } from "@/lib/i18n";
-import { readExportWindow } from "@/lib/market-replay/export-window";
+import { readCompleteWindow, WindowVersionChangedError } from "@/lib/market-replay/export-window";
+import { WindowReadBudgetError, WindowSourceBudgetError } from "@/lib/market-replay/aggregation-reader";
 import { AggregationNotReadyError } from "@/lib/market-replay/aggregation-storage";
 import { resolveDisplaySession } from "@/lib/market-replay/chart-sessions";
 import { datasetSourceInterval, serializeSourceBar } from "@/lib/market-replay/dataset";
@@ -62,12 +63,15 @@ export async function GET(request: Request, context: RouteContext) {
   const windowStartedAt = performance.now();
   const metrics = { sourceRows: 0, summaryRows: 0 };
   try {
-    const result = await readExportWindow({ dataset, datasetId: id, anchorSequence: endSequence,
+    const result = await readCompleteWindow({ dataset, datasetId: id, anchorSequence: endSequence,
       direction: "backward", count: wanted, warmupCount: 0, endSequence,
       sourceSeconds, displaySeconds: parsed.data.displayIntervalSeconds, session, finalSequence: dataset.barCount - 1, metrics });
     aggregated = result.bars;
   } catch (error) {
     if (error instanceof AggregationNotReadyError) return NextResponse.json({ error: error.message, code: error.code }, { status: 409 });
+    if (error instanceof WindowVersionChangedError) return NextResponse.json({ error: copy.marketReplay.windowChanged, code: "WINDOW_VERSION_CHANGED" }, { status: 409 });
+    if (error instanceof WindowReadBudgetError || error instanceof WindowSourceBudgetError)
+      return NextResponse.json({ error: copy.marketReplay.windowBudget, code: "WINDOW_BUDGET" }, { status: 422 });
     throw error;
   }
   const window = aggregated.slice(-wanted);
