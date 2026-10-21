@@ -604,6 +604,9 @@ export function HistoricalReplayClient({
         apiRef={textDrawing.apiRef}
         onAdopt={textDrawing.adopt} register={textDrawing.register} isCurrent={textDrawing.guard()}
         templates={textTemplates} onTemplatesChange={setTextTemplates} onPreview={textDrawing.preview} onClose={textDrawing.close}
+        onRemove={async (id, current) => {
+          await drawingState.removeText(id, current); setSelectedDrawingId(value => value === id ? null : value);
+        }}
         onSave={async (id, draft, clientId, current) => {
           const saved = await drawingState.saveText(id, draft, clientId, current);
           if (!current()) throw new Error(copy.marketReplay.textAutosaveError);

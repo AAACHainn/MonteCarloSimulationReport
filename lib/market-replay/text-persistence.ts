@@ -11,3 +11,10 @@ export async function persistTextDrawing(fetcher: typeof fetch, datasetId: strin
   if (!response.ok || data.drawing?.type !== "TEXT") throw new Error(data.error || copy.marketReplay.textAutosaveError);
   return data.drawing;
 }
+
+export async function deleteTextDrawing(fetcher: typeof fetch, datasetId: string, id: string): Promise<void> {
+  const response = await fetcher(`/api/market-datasets/${datasetId}/drawings/${encodeURIComponent(id)}`, { method: "DELETE" });
+  // A previous DELETE may have succeeded even if its response was lost.
+  if (response.ok || response.status === 404) return;
+  throw new Error(copy.marketReplay.drawingDeleteError);
+}

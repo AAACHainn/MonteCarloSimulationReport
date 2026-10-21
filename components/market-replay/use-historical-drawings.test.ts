@@ -58,6 +58,21 @@ function harness() {
 }
 
 describe("historical drawing persistence", () => {
+  it("removes cleared text from the server and collection, preserving other drawing types", async () => {
+    const text: TextDrawing = { ...original, id: "text", type: "TEXT", geometry: { anchor: original.geometry.start, text: "old" }, style: DEFAULT_TEXT_STYLE };
+    remote.push(text); const app = harness(); await app.ready();
+    await app.render().removeText(text.id, () => true);
+    expect(remote).toEqual([original]); expect(app.render().drawings).toEqual([original]);
+    expect(app.render().busy).toBe(false); app.cleanup();
+  });
+  it("keeps failed text deletion retryable and treats a lost successful DELETE as already removed", async () => {
+    const text: TextDrawing = { ...original, id: "text", type: "TEXT", geometry: { anchor: original.geometry.start, text: "old" }, style: DEFAULT_TEXT_STYLE };
+    remote.push(text); const app = harness(); await app.ready(); fetcher.mockResolvedValueOnce(json({ error: "offline" }, 503));
+    await expect(app.render().removeText(text.id, () => true)).rejects.toThrow();
+    expect(app.render().drawings).toEqual([original, text]); expect(app.render().busy).toBe(false);
+    remote = [original]; fetcher.mockResolvedValueOnce(json({}, 404));
+    await app.render().removeText(text.id, () => true); expect(app.render().drawings).toEqual([original]); app.cleanup();
+  });
   it("keeps text creation out of the optimistic collection during delayed POST and reconciles once", async () => {
     const app = harness(); const api = await app.ready();
     let resolve!: (response: Response) => void;

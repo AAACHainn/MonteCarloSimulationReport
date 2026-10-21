@@ -11,10 +11,10 @@ import type { DrawingAnchor, TextDrawingStyle } from "@/lib/market-replay/chart-
 import type { TextDrawingApi, TextEditorPosition } from "@/lib/market-replay/text-drawing-primitive";
 import { listenForTextEditorOutside } from "./text-inline-editor-events";
 
-export function TextInlineEditor({ apiRef, anchor, text, style, onChange, valid, saving, error, onFinish, onSettings, onRetry,
+export function TextInlineEditor({ apiRef, anchor, text, style, onChange, valid, saving, disabled, error, onFinish, onSettings, onRetry,
   onSuspend, onWidth, onRestoreStyle, onResizeEnd }: {
   apiRef: RefObject<TextDrawingApi | null>; anchor: DrawingAnchor; text: string; style: TextDrawingStyle;
-  onChange: (text: string) => void; valid: boolean; saving: boolean; error: string | null;
+  onChange: (text: string) => void; valid: boolean; saving: boolean; disabled: boolean; error: string | null;
   onFinish: () => Promise<boolean>; onSettings: () => Promise<boolean>; onRetry: () => Promise<void>;
   onSuspend: (reason: string, suspended: boolean) => void; onWidth: (width: number) => void;
   onRestoreStyle: (style: TextDrawingStyle) => void; onResizeEnd: () => Promise<void>;
@@ -93,7 +93,7 @@ export function TextInlineEditor({ apiRef, anchor, text, style, onChange, valid,
     <p id={`${id}-hint`} className="sr-only">{copy.marketReplay.textInlineHint}</p>
     <div className={width > position.width - 16 ? "-m-1 overflow-x-auto overflow-y-hidden p-1" : "-m-1 p-1"}>
       <div className="relative outline outline-1 outline-blue-600" style={{ width, backgroundColor: background }}>
-        <Textarea ref={input} id={`${id}-input`} value={text} autoFocus rows={1}
+        <Textarea ref={input} id={`${id}-input`} value={text} autoFocus rows={1} disabled={disabled}
           placeholder={copy.marketReplay.textInlinePlaceholder} wrap={style.wrapEnabled ? "soft" : "off"}
           aria-invalid={Boolean(text) && !valid} aria-describedby={`${id}-hint${error ? ` ${id}-error` : ""}`}
           className="block min-h-0 resize-none rounded-none border-0 bg-transparent shadow-none focus-visible:ring-0"
@@ -102,7 +102,7 @@ export function TextInlineEditor({ apiRef, anchor, text, style, onChange, valid,
           onCompositionStart={() => { composing.current = true; onSuspend("composition", true); }}
           onCompositionEnd={event => { composing.current = false; onChange(event.currentTarget.value); onSuspend("composition", false); }}
           onChange={event => onChange(event.target.value)} />
-        <button ref={handle} type="button" role="separator" aria-orientation="vertical"
+        <button ref={handle} type="button" role="separator" aria-orientation="vertical" disabled={disabled}
           aria-label={copy.marketReplay.textResizeWidth} aria-valuemin={120} aria-valuemax={800} aria-valuenow={style.wrapWidth}
           className="absolute -right-5 top-1/2 flex h-10 w-10 -translate-y-1/2 cursor-ew-resize touch-none items-center justify-center focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
           onPointerDown={event => {
@@ -133,10 +133,10 @@ export function TextInlineEditor({ apiRef, anchor, text, style, onChange, valid,
       </div>
     </div>
     <div aria-live="polite" className="absolute left-0 top-full mt-1 max-w-full text-xs">
-      {error || text && !valid ? <div id={`${id}-error`} role="alert" className="rounded border border-red-200 bg-white p-2 text-red-700">
+      {error || text.trim() && !valid ? <div id={`${id}-error`} role="alert" className="rounded border border-red-200 bg-white p-2 text-red-700">
         {error || copy.marketReplay.textContentError}
         {error ? <Button type="button" variant="ghost" size="sm" onClick={() => void onRetry()}>{copy.marketReplay.textSaveRetry}</Button> : null}
-      </div> : saving ? <span className="rounded bg-white/90 px-1 text-slate-500">{copy.marketReplay.textAutosaving}</span>
+      </div> : saving ? <span className="sr-only">{copy.marketReplay.textAutosaving}</span>
         : <span className="sr-only">{copy.marketReplay.textAutosaved}</span>}
     </div>
   </div>, position.host);

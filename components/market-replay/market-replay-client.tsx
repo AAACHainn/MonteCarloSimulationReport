@@ -47,7 +47,7 @@ import { copy } from "@/lib/i18n";
 import { Type as TextIcon } from "lucide-react";
 import { TextSettingsDialog, TextToolOption } from "./text-settings-dialog";
 import { runDrawingWrite } from "@/lib/market-replay/drawing-write-queue";
-import { persistTextDrawing } from "@/lib/market-replay/text-persistence";
+import { deleteTextDrawing, persistTextDrawing } from "@/lib/market-replay/text-persistence";
 import { useTextDrawingEditor } from "./use-text-drawing-editor";
 import { useDrawingScopeGuard } from "./use-drawing-scope-guard";
 import { drawingObjectName, drawingObjectColor, drawingSettingsLabel, drawingDeleteLabel } from "@/lib/market-replay/drawing-presentation";
@@ -2785,6 +2785,13 @@ export function MarketReplayClient({ dataset: initialDataset, initialJournalFocu
         apiRef={textDrawing.apiRef}
         onAdopt={textDrawing.adopt} register={textDrawing.register} isCurrent={textDrawing.guard()}
         templates={textTemplates} onTemplatesChange={setTextTemplates} onPreview={textDrawing.preview} onClose={textDrawing.close}
+        onRemove={(id, current) => runDrawingWrite(drawingWriteScope, async () => {
+          if (!current()) throw new Error(copy.marketReplay.drawingDeleteError);
+          await deleteTextDrawing(fetch, dataset.id, id);
+          if (!current()) throw new Error(copy.marketReplay.drawingDeleteError);
+          const next = drawingsLive.current.filter(item => item.id !== id);
+          drawingsLive.current = next; setDrawings(next); setSelectedDrawingId(value => value === id ? null : value);
+        })}
         onSave={(id, draft, clientId, current) => runDrawingWrite(drawingWriteScope, async () => {
           if (!current()) throw new Error(copy.marketReplay.textAutosaveError);
           const saved = await persistTextDrawing(fetch, dataset.id, id, draft, clientId);

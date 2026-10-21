@@ -137,6 +137,53 @@ describe("text autosave", () => {
     const { controller, persist } = setup(); controller.update(draft("unsaved")); controller.dispose();
     await vi.advanceTimersByTimeAsync(1000); expect(persist).not.toHaveBeenCalled();
   });
+  it("drops a cleared unsent draft without creating or deleting anything", async () => {
+    const { controller, persist } = setup(), remove = vi.fn(async () => undefined);
+    controller.update(draft("not submitted")); await vi.advanceTimersByTimeAsync(300); controller.update(draft(" \n"));
+    expect(await controller.remove(remove)).toBe(true);
+    await vi.advanceTimersByTimeAsync(1000); expect(persist).not.toHaveBeenCalled(); expect(remove).not.toHaveBeenCalled();
+  });
+  it("deletes a cleared existing object once and blocks autosave or edits while removal is pending", async () => {
+    const { controller, persist } = setup("old", "existing"), pending = deferred<void>(), remove = vi.fn(() => pending.promise);
+    controller.update(draft("")); const exiting = controller.remove(remove);
+    expect(controller.remove(remove)).toBe(exiting); expect(controller.state.removing).toBe(true);
+    controller.update(draft("late event")); await vi.advanceTimersByTimeAsync(1000);
+    expect(controller.current.geometry.text).toBe(""); expect(remove).toHaveBeenCalledTimes(1); expect(remove).toHaveBeenCalledWith("existing");
+    pending.resolve(); expect(await exiting).toBe(true); expect(persist).not.toHaveBeenCalled();
+    expect(controller.state).toMatchObject({ id: null, dirty: false, removing: false });
+  });
+  it("waits for pending PATCH before deleting without submitting blank content", async () => {
+    const { controller, persist } = setup("old", "existing"), pending = deferred<TextDrawing>(), remove = vi.fn(async () => undefined);
+    persist.mockImplementationOnce(() => pending.promise);
+    controller.update(draft("in flight")); await vi.advanceTimersByTimeAsync(700); controller.update(draft(""));
+    const exiting = controller.remove(remove); await Promise.resolve(); expect(remove).not.toHaveBeenCalled();
+    pending.resolve(saved(draft("in flight"), "existing")); expect(await exiting).toBe(true);
+    expect(persist).toHaveBeenCalledOnce(); expect(remove).toHaveBeenCalledWith("existing");
+  });
+  it("waits for pending creation then deletes its actual ID", async () => {
+    const { controller, persist } = setup(), pending = deferred<TextDrawing>(), remove = vi.fn(async () => undefined);
+    persist.mockImplementationOnce(() => pending.promise);
+    controller.update(draft("submitted")); await vi.advanceTimersByTimeAsync(700); controller.update(draft(""));
+    const exiting = controller.remove(remove); await Promise.resolve(); expect(remove).not.toHaveBeenCalled();
+    pending.resolve(saved(draft("submitted"), "actual-id")); expect(await exiting).toBe(true);
+    expect(persist).toHaveBeenCalledOnce(); expect(remove).toHaveBeenCalledWith("actual-id");
+  });
+  it("resolves a lost POST with the frozen snapshot and identity before deleting it", async () => {
+    const { controller, persist } = setup(), remove = vi.fn(async () => undefined);
+    persist.mockRejectedValueOnce(new Error("response lost")).mockResolvedValueOnce(saved(draft("server actual"), "actual-id"));
+    controller.update(draft("first POST")); await vi.advanceTimersByTimeAsync(700); controller.update(draft(""));
+    expect(await controller.remove(remove)).toBe(true);
+    expect(persist.mock.calls[1]).toEqual([null, draft("first POST"), "fixed-creation-id"]);
+    expect(remove).toHaveBeenCalledWith("actual-id"); expect(persist).toHaveBeenCalledTimes(2);
+  });
+  it("preserves the cleared editor on delete failure and permits explicit retry without background requests", async () => {
+    const { controller, persist } = setup("old", "existing"), remove = vi.fn(async () => undefined);
+    remove.mockRejectedValueOnce(new Error("offline")); controller.update(draft(""));
+    expect(await controller.remove(remove)).toBe(false);
+    expect(controller.state).toMatchObject({ id: "existing", dirty: true, removing: false, error: true });
+    await vi.advanceTimersByTimeAsync(5000); expect(remove).toHaveBeenCalledOnce(); expect(persist).not.toHaveBeenCalled();
+    expect(await controller.remove(remove)).toBe(true); expect(remove).toHaveBeenCalledTimes(2);
+  });
 });
 
 it("serializes complete drawing writes across owners while isolating scopes and recovering from failure", async () => {

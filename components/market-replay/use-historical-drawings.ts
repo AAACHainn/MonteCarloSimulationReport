@@ -6,7 +6,7 @@ import { copy } from "@/lib/i18n";
 import type { MarketDrawing, MarketDrawingStyle, DrawingGeometry, NewMarketDrawing } from "@/lib/market-replay/chart-drawings";
 import { drawingGeometryMatchesType, drawingStyleMatchesType } from "@/lib/market-replay/chart-drawings";
 import { runDrawingWrite } from "@/lib/market-replay/drawing-write-queue";
-import { persistTextDrawing } from "@/lib/market-replay/text-persistence";
+import { deleteTextDrawing, persistTextDrawing } from "@/lib/market-replay/text-persistence";
 import type { TextDraft } from "@/lib/market-replay/text-autosave";
 
 type DrawingPayload = { drawings: MarketDrawing[]; drawing?: MarketDrawing; error?: string };
@@ -116,5 +116,15 @@ export function useHistoricalDrawings({ datasetId, fetch, writeScope }: {
       setError(null); return saved;
     } finally { if (generation === readGeneration.current) { locked.current = false; setBusy(false); } }
   });
-  return { drawings, loaded, busy, error, refresh, create, update, remove, clear, saveText };
+  const removeText = (id: string, isCurrent: () => boolean) => runDrawingWrite(writeScope ?? url, async () => {
+    if (!isCurrent() || !loadedRef.current || locked.current) throw new Error(copy.marketReplay.drawingDeleteError);
+    const generation = readGeneration.current;
+    locked.current = true; setBusy(true);
+    try {
+      await deleteTextDrawing(fetch, datasetId, id);
+      if (!isCurrent() || generation !== readGeneration.current) throw new Error(copy.marketReplay.drawingDeleteError);
+      publish(current.current.filter(item => item.id !== id)); setError(null);
+    } finally { if (generation === readGeneration.current) { locked.current = false; setBusy(false); } }
+  });
+  return { drawings, loaded, busy, error, refresh, create, update, remove, clear, saveText, removeText };
 }

@@ -36,11 +36,12 @@ function TextToggle({ label, checked, onChange, children }: { label: string; che
     {checked ? children : null}
   </div>;
 }
-export function TextSettingsDialog({ editor, apiRef, templates, onTemplatesChange, onPreview, onSave, onClose, onAdopt, register, isCurrent }: {
+export function TextSettingsDialog({ editor, apiRef, templates, onTemplatesChange, onPreview, onSave, onRemove, onClose, onAdopt, register, isCurrent }: {
   editor: TextEditor; templates: TextTemplate[]; onTemplatesChange: (templates: TextTemplate[]) => void;
   apiRef: RefObject<TextDrawingApi | null>;
   onPreview: (preview: TextEditPreview | null, owner: string) => void;
   onSave: (id: string | null, draft: TextDraft, clientId: string, isCurrent: () => boolean) => Promise<TextDrawing>; onClose: () => void;
+  onRemove: (id: string, isCurrent: () => boolean) => Promise<void>;
   onAdopt: (id: string, owner: string) => void; register: (control: TextEditorControl | null, owner: string) => void;
   isCurrent: () => boolean;
 }) {
@@ -56,9 +57,9 @@ export function TextSettingsDialog({ editor, apiRef, templates, onTemplatesChang
   const [busy, setBusy] = useState(false);
   const [settingsOpen, setSettingsOpen] = useState(!editor.inline);
   const saving = useRef(false);
-  const [saveState, setSaveState] = useState<TextSaveState>({ id: editor.id, dirty: false, saving: false, error: false, valid: Boolean(editor.id) });
+  const [saveState, setSaveState] = useState<TextSaveState>({ id: editor.id, dirty: false, saving: false, removing: false, error: false, valid: Boolean(editor.id) });
   const creationId = useRef<string | null>(null); creationId.current ??= createUuid();
-  const currentGuard = useRef(isCurrent), persist = useRef(onSave);
+  const currentGuard = useRef(isCurrent), persist = useRef(onSave), remove = useRef(onRemove);
   const draftRef = useRef<TextDraft>({ geometry: editor.geometry, style: editor.style });
   draftRef.current = { geometry: { anchor: editor.geometry.anchor, text }, style };
   const controllerRef = useRef<TextAutosave | null>(null);
@@ -95,12 +96,15 @@ export function TextSettingsDialog({ editor, apiRef, templates, onTemplatesChang
   };
   const finish = async () => {
     if (settingsOpen) return false;
-    const ok = await controller.flush();
+    const empty = !controller.current.geometry.text.trim();
+    const ok = empty ? await controller.remove(id => remove.current(id, currentGuard.current)) : await controller.flush();
     if (ok && currentGuard.current()) onClose();
-    else if (currentGuard.current()) setError(controller.state.valid ? copy.marketReplay.textAutosaveError : copy.marketReplay.textContentError);
+    else if (currentGuard.current()) setError(empty ? copy.marketReplay.drawingDeleteError
+      : controller.state.valid ? copy.marketReplay.textAutosaveError : copy.marketReplay.textContentError);
     return ok;
   };
   const openSettings = async () => {
+    if (controller.state.removing) return false;
     if (settingsOpen) return true;
     if (!await controller.flush() || !currentGuard.current()) { setError(copy.marketReplay.textAutosaveError); return false; }
     checkpoint.current = controller.current; controller.suspend("settings", true); setSettingsOpen(true); return true;
@@ -140,8 +144,9 @@ export function TextSettingsDialog({ editor, apiRef, templates, onTemplatesChang
   };
   return <>
     {inline ? <TextInlineEditor apiRef={apiRef} anchor={editor.geometry.anchor} text={text} style={style}
-      onChange={updateInline} valid={contentValid && styleValid} saving={saveState.saving} error={error || (saveState.error ? copy.marketReplay.textAutosaveError : null)}
-      onFinish={finish} onSettings={openSettings} onRetry={async () => { setError(null); await controller.flush(); }}
+      onChange={updateInline} valid={contentValid && styleValid} saving={saveState.saving} disabled={saveState.removing}
+      error={saveState.removing ? null : error || (saveState.error ? copy.marketReplay.textAutosaveError : null)}
+      onFinish={finish} onSettings={openSettings} onRetry={async () => { setError(null); if (!controller.current.geometry.text.trim()) await finish(); else await controller.flush(); }}
       onSuspend={(reason, suspended) => controller.suspend(reason, suspended)}
       onWidth={wrapWidth => updateInline(draftRef.current.geometry.text, { ...draftRef.current.style, wrapEnabled: true, wrapWidth })}
       onRestoreStyle={previous => updateInline(draftRef.current.geometry.text, previous)}

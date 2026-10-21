@@ -1,7 +1,7 @@
 import { DEFAULT_TEXT_STYLE, normalizeDrawingText, textGeometrySchema, textDrawingStyleSchema, type TextDrawing, type TextGeometry, type TextDrawingStyle } from "./chart-drawings";
 
 export type TextDraft = { geometry: TextGeometry; style: TextDrawingStyle };
-export type TextSaveState = { id: string | null; dirty: boolean; saving: boolean; error: boolean; valid: boolean };
+export type TextSaveState = { id: string | null; dirty: boolean; saving: boolean; removing: boolean; error: boolean; valid: boolean };
 export type TextPersist = (id: string | null, draft: TextDraft, clientId: string) => Promise<TextDrawing>;
 const snapshot = (draft: TextDraft): TextDraft => ({ geometry: { anchor: { ...draft.geometry.anchor }, text: normalizeDrawingText(draft.geometry.text) }, style: { ...draft.style } });
 const styleKeys = Object.keys(DEFAULT_TEXT_STYLE) as Array<keyof TextDrawingStyle>;
@@ -16,6 +16,7 @@ export class TextAutosave {
   private creation: TextDraft | null = null;
   private timer: ReturnType<typeof setTimeout> | null = null;
   private flight: Promise<boolean> | null = null;
+  private removal: Promise<boolean> | null = null;
   private stopped = false;
   private failed = false;
   private holds = new Set<string>();
@@ -29,11 +30,12 @@ export class TextAutosave {
   get state(): TextSaveState {
     const valid = textGeometrySchema.safeParse(this.draft.geometry).success && textDrawingStyleSchema.safeParse(this.draft.style).success;
     const dirty = this.saved ? key(this.saved) !== key(this.draft) : this.creation !== null || Boolean(this.draft.geometry.text.trim());
-    return { id: this.id, dirty, valid, saving: Boolean(this.flight), error: this.failed };
+    return { id: this.id, dirty, valid, saving: Boolean(this.flight || this.removal), removing: Boolean(this.removal), error: this.failed };
   }
   private notify() { if (!this.stopped) this.changed(this.state); }
   private clearTimer() { if (this.timer) clearTimeout(this.timer); this.timer = null; }
   update(draft: TextDraft) {
+    if (this.removal) return;
     const next = snapshot(draft);
     if (key(next) === key(this.draft)) return;
     this.draft = next; this.failed = false; this.notify(); this.schedule();
@@ -60,8 +62,7 @@ export class TextAutosave {
       try {
         if (this.stopped) return false;
         const drawing = await this.persist(this.id, this.id ? sent : this.creation!, this.clientId);
-        this.id = drawing.id; this.saved = snapshot(drawing); this.failed = false;
-        if (!this.stopped) this.adopted(drawing);
+        this.accept(drawing);
         return true;
       } catch { this.failed = true; return false; }
     });
@@ -70,6 +71,7 @@ export class TextAutosave {
     return task;
   }
   async flush() {
+    if (this.removal) return false;
     this.clearTimer();
     if (!this.id && !this.creation && !this.draft.geometry.text.trim() && !this.flight) return true;
     while (!this.stopped) {
@@ -82,7 +84,31 @@ export class TextAutosave {
     }
     return false;
   }
-  async discard() { this.stopped = true; this.clearTimer(); await this.flight; return this.id; }
+  private accept(drawing: TextDrawing) {
+    this.id = drawing.id; this.saved = snapshot(drawing); this.failed = false;
+    if (!this.stopped) this.adopted(drawing);
+  }
+  /** Empty inline content means delete on exit; resolve any unknown creation before deleting. */
+  remove(remove: (id: string) => Promise<void>): Promise<boolean> {
+    if (this.removal) return this.removal;
+    if (this.stopped || this.holds.size || this.draft.geometry.text.trim()) return Promise.resolve(false);
+    this.clearTimer(); this.holds.add("removal");
+    const task = Promise.resolve().then(async () => {
+      try {
+        await this.flight;
+        if (this.stopped) return false;
+        if (!this.id && this.creation) this.accept(await this.persist(null, this.creation, this.clientId));
+        if (this.stopped) return false;
+        if (this.id) await remove(this.id);
+        this.id = null; this.saved = null; this.creation = null; this.failed = false; this.stopped = true;
+        return true;
+      } catch { this.failed = true; return false; }
+    });
+    this.removal = task; this.notify();
+    void task.then(() => { this.removal = null; this.holds.delete("removal"); this.notify(); });
+    return task;
+  }
+  async discard() { this.stopped = true; this.clearTimer(); await this.flight; await this.removal; return this.id; }
   activate() { this.stopped = false; this.schedule(); }
   dispose() { this.stopped = true; this.clearTimer(); }
 }
