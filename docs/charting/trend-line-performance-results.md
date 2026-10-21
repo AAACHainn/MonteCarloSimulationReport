@@ -11,11 +11,11 @@
 
 主要实现文件：
 
-- [共享定位器](../lib/market-replay/drawing-timeline.ts)
-- [聚合及日历](../lib/market-replay/aggregation.ts)
-- [图表接入](../components/market-replay/replay-chart.tsx)
-- [趋势线](../lib/market-replay/trend-line-primitive.ts)、[斐波那契](../lib/market-replay/fibonacci-retracement-primitive.ts)
-- [视口相交判断](../lib/market-replay/drawing-viewport.ts)
+- [共享定位器](../../lib/market-replay/drawing-timeline.ts)
+- [聚合及日历](../../lib/market-replay/aggregation.ts)
+- [图表接入](../../components/market-replay/replay-chart.tsx)
+- [趋势线](../../lib/market-replay/trend-line-primitive.ts)、[斐波那契](../../lib/market-replay/fibonacci-retracement-primitive.ts)
+- [视口相交判断](../../lib/market-replay/drawing-viewport.ts)
 
 ## 原诊断基线与验收意图
 
@@ -60,7 +60,7 @@ corepack pnpm run benchmark:drawing-projection
 corepack pnpm run benchmark:drawing-projection D:/path/to/existing.db
 ```
 
-[测量脚本](../scripts/benchmark-drawing-projection.ts)。原始结果保存在被 Git 忽略的 `tmp/trend-line-diagnosis/projection-after.json`；诊断基线为同目录 `projection-baseline.json`。合成场景使用 16 / 50 / 200 条绘图和 300 / 1,200 根窗口，端点向两侧最多延伸 200 天。
+[测量脚本](../../scripts/benchmark-drawing-projection.ts)。原始结果保存在被 Git 忽略的 `tmp/trend-line-diagnosis/projection-after.json`；诊断基线为同目录 `projection-baseline.json`。合成场景使用 16 / 50 / 200 条绘图和 300 / 1,200 根窗口，端点向两侧最多延伸 200 天。
 
 ## 浏览器与交互
 

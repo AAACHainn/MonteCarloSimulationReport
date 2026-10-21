@@ -15,10 +15,10 @@
 
 ## 实现与性能约束
 
-- [数据与校验](../lib/market-replay/chart-drawings.ts)：新增 `RECTANGLE`，使用两个时间/源序号/价格锚点和独立样式。已有 SQLite `type` / JSON 字符串字段继续适用，PATCH 同时校验类型匹配和退化几何。
-- [矩形 primitive](../lib/market-replay/rectangle-primitive.ts)：一个实例管理全部矩形，使用共享 `DrawingTimelineLocator`，两个 Canvas pane view 分别负责填充和编辑层。裁剪不改保存数据，保留包围整个视口但四角均在屏外的矩形。
-- [图表交互](../components/market-replay/replay-chart.tsx)：按绘图数组变化分组，复用共享索引和缓存；鼠标事件每帧处理最新一次，绘图同步继续合并。移动仅更新 ref 预览，松开提交一次；只选择、取消或几何未变化不提交。只调整价格边缘保留原时间/源序号，只调整时间边缘保留原价格，避免高周期下改写未编辑的锚点。
-- [共享设置和模板](../components/market-replay/rectangle-controls.tsx) 同时用于普通和历史页；[共用样式控件](../components/ui/style-controls.tsx) 统一各类绘图表单。UUID 使用统一 `createUuid()`，支持普通 HTTP。
+- [数据与校验](../../lib/market-replay/chart-drawings.ts)：新增 `RECTANGLE`，使用两个时间/源序号/价格锚点和独立样式。已有 SQLite `type` / JSON 字符串字段继续适用，PATCH 同时校验类型匹配和退化几何。
+- [矩形 primitive](../../lib/market-replay/rectangle-primitive.ts)：一个实例管理全部矩形，使用共享 `DrawingTimelineLocator`，两个 Canvas pane view 分别负责填充和编辑层。裁剪不改保存数据，保留包围整个视口但四角均在屏外的矩形。
+- [图表交互](../../components/market-replay/replay-chart.tsx)：按绘图数组变化分组，复用共享索引和缓存；鼠标事件每帧处理最新一次，绘图同步继续合并。移动仅更新 ref 预览，松开提交一次；只选择、取消或几何未变化不提交。只调整价格边缘保留原时间/源序号，只调整时间边缘保留原价格，避免高周期下改写未编辑的锚点。
+- [共享设置和模板](../../components/market-replay/rectangle-controls.tsx) 同时用于普通和历史页；[共用样式控件](../../components/ui/style-controls.tsx) 统一各类绘图表单。UUID 使用统一 `createUuid()`，支持普通 HTTP。
 
 ## 验证
 

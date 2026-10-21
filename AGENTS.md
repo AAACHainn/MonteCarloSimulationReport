@@ -7,7 +7,7 @@
 - 禁止批量删除文件或目录，包括 `del /s`、`rd /s`、`rmdir /s`、`Remove-Item -Recurse`、`rm -rf`。只能一次删除一个明确路径的文件；需要批量删除时停止操作，请用户手动处理。
 - 保留已有工作区改动，不擅自回退或覆盖；不要把历史文档中的“未提交”或“验证通过”当作当前状态。
 - 不提交 `.env`、密钥、SQLite 数据库、截图、导入文件、日志、依赖或构建产物。不自行扩展登录、权限或多租户功能。
-- 涉及现有数据库升级或部署，先阅读 [升级指南](docs/upgrade.md)，核对实际数据库并建立备份；保留原行情加密主密钥，不通过重置数据库或删除数据卷消除迁移错误。
+- 涉及现有数据库升级或部署，先阅读 [升级指南](docs/operations/upgrade.md)，核对实际数据库并建立备份；保留原行情加密主密钥，不通过重置数据库或删除数据卷消除迁移错误。
 
 ## 架构与兼容
 
@@ -30,7 +30,7 @@
 
 ## UI 与文案
 
-- 修改任何用户可见界面前，必须完整阅读唯一 UI 规范 [docs/ui-guidelines.md](docs/ui-guidelines.md)，交付前执行对应检查清单；优先复用 `components/ui/` 与既有页面模式，公共交互和样式沉淀到基础组件。
+- 修改任何用户可见界面前，必须完整阅读唯一 UI 规范 [docs/ui/ui-guidelines.md](docs/ui/ui-guidelines.md)，交付前执行对应检查清单；优先复用 `components/ui/` 与既有页面模式，公共交互和样式沉淀到基础组件。
 - UI 例外须在交付说明中写明原因、影响范围与验证方式；重复出现时抽象为基础组件或更新规范。
 - 默认简体中文，可见文案集中在 `lib/i18n.ts` 的 `copy`；金额、数字与百分比复用 `lib/format.ts`。确认与删除弹窗使用 `components/ui/confirm-dialog.tsx`，不用原生 `alert` / `confirm`。
 
@@ -55,9 +55,9 @@ corepack pnpm run build
 | 任务 | 文档 |
 | --- | --- |
 | 安装、使用、CSV 格式、目录概览 | [README.md](README.md) |
-| 数据迁移、备份、生产部署与回退 | [升级指南](docs/upgrade.md) |
-| Databento 连接、同步、预算与冲突 | [行情同步](docs/market-data-sync.md) |
-| 独立会话、训练 / 实盘重演、纠错 | [回放多会话](docs/replay-sessions-implementation.md) |
-| 策略清单、连亏触发与关卡计数 | [交易关卡](docs/training-gate.md) |
-| 回放 PDF 的筛选、截图与分卷 | [PDF 导出](docs/replay-pdf-export.md) |
-| 追溯早期聚合与导入实现 | [2026-08-30 开发历史](docs/development-history-2026-08-30.md) |
+| 数据迁移、备份、生产部署与回退 | [升级指南](docs/operations/upgrade.md) |
+| Databento 连接、同步、预算与冲突 | [行情同步](docs/market-data/market-data-sync.md) |
+| 独立会话、训练 / 实盘重演、纠错 | [回放多会话](docs/replay/replay-sessions-implementation.md) |
+| 策略清单、连亏触发与关卡计数 | [交易关卡](docs/replay/training-gate.md) |
+| 回放 PDF 的筛选、截图与分卷 | [PDF 导出](docs/replay/replay-pdf-export.md) |
+| 追溯早期聚合与导入实现 | [2026-08-30 开发历史](docs/history/development-history-2026-08-30.md) |

@@ -26,7 +26,7 @@
 - 合并记录单独标识，避免把分支功能在合并时重复计算。原始标题在完整索引中保留。
 - 日志描述对应时间点的改动，不把当时的实现当作今天仍然有效的规则。例如，历史页绘图早期使用浏览器草稿，10 月 19 日已统一保存到后端。
 - 只有实施说明明确记录的检查才写为“当时验证”；不根据新增测试文件推断测试已经通过，也不把本次文档检查写成应用测试结果。
-- 数据迁移、部署和当前使用规则以[升级指南](../../docs/upgrade.md)及相应专题文档为准，开发日志不能替代升级步骤。
+- 数据迁移、部署和当前使用规则以[升级指南](../operations/upgrade.md)及相应专题文档为准，开发日志不能替代升级步骤。
 
 ## 后续维护
 
@@ -42,4 +42,4 @@ git show --stat <commit>
 git show <commit>
 ```
 
-专题说明：[回放多会话](../../docs/replay-sessions-implementation.md)、[行情同步](../../docs/market-data-sync.md)、[PDF 导出](../../docs/replay-pdf-export.md)、[AI 助手](../../docs/ai-assistant.md)、[矩形绘图](../../docs/rectangle-drawing.md)、[绘图持久化](../../docs/archived-drawings.md)。
+专题说明：[回放多会话](../replay/replay-sessions-implementation.md)、[行情同步](../market-data/market-data-sync.md)、[PDF 导出](../replay/replay-pdf-export.md)、[AI 助手](../ai/ai-assistant.md)、[矩形绘图](../charting/rectangle-drawing.md)、[绘图持久化](../charting/archived-drawings.md)。

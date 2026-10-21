@@ -1,6 +1,6 @@
 # 普通推进事务与浏览器重复工作优化
 
-2026-10-18，接续 [SQLite 提交优化](sqlite-wal-validation.md) 的本机 WAL + FULL 试用。此次不修改数据库结构、撮合规则、源周期推进、权益采样策略或界面布局。
+2026-10-18，接续 [SQLite 提交优化](../operations/sqlite-wal-validation.md) 的本机 WAL + FULL 试用。此次不修改数据库结构、撮合规则、源周期推进、权益采样策略或界面布局。
 
 ## 实施范围
 
@@ -11,7 +11,7 @@
 - 已完整取得的交易标记窗口，在日志数量不变、回放继续向右时复用。向左读取未覆盖范围、新成交、主动刷新、纠错/窗口重载仍会重新读取；截断结果不复用，历史窗口不推断未读取范围。
 - 持仓、订单和草稿价格线按稳定身份保留，只在参数变化时原位更新，取消或平仓时删除；保留拖动预览、R 标题与操作坐标更新。
 
-相关代码：[推进事务](../lib/market-replay/replay-sync.ts)、[派生持久化](../lib/replay-sessions/persistence.ts)、[上下文](../lib/replay-sessions/context-storage.ts)、[浏览器推进](../components/market-replay/market-replay-client.tsx)、[显示缓存](../lib/market-replay/bar-cache.ts)、[价格线](../components/market-replay/replay-chart.tsx)。
+相关代码：[推进事务](../../lib/market-replay/replay-sync.ts)、[派生持久化](../../lib/replay-sessions/persistence.ts)、[上下文](../../lib/replay-sessions/context-storage.ts)、[浏览器推进](../../components/market-replay/market-replay-client.tsx)、[显示缓存](../../lib/market-replay/bar-cache.ts)、[价格线](../../components/market-replay/replay-chart.tsx)。
 
 ## 前后基准
 

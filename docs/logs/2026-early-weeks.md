@@ -81,7 +81,7 @@
 - 接入模拟交易，建立回放与交易操作的基础流程。
 - 增加多周期聚合，为不同显示周期的图表展示提供基础。
 
-相关历史背景见[早期聚合与回放实现记录](../../docs/development-history-2026-08-30.md)。
+相关历史背景见[早期聚合与回放实现记录](../history/development-history-2026-08-30.md)。
 
 关联提交（3 条）：[39b7d49](https://github.com/AAACHainn/MonteCarloSimulationReport/commit/39b7d492423f3c483b8d3aa684acc382092d5fde)、[d714d03](https://github.com/AAACHainn/MonteCarloSimulationReport/commit/d714d031bdc0e6653bbef50932e29ac61116529e)、[43dd812](https://github.com/AAACHainn/MonteCarloSimulationReport/commit/43dd81285b74be766b312eb0dafbf154d1ed8614)。
 

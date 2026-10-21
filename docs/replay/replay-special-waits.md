@@ -11,7 +11,7 @@
 - 每根源 K 线仍由客户端准备当时的 ABR 上下文，后端逐源撮合与计算权益峰值/回撤；订单、成交、FIFO 批次、日志、权益与进度仍原子保存。合并请求保留原来每 100 根提交边界的权益补点，以及稀疏采样、成交和末根补点。
 - 继续串行执行，取消在批次边界生效；已经发出的请求仍使用同一请求编号取回回执。暂停、后台暂停、快捷键松开与等待中的队列沿用原有规则。
 
-相关实现：[候选分页](../lib/market-replay/display-advance.ts)、[显示推进路由](../app/api/market-datasets/[id]/replay/advance/route.ts)、[批量校验](../lib/validations.ts)、[推进事务](../lib/market-replay/replay-sync.ts)、[客户端](../components/market-replay/market-replay-client.tsx)、[增量窗口](../lib/market-replay/advance-display.ts)。
+相关实现：[候选分页](../../lib/market-replay/display-advance.ts)、[显示推进路由](../../app/api/market-datasets/[id]/replay/advance/route.ts)、[批量校验](../../lib/validations.ts)、[推进事务](../../lib/market-replay/replay-sync.ts)、[客户端](../../components/market-replay/market-replay-client.tsx)、[增量窗口](../../lib/market-replay/advance-display.ts)。
 
 ## 相同环境的前后基准
 
@@ -24,7 +24,7 @@
 
 行情读取数统计各 findMany 返回行数，包括重复读取，不含已揭示当前价的单行查询。RTH 优化主要减少读取量和对象分配，SQL 数量未减少；这组测量未计入浏览器移除的整窗请求收益。
 
-[复现程序](../scripts/benchmark-replay-special-cases.ts) 与 [Vitest 配置](../scripts/benchmark-replay-special-cases.config.ts) 专供显式基准，不由普通测试自动执行：
+[复现程序](../../scripts/benchmark-replay-special-cases.ts) 与 [Vitest 配置](../../scripts/benchmark-replay-special-cases.config.ts) 专供显式基准，不由普通测试自动执行：
 
 ~~~powershell
 $env:SQLITE_DRIVER = "better-sqlite3"

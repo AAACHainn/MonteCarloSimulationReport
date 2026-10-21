@@ -12,7 +12,7 @@
 | 日期存储 | Unix 毫秒 | 显式 unixepoch-ms |
 | 提交配置 | DELETE + FULL | 分别测试 DELETE + FULL、WAL + FULL |
 
-候选版本写在 [独立包清单](../scripts/sqlite-wal/candidate-package.json) 和 [独立锁文件](../scripts/sqlite-wal/candidate-lock.yaml)，不改变根项目依赖。
+候选版本写在 [独立包清单](../../scripts/sqlite-wal/candidate-package.json) 和 [独立锁文件](../../scripts/sqlite-wal/candidate-lock.yaml)，不改变根项目依赖。
 
 SQLite 3.51.3 修复了本次讨论的 WAL-reset 问题，better-sqlite3 12.8.0 发布说明确认内置该版本。依据：[SQLite WAL 说明](https://www.sqlite.org/wal.html#walreset)、[驱动发布说明](https://github.com/WiseLibs/better-sqlite3/releases/tag/v12.8.0)。
 
@@ -129,4 +129,4 @@ corepack pnpm run db:runtime --integrity
 
 ## 后续普通推进与浏览器优化
 
-第 2、3 项的实施范围、同版本 WAL + FULL 前后基准及验证边界，见 [普通推进性能优化](replay-performance-optimizations.md)。
+第 2、3 项的实施范围、同版本 WAL + FULL 前后基准及验证边界，见 [普通推进性能优化](../replay/replay-performance-optimizations.md)。

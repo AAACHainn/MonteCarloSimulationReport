@@ -1,6 +1,6 @@
 # 现有安装升级与跨机器部署
 
-适用于已有业务数据的安装，从行情同步开发及后续版本升级到最新代码。本文是升级入口；具体行为另见 [行情同步](market-data-sync.md)、[回放多会话实施记录](replay-sessions-implementation.md)、[交易关卡](training-gate.md)。
+适用于已有业务数据的安装，从行情同步开发及后续版本升级到最新代码。本文是升级入口；具体行为另见 [行情同步](../market-data/market-data-sync.md)、[回放多会话实施记录](../replay/replay-sessions-implementation.md)、[交易关卡](../replay/training-gate.md)。
 
 本文于 2026-10-20 增补时间聚合升级；此前性能部分于 2026-10-18 按功能提交 `6a99d6e` 核对，包含 SQLite 提交优化、普通推进事务与浏览器优化，以及特殊场景等待优化。执行时以实际取得的目标提交、迁移目录和部署文件为准，不依赖本机临时备份或开发过程中的验收记录。其他机器与 Docker 生产镜像尚未完成此次升级验收。
 
@@ -13,13 +13,13 @@
 | 此前：跨非交易时段分页读取、增量窗口、高周期与日期快进减少请求 | 同上；刷新页面加载新客户端 | 无新增迁移、无额外开关；仍逐源撮合及计算权益峰值/回撤 |
 | 此前：SQLite 3.51.3 + WAL + FULL | 在目标环境验证原生驱动，停止写入、备份、副本演练，再显式切换配置 | 不改表结构；日志模式会写入数据库，不能只退环境变量 |
 
-仅部署上述较早的性能优化时无需初始化数据库；本次时间聚合重构必须完成新增结构升级。更早版本的安装仍按第 3、4 节处理全部待迁移项。实现和本机基准见 [SQLite 提交优化](sqlite-wal-validation.md)、[普通推进与浏览器优化](replay-performance-optimizations.md)、[特殊场景等待优化](replay-special-waits.md)。
+仅部署上述较早的性能优化时无需初始化数据库；本次时间聚合重构必须完成新增结构升级。更早版本的安装仍按第 3、4 节处理全部待迁移项。实现和本机基准见 [SQLite 提交优化](sqlite-wal-validation.md)、[普通推进与浏览器优化](../replay/replay-performance-optimizations.md)、[特殊场景等待优化](../replay/replay-special-waits.md)。
 
 ## 0. 时间聚合重构的升级要求（2026-10-20）
 
-后续来源质量规则包含迁移 `20261020150000_bar_emission_mode`，仅为 `MarketDataset` 增加 `barEmissionMode`，默认未知。保留已有聚合代次和 OHLCV，无需重新导入或重建；按原迁移路径升级结构并重新构建客户端即可。已有已确认的 Databento 数据在“编辑行情设置”选择“按成交输出”，新 Databento 导入会自动识别。其他来源不能仅按文件名推断输出模式。详情见[源记录输出方式与质量判定](time-aggregation.md#源记录输出方式与质量判定2026-10-20)。
+后续来源质量规则包含迁移 `20261020150000_bar_emission_mode`，仅为 `MarketDataset` 增加 `barEmissionMode`，默认未知。保留已有聚合代次和 OHLCV，无需重新导入或重建；按原迁移路径升级结构并重新构建客户端即可。已有已确认的 Databento 数据在“编辑行情设置”选择“按成交输出”，新 Databento 导入会自动识别。其他来源不能仅按文件名推断输出模式。详情见[源记录输出方式与质量判定](../market-data/time-aggregation.md#源记录输出方式与质量判定2026-10-20)。
 
-本次增加 `MarketAggregationGeneration`、`MarketAggregatedBar`、`MarketAggregationJob`，删除旧 `MarketBarBlock`、`MarketBarBlockBuildState` 和 `MarketDataset.barBlockBuildCursor`，新增活动代次指针。原始行情、源序号、回放、账户与交易记录保留。规则、面板和本机基准见[时间聚合说明](time-aggregation.md)。
+本次增加 `MarketAggregationGeneration`、`MarketAggregatedBar`、`MarketAggregationJob`，删除旧 `MarketBarBlock`、`MarketBarBlockBuildState` 和 `MarketDataset.barBlockBuildCursor`，新增活动代次指针。原始行情、源序号、回放、账户与交易记录保留。规则、面板和本机基准见[时间聚合说明](../market-data/time-aggregation.md)。
 
 完成下文备份和副本验证后，按原安装方式选择 `migrate deploy` 或初始化兜底脚本，不能混用。迁移只调整结构，不转换旧摘要，也不自动扫描历史；升级后已有数据集显示“聚合待构建”，在行情面板逐个点击“构建聚合”。完成前源周期仍可读取，更高周期明确提示未就绪。新导入自动聚合，追加与同步维护已就绪聚合的尾部。自定义周期入口及合法范围保留。
 
@@ -102,11 +102,11 @@ corepack pnpm run db:init-sqlite
 
 | 项目 | 当前代码中的位置与要求 |
 | --- | --- |
-| Prisma Client / CLI / 适配器 | [package.json](../package.json) 与 [pnpm-lock.yaml](../pnpm-lock.yaml)，均锁定 `6.19.3` |
+| Prisma Client / CLI / 适配器 | [package.json](../../package.json) 与 [pnpm-lock.yaml](../../pnpm-lock.yaml)，均锁定 `6.19.3` |
 | 新驱动 | `better-sqlite3` 锁定 `12.8.0`，内置 SQLite `3.51.3` |
-| 适配器传递依赖 | [pnpm-workspace.yaml](../pnpm-workspace.yaml) 定向覆盖为同一驱动版本 |
-| 运行时校验 | [连接工厂](../lib/sqlite-client.mjs) 对新驱动每条实际连接要求 `3.51.3`、外键开启、`synchronous=2`（FULL），日期保留 Unix 毫秒 |
-| 默认安装 | [环境示例](../.env.example) 为 `SQLITE_DRIVER=native`、`SQLITE_JOURNAL_MODE=delete`；native 引擎版本取决于 Prisma 内置引擎，本机实测为 `3.46.0` |
+| 适配器传递依赖 | [pnpm-workspace.yaml](../../pnpm-workspace.yaml) 定向覆盖为同一驱动版本 |
+| 运行时校验 | [连接工厂](../../lib/sqlite-client.mjs) 对新驱动每条实际连接要求 `3.51.3`、外键开启、`synchronous=2`（FULL），日期保留 Unix 毫秒 |
+| 默认安装 | [环境示例](../../.env.example) 为 `SQLITE_DRIVER=native`、`SQLITE_JOURNAL_MODE=delete`；native 引擎版本取决于 Prisma 内置引擎，本机实测为 `3.46.0` |
 
 适配器 `6.19.3` 上游声明的驱动范围是 `^11.9.0`，本项目的 `12.8.0` 覆盖超出该范围。这组锁定组合已在 Windows / Node 24.15.0 验证；Linux、其他 Node 版本与生产镜像需在目标环境完成验收。不要单独升级 Prisma、驱动或锁文件后沿用旧结论；连接工厂会拒绝未经校验的 SQLite 版本。版本依据、测试范围及剩余事项见 [SQLite 验证记录](sqlite-wal-validation.md)。
 
@@ -176,13 +176,13 @@ corepack pnpm run db:runtime --integrity
 ### 行情同步
 
 - 保留已有 `MARKET_DATA_ENCRYPTION_KEY` 原值；它用于解密数据库中的 Databento API Key，不能每次升级重新生成。不在日志、报告或对话中输出密钥。
-- 从未配置行情连接的新安装，按 [行情同步说明](market-data-sync.md) 创建一次密钥并持久保存。
+- 从未配置行情连接的新安装，按 [行情同步说明](../market-data/market-data-sync.md) 创建一次密钥并持久保存。
 - 副本演练与首次升级验收先设置 `MARKET_DATA_SYNC_ENABLED=0`；正式验收后再恢复原设置。不要为测试主动执行付费下载。
 - 本地 Node 部署需要在服务运行环境中传入配置；生产 Compose 已映射这两个变量。拉取代码不会自动复制另一台机器的环境变量。
 
 ### AI 配置
 
-AI 使用独立的 `AI_ENCRYPTION_KEY`，保留原行情主密钥不变。本地可运行 `node scripts/setup-ai-key.mjs` 生成一次并保存在 `.env`，随后重启服务；已有有效配置不覆盖。备份更新后的环境配置、数据库及 `storage/ai/`，普通业务导出不包含密钥。详见 [AI 机器人说明](ai-assistant.md)。
+AI 使用独立的 `AI_ENCRYPTION_KEY`，保留原行情主密钥不变。本地可运行 `node scripts/setup-ai-key.mjs` 生成一次并保存在 `.env`，随后重启服务；已有有效配置不覆盖。备份更新后的环境配置、数据库及 `storage/ai/`，普通业务导出不包含密钥。详见 [AI 机器人说明](../ai/ai-assistant.md)。
 
 AI 普通聊天在窗口内运行，会话分析依赖独立 worker。升级前停止或等待这些活动任务；中断任务需要用户显式继续，不能自动重复未知计费状态的步骤。
 
@@ -252,7 +252,7 @@ services:
 
 ## 7. 回退
 
-空仓快速推进版本将延迟计算描述写入既有 `ReplayContextRun.context` 字符串，不新增表结构。使用后回退至不识别 `FLAT_ADVANCE_V1` 的旧代码，需要匹配备份或先展开为旧格式的上下文，不能直接沿用新记录进行纠错重演。详见[空仓快速推进与回退兼容](flat-replay-advance.md#纠错上下文与回退兼容)。
+空仓快速推进版本将延迟计算描述写入既有 `ReplayContextRun.context` 字符串，不新增表结构。使用后回退至不识别 `FLAT_ADVANCE_V1` 的旧代码，需要匹配备份或先展开为旧格式的上下文，不能直接沿用新记录进行纠错重演。详见[空仓快速推进与回退兼容](../replay/flat-replay-advance.md#纠错上下文与回退兼容)。
 
 先区分日志模式回退与数据库结构回退：
 
@@ -266,7 +266,7 @@ services:
 ```text
 请把这台机器上的交易系统分析台升级到我指定的最新代码，保留本机全部已有行情、交易、会话和复盘数据。
 
-先阅读 AGENTS.md 和 docs/upgrade.md，并按其引用阅读行情同步、多会话及交易关卡说明。检查当前提交、本地改动、运行方式、真实 DATABASE_URL、数据库迁移历史和环境变量，确认目标提交已包含这些文档。
+先阅读 AGENTS.md 和 docs/operations/upgrade.md，并按其引用阅读行情同步、多会话及交易关卡说明。检查当前提交、本地改动、运行方式、真实 DATABASE_URL、数据库迁移历史和环境变量，确认目标提交已包含这些文档。
 
 停止本项目写入并建立一致性数据库/文件/环境备份，在数据库副本上演练，识别 Prisma migrate deploy 与旧 db:init-sqlite 路径后再升级正式库；不要重置数据库、覆盖为开发库或将未执行迁移直接标记完成。保留原 MARKET_DATA_ENCRYPTION_KEY，副本及首次验收关闭行情同步，不触发付费下载。
 
