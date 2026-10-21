@@ -5,11 +5,13 @@ import {
   createMarketDrawingSchema,
   distanceToSegment,
   fibonacciPriceAtLevel,
+  fibonacciRetracementStyleSchema,
   logicalIndexForAnchor,
   logicalIndexForTimelineAnchor,
   parseFibonacciRetracementPreferences,
   parseTrendLinePreferences,
   snapScreenPointTo45,
+  serializeMarketDrawing,
   timelineAnchorForLogicalIndex,
   trendLineCanvasDashArray,
   trendLineDashArray,
@@ -236,5 +238,28 @@ describe("chart drawing geometry", () => {
       defaultStyle: DEFAULT_FIBONACCI_RETRACEMENT_STYLE,
       templates: [],
     });
+  });
+
+  it("hydrates legacy backend styles and templates without changing their existing colors", () => {
+    const legacy = { width: 3, lineStyle: "DASHED", levels: DEFAULT_FIBONACCI_RETRACEMENT_STYLE.levels };
+    const hydrated = { ...legacy, singleColor: null, showPrices: true, showLevels: true };
+    expect(parseFibonacciRetracementPreferences(JSON.stringify({
+      defaultStyle: legacy, templates: [{ id: "legacy", name: "旧模板", style: legacy }],
+    }))).toEqual({ defaultStyle: hydrated, templates: [{ id: "legacy", name: "旧模板", style: hydrated }] });
+    expect(serializeMarketDrawing({
+      id: "legacy", datasetId: "dataset", type: "FIB_RETRACEMENT",
+      geometry: JSON.stringify({ start: { timestamp: bars[0].timestamp, sourceSequence: 0, price: 100 },
+        end: { timestamp: bars[1].timestamp, sourceSequence: 5, price: 120 } }),
+      style: JSON.stringify(legacy), createdAt: new Date(0), updatedAt: new Date(0),
+    }).style).toEqual(hydrated);
+  });
+
+  it("round-trips the new template settings and rejects malformed display settings", () => {
+    const style = { ...DEFAULT_FIBONACCI_RETRACEMENT_STYLE, singleColor: "#123456", showPrices: false, showLevels: false };
+    const stored = { defaultStyle: style, templates: [{ id: "mono", name: "单色", style }] };
+    expect(parseFibonacciRetracementPreferences(JSON.stringify(stored))).toEqual(stored);
+    for (const patch of [{ singleColor: "red" }, { singleColor: "#12345" }, { showPrices: 1 }, { showLevels: null }]) {
+      expect(fibonacciRetracementStyleSchema.safeParse({ ...style, ...patch }).success).toBe(false);
+    }
   });
 });

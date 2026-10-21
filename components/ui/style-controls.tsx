@@ -1,7 +1,7 @@
 "use client";
 
 import { useId, type ReactNode } from "react";
-import { Trash2 } from "lucide-react";
+import { RotateCcw, Trash2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -34,6 +34,33 @@ export function StyleColorField({ label, value, onChange }: {
       <Input id={id} type="color" value={value} onChange={event => onChange(event.target.value.toUpperCase())}
         className="w-14 shrink-0 cursor-pointer p-1" />
       <span className="font-mono text-xs text-slate-500">{value.toUpperCase()}</span>
+    </div>
+  </StyleFieldRow>;
+}
+
+export function StyleOptionalColorField({ label, value, mixedLabel, resetLabel, onChange }: {
+  label: string; value: string | null; mixedLabel: string; resetLabel: string;
+  onChange: (color: string | null) => void;
+}) {
+  const id = useId();
+  return <StyleFieldRow label={label} htmlFor={id}>
+    <div className="flex min-w-0 items-center gap-2">
+      <div className="relative h-10 w-11 shrink-0 rounded-md border bg-white p-1 focus-within:ring-2 focus-within:ring-ring">
+        {/* The split swatch represents per-level colors, rather than a selected color. */}
+        <span aria-hidden="true" className="block h-full w-full overflow-hidden rounded-sm" style={value
+          ? { backgroundColor: value }
+          : { background: "linear-gradient(45deg, #F23645 50%, #089981 50%)" }} />
+        <Input id={id} type="color" value={value ?? "#2962FF"}
+          onChange={event => onChange(event.target.value.toUpperCase())}
+          className="absolute inset-0 h-full w-full cursor-pointer opacity-0" />
+      </div>
+      <span className={value ? "font-mono text-xs text-slate-500" : "text-xs text-slate-500"}>
+        {value?.toUpperCase() ?? mixedLabel}
+      </span>
+      {value ? <Button type="button" variant="ghost" size="icon" onClick={() => onChange(null)}
+        aria-label={resetLabel} title={resetLabel} className="shrink-0 text-slate-500">
+        <RotateCcw className="h-4 w-4" aria-hidden="true" />
+      </Button> : null}
     </div>
   </StyleFieldRow>;
 }

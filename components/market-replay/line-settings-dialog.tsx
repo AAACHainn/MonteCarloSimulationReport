@@ -6,7 +6,7 @@ import { Button } from "@/components/ui/button";
 import { Dialog } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import { LINE_STYLE_OPTIONS, StyleChoiceField, StyleColorField, StyleLineWidthField, StyleOpacityField, StyleTemplateField } from "@/components/ui/style-controls";
+import { LINE_STYLE_OPTIONS, StyleChoiceField, StyleColorField, StyleLineWidthField, StyleOpacityField, StyleOptionalColorField, StyleTemplateField } from "@/components/ui/style-controls";
 import { DRAWING_TYPE_FIB_RETRACEMENT, drawingStyleMatchesType, hasDuplicateEnabledFibonacciLevels,
   type TrendLineDrawing, type FibonacciRetracementDrawing, type TrendLineStyle, type FibonacciRetracementStyle,
   type TrendLineTemplate, type FibonacciRetracementTemplate } from "@/lib/market-replay/chart-drawings";
@@ -135,7 +135,9 @@ export function LineSettingsDialog({ drawing, draft: styleDraft, onDraftChange: 
                     />
                     <Input
                       type="color"
-                      value={level.color}
+                      value={styleDraft.singleColor ?? level.color}
+                      disabled={styleDraft.singleColor !== null}
+                      title={styleDraft.singleColor ? copy.marketReplay.fibonacciIndividualColorHint : undefined}
                       aria-label={copy.marketReplay.fibonacciLevelColor(level.value)}
                       onChange={(event) => setStyleDraft((current) => current && "levels" in current ? {
                         ...current,
@@ -145,6 +147,25 @@ export function LineSettingsDialog({ drawing, draft: styleDraft, onDraftChange: 
                     />
                   </div>
                 ))}
+              </div>
+              <div className="space-y-3 pt-2">
+                <StyleOptionalColorField label={copy.marketReplay.fibonacciSingleColor} value={styleDraft.singleColor}
+                  mixedLabel={copy.marketReplay.fibonacciMixedColors} resetLabel={copy.marketReplay.fibonacciRestoreColors}
+                  onChange={singleColor => setStyleDraft(current => current && "levels" in current ? { ...current, singleColor } : current)} />
+                <div className="flex flex-wrap items-center gap-x-6 gap-y-2">
+                  <label className="flex min-h-10 items-center gap-2 text-sm text-slate-700">
+                    <input type="checkbox" checked={styleDraft.showPrices}
+                      onChange={event => setStyleDraft(current => current && "levels" in current ? { ...current, showPrices: event.target.checked } : current)}
+                      className="h-4 w-4 rounded border-slate-300 focus-visible:ring-2 focus-visible:ring-ring" />
+                    {copy.marketReplay.fibonacciShowPrices}
+                  </label>
+                  <label className="flex min-h-10 items-center gap-2 text-sm text-slate-700">
+                    <input type="checkbox" checked={styleDraft.showLevels}
+                      onChange={event => setStyleDraft(current => current && "levels" in current ? { ...current, showLevels: event.target.checked } : current)}
+                      className="h-4 w-4 rounded border-slate-300 focus-visible:ring-2 focus-visible:ring-ring" />
+                    {copy.marketReplay.fibonacciShowLevels}
+                  </label>
+                </div>
               </div>
             </div>
           ) : null}

@@ -118,7 +118,11 @@ function drawLevels(
       context.stroke();
     }
 
-    const text = `${level.value}  ${formatPriceForTick(level.price, priceTickSize)}`;
+    if (!style.showLevels && !style.showPrices) continue;
+    const text = [
+      ...(style.showLevels ? [String(level.value)] : []),
+      ...(style.showPrices ? [formatPriceForTick(level.price, priceTickSize)] : []),
+    ].join("  ");
     const textWidth = context.measureText(text).width;
     context.fillStyle = "rgba(255,255,255,.86)";
     context.fillRect(left + 3, level.y - 14, textWidth + 6, 13);
@@ -215,7 +219,7 @@ export class FibonacciRetracementPrimitive implements ISeriesPrimitive<Time> {
         if (!level.enabled) return [];
         const price = fibonacciPriceAtLevel(geometry, level.value);
         const y = series.priceToCoordinate(price);
-        return y === null ? [] : [{ value: level.value, price, color: level.color, y: Number(y),
+        return y === null ? [] : [{ value: level.value, price, color: drawing.style.singleColor ?? level.color, y: Number(y),
           lineVisible: segmentIntersectsViewport({ x: Number(startX), y: Number(y) },
             { x: Number(endX), y: Number(y) }, chart.timeScale().width(), chart.panes()[0]?.getHeight() ?? 0),
         }];

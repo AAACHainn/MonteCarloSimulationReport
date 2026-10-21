@@ -104,6 +104,12 @@ describe("session drawing persistence", () => {
     const nextGeometry = { ...geometry, end: { ...geometry.end, price: 103 } };
     expect((await drawingPATCH(request(session, "PATCH", { geometry: nextGeometry }), itemContext(original.id))).status).toBe(200);
     expect((await read(session)).drawings.find((item: { id: string }) => item.id === original.id).geometry).toEqual(nextGeometry);
+    if (type === "FIB_RETRACEMENT") {
+      const displayStyle = { ...DEFAULT_FIBONACCI_RETRACEMENT_STYLE, singleColor: "#123456", showPrices: false, showLevels: false };
+      expect((await drawingPATCH(request(session, "PATCH", { style: displayStyle }), itemContext(original.id))).status).toBe(200);
+      expect((await read(session)).drawings.find((item: { id: string }) => item.id === original.id).style).toEqual(displayStyle);
+      expect(JSON.parse((await prisma.marketDrawing.findUniqueOrThrow({ where: { id: original.id } })).style)).toEqual(displayStyle);
+    }
     expect((await drawingDELETE(request(session, "DELETE"), itemContext(original.id))).status).toBe(200);
     expect((await read(session)).drawings.map((item: { id: string }) => item.id)).not.toContain(original.id);
     expect((await read(sibling)).drawings).toEqual([]);

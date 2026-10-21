@@ -54,6 +54,9 @@ export type FibonacciRetracementStyle = {
   width: number;
   lineStyle: (typeof TREND_LINE_STYLES)[number];
   levels: FibonacciLevel[];
+  singleColor: string | null;
+  showPrices: boolean;
+  showLevels: boolean;
 };
 
 export type FibonacciRetracementDrawing = {
@@ -120,6 +123,9 @@ export const DEFAULT_TREND_LINE_STYLE: TrendLineStyle = {
 export const DEFAULT_FIBONACCI_RETRACEMENT_STYLE: FibonacciRetracementStyle = {
   width: 1,
   lineStyle: "SOLID",
+  singleColor: null,
+  showPrices: true,
+  showLevels: true,
   levels: [
     { value: 0, enabled: true, color: "#787B86" },
     { value: 0.236, enabled: true, color: "#F23645" },
@@ -194,6 +200,9 @@ export const fibonacciRetracementStyleSchema = z.object({
   width: z.number().int().min(1).max(4),
   lineStyle: z.enum(TREND_LINE_STYLES),
   levels: z.array(fibonacciLevelSchema).min(1).max(10),
+  singleColor: z.string().regex(/^#[0-9a-f]{6}$/i).nullable().default(null),
+  showPrices: z.boolean().default(true),
+  showLevels: z.boolean().default(true),
 }).strict().refine(
   (style) => !hasDuplicateEnabledFibonacciLevels(style),
   { message: "Enabled Fibonacci levels must be unique", path: ["levels"] },

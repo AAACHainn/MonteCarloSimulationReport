@@ -102,9 +102,27 @@ describe("market drawing API", () => {
         datasetId: "dataset-1",
         type: "FIB_RETRACEMENT",
         geometry: JSON.stringify(geometry),
-        style: JSON.stringify(DEFAULT_FIBONACCI_RETRACEMENT_STYLE),
+        style: expect.any(String),
       },
     });
+    expect(JSON.parse(mocks.drawingCreate.mock.calls[0][0].data.style)).toEqual(DEFAULT_FIBONACCI_RETRACEMENT_STYLE);
+  });
+
+  it("persists Fibonacci color and label settings through PATCH and GET", async () => {
+    const style = { ...DEFAULT_FIBONACCI_RETRACEMENT_STYLE, singleColor: "#123456", showPrices: false, showLevels: true };
+    const saved = { ...record, type: "FIB_RETRACEMENT", style: JSON.stringify(style) };
+    mocks.drawingFindFirst.mockResolvedValue(saved);
+    mocks.drawingUpdate.mockResolvedValue(saved);
+    const response = await PATCH(new Request("http://localhost/api/drawings/drawing-1", {
+      method: "PATCH", body: JSON.stringify({ style }),
+    }), itemContext);
+    expect(response.status).toBe(200);
+    expect(mocks.drawingUpdate).toHaveBeenCalledWith({ where: { id: "drawing-1" }, data: { style: expect.any(String) } });
+    expect(JSON.parse(mocks.drawingUpdate.mock.calls[0][0].data.style)).toEqual(style);
+    expect(await response.json()).toMatchObject({ drawing: { style } });
+    mocks.drawingFindMany.mockResolvedValue([saved]);
+    expect(await (await GET(new Request("http://localhost/api/drawings"), collectionContext)).json())
+      .toMatchObject({ drawings: [{ style }] });
   });
 
   it("rejects malformed drawing data", async () => {
