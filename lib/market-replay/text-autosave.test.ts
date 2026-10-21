@@ -65,6 +65,40 @@ describe("text autosave", () => {
     controller.update(draft("local latest")); expect(await controller.flush()).toBe(true);
     expect(persist.mock.calls[1][0]).toBe("existing-client-id"); expect(persist.mock.calls[1][1]).toEqual(draft("local latest"));
   });
+  it("resolves a lost creation before rejecting exit with cleared input, without writing invalid text", async () => {
+    const { controller, persist, adopted } = setup(); const record = saved(draft("already committed"), "server-id");
+    persist.mockRejectedValueOnce(new Error("POST committed but response lost")).mockResolvedValueOnce(record);
+    controller.update(draft("already committed")); await vi.advanceTimersByTimeAsync(700);
+    controller.update(draft(" \n")); expect(controller.state.dirty).toBe(true);
+    expect(await controller.flush()).toBe(false);
+    expect(persist).toHaveBeenCalledTimes(2);
+    expect(persist.mock.calls[1]).toEqual([null, draft("already committed"), "fixed-creation-id"]);
+    expect(controller.state).toMatchObject({ id: "server-id", dirty: true, valid: false });
+    expect(controller.current.geometry.text).toBe(" \n"); expect(adopted).toHaveBeenCalledWith(record);
+    controller.update(draft("corrected")); expect(await controller.flush()).toBe(true);
+    expect(persist.mock.calls[2][0]).toBe("server-id"); expect(persist.mock.calls[2][1]).toEqual(draft("corrected"));
+  });
+  it("keeps an unresolved cleared creation dirty and does not silently exit or retry in the background", async () => {
+    const { controller, persist } = setup(); persist.mockRejectedValue(new Error("offline"));
+    controller.update(draft("submitted")); await vi.advanceTimersByTimeAsync(700); controller.update(draft(""));
+    expect(await controller.flush()).toBe(false); expect(persist).toHaveBeenCalledTimes(2);
+    expect(controller.state).toMatchObject({ id: null, dirty: true, error: true, valid: false });
+    await vi.advanceTimersByTimeAsync(5000); expect(persist).toHaveBeenCalledTimes(2);
+  });
+  it("waits for an in-flight creation cleared before exit and keeps the acknowledged object editable", async () => {
+    const { controller, persist } = setup(), pending = deferred<TextDrawing>();
+    persist.mockImplementationOnce(() => pending.promise);
+    controller.update(draft("submitted")); await vi.advanceTimersByTimeAsync(700); controller.update(draft(""));
+    const exiting = controller.flush(); pending.resolve(saved(draft("submitted"), "created"));
+    expect(await exiting).toBe(false); expect(persist).toHaveBeenCalledOnce();
+    expect(controller.state).toMatchObject({ id: "created", dirty: true, valid: false });
+  });
+  it("allows an empty draft to exit without a request if its initial debounce never fired", async () => {
+    const { controller, persist } = setup(); controller.update(draft("not sent"));
+    await vi.advanceTimersByTimeAsync(300); controller.update(draft(""));
+    expect(await controller.flush()).toBe(true); expect(controller.state.dirty).toBe(false);
+    await vi.advanceTimersByTimeAsync(1000); expect(persist).not.toHaveBeenCalled();
+  });
   it("suspends IME and width gestures; cancellation restores width without losing previously typed content", async () => {
     const { controller, persist } = setup("old", "existing");
     controller.suspend("composition", true); controller.update(draft("中文输入中"));

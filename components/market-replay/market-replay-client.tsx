@@ -49,6 +49,7 @@ import { TextSettingsDialog, TextToolOption } from "./text-settings-dialog";
 import { runDrawingWrite } from "@/lib/market-replay/drawing-write-queue";
 import { persistTextDrawing } from "@/lib/market-replay/text-persistence";
 import { useTextDrawingEditor } from "./use-text-drawing-editor";
+import { useDrawingScopeGuard } from "./use-drawing-scope-guard";
 import { drawingObjectName, drawingObjectColor, drawingSettingsLabel, drawingDeleteLabel } from "@/lib/market-replay/drawing-presentation";
 import {
   createReplayState,
@@ -390,9 +391,10 @@ export function MarketReplayClient({ dataset: initialDataset, initialJournalFocu
   const textDrawing = useTextDrawingEditor(
     dataset.id + ":" + replaySession?.id + ":" + replaySession?.activeProjectionId,
     chartVisibility.drawings, drawings, defaultTextStyle);
-  const { open: openTextDrawing, guard: textScopeGuard } = textDrawing;
+  const { open: openTextDrawing } = textDrawing;
   const { beforeExit: finishText, discard: discardText, requestSettings: requestTextSettings } = textDrawing;
   const drawingWriteScope = dataset.id + ":" + replaySession?.id + ":" + replaySession?.activeProjectionId;
+  const drawingScopeGuard = useDrawingScopeGuard(drawingWriteScope);
   const drawingsLive = useRef(drawings); drawingsLive.current = drawings;
   const visibleBarCountConfig = useMemo(() => (
     chartVisibility.indicators ? barCountConfig : { ...barCountConfig, enabled: false }
@@ -559,38 +561,41 @@ export function MarketReplayClient({ dataset: initialDataset, initialJournalFocu
   const updateDrawing = useCallback(async (
     id: string,
     patch: { geometry?: DrawingGeometry; style?: MarketDrawingStyle },
-  ) => runDrawingWrite(drawingWriteScope, async () => {
-    const previous = drawingsLive.current.find((drawing) => drawing.id === id);
-    if (clearingDrawingsRef.current || !previous || id.startsWith("temporary-") || pendingDrawingIds.has(id)) return false;
-    if (patch.style && !drawingStyleMatchesType(previous.type, patch.style)) return false;
-    if (patch.geometry && !drawingGeometryMatchesType(previous.type, patch.geometry)) return false;
-    if ((!patch.geometry || JSON.stringify(patch.geometry) === JSON.stringify(previous.geometry))
-      && (!patch.style || JSON.stringify(patch.style) === JSON.stringify(previous.style))) return true;
-    const currentScope = textScopeGuard();
-    const optimistic = { ...previous, ...patch, updatedAt: new Date().toISOString() } as MarketDrawing;
-    setDrawings((current) => current.map((drawing) => drawing.id === id ? optimistic : drawing));
-    setDrawingPending(id, true);
-    try {
-      const response = await fetch(`/api/market-datasets/${dataset.id}/drawings/${id}`, {
-        method: "PATCH",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(patch),
-      });
-      const data = await response.json() as { drawing?: MarketDrawing; error?: string };
+  ) => {
+    const currentScope = drawingScopeGuard();
+    return runDrawingWrite(drawingWriteScope, async () => {
       if (!currentScope()) return false;
-      if (!response.ok || !data.drawing) throw new Error(data.error);
-      setDrawings((current) => current.map((drawing) => drawing.id === id ? data.drawing! : drawing));
-      setDrawingError(null);
-      return true;
-    } catch {
-      if (!currentScope()) return false;
-      setDrawings((current) => current.map((drawing) => drawing.id === id ? previous : drawing));
-      setDrawingError(copy.marketReplay.drawingSaveError);
-      return false;
-    } finally {
-      if (currentScope()) setDrawingPending(id, false);
-    }
-  }), [dataset.id, drawingWriteScope, pendingDrawingIds, setDrawingPending, fetch, textScopeGuard]);
+      const previous = drawingsLive.current.find((drawing) => drawing.id === id);
+      if (clearingDrawingsRef.current || !previous || id.startsWith("temporary-") || pendingDrawingIds.has(id)) return false;
+      if (patch.style && !drawingStyleMatchesType(previous.type, patch.style)) return false;
+      if (patch.geometry && !drawingGeometryMatchesType(previous.type, patch.geometry)) return false;
+      if ((!patch.geometry || JSON.stringify(patch.geometry) === JSON.stringify(previous.geometry))
+        && (!patch.style || JSON.stringify(patch.style) === JSON.stringify(previous.style))) return true;
+      const optimistic = { ...previous, ...patch, updatedAt: new Date().toISOString() } as MarketDrawing;
+      setDrawings((current) => current.map((drawing) => drawing.id === id ? optimistic : drawing));
+      setDrawingPending(id, true);
+      try {
+        const response = await fetch(`/api/market-datasets/${dataset.id}/drawings/${id}`, {
+          method: "PATCH",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(patch),
+        });
+        const data = await response.json() as { drawing?: MarketDrawing; error?: string };
+        if (!currentScope()) return false;
+        if (!response.ok || !data.drawing) throw new Error(data.error);
+        setDrawings((current) => current.map((drawing) => drawing.id === id ? data.drawing! : drawing));
+        setDrawingError(null);
+        return true;
+      } catch {
+        if (!currentScope()) return false;
+        setDrawings((current) => current.map((drawing) => drawing.id === id ? previous : drawing));
+        setDrawingError(copy.marketReplay.drawingSaveError);
+        return false;
+      } finally {
+        if (currentScope()) setDrawingPending(id, false);
+      }
+    });
+  }, [dataset.id, drawingWriteScope, pendingDrawingIds, setDrawingPending, fetch, drawingScopeGuard]);
 
   const deleteDrawing = useCallback(async (id: string) => {
     await discardText(id);

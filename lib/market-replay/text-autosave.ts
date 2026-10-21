@@ -28,7 +28,7 @@ export class TextAutosave {
   get baseline() { return this.saved ? snapshot(this.saved) : null; }
   get state(): TextSaveState {
     const valid = textGeometrySchema.safeParse(this.draft.geometry).success && textDrawingStyleSchema.safeParse(this.draft.style).success;
-    const dirty = this.saved ? key(this.saved) !== key(this.draft) : Boolean(this.draft.geometry.text.trim());
+    const dirty = this.saved ? key(this.saved) !== key(this.draft) : this.creation !== null || Boolean(this.draft.geometry.text.trim());
     return { id: this.id, dirty, valid, saving: Boolean(this.flight), error: this.failed };
   }
   private notify() { if (!this.stopped) this.changed(this.state); }
@@ -50,7 +50,8 @@ export class TextAutosave {
   private commit(): Promise<boolean> {
     if (this.flight) return this.flight;
     const state = this.state;
-    if (this.stopped || this.holds.size || !state.valid) return Promise.resolve(false);
+    const recoveringCreation = !this.id && this.creation !== null;
+    if (this.stopped || this.holds.size || !state.valid && !recoveringCreation) return Promise.resolve(false);
     if (!state.dirty) return Promise.resolve(true);
     this.clearTimer();
     const sent = snapshot(this.draft);
@@ -70,9 +71,11 @@ export class TextAutosave {
   }
   async flush() {
     this.clearTimer();
-    if (!this.id && !this.draft.geometry.text.trim() && !this.flight) return true;
+    if (!this.id && !this.creation && !this.draft.geometry.text.trim() && !this.flight) return true;
     while (!this.stopped) {
-      if (this.holds.size || !this.state.valid) return false;
+      // A lost POST may already exist on the server. Resolve its frozen creation before allowing exit.
+      const recoveringCreation = !this.id && this.creation !== null;
+      if (this.holds.size || !this.state.valid && !recoveringCreation) return false;
       if (!this.state.dirty && !this.flight) return true;
       if (!await this.commit()) return false;
       this.clearTimer();

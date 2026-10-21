@@ -1,6 +1,7 @@
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
 import { webcrypto } from "node:crypto";
 import { useTextDrawingEditor } from "./use-text-drawing-editor";
+import { useDrawingScopeGuard } from "./use-drawing-scope-guard";
 import { DEFAULT_TEXT_STYLE, type MarketDrawing, type TextDrawing } from "@/lib/market-replay/chart-drawings";
 
 const hooks = vi.hoisted(() => ({ index: 0, slots: [] as unknown[], pending: [] as Array<() => void> }));
@@ -25,7 +26,8 @@ beforeEach(() => { hooks.index = 0; hooks.slots = []; hooks.pending = []; vi.stu
 afterEach(() => vi.unstubAllGlobals());
 function RenderHook(scope = "A", visible = true, drawings: MarketDrawing[] = [drawing]) {
   hooks.index = 0; const value = useTextDrawingEditor(scope, visible, drawings, DEFAULT_TEXT_STYLE);
-  hooks.pending.splice(0).forEach(effect => effect()); return value;
+  const writeGuard = useDrawingScopeGuard(scope);
+  hooks.pending.splice(0).forEach(effect => effect()); return { ...value, writeGuard };
 }
 it("rejects stale guards after A → B → A as well as close/reopen in the same scope", () => {
   let editor = RenderHook(); editor.open(drawing, true); editor = RenderHook(); const valid = editor.guard(); expect(valid()).toBe(true);
@@ -51,4 +53,16 @@ it("keeps failed exit attempts open, routes settings to the same editor and allo
   expect(await editor.beforeExit()).toBe(false); expect(RenderHook().editor?.id).toBe(drawing.id);
   expect(await editor.requestSettings(drawing.id)).toBe(true); expect(control.settings).toHaveBeenCalledOnce();
   await editor.discard(drawing.id); expect(control.discard).toHaveBeenCalledOnce(); expect(RenderHook().editor).toBeNull();
+});
+it("keeps ordinary drawing responses valid through text open, close, placement and visibility changes", async () => {
+  let editor = RenderHook(); const currentWrite = editor.writeGuard();
+  editor.open(drawing, true); editor = RenderHook(); const currentEditor = editor.guard();
+  editor.close(); editor = RenderHook(); editor.place(drawing.geometry.anchor); RenderHook("A", false);
+  expect(currentEditor()).toBe(false); expect(currentWrite()).toBe(true);
+});
+it("invalidates ordinary writes on scope replacement, A → B → A and unmount only", () => {
+  const current = RenderHook().writeGuard(); RenderHook("B"); RenderHook("A"); expect(current()).toBe(false);
+  const mounted = RenderHook().writeGuard();
+  for (const slot of hooks.slots) (slot as { cleanup?: () => void })?.cleanup?.();
+  expect(mounted()).toBe(false);
 });
