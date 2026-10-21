@@ -11,7 +11,7 @@ export type TextDrawingApi = {
 };
 export type TextDrawingSnapshot = { drawings: readonly TextDrawing[]; selectedDrawingId: string | null;
   edit: TextEditPreview | null; drag: { id: string; geometry: TextGeometry } | null;
-  timeline: DrawingTimelineLocator; paneHeight?: number };
+  timeline: DrawingTimelineLocator };
 type ProjectedText = { id: string; anchor: DrawingAnchor; x: number; y: number; layout: CachedTextLayout;
   style: TextDrawingStyle; selected: boolean; visible: boolean };
 export type TextHit = { drawingId: string; part: "text" | "text-anchor"; distance: number; priority: 0 | 2 };
@@ -52,7 +52,8 @@ export class TextDrawingPrimitive implements ISeriesPrimitive<Time> {
     const attachment = this.attachment, snapshot = this.snapshot;
     if (!attachment || !snapshot) return;
     this.width = attachment.chart.timeScale().width();
-    this.height = snapshot.paneHeight ?? attachment.chart.panes()[0]?.getHeight() ?? 0;
+    // Read live pane bounds: volume toggles and pane resizing may not change the drawing snapshot.
+    this.height = attachment.chart.panes()[0]?.getHeight() ?? 0;
     const items: ProjectedText[] = [], ids = new Set<string>();
     const project = (id: string, geometry: TextGeometry, style: TextDrawingStyle, selected: boolean) => {
       ids.add(id);

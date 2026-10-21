@@ -349,7 +349,6 @@ export function ReplayChart({
   const textPositionRef = useRef<{ anchor: DrawingAnchor; listener: (position: TextEditorPosition | null) => void } | null>(null);
   const textDragRef = useRef<{ id: string; geometry: TextGeometry } | null>(null);
   const onPlaceTextRef = useRef(onPlaceText); onPlaceTextRef.current = onPlaceText;
-  const textVolumeRef = useRef(volumeVisible); textVolumeRef.current = volumeVisible;
   const lastDataRef = useRef<AggregatedMarketBarData[]>([]);
   const lastDataRevisionRef = useRef(dataRevision);
   const lastHiddenAfterRef = useRef<ChartHideAfter | null>(null);
@@ -518,11 +517,10 @@ export function ReplayChart({
         session: drawingSessionRef.current,
         priceTickSize: priceTickSizeRef.current,
       });
+      // Volume has its own pane; price-scale margins remain usable price-pane space.
       const height = chartRef.current?.panes()[0]?.getHeight() ?? 0;
-      const bottom = textVolumeRef.current ? candleRef.current?.priceScale().options().scaleMargins.bottom ?? 0 : 0;
       textPrimitiveRef.current?.setDrawings({ drawings: drawingGroupsRef.current.text, timeline,
-        selectedDrawingId: selectedDrawingIdRef.current, edit: textEditRef.current, drag: textDragRef.current,
-        paneHeight: height * (1 - bottom) });
+        selectedDrawingId: selectedDrawingIdRef.current, edit: textEditRef.current, drag: textDragRef.current });
       const position = textPositionRef.current;
       if (position) {
         const chart = chartRef.current, series = candleRef.current, host = interactionRef.current;
@@ -530,7 +528,7 @@ export function ReplayChart({
         const x = index === null ? null : chart?.timeScale().logicalToCoordinate(index as never);
         const y = series?.priceToCoordinate(position.anchor.price);
         position.listener(host && x != null && y != null && Number.isFinite(x) && Number.isFinite(y)
-          ? { host, x: Number(x), y: Number(y), width: chart?.timeScale().width() ?? 0, height: height * (1 - bottom) } : null);
+          ? { host, x: Number(x), y: Number(y), width: chart?.timeScale().width() ?? 0, height } : null);
       }
     });
   }, []);
@@ -1173,8 +1171,7 @@ export function ReplayChart({
         stopEvent(event);
         if (activeTool === DRAWING_TYPE_TEXT) {
           const height = chart.panes()[0]?.getHeight() ?? 0;
-          const bottom = textVolumeRef.current ? series.priceScale().options().scaleMargins.bottom : 0;
-          if (initial.coordinate.y > height * (1 - bottom)) return;
+          if (initial.coordinate.y > height) return;
           commitDraft(null, null); drawingToolRef.current = null; onDrawingToolChangeRef.current(null);
           onPlaceTextRef.current?.(initial.anchor); setChartCursor(""); return;
         }

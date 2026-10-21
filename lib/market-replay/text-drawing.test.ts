@@ -95,12 +95,13 @@ describe("bounded text layout", () => {
 function setup() {
   const measured = vi.fn(measure), primitive = new TextDrawingPrimitive(measured), timeline = new DrawingTimelineLocator();
   timeline.setTimeline([{ timestamp: anchor.timestamp, bucketEnd: "2026-10-01T00:01:00Z", firstSequence: 0, lastSequence: 0 }], 60);
-  let x = 20, y = 100;
-  primitive.attached({ chart: { timeScale: () => ({ logicalToCoordinate: () => x, width: () => 500 }), panes: () => [{ getHeight: () => 300 }] },
+  let x = 20, y = 100, paneHeight = 300;
+  primitive.attached({ chart: { timeScale: () => ({ logicalToCoordinate: () => x, width: () => 500 }), panes: () => [{ getHeight: () => paneHeight }, { getHeight: () => 75 }] },
     series: { priceToCoordinate: () => y }, requestUpdate: vi.fn() } as never);
-  const snapshot = { drawings: [drawing], timeline, edit: null, drag: null, selectedDrawingId: null, paneHeight: 300 };
+  const snapshot = { drawings: [drawing], timeline, edit: null, drag: null, selectedDrawingId: null };
   primitive.setDrawings(snapshot); primitive.updateAllViews();
-  return { primitive, measured, snapshot, move: (nextX: number, nextY: number) => { x = nextX; y = nextY; primitive.updateAllViews(); } };
+  return { primitive, measured, snapshot, move: (nextX: number, nextY: number) => { x = nextX; y = nextY; primitive.updateAllViews(); },
+    resize: (height: number) => { paneHeight = height; primitive.updateAllViews(); } };
 }
 function render(primitive: TextDrawingPrimitive) {
   const fillText = vi.fn(), fillRect = vi.fn(), strokeRect = vi.fn();
@@ -110,6 +111,20 @@ function render(primitive: TextDrawingPrimitive) {
   return { fillText, fillRect, strokeRect };
 }
 describe("text primitive projection and rendering", () => {
+  it("uses the full live price pane, including its bottom margin, and excludes the separate volume pane after resizing", () => {
+    const { primitive, measured, move, resize } = setup(); measured.mockClear();
+    move(20, 280);
+    expect(primitive.hitTestAt({ x: 40, y: 290 })).toMatchObject({ drawingId: "text" });
+    expect(render(primitive).fillText).toHaveBeenCalledTimes(1);
+    expect(primitive.hitTestAt({ x: 40, y: 310 })).toBeNull();
+    resize(400); move(20, 360);
+    expect(primitive.hitTestAt({ x: 40, y: 390 })).toMatchObject({ drawingId: "text" });
+    expect(render(primitive).fillText).toHaveBeenCalledTimes(2);
+    expect(primitive.hitTestAt({ x: 40, y: 410 })).toBeNull();
+    resize(300);
+    expect(render(primitive).fillText).not.toHaveBeenCalled();
+    expect(measured).not.toHaveBeenCalled();
+  });
   it("hands an existing text object to the one inline editor without painting or hitting a duplicate, and restores on cancel", () => {
     const { primitive, measured, snapshot } = setup(); measured.mockClear();
     primitive.setDrawings({ ...snapshot, selectedDrawingId: drawing.id,
