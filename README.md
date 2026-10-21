@@ -117,7 +117,7 @@ corepack pnpm start
 
 仓库还提供 `Dockerfile.prod` 与 `compose.prod.yaml`。生产 Compose 引用预构建镜像，拉取源码不会自动更新该镜像；runner 已包含后台 worker 所需源码，仍须验证目标镜像的原生驱动、worker 与持久化。启用 WAL 时还需显式传入 SQLite 配置，并将迁移从服务启动命令分离，详见 [Docker 部署检查](docs/upgrade.md#docker-部署的额外检查)。
 
-本次回放事务、浏览器和特殊等待优化无需新增结构迁移，重新构建、重启并刷新页面即可生效；SQLite WAL 提交优化需额外显式接入，版本来源和切换步骤见 [SQLite 升级](docs/upgrade.md#sqlite-引擎与-wal-升级)。
+已有数据库的迁移、SQLite 驱动或 WAL 配置变更，请按[升级指南](docs/upgrade.md)核对目标环境、备份并执行相应步骤。
 
 ## 使用流程
 
@@ -293,9 +293,8 @@ Windows 下若 Prisma query engine DLL 被占用，请先确认并停止本项�
 | [行情增量同步](docs/market-data-sync.md) | Databento 连接、自动计划、预算与冲突处理 |
 | [模拟训练交易关卡](docs/training-gate.md) | 策略清单、连亏触发、计数与会话恢复 |
 | [回放交易 PDF 导出](docs/replay-pdf-export.md) | 筛选、截图、明细字段与分卷下载 |
-| [回放多会话实施记录](docs/replay-sessions-implementation.md) | 会话模式、纠错规则与实现说明 |
+| [回放多会话实施说明](docs/replay-sessions-implementation.md) | 会话模式、纠错规则与实现说明 |
 | [AI 机器人与交易复盘](docs/ai-assistant.md) | 配置、草稿采用、会话分析、证据、限制与部署 |
-| [AI 复盘版本规划](docs/ai-review-version-plan.md) | 规划背景、附件适配取舍与接入位置 |
 | [UI 设计与实现规范](docs/ui-guidelines.md) | 页面、组件与交互约束 |
 
 ## 许可证
