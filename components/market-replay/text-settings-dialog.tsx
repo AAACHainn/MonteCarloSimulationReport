@@ -10,9 +10,12 @@ import { Textarea } from "@/components/ui/textarea";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { StyleColorField, StyleOpacityField, StyleTemplateField } from "@/components/ui/style-controls";
 import { TEXT_FONT_SIZES, normalizeDrawingText, textGeometrySchema, textDrawingStyleSchema,
-  type TextGeometry, type TextDrawingStyle, type TextTemplate } from "@/lib/market-replay/chart-drawings";
+  type TextDrawingStyle, type TextTemplate } from "@/lib/market-replay/chart-drawings";
 import type { TextDrawingApi, TextEditPreview } from "@/lib/market-replay/text-drawing-primitive";
 import { TextInlineEditor } from "./text-inline-editor";
+import { TextAutosave, type TextDraft, type TextSaveState } from "@/lib/market-replay/text-autosave";
+import type { TextDrawing } from "@/lib/market-replay/chart-drawings";
+import type { TextEditorControl } from "./use-text-drawing-editor";
 import { createUuid } from "@/lib/uuid";
 import { copy } from "@/lib/i18n";
 
@@ -33,11 +36,13 @@ function TextToggle({ label, checked, onChange, children }: { label: string; che
     {checked ? children : null}
   </div>;
 }
-export function TextSettingsDialog({ editor, apiRef, templates, onTemplatesChange, onPreview, onSave, onClose }: {
+export function TextSettingsDialog({ editor, apiRef, templates, onTemplatesChange, onPreview, onSave, onClose, onAdopt, register, isCurrent }: {
   editor: TextEditor; templates: TextTemplate[]; onTemplatesChange: (templates: TextTemplate[]) => void;
   apiRef: RefObject<TextDrawingApi | null>;
-  onPreview: (preview: TextEditPreview | null) => void;
-  onSave: (geometry: TextGeometry, style: TextDrawingStyle) => Promise<boolean>; onClose: () => void;
+  onPreview: (preview: TextEditPreview | null, owner: string) => void;
+  onSave: (id: string | null, draft: TextDraft, clientId: string, isCurrent: () => boolean) => Promise<TextDrawing>; onClose: () => void;
+  onAdopt: (id: string, owner: string) => void; register: (control: TextEditorControl | null, owner: string) => void;
+  isCurrent: () => boolean;
 }) {
   const prefix = useId();
   const [text, setText] = useState(editor.geometry.text);
@@ -51,21 +56,77 @@ export function TextSettingsDialog({ editor, apiRef, templates, onTemplatesChang
   const [busy, setBusy] = useState(false);
   const [settingsOpen, setSettingsOpen] = useState(!editor.inline);
   const saving = useRef(false);
+  const [saveState, setSaveState] = useState<TextSaveState>({ id: editor.id, dirty: false, saving: false, error: false, valid: Boolean(editor.id) });
+  const creationId = useRef<string | null>(null); creationId.current ??= createUuid();
+  const currentGuard = useRef(isCurrent), persist = useRef(onSave);
+  const draftRef = useRef<TextDraft>({ geometry: editor.geometry, style: editor.style });
+  draftRef.current = { geometry: { anchor: editor.geometry.anchor, text }, style };
+  const controllerRef = useRef<TextAutosave | null>(null);
+  if (!controllerRef.current) controllerRef.current = new TextAutosave(draftRef.current, editor.id, creationId.current,
+    (id, draft, clientId) => persist.current(id, draft, clientId, currentGuard.current), setSaveState, drawing => {
+      onAdopt(drawing.id, editor.key);
+      onPreview({ ...draftRef.current, id: drawing.id, inline: true }, editor.key);
+    });
+  const controller = controllerRef.current;
+  const checkpoint = useRef<TextDraft>(controller.current);
+  useEffect(() => { controller.activate(); return () => controller.dispose(); }, [controller]);
   const normalized = normalizeDrawingText(text);
   const geometry = { anchor: editor.geometry.anchor, text: normalized };
   const contentValid = textGeometrySchema.safeParse(geometry).success;
   const widthValid = !style.wrapEnabled || /^\d+$/.test(width) && Number(width) >= 120 && Number(width) <= 800;
   const styleValid = textDrawingStyleSchema.safeParse(style).success && widthValid;
   const inline = Boolean(editor.inline && !settingsOpen && !naming);
-  useEffect(() => { onPreview({ id: editor.id, geometry: { anchor: editor.geometry.anchor, text: contentValid ? normalized : "" }, style, inline }); },
-    [editor.id, editor.geometry.anchor, normalized, contentValid, style, inline, onPreview]);
-  useEffect(() => () => onPreview(null), [onPreview]);
+  useEffect(() => {
+    controller.suspend("settings", settingsOpen);
+    controller.update({ geometry: { anchor: editor.geometry.anchor, text: normalized }, style });
+    onPreview({ id: controller.state.id, geometry: { anchor: editor.geometry.anchor, text: contentValid ? normalized : "" }, style, inline }, editor.key);
+  }, [editor.key, editor.id, editor.geometry.anchor, normalized, contentValid, style, inline, settingsOpen, onPreview, controller]);
+  useEffect(() => () => onPreview(null, editor.key), [onPreview, editor.key]);
+  const dirty = saveState.dirty || saveState.saving;
+  useEffect(() => {
+    if (!dirty) return;
+    const warn = (event: BeforeUnloadEvent) => { event.preventDefault(); event.returnValue = ""; };
+    window.addEventListener("beforeunload", warn); return () => window.removeEventListener("beforeunload", warn);
+  }, [dirty]);
+  const updateInline = (value: string, nextStyle = draftRef.current.style) => {
+    setText(value); setStyle(nextStyle); setWidth(String(nextStyle.wrapWidth)); setError(null);
+    const draft = { geometry: { anchor: editor.geometry.anchor, text: value }, style: nextStyle };
+    draftRef.current = draft; controller.update(draft);
+  };
+  const finish = async () => {
+    if (settingsOpen) return false;
+    const ok = await controller.flush();
+    if (ok && currentGuard.current()) onClose();
+    else if (currentGuard.current()) setError(controller.state.valid ? copy.marketReplay.textAutosaveError : copy.marketReplay.textContentError);
+    return ok;
+  };
+  const openSettings = async () => {
+    if (settingsOpen) return true;
+    if (!await controller.flush() || !currentGuard.current()) { setError(copy.marketReplay.textAutosaveError); return false; }
+    checkpoint.current = controller.current; controller.suspend("settings", true); setSettingsOpen(true); return true;
+  };
+  const control = useRef({ finish, settings: openSettings }); control.current = { finish, settings: openSettings };
+  useEffect(() => {
+    register({ finish: () => control.current.finish(), settings: () => control.current.settings(), discard: async () => { await controller.discard(); } }, editor.key);
+    return () => register(null, editor.key);
+  }, [controller, editor.key, register]);
+  const cancelSettings = () => {
+    if (saving.current) return;
+    if (!editor.inline) { onClose(); return; }
+    const previous = checkpoint.current;
+    updateInline(previous.geometry.text, previous.style); setSettingsOpen(false); controller.suspend("settings", false);
+  };
   const save = async () => {
     if (saving.current) return;
     if (!contentValid || !styleValid) { setError(!contentValid ? copy.marketReplay.textContentError : copy.marketReplay.textWrapError); return; }
     saving.current = true; setBusy(true); setError(null);
-    try { if (await onSave(geometry, { ...style })) onClose(); else setError(copy.marketReplay.drawingSaveError); }
-    catch { setError(copy.marketReplay.drawingSaveError); }
+    controller.update({ geometry, style }); controller.suspend("settings", false);
+    try {
+      if (await controller.flush() && currentGuard.current()) {
+        checkpoint.current = controller.current;
+        if (editor.inline) setSettingsOpen(false); else onClose();
+      } else { setError(copy.marketReplay.textAutosaveError); controller.suspend("settings", true); }
+    } catch { setError(copy.marketReplay.textAutosaveError); controller.suspend("settings", true); }
     finally { saving.current = false; setBusy(false); }
   };
   const saveTemplate = () => {
@@ -79,10 +140,14 @@ export function TextSettingsDialog({ editor, apiRef, templates, onTemplatesChang
   };
   return <>
     {inline ? <TextInlineEditor apiRef={apiRef} anchor={editor.geometry.anchor} text={text} style={style}
-      onChange={value => { setText(value); setError(null); }} valid={contentValid && styleValid} busy={busy} error={error}
-      onSave={save} onClose={onClose} onSettings={() => setSettingsOpen(true)} /> : null}
+      onChange={updateInline} valid={contentValid && styleValid} saving={saveState.saving} error={error || (saveState.error ? copy.marketReplay.textAutosaveError : null)}
+      onFinish={finish} onSettings={openSettings} onRetry={async () => { setError(null); await controller.flush(); }}
+      onSuspend={(reason, suspended) => controller.suspend(reason, suspended)}
+      onWidth={wrapWidth => updateInline(draftRef.current.geometry.text, { ...draftRef.current.style, wrapEnabled: true, wrapWidth })}
+      onRestoreStyle={previous => updateInline(draftRef.current.geometry.text, previous)}
+      onResizeEnd={async () => { await controller.flush(); }} /> : null}
     <Dialog open={settingsOpen && !naming} title={copy.marketReplay.textSettings} description={copy.marketReplay.textSettingsDescription}
-      className="max-w-md" onClose={() => { if (!saving.current) onClose(); }}>
+      className="max-w-md" onClose={cancelSettings}>
       <div className="space-y-5" aria-busy={busy}>
         <fieldset disabled={busy} className="min-w-0 space-y-5">
           <StyleTemplateField value={templateId} templates={templates} onChange={id => {
@@ -138,7 +203,7 @@ export function TextSettingsDialog({ editor, apiRef, templates, onTemplatesChang
         <div className="flex flex-wrap items-center justify-between gap-3 border-t pt-4">
           <Button type="button" variant="outline" disabled={busy || !styleValid} onClick={() => { setName(""); setTemplateError(null); setNaming(true); }}>{copy.marketReplay.saveDrawingTemplate}</Button>
           <div className="ml-auto flex gap-2">
-            <Button type="button" variant="outline" disabled={busy} onClick={onClose}>{copy.marketReplay.drawingCancel}</Button>
+            <Button type="button" variant="outline" disabled={busy} onClick={cancelSettings}>{copy.marketReplay.drawingCancel}</Button>
             <Button type="button" disabled={busy || !contentValid || !styleValid} onClick={() => void save()}>
               {busy ? <Loader2 className="h-4 w-4 animate-spin" aria-hidden="true" /> : null}{copy.marketReplay.drawingConfirm}</Button>
           </div>

@@ -28,6 +28,7 @@ import { DELETE as sessionDELETE, GET as sessionGET, PATCH as sessionPATCH } fro
 import { DELETE as journalSessionDELETE } from "@/app/api/market-datasets/[id]/paper-journal/sessions/[sessionId]/route";
 import { getPaperSessionSnapshot } from "@/lib/paper-trading/serialize";
 import { DEFAULT_TREND_LINE_STYLE, DEFAULT_RECTANGLE_STYLE, DEFAULT_FIBONACCI_RETRACEMENT_STYLE, DEFAULT_TEXT_STYLE } from "@/lib/market-replay/chart-drawings";
+import { randomUUID } from "node:crypto";
 import { createCorrection, commitCorrection, cancelCorrection, readCorrection } from "./corrections";
 import { runReplayCorrection } from "./correction-runner";
 import { GET as journalGET } from "@/app/api/market-datasets/[id]/paper-journal/route";
@@ -84,6 +85,39 @@ describe("session drawing persistence", () => {
     expect(response.status).toBe(200);
   }
   async function read(session: Awaited<ReturnType<typeof create>>) { return (await drawingsGET(request(session, "GET"), context)).json(); }
+  it("makes text creation retry-safe without replaying the POST snapshot over later edits", async () => {
+    const session = await create("TRAINING"), clientId = randomUUID();
+    const payload = { type: "TEXT", clientId, geometry: { anchor: geometry.start, text: "first" }, style: DEFAULT_TEXT_STYLE };
+    const responses = await Promise.all([drawingPOST(request(session, "POST", payload), context), drawingPOST(request(session, "POST", payload), context)]);
+    expect(responses.map(response => response.status)).toEqual([201, 201]);
+    expect((await read(session)).drawings).toHaveLength(1);
+    expect((await read(session)).drawings[0].id).toBe(clientId);
+    const changed = { anchor: geometry.start, text: "latest PATCH" };
+    expect((await drawingPATCH(request(session, "PATCH", { geometry: changed }), itemContext(clientId))).status).toBe(200);
+    const before = await prisma.marketDrawing.findUniqueOrThrow({ where: { id: clientId } });
+    const retry = await drawingPOST(request(session, "POST", payload), context);
+    expect(retry.status).toBe(201); expect((await retry.json()).drawing.geometry).toEqual(changed);
+    expect(await prisma.marketDrawing.findUniqueOrThrow({ where: { id: clientId } })).toEqual(before);
+    const sibling = await create("TRAINING");
+    expect((await drawingPOST(request(sibling, "POST", payload), context)).status).toBe(409);
+    expect((await read(sibling)).drawings).toHaveLength(0);
+    expect((await drawingPOST(request(session, "POST", { ...payload, clientId: "not-a-uuid" }), context)).status).toBe(400);
+    expect((await drawingPOST(request(session, "POST", { type: "RECTANGLE", clientId: randomUUID(), geometry }), context)).status).toBe(400);
+  });
+  it("rejects text creation IDs owned by another type or dataset without returning or altering that record", async () => {
+    const session = await create("TRAINING"), foreignId = randomUUID(), otherTypeId = randomUUID();
+    await prisma.marketDataset.create({ data: { id: "text-id-foreign-dataset", name: "Other", symbol: "TEST", timeframe: "1m", timezone: "UTC", barCount: 0, startTime: base, endTime: base } });
+    await prisma.marketDrawing.create({ data: { id: foreignId, datasetId: "text-id-foreign-dataset", type: "TEXT",
+      geometry: JSON.stringify({ anchor: geometry.start, text: "foreign" }), style: JSON.stringify(DEFAULT_TEXT_STYLE) } });
+    await prisma.marketDrawing.create({ data: { id: otherTypeId, datasetId: "shared", replaySessionId: session.id, type: "RECTANGLE",
+      geometry: JSON.stringify(geometry), style: JSON.stringify(DEFAULT_RECTANGLE_STYLE) } });
+    for (const clientId of [foreignId, otherTypeId]) {
+      const before = await prisma.marketDrawing.findUniqueOrThrow({ where: { id: clientId } });
+      const response = await drawingPOST(request(session, "POST", { type: "TEXT", clientId, geometry: { anchor: geometry.start, text: "new" } }), context);
+      expect(response.status).toBe(409); expect((await response.json()).drawing).toBeUndefined();
+      expect(await prisma.marketDrawing.findUniqueOrThrow({ where: { id: clientId } })).toEqual(before);
+    }
+  });
   it.each([
     { type: "TREND_LINE", style: DEFAULT_TREND_LINE_STYLE },
     { type: "RECTANGLE", style: DEFAULT_RECTANGLE_STYLE },

@@ -1,4 +1,4 @@
-import { withReplaySessionRoute, drawingScopeWhere, assertReplayDrawingWritable } from '@/lib/replay-sessions/scope';
+import { withReplaySessionRoute, drawingScopeWhere, assertReplayDrawingWritable, ReplaySessionError } from '@/lib/replay-sessions/scope';
 import { z } from "zod";
 import { NextResponse } from "next/server";
 import { prisma } from "@/lib/db";
@@ -32,15 +32,23 @@ async function handlePOST(request: Request, context: RouteContext) {
   if (!dataset) return NextResponse.json({ error: copy.marketReplay.datasetNotFound }, { status: 404 });
   const drawing = await prisma.$transaction(async tx => {
     await assertReplayDrawingWritable(tx);
-    return tx.marketDrawing.create({
-      data: {
+    const data = {
         datasetId: id,
         ...drawingScopeWhere(),
         type: parsed.data.type,
         geometry: JSON.stringify(parsed.data.geometry),
         style: JSON.stringify(parsed.data.style),
-      },
-    });
+      };
+    if (parsed.data.type === "TEXT" && parsed.data.clientId) {
+      // Empty update preserves the actual record on retries, including later PATCH changes.
+      const record = await tx.marketDrawing.upsert({ where: { id: parsed.data.clientId },
+        create: { ...data, id: parsed.data.clientId }, update: {} });
+      if (record.datasetId !== id || record.replaySessionId !== data.replaySessionId || record.type !== "TEXT") {
+        throw new ReplaySessionError("DRAWING_ID_CONFLICT", 409, copy.marketReplay.invalidDrawing);
+      }
+      return record;
+    }
+    return tx.marketDrawing.create({ data });
   });
   return NextResponse.json({ drawing: serializeMarketDrawing(drawing) }, { status: 201 });
 }

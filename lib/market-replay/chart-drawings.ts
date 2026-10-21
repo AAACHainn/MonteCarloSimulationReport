@@ -105,7 +105,7 @@ export type TextPreferences = { defaultStyle: TextDrawingStyle; templates: TextT
 export const DEFAULT_TEXT_STYLE: TextDrawingStyle = {
   color: "#2962FF", fontSize: 18, bold: false, italic: false,
   backgroundEnabled: false, backgroundColor: "#FFFFFF", backgroundOpacity: 90,
-  borderEnabled: false, borderColor: "#2962FF", wrapEnabled: false, wrapWidth: 240,
+  borderEnabled: false, borderColor: "#2962FF", wrapEnabled: true, wrapWidth: 240,
 };
 export function normalizeDrawingText(text: string) { return text.replace(/\r\n?/g, "\n"); }
 export type TwoPointDrawing = TrendLineDrawing | FibonacciRetracementDrawing | RectangleDrawing;
@@ -289,7 +289,7 @@ export const fibonacciRetracementPreferencesSchema = z.object({
 }).strict();
 
 export const createMarketDrawingSchema = z.discriminatedUnion("type", [
-  z.object({ type: z.literal(DRAWING_TYPE_TEXT), geometry: textGeometrySchema,
+  z.object({ type: z.literal(DRAWING_TYPE_TEXT), clientId: z.string().uuid().optional(), geometry: textGeometrySchema,
     style: textDrawingStyleSchema.default(DEFAULT_TEXT_STYLE) }).strict(),
   z.object({
     type: z.literal(DRAWING_TYPE_RECTANGLE),

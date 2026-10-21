@@ -8,13 +8,14 @@ export type TextEditorPosition = { host: HTMLElement; x: number; y: number; widt
 export type TextDrawingApi = {
   previewText: (preview: TextEditPreview | null) => void;
   subscribePosition: (anchor: DrawingAnchor, listener: (position: TextEditorPosition | null) => void) => () => void;
+  consumeDoubleClick?: (pointer: PointerEvent) => boolean;
 };
 export type TextDrawingSnapshot = { drawings: readonly TextDrawing[]; selectedDrawingId: string | null;
   edit: TextEditPreview | null; drag: { id: string; geometry: TextGeometry } | null;
   timeline: DrawingTimelineLocator };
 type ProjectedText = { id: string; anchor: DrawingAnchor; x: number; y: number; layout: CachedTextLayout;
   style: TextDrawingStyle; selected: boolean; visible: boolean };
-export type TextHit = { drawingId: string; part: "text" | "text-anchor"; distance: number; priority: 0 | 2 };
+export type TextHit = { drawingId: string; part: "text"; distance: number; priority: 0 };
 
 export class TextDrawingPrimitive implements ISeriesPrimitive<Time> {
   private attachment: SeriesAttachedParameter<Time> | null = null;
@@ -23,6 +24,7 @@ export class TextDrawingPrimitive implements ISeriesPrimitive<Time> {
   private width = 0;
   private height = 0;
   private context: CanvasRenderingContext2D | null = null;
+  private hoveredId: string | null = null;
   private cache: TextLayoutCache;
   private fontListener = () => { this.cache.clear(); this.attachment?.requestUpdate(); };
   private readonly view;
@@ -44,10 +46,14 @@ export class TextDrawingPrimitive implements ISeriesPrimitive<Time> {
   }
   detached() {
     if (typeof document !== "undefined") document.fonts?.removeEventListener("loadingdone", this.fontListener);
-    this.attachment = null; this.snapshot = null; this.projected = []; this.cache.clear(); this.context = null;
+    this.attachment = null; this.snapshot = null; this.projected = []; this.cache.clear(); this.context = null; this.hoveredId = null;
   }
   paneViews() { return [this.view]; }
   setDrawings(snapshot: TextDrawingSnapshot) { this.snapshot = snapshot; this.attachment?.requestUpdate(); }
+  setHovered(id: string | null) {
+    if (this.hoveredId === id) return;
+    this.hoveredId = id; this.attachment?.requestUpdate();
+  }
   updateAllViews() {
     const attachment = this.attachment, snapshot = this.snapshot;
     if (!attachment || !snapshot) return;
@@ -85,10 +91,13 @@ export class TextDrawingPrimitive implements ISeriesPrimitive<Time> {
       if (!item.visible) continue;
       const { x, y, layout, style } = item;
       if (editing) {
-        if (!item.selected) continue;
-        context.strokeStyle = "#2962FF"; context.lineWidth = 1; context.setLineDash([4, 4]);
-        context.strokeRect(x + layout.left, y + layout.top, layout.right - layout.left, layout.bottom - layout.top); context.setLineDash([]);
-        context.fillStyle = "#ffffff"; context.fillRect(x - 4, y - 4, 8, 8); context.strokeRect(x - 4, y - 4, 8, 8);
+        if (this.hoveredId !== item.id) continue;
+        context.strokeStyle = "#2563eb"; context.lineWidth = 1; context.setLineDash([]);
+        context.globalAlpha = 0.5;
+        context.strokeRect(x, y, layout.width, layout.height);
+        const handleX = x + layout.width, handleY = y + layout.height / 2;
+        context.fillStyle = "#ffffff"; context.fillRect(handleX - 4, handleY - 4, 8, 8); context.strokeRect(handleX - 4, handleY - 4, 8, 8);
+        context.globalAlpha = 1;
         continue;
       }
       if (style.backgroundEnabled && style.backgroundOpacity > 0) {
@@ -107,8 +116,6 @@ export class TextDrawingPrimitive implements ISeriesPrimitive<Time> {
     if (point.x < 0 || point.y < 0 || point.x > this.width || point.y > this.height) return null;
     for (let i = this.projected.length - 1; i >= 0; i--) {
       const item = this.projected[i]; if (!item.visible || item.id === "text-placement-preview") continue;
-      if (item.selected && Math.hypot(point.x - item.x, point.y - item.y) <= 7)
-        return { drawingId: item.id, part: "text-anchor", distance: 0, priority: 2 };
       if (point.x >= item.x + item.layout.left && point.x <= item.x + item.layout.right && point.y >= item.y + item.layout.top && point.y <= item.y + item.layout.bottom)
         return { drawingId: item.id, part: "text", distance: 0, priority: 0 };
     }
@@ -116,7 +123,7 @@ export class TextDrawingPrimitive implements ISeriesPrimitive<Time> {
   }
   hitTest(x: number, y: number): PrimitiveHoveredItem | null {
     const hit = this.hitTestAt({ x, y });
-    return hit ? { externalId: `text:${encodeURIComponent(hit.drawingId)}`, cursorStyle: "move", zOrder: "top",
+    return hit ? { externalId: `text:${encodeURIComponent(hit.drawingId)}`, cursorStyle: "pointer", zOrder: "top",
       hitTestPriority: hit.priority, distance: 0, isBackground: hit.part === "text", itemType: "primitive" } : null;
   }
   getDrawingCoordinates(id: string) { return this.projected.find(item => item.id === id) ?? null; }

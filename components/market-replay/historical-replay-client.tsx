@@ -109,7 +109,8 @@ export function HistoricalReplayClient({
   const [drawingToolOpen, setDrawingToolOpen] = useState(false);
   const [drawingTool, setDrawingTool] = useState<DrawingTool | null>(null);
   const [drawingObjectsOpen, setDrawingObjectsOpen] = useState(false);
-  const drawingState = useHistoricalDrawings({ datasetId: dataset.id, fetch });
+  const drawingState = useHistoricalDrawings({ datasetId: dataset.id, fetch,
+    writeScope: dataset.id + ":" + replaySession?.id + ":" + replaySession?.activeProjectionId });
   const { drawings, loaded: drawingsLoaded, busy: drawingBusy, error: drawingError } = drawingState;
   const [rectangleStyleId, setRectangleStyleId] = useState<string | null>(null);
   const [styleDrawingId, setStyleDrawingId] = useState<string | null>(null);
@@ -155,6 +156,7 @@ export function HistoricalReplayClient({
     dataset.id + ":" + replaySession?.id + ":" + replaySession?.activeProjectionId,
     chartVisibility.drawings, drawings, defaultTextStyle);
   const { open: openTextDrawing } = textDrawing;
+  const { beforeExit: finishText, discard: discardText, requestSettings: requestTextSettings } = textDrawing;
   const visibleBarCountConfig = useMemo(() => (
     chartVisibility.indicators ? barCountConfig : { ...barCountConfig, enabled: false }
   ), [barCountConfig, chartVisibility.indicators]);
@@ -232,16 +234,18 @@ export function HistoricalReplayClient({
     [dataset, session.displaySession],
   );
 
-  const armDrawing = useCallback((tool: DrawingTool) => {
+  const armDrawing = useCallback(async (tool: DrawingTool) => {
+    if (!await finishText()) return;
     if (!drawingsLoaded || drawingBusy) return;
     setMeasurementArmed(false);
     setChartVisibility((current) => current.drawings ? current : { ...current, drawings: true });
     setDrawingTool(tool);
     setDrawingToolOpen(false);
     setSelectedDrawingId(null);
-  }, [setChartVisibility, drawingsLoaded, drawingBusy]);
+  }, [setChartVisibility, drawingsLoaded, drawingBusy, finishText]);
 
-  const changeChartVisibility = useCallback((next: ReplayChartVisibility) => {
+  const changeChartVisibility = useCallback(async (next: ReplayChartVisibility) => {
+    if (!next.drawings && !await finishText()) return;
     setChartVisibility(next);
     if (!next.drawings) {
       setDrawingTool(null);
@@ -249,7 +253,7 @@ export function HistoricalReplayClient({
       setDrawingObjectsOpen(false);
       setSelectedDrawingId(null);
     }
-  }, [setChartVisibility]);
+  }, [setChartVisibility, finishText]);
 
   const createDrawing = async (type: TwoPointDrawingTool, geometry: TrendLineGeometry) => {
     const drawing = await drawingState.create(twoPointDrawingInput(dataset.id, type, geometry, {
@@ -260,16 +264,19 @@ export function HistoricalReplayClient({
 
   const updateDrawing = (id: string, geometry: DrawingGeometry) => { void drawingState.update(id, { geometry }); };
 
-  const openDrawingStyle = useCallback((id: string, inlineText = false) => {
+  const openDrawingStyle = useCallback(async (id: string, inlineText = false) => {
+    if (!inlineText && await requestTextSettings(id)) return;
+    if (!await finishText()) return;
     const drawing = drawings.find(item => item.id === id);
     if (!drawing || drawingBusy || id.startsWith("temporary-")) return;
     setSelectedDrawingId(id);
     if (drawing.type === DRAWING_TYPE_TEXT) { openTextDrawing(drawing, inlineText); return; }
     if (drawing.type === DRAWING_TYPE_RECTANGLE) { setRectangleStyleId(id); return; }
     setStyleDrawingId(id); setStyleDraft(cloneLineDrawingStyle(drawing.style));
-  }, [drawings, drawingBusy, openTextDrawing]);
+  }, [drawings, drawingBusy, openTextDrawing, finishText, requestTextSettings]);
 
   const deleteDrawing = async (id: string) => {
+    await discardText(id);
     if (await drawingState.remove(id)) {
       setSelectedDrawingId((current) => current === id ? null : current);
       if (styleDrawingId === id) { setStyleDrawingId(null); setStyleDraft(null); }
@@ -572,8 +579,8 @@ export function HistoricalReplayClient({
           <header className="flex items-center gap-2 border-b px-3 py-2.5">
             <ListTree className="h-4 w-4 text-slate-500" /><h3 className="text-sm font-semibold text-slate-950">{copy.marketReplay.drawingObjects}</h3>
             <Button type="button" variant="ghost" size="sm" disabled={!drawingsLoaded || drawingBusy || !drawings.length}
-              aria-label={copy.marketReplay.clearDrawings} className="ml-auto text-red-600 hover:bg-red-50 hover:text-red-700"
-              onClick={async () => { if (await drawingState.clear()) { setSelectedDrawingId(null); setRectangleStyleId(null); setStyleDrawingId(null); setStyleDraft(null); } }}>{copy.marketReplay.clearDrawingsShort}</Button>
+              data-text-delete="all" aria-label={copy.marketReplay.clearDrawings} className="ml-auto text-red-600 hover:bg-red-50 hover:text-red-700"
+              onClick={async () => { await discardText(); if (await drawingState.clear()) { setSelectedDrawingId(null); setRectangleStyleId(null); setStyleDrawingId(null); setStyleDraft(null); } }}>{copy.marketReplay.clearDrawingsShort}</Button>
             <button type="button" className="ml-auto rounded p-1 text-slate-400 hover:bg-slate-100 hover:text-slate-700 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-600" aria-label={copy.marketReplay.closeDrawingObjects} onClick={() => setDrawingObjectsOpen(false)}><X className="h-4 w-4" /></button>
           </header>
           <div className="min-h-0 flex-1 overflow-y-auto p-1.5">
@@ -582,9 +589,9 @@ export function HistoricalReplayClient({
                 {drawingObjectName(drawing, index + 1)}
               </button>
               <Button type="button" disabled={drawingBusy} variant="ghost" size="icon"
-                aria-label={drawingSettingsLabel(drawing)}
+                data-text-settings={drawing.id} aria-label={drawingSettingsLabel(drawing)}
                 onClick={() => openDrawingStyle(drawing.id)}><Settings2 className="h-4 w-4" aria-hidden="true" /></Button>
-              <Button type="button" disabled={drawingBusy} variant="ghost" size="icon" aria-label={drawingDeleteLabel(drawing)} className="text-slate-400 hover:bg-red-50 hover:text-red-600" onClick={() => void deleteDrawing(drawing.id)}><Trash2 className="h-4 w-4" aria-hidden="true" /></Button>
+              <Button type="button" data-text-delete={drawing.id} disabled={drawingBusy} variant="ghost" size="icon" aria-label={drawingDeleteLabel(drawing)} className="text-slate-400 hover:bg-red-50 hover:text-red-600" onClick={() => void deleteDrawing(drawing.id)}><Trash2 className="h-4 w-4" aria-hidden="true" /></Button>
             </div>) : <p className="p-3 text-xs text-slate-500">{copy.marketReplay.drawingObjectsEmpty}</p>}
           </div>
           {drawingBusy ? <p role="status" className="border-t px-3 py-2 text-xs text-slate-500">{copy.marketReplay.drawingSaving}</p> : null}
@@ -595,15 +602,12 @@ export function HistoricalReplayClient({
 
       {textDrawing.editor ? <TextSettingsDialog key={textDrawing.editor.key} editor={textDrawing.editor}
         apiRef={textDrawing.apiRef}
+        onAdopt={textDrawing.adopt} register={textDrawing.register} isCurrent={textDrawing.guard()}
         templates={textTemplates} onTemplatesChange={setTextTemplates} onPreview={textDrawing.preview} onClose={textDrawing.close}
-        onSave={async (geometry, style) => {
-          const current = textDrawing.guard();
-          const id = textDrawing.editor!.id;
-          const saved = id ? await drawingState.update(id, { geometry, style })
-            : await drawingState.create({ datasetId: dataset.id, type: "TEXT", geometry, style });
-          if (!saved || !current()) return false;
-          if (typeof saved !== "boolean") setSelectedDrawingId(saved.id);
-          setDefaultTextStyle({ ...style }); return true;
+        onSave={async (id, draft, clientId, current) => {
+          const saved = await drawingState.saveText(id, draft, clientId, current);
+          if (!current()) throw new Error(copy.marketReplay.textAutosaveError);
+          setSelectedDrawingId(saved.id); setDefaultTextStyle({ ...saved.style }); return saved;
         }} /> : null}
 
     {(() => {

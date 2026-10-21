@@ -57,8 +57,9 @@ describe("bounded text layout", () => {
   });
   it("does not remeasure on colors, position-independent access or inactive wrap width changes", () => {
     const measured = vi.fn(measure), cache = new TextLayoutCache(measured);
-    const first = cache.get("one", geometry.text, style); measured.mockClear();
-    expect(cache.get("one", geometry.text, { ...style, color: "#123456", borderEnabled: true, wrapWidth: 600 })).toBe(first);
+    const unwrapped = { ...style, wrapEnabled: false };
+    const first = cache.get("one", geometry.text, unwrapped); measured.mockClear();
+    expect(cache.get("one", geometry.text, { ...unwrapped, color: "#123456", borderEnabled: true, wrapWidth: 600 })).toBe(first);
     expect(measured).not.toHaveBeenCalled();
     cache.get("two", "second", style); measured.mockClear();
     cache.get("one", "new", style); const calls = measured.mock.calls.length;
@@ -96,19 +97,22 @@ function setup() {
   const measured = vi.fn(measure), primitive = new TextDrawingPrimitive(measured), timeline = new DrawingTimelineLocator();
   timeline.setTimeline([{ timestamp: anchor.timestamp, bucketEnd: "2026-10-01T00:01:00Z", firstSequence: 0, lastSequence: 0 }], 60);
   let x = 20, y = 100, paneHeight = 300;
+  const updates = vi.fn();
   primitive.attached({ chart: { timeScale: () => ({ logicalToCoordinate: () => x, width: () => 500 }), panes: () => [{ getHeight: () => paneHeight }, { getHeight: () => 75 }] },
-    series: { priceToCoordinate: () => y }, requestUpdate: vi.fn() } as never);
+    series: { priceToCoordinate: () => y }, requestUpdate: updates } as never);
   const snapshot = { drawings: [drawing], timeline, edit: null, drag: null, selectedDrawingId: null };
   primitive.setDrawings(snapshot); primitive.updateAllViews();
-  return { primitive, measured, snapshot, move: (nextX: number, nextY: number) => { x = nextX; y = nextY; primitive.updateAllViews(); },
+  return { primitive, measured, snapshot, updates, move: (nextX: number, nextY: number) => { x = nextX; y = nextY; primitive.updateAllViews(); },
     resize: (height: number) => { paneHeight = height; primitive.updateAllViews(); } };
 }
 function render(primitive: TextDrawingPrimitive) {
-  const fillText = vi.fn(), fillRect = vi.fn(), strokeRect = vi.fn();
-  const context = new Proxy({ fillText, fillRect, strokeRect }, { get: (object, key) => Reflect.get(object, key) ?? (() => undefined), set: Reflect.set });
+  const fillText = vi.fn(), fillRect = vi.fn(), strokeRect = vi.fn(), setLineDash = vi.fn();
+  const alphas: unknown[] = [];
+  const context = new Proxy({ fillText, fillRect, strokeRect, setLineDash }, { get: (object, key) => Reflect.get(object, key) ?? (() => undefined),
+    set: (object, key, value) => { if (key === "globalAlpha") alphas.push(value); return Reflect.set(object, key, value); } });
   const target = { useMediaCoordinateSpace: (draw: (scope: unknown) => void) => draw({ context }) } as never;
   for (const view of primitive.paneViews()) { view.renderer().drawBackground!(target); view.renderer().draw(target); }
-  return { fillText, fillRect, strokeRect };
+  return { fillText, fillRect, strokeRect, setLineDash, alphas };
 }
 describe("text primitive projection and rendering", () => {
   it("uses the full live price pane, including its bottom margin, and excludes the separate volume pane after resizing", () => {
@@ -151,16 +155,30 @@ describe("text primitive projection and rendering", () => {
     expect(measured).not.toHaveBeenCalled(); expect(render(primitive).fillText).toHaveBeenCalledTimes(2);
     move(-2000, -2000); expect(render(primitive).fillText).not.toHaveBeenCalled(); expect(measured).not.toHaveBeenCalled();
   });
-  it("replaces one saved object during editing and uses foreground anchor hits", () => {
+  it("replaces one saved object during editing and uses the whole text box without a separate anchor handle", () => {
     const { primitive, snapshot } = setup();
     primitive.setDrawings({ ...snapshot, selectedDrawingId: drawing.id,
       edit: { id: drawing.id, geometry: { ...geometry, text: "edited" }, style: { ...style, backgroundEnabled: true, borderEnabled: true } } });
     primitive.updateAllViews(); const result = render(primitive);
     expect(result.fillText).toHaveBeenCalledTimes(1); expect(result.fillText.mock.calls[0][0]).toBe("edited");
-    expect(primitive.hitTest(20, 100)).toMatchObject({ hitTestPriority: 2, isBackground: false });
+    expect(primitive.hitTest(20, 100)).toMatchObject({ hitTestPriority: 0, isBackground: true, cursorStyle: "pointer" });
     expect(primitive.hitTest(40, 110)).toMatchObject({ isBackground: true });
     primitive.setDrawings({ ...snapshot, drawings: [] }); primitive.updateAllViews();
     expect(primitive.cacheStats.entries).toBe(0); expect(render(primitive).fillText).not.toHaveBeenCalled();
+  });
+  it("paints a 50% solid hover frame with a right handle, without changing text opacity or measuring again", () => {
+    const { primitive, measured, updates } = setup(); measured.mockClear(); updates.mockClear();
+    expect(render(primitive).strokeRect).not.toHaveBeenCalled();
+    primitive.setHovered(drawing.id); primitive.updateAllViews();
+    primitive.setHovered(drawing.id); expect(updates).toHaveBeenCalledTimes(1);
+    const result = render(primitive);
+    expect(result.strokeRect).toHaveBeenCalledTimes(2);
+    expect(result.setLineDash.mock.calls.every(([dash]) => dash.length === 0)).toBe(true);
+    expect(result.alphas).toEqual([0.5, 1]);
+    expect(result.strokeRect.mock.calls[0]).toEqual([20, 100, 252, 64]);
+    expect(result.strokeRect.mock.calls[1]).toEqual([268, 128, 8, 8]);
+    expect(measured).not.toHaveBeenCalled();
+    primitive.setHovered(null); expect(render(primitive).strokeRect).not.toHaveBeenCalled();
   });
   it("only paints vertically visible rows, never creates autoscale data and clears on detach", () => {
     const { primitive, snapshot, move } = setup();

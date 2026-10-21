@@ -73,6 +73,7 @@ import { RectanglePrimitive, resizeRectangleGeometry, type RectangleHandle } fro
 import { TrendLinePrimitive } from "@/lib/market-replay/trend-line-primitive";
 import { FibonacciRetracementPrimitive } from "@/lib/market-replay/fibonacci-retracement-primitive";
 import { TextDrawingPrimitive, type TextDrawingApi, type TextEditPreview, type TextEditorPosition } from "@/lib/market-replay/text-drawing-primitive";
+import { createTextClickBridge, textPointerMoved } from "./text-inline-editor-events";
 import { formatUtcDateTime, formatUtcOffset } from "@/lib/market-replay/display-timezone";
 import { formatPriceForTick, priceDecimalsForTick, snapPriceToTick } from "@/lib/market-replay/price-ticks";
 import { ReplayTradeAnnotationPrimitive } from "@/lib/market-replay/trade-annotation-primitive";
@@ -346,6 +347,8 @@ export function ReplayChart({
   const fibonacciPrimitiveRef = useRef<FibonacciRetracementPrimitive | null>(null);
   const textPrimitiveRef = useRef<TextDrawingPrimitive | null>(null);
   const textEditRef = useRef<TextEditPreview | null>(null);
+  const textClicks = useRef<ReturnType<typeof createTextClickBridge> | null>(null);
+  textClicks.current ??= createTextClickBridge();
   const textPositionRef = useRef<{ anchor: DrawingAnchor; listener: (position: TextEditorPosition | null) => void } | null>(null);
   const textDragRef = useRef<{ id: string; geometry: TextGeometry } | null>(null);
   const onPlaceTextRef = useRef(onPlaceText); onPlaceTextRef.current = onPlaceText;
@@ -533,7 +536,12 @@ export function ReplayChart({
     });
   }, []);
   useImperativeHandle(drawingApiRef, () => ({
-    previewText(preview) { textEditRef.current = preview; syncDrawingPrimitive(); },
+    previewText(preview) {
+      textEditRef.current = preview;
+      if (preview?.inline || !preview) textPrimitiveRef.current?.setHovered(null);
+      syncDrawingPrimitive();
+    },
+    consumeDoubleClick(pointer) { return textClicks.current!.consume(textEditRef.current?.id ?? null, pointer); },
     subscribePosition(anchor, listener) {
       const subscription = { anchor, listener };
       textPositionRef.current = subscription; syncDrawingPrimitive();
@@ -1094,8 +1102,13 @@ export function ReplayChart({
       start: { x: number; y: number };
       end: { x: number; y: number };
     } | null = null;
-    let textDragging: { id: string; clientX: number; clientY: number; geometry: TextGeometry; x: number; y: number } | null = null;
+    let textDragging: { id: string; clientX: number; clientY: number; timeStamp: number; geometry: TextGeometry; x: number; y: number; moved: boolean } | null = null;
     let capturedPointer: number | null = null;
+    let hoveredText: string | null = null;
+    const hoverText = (id: string | null) => {
+      textPrimitiveRef.current?.setHovered(id);
+      if (hoveredText !== id) { hoveredText = id; if (!dragging && !textDragging) setChartCursor(id ? "pointer" : ""); }
+    };
 
     const pointAtCoordinate = (x: number, y: number, requireInside: boolean): PositionedAnchor | null => {
       const currentBars = barsRef.current;
@@ -1230,8 +1243,10 @@ export function ReplayChart({
           const y = series.priceToCoordinate(target.price); return y !== null && Math.abs(Number(y) - (event.clientY - rect.top)) <= 8;
         })) return;
         stopEvent(event); onSelectedDrawingIdChangeRef.current(id); selectedDrawingIdRef.current = id;
-        textDragging = { id, clientX: event.clientX, clientY: event.clientY, geometry: drawing.geometry, x: textCoordinate.x, y: textCoordinate.y };
-        capturedPointer = event.pointerId; interaction.setPointerCapture(event.pointerId); chart.applyOptions({ handleScroll: false }); setChartCursor("move"); return;
+        hoverText(id);
+        textClicks.current!.clear();
+        textDragging = { id, clientX: event.clientX, clientY: event.clientY, timeStamp: event.timeStamp, geometry: drawing.geometry, x: textCoordinate.x, y: textCoordinate.y, moved: false };
+        capturedPointer = event.pointerId; interaction.setPointerCapture(event.pointerId); chart.applyOptions({ handleScroll: false }); setChartCursor("pointer"); return;
       }
       const coordinate = drawing ? drawingCoordinates(drawing) : null;
       if (!drawing || !coordinate || id.startsWith("temporary-")) return;
@@ -1257,6 +1272,10 @@ export function ReplayChart({
       if (textDragging) {
         stopEvent(event);
         const dx = event.clientX - textDragging.clientX, dy = event.clientY - textDragging.clientY;
+        if (!textDragging.moved) {
+          if (!textPointerMoved(textDragging, event)) return;
+          textDragging.moved = true; setChartCursor("pointer");
+        }
         const positioned = pointAtCoordinate(textDragging.x + dx, textDragging.y + dy, false);
         if (positioned) {
           const original = textDragging.geometry.anchor;
@@ -1288,7 +1307,18 @@ export function ReplayChart({
         );
         return;
       }
-      if (!dragging) return;
+      if (!dragging) {
+        const target = event.target as HTMLElement;
+        if (drawingToolRef.current || measurementArmedRef.current || event.shiftKey || textEditRef.current?.inline || !interaction.contains(target)
+          || target.closest("button,input,textarea,[data-text-editor],[data-context-menu],[data-order-ticket],[data-line-action]")) { hoverText(null); return; }
+        const rect = container.getBoundingClientRect(), point = { x: event.clientX - rect.left, y: event.clientY - rect.top };
+        const textHit = textPrimitiveRef.current?.hitTestAt(point);
+        const hit = textHit ? hitDrawingAt(point) : null;
+        const nearOrder = textHit && [...lineTargetsRef.current.values()].some(target => {
+          const y = series.priceToCoordinate(target.price); return y !== null && Math.abs(Number(y) - point.y) <= 8;
+        });
+        hoverText(hit?.drawingId === textHit?.drawingId && !nearOrder ? textHit?.drawingId ?? null : null); return;
+      }
       stopEvent(event);
       let geometry: TrendLineGeometry | null = null;
       if (dragging.kind === "line") {
@@ -1336,8 +1366,10 @@ export function ReplayChart({
       pendingPointer = null;
     };
     const move = (event: PointerEvent) => {
-      if (!dragging && !textDragging && !(drawingToolRef.current && drawingDraftRef.current)) return;
-      stopEvent(event);
+      const active = dragging || textDragging || drawingToolRef.current && drawingDraftRef.current;
+      if (!active && !drawingGroupsRef.current.text.length) return;
+      if (!active && (textEditRef.current?.inline || !interaction.contains(event.target as Node))) { hoverText(null); return; }
+      if (active) stopEvent(event);
       pendingPointer = event;
       if (pointerFrame !== null) return;
       pointerFrame = requestAnimationFrame(() => {
@@ -1352,10 +1384,13 @@ export function ReplayChart({
         clearPointerFrame(); if (moved) processDrawingMove(event); stopEvent(event);
         const preview = textDragRef.current;
         if (preview && JSON.stringify(preview.geometry) !== JSON.stringify(textDragging.geometry)) onUpdateDrawingRef.current(preview.id, preview.geometry);
+        const clickedId = textDragging.moved ? null : textDragging.id;
         textDragging = null; textDragRef.current = null; syncDrawingPrimitive();
         if (interaction.hasPointerCapture(event.pointerId)) interaction.releasePointerCapture(event.pointerId);
         capturedPointer = null;
-        chart.applyOptions({ handleScroll: true }); setChartCursor(""); return;
+        chart.applyOptions({ handleScroll: true }); setChartCursor("");
+        if (clickedId) { textClicks.current!.released(clickedId, event); onOpenDrawingStyleRef.current(clickedId, true); }
+        return;
       }
       if (!dragging) return;
       const moved = pendingPointer !== null || event.clientX !== dragging.clientX || event.clientY !== dragging.clientY;
@@ -1376,6 +1411,7 @@ export function ReplayChart({
       setChartCursor("");
     };
     const cancelDrag = () => {
+      textClicks.current!.clear(); hoverText(null);
       clearPointerFrame();
       dragging = null;
       textDragging = null; textDragRef.current = null;
@@ -1385,7 +1421,9 @@ export function ReplayChart({
       chart.applyOptions({ handleScroll: true });
       setChartCursor(drawingToolRef.current ? "crosshair" : "");
     };
+    const leave = () => { if (!dragging && !textDragging) hoverText(null); };
     const doubleClick = (event: MouseEvent) => {
+      textClicks.current!.clear();
       if ((event.target as HTMLElement).closest("[data-text-editor]")) return;
       const rect = container.getBoundingClientRect();
       const id = hitDrawingAt({
@@ -1394,7 +1432,7 @@ export function ReplayChart({
       })?.drawingId;
       if (!id || id.startsWith("temporary-")) return;
       stopEvent(event);
-      onOpenDrawingStyleRef.current(id, true);
+      onOpenDrawingStyleRef.current(id);
     };
     const key = (event: KeyboardEvent) => {
       if (event.defaultPrevented || event.isComposing || hasVisibleReplayDialog() || isReplayShortcutInputTarget(event.target)) return;
@@ -1422,6 +1460,7 @@ export function ReplayChart({
     };
 
     interaction.addEventListener("pointerdown", down, true);
+    interaction.addEventListener("pointerleave", leave);
     window.addEventListener("pointermove", move, true);
     window.addEventListener("pointerup", finish, true);
     window.addEventListener("pointercancel", cancelDrag, true);
@@ -1429,11 +1468,13 @@ export function ReplayChart({
     interaction.addEventListener("dblclick", doubleClick, true);
     window.addEventListener("keydown", key, true);
     return () => {
+      textClicks.current!.clear(); hoverText(null);
       clearPointerFrame();
       textDragRef.current = null;
       if (capturedPointer !== null && interaction.hasPointerCapture(capturedPointer)) interaction.releasePointerCapture(capturedPointer);
       if (chartRef.current === chart) { chart.applyOptions({ handleScroll: true }); commitPreview(null); }
       interaction.removeEventListener("pointerdown", down, true);
+      interaction.removeEventListener("pointerleave", leave);
       window.removeEventListener("pointermove", move, true);
       window.removeEventListener("pointerup", finish, true);
       window.removeEventListener("pointercancel", cancelDrag, true);

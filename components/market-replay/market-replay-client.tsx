@@ -46,6 +46,8 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { copy } from "@/lib/i18n";
 import { Type as TextIcon } from "lucide-react";
 import { TextSettingsDialog, TextToolOption } from "./text-settings-dialog";
+import { runDrawingWrite } from "@/lib/market-replay/drawing-write-queue";
+import { persistTextDrawing } from "@/lib/market-replay/text-persistence";
 import { useTextDrawingEditor } from "./use-text-drawing-editor";
 import { drawingObjectName, drawingObjectColor, drawingSettingsLabel, drawingDeleteLabel } from "@/lib/market-replay/drawing-presentation";
 import {
@@ -389,6 +391,9 @@ export function MarketReplayClient({ dataset: initialDataset, initialJournalFocu
     dataset.id + ":" + replaySession?.id + ":" + replaySession?.activeProjectionId,
     chartVisibility.drawings, drawings, defaultTextStyle);
   const { open: openTextDrawing, guard: textScopeGuard } = textDrawing;
+  const { beforeExit: finishText, discard: discardText, requestSettings: requestTextSettings } = textDrawing;
+  const drawingWriteScope = dataset.id + ":" + replaySession?.id + ":" + replaySession?.activeProjectionId;
+  const drawingsLive = useRef(drawings); drawingsLive.current = drawings;
   const visibleBarCountConfig = useMemo(() => (
     chartVisibility.indicators ? barCountConfig : { ...barCountConfig, enabled: false }
   ), [barCountConfig, chartVisibility.indicators]);
@@ -495,16 +500,18 @@ export function MarketReplayClient({ dataset: initialDataset, initialJournalFocu
     return () => controller.abort();
   }, [dataset.id, fetch]);
 
-  const armDrawing = useCallback((tool: DrawingTool) => {
+  const armDrawing = useCallback(async (tool: DrawingTool) => {
+    if (!await finishText()) return;
     setMeasurementArmed(false);
     setChartVisibility((current) => current.drawings ? current : { ...current, drawings: true });
     setDrawingTool(tool);
     setDrawingToolOpen(false);
     setSelectedDrawingId(null);
     setDrawingError(null);
-  }, [setChartVisibility]);
+  }, [setChartVisibility, finishText]);
 
-  const changeChartVisibility = useCallback((next: ReplayChartVisibility) => {
+  const changeChartVisibility = useCallback(async (next: ReplayChartVisibility) => {
+    if (!next.drawings && !await finishText()) return;
     setChartVisibility(next);
     if (!next.drawings) {
       setDrawingTool(null);
@@ -512,11 +519,11 @@ export function MarketReplayClient({ dataset: initialDataset, initialJournalFocu
       setDrawingObjectsOpen(false);
       setSelectedDrawingId(null);
     }
-  }, [setChartVisibility]);
+  }, [setChartVisibility, finishText]);
   const armTrendLine = useCallback(() => armDrawing(DRAWING_TYPE_TREND_LINE), [armDrawing]);
   const armFibonacciRetracement = useCallback(() => armDrawing(DRAWING_TYPE_FIB_RETRACEMENT), [armDrawing]);
 
-  const createDrawing = useCallback(async (type: TwoPointDrawingTool, geometry: TrendLineGeometry) => {
+  const createDrawing = useCallback(async (type: TwoPointDrawingTool, geometry: TrendLineGeometry) => runDrawingWrite(drawingWriteScope, async () => {
     if (clearingDrawingsRef.current) return;
     const temporaryId = createLocalDrawingId("temporary");
     const now = new Date().toISOString();
@@ -547,13 +554,13 @@ export function MarketReplayClient({ dataset: initialDataset, initialJournalFocu
     } finally {
       setDrawingPending(temporaryId, false);
     }
-  }, [dataset.id, defaultRectangleStyle, defaultFibonacciStyle, defaultTrendLineStyle, setDrawingPending, fetch]);
+  }), [dataset.id, drawingWriteScope, defaultRectangleStyle, defaultFibonacciStyle, defaultTrendLineStyle, setDrawingPending, fetch]);
 
   const updateDrawing = useCallback(async (
     id: string,
     patch: { geometry?: DrawingGeometry; style?: MarketDrawingStyle },
-  ) => {
-    const previous = drawings.find((drawing) => drawing.id === id);
+  ) => runDrawingWrite(drawingWriteScope, async () => {
+    const previous = drawingsLive.current.find((drawing) => drawing.id === id);
     if (clearingDrawingsRef.current || !previous || id.startsWith("temporary-") || pendingDrawingIds.has(id)) return false;
     if (patch.style && !drawingStyleMatchesType(previous.type, patch.style)) return false;
     if (patch.geometry && !drawingGeometryMatchesType(previous.type, patch.geometry)) return false;
@@ -583,12 +590,14 @@ export function MarketReplayClient({ dataset: initialDataset, initialJournalFocu
     } finally {
       if (currentScope()) setDrawingPending(id, false);
     }
-  }, [dataset.id, drawings, pendingDrawingIds, setDrawingPending, fetch, textScopeGuard]);
+  }), [dataset.id, drawingWriteScope, pendingDrawingIds, setDrawingPending, fetch, textScopeGuard]);
 
   const deleteDrawing = useCallback(async (id: string) => {
-    const index = drawings.findIndex((drawing) => drawing.id === id);
+    await discardText(id);
+    return runDrawingWrite(drawingWriteScope, async () => {
+    const index = drawingsLive.current.findIndex((drawing) => drawing.id === id);
     if (clearingDrawingsRef.current || index < 0 || id.startsWith("temporary-") || pendingDrawingIds.has(id)) return;
-    const previous = drawings[index];
+    const previous = drawingsLive.current[index];
     setDrawings((current) => current.filter((drawing) => drawing.id !== id));
     setSelectedDrawingId((current) => current === id ? null : current);
     if (styleDrawingId === id) {
@@ -610,11 +619,14 @@ export function MarketReplayClient({ dataset: initialDataset, initialJournalFocu
     } finally {
       setDrawingPending(id, false);
     }
-  }, [dataset.id, drawings, pendingDrawingIds, setDrawingPending, styleDrawingId, fetch]);
+    });
+  }, [dataset.id, drawingWriteScope, discardText, pendingDrawingIds, setDrawingPending, styleDrawingId, fetch]);
 
   const clearDrawings = async () => {
-    if (clearingDrawingsRef.current || pendingDrawingIds.size || !drawings.length) return;
-    const previous = drawings;
+    await discardText();
+    return runDrawingWrite(drawingWriteScope, async () => {
+    if (clearingDrawingsRef.current || pendingDrawingIds.size || !drawingsLive.current.length) return;
+    const previous = drawingsLive.current;
     clearingDrawingsRef.current = true; setClearingDrawings(true); setDrawingError(null);
     setDrawingTool(null); setDrawings([]); setSelectedDrawingId(null);
     try {
@@ -626,10 +638,13 @@ export function MarketReplayClient({ dataset: initialDataset, initialJournalFocu
       setDrawings(data.drawings);
     } catch { setDrawings(previous); setDrawingError(copy.marketReplay.drawingDeleteError); }
     finally { clearingDrawingsRef.current = false; setClearingDrawings(false); }
+    });
   };
 
-  const openDrawingStyle = useCallback((id: string, inlineText = false) => {
-    const drawing = drawings.find((item) => item.id === id);
+  const openDrawingStyle = useCallback(async (id: string, inlineText = false) => {
+    if (!inlineText && await requestTextSettings(id)) return;
+    if (!await finishText()) return;
+    const drawing = drawingsLive.current.find((item) => item.id === id);
     if (!drawing) return;
     setSelectedDrawingId(id);
     if (drawing.type === DRAWING_TYPE_TEXT) { openTextDrawing(drawing, inlineText); return; }
@@ -638,7 +653,7 @@ export function MarketReplayClient({ dataset: initialDataset, initialJournalFocu
     setStyleDraft(drawing.type === DRAWING_TYPE_TREND_LINE
       ? { ...drawing.style }
       : cloneFibonacciStyle(drawing.style));
-  }, [drawings, openTextDrawing]);
+  }, [finishText, requestTextSettings, openTextDrawing]);
 
   const displayedDrawings = useMemo(() => (
     styleDrawingId && styleDraft
@@ -2221,6 +2236,7 @@ export function MarketReplayClient({ dataset: initialDataset, initialJournalFocu
   }
 
   async function prepareSessionSwitch() {
+    if (!await finishText()) return false;
     cancelForwardRef.current = true; pausePlayback(); manualStepsRef.current.cancel();
     await paperMutationChainRef.current; await advanceCompletionRef.current;
     pausePlayback(); return flushVisible();
@@ -2676,7 +2692,7 @@ export function MarketReplayClient({ dataset: initialDataset, initialJournalFocu
                 <ListTree className="h-4 w-4 text-slate-500" />
                 <h3 className="text-sm font-semibold text-slate-950">{copy.marketReplay.drawingObjects}</h3>
                 <Button type="button" variant="ghost" size="sm" disabled={clearingDrawings || Boolean(pendingDrawingIds.size) || !drawings.length}
-                  aria-label={copy.marketReplay.clearDrawings} className="ml-auto text-red-600 hover:bg-red-50 hover:text-red-700"
+                  data-text-delete="all" aria-label={copy.marketReplay.clearDrawings} className="ml-auto text-red-600 hover:bg-red-50 hover:text-red-700"
                   onClick={() => void clearDrawings()}>{copy.marketReplay.clearDrawingsShort}</Button>
                 <button
                   type="button"
@@ -2713,13 +2729,13 @@ export function MarketReplayClient({ dataset: initialDataset, initialJournalFocu
                         : <span className="flex h-4 w-4 shrink-0 items-center justify-center font-mono text-[9px] font-bold" style={{ color: drawingColor }}>Fib</span>}
                       <span className="min-w-0 flex-1 truncate font-medium">{drawingObjectName(drawing, index + 1)}</span>
                       {drawing.type === DRAWING_TYPE_RECTANGLE || drawing.type === DRAWING_TYPE_TEXT ? <Button type="button" variant="ghost" size="icon" disabled={pending}
-                        aria-label={drawingSettingsLabel(drawing)} onClick={event => { event.stopPropagation(); openDrawingStyle(drawing.id); }}>
+                        data-text-settings={drawing.id} aria-label={drawingSettingsLabel(drawing)} onClick={event => { event.stopPropagation(); openDrawingStyle(drawing.id); }}>
                         <Settings2 className="h-4 w-4" aria-hidden="true" />
                       </Button> : null}
                       <button
                         type="button"
                         disabled={pending}
-                        aria-label={drawingDeleteLabel(drawing)}
+                        data-text-delete={drawing.id} aria-label={drawingDeleteLabel(drawing)}
                         className="rounded p-1 text-slate-400 hover:bg-red-50 hover:text-red-600 disabled:opacity-40"
                         onClick={(event) => {
                           event.stopPropagation();
@@ -2762,23 +2778,17 @@ export function MarketReplayClient({ dataset: initialDataset, initialJournalFocu
 
       {textDrawing.editor ? <TextSettingsDialog key={textDrawing.editor.key} editor={textDrawing.editor}
         apiRef={textDrawing.apiRef}
+        onAdopt={textDrawing.adopt} register={textDrawing.register} isCurrent={textDrawing.guard()}
         templates={textTemplates} onTemplatesChange={setTextTemplates} onPreview={textDrawing.preview} onClose={textDrawing.close}
-        onSave={async (geometry, style) => {
-          const current = textDrawing.guard();
-          const id = textDrawing.editor!.id;
-          if (id) {
-            if (!await updateDrawing(id, { geometry, style }) || !current()) return false;
-          } else {
-            const response = await fetch(`/api/market-datasets/${dataset.id}/drawings`, {
-              method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ type: "TEXT", geometry, style }),
-            });
-            const data = await response.json() as { drawing?: MarketDrawing };
-            if (!response.ok || !data.drawing || !current()) return false;
-            const saved = data.drawing;
-            setDrawings(items => [...items, saved]); setSelectedDrawingId(saved.id);
-          }
-          setDefaultTextStyle({ ...style }); return true;
-        }} /> : null}
+        onSave={(id, draft, clientId, current) => runDrawingWrite(drawingWriteScope, async () => {
+          if (!current()) throw new Error(copy.marketReplay.textAutosaveError);
+          const saved = await persistTextDrawing(fetch, dataset.id, id, draft, clientId);
+          if (!current()) throw new Error(copy.marketReplay.textAutosaveError);
+          const items = drawingsLive.current;
+          const next = items.some(item => item.id === saved.id) ? items.map(item => item.id === saved.id ? saved : item) : [...items, saved];
+          drawingsLive.current = next; setDrawings(next); setSelectedDrawingId(saved.id);
+          setDefaultTextStyle({ ...saved.style }); return saved;
+        })} /> : null}
 
       {(() => {
         const drawing = drawings.find(d => d.id === rectangleStyleId);

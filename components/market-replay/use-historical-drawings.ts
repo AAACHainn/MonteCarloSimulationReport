@@ -5,11 +5,14 @@ import { createUuid } from "@/lib/uuid";
 import { copy } from "@/lib/i18n";
 import type { MarketDrawing, MarketDrawingStyle, DrawingGeometry, NewMarketDrawing } from "@/lib/market-replay/chart-drawings";
 import { drawingGeometryMatchesType, drawingStyleMatchesType } from "@/lib/market-replay/chart-drawings";
+import { runDrawingWrite } from "@/lib/market-replay/drawing-write-queue";
+import { persistTextDrawing } from "@/lib/market-replay/text-persistence";
+import type { TextDraft } from "@/lib/market-replay/text-autosave";
 
 type DrawingPayload = { drawings: MarketDrawing[]; drawing?: MarketDrawing; error?: string };
 
-export function useHistoricalDrawings({ datasetId, fetch }: {
-  datasetId: string; fetch: typeof globalThis.fetch;
+export function useHistoricalDrawings({ datasetId, fetch, writeScope }: {
+  datasetId: string; fetch: typeof globalThis.fetch; writeScope?: string;
 }) {
   const [drawings, setDrawings] = useState<MarketDrawing[]>([]);
   const current = useRef(drawings);
@@ -46,16 +49,21 @@ export function useHistoricalDrawings({ datasetId, fetch }: {
     return () => { controller.abort(); invalidateReads(); };
   }, [refresh, invalidateReads]);
 
-  const mutate = useCallback(async (next: MarketDrawing[], method: string, suffix: string, body: unknown,
+  const mutate = useCallback(async (next: () => MarketDrawing[], method: string, suffix: string, body: unknown,
     reconcile: (payload: DrawingPayload) => MarketDrawing[], failure: string) => {
+    if (locked.current) return false;
+    const requestedGeneration = readGeneration.current;
+    return runDrawingWrite(writeScope ?? url, async () => {
+    if (requestedGeneration !== readGeneration.current) return false;
     if (!loadedRef.current || locked.current) return false;
     locked.current = true; setBusy(true); setError(null);
     const previous = current.current;
     const generation = readGeneration.current;
     try {
-      publish(next);
+      const requestBody = typeof body === "function" ? body() : body;
+      publish(next());
       const response = await fetch(url + suffix, { method, headers: { "Content-Type": "application/json" },
-        ...(body === undefined ? {} : { body: JSON.stringify(body) }) });
+        ...(requestBody === undefined ? {} : { body: JSON.stringify(requestBody) }) });
       const data = await response.json() as DrawingPayload;
       if (generation !== readGeneration.current) return false;
       if (!response.ok) throw new Error(data.error || failure);
@@ -64,18 +72,20 @@ export function useHistoricalDrawings({ datasetId, fetch }: {
     } catch (cause) {
       if (generation === readGeneration.current) { publish(previous); setError(cause instanceof Error ? cause.message : failure); } return false;
     } finally { if (generation === readGeneration.current) { locked.current = false; setBusy(false); } }
-  }, [fetch, publish, url]);
+    });
+  }, [fetch, publish, url, writeScope]);
 
   const create = async (drawing: NewMarketDrawing) => {
+    if (!loadedRef.current || locked.current) return null;
     const timestamp = new Date().toISOString();
     const optimistic = { ...drawing, id: `temporary-${createUuid()}`,
       createdAt: timestamp, updatedAt: timestamp } as MarketDrawing;
     let saved = optimistic;
-    const next = drawing.type === "TEXT" ? current.current : [...current.current, optimistic];
+    const next = () => drawing.type === "TEXT" ? current.current : [...current.current, optimistic];
     const ok = await mutate(next, "POST", "", { type: drawing.type, geometry: drawing.geometry, style: drawing.style }, payload => {
       if (!payload.drawing) throw new Error(copy.marketReplay.drawingSaveError);
       saved = payload.drawing;
-      return drawing.type === "TEXT" ? [...next, saved] : next.map(item => item.id === optimistic.id ? saved : item);
+      return drawing.type === "TEXT" ? [...current.current, saved] : current.current.map(item => item.id === optimistic.id ? saved : item);
     }, copy.marketReplay.drawingSaveError);
     return ok ? saved : null;
   };
@@ -86,14 +96,25 @@ export function useHistoricalDrawings({ datasetId, fetch }: {
     if (patch.style && !drawingStyleMatchesType(previous.type, patch.style)) return false;
     if ((!patch.geometry || JSON.stringify(patch.geometry) === JSON.stringify(previous.geometry))
       && (!patch.style || JSON.stringify(patch.style) === JSON.stringify(previous.style))) return true;
-    const next = current.current.map(item => item.id === id ? { ...item, ...patch, updatedAt: new Date().toISOString() } as MarketDrawing : item);
+    const next = () => current.current.map(item => item.id === id ? { ...item, ...patch, updatedAt: new Date().toISOString() } as MarketDrawing : item);
     return mutate(next, "PATCH", `/${encodeURIComponent(id)}`, patch, payload => {
       if (!payload.drawing) throw new Error(copy.marketReplay.drawingSaveError);
-      return next.map(item => item.id === id ? payload.drawing! : item);
+      return current.current.map(item => item.id === id ? payload.drawing! : item);
     }, copy.marketReplay.drawingSaveError);
   };
-  const remove = (id: string) => mutate(current.current.filter(item => item.id !== id), "DELETE", `/${encodeURIComponent(id)}`, undefined,
+  const remove = (id: string) => mutate(() => current.current.filter(item => item.id !== id), "DELETE", `/${encodeURIComponent(id)}`, undefined,
     () => current.current.filter(item => item.id !== id), copy.marketReplay.drawingDeleteError);
-  const clear = () => mutate([], "DELETE", "", { ids: current.current.map(item => item.id) }, payload => payload.drawings, copy.marketReplay.drawingDeleteError);
-  return { drawings, loaded, busy, error, refresh, create, update, remove, clear };
+  const clear = () => mutate(() => [], "DELETE", "", () => ({ ids: current.current.map(item => item.id) }), payload => payload.drawings, copy.marketReplay.drawingDeleteError);
+  const saveText = (id: string | null, draft: TextDraft, clientId: string, isCurrent: () => boolean) => runDrawingWrite(writeScope ?? url, async () => {
+    if (!isCurrent() || !loadedRef.current || locked.current) throw new Error(copy.marketReplay.textAutosaveError);
+    const generation = readGeneration.current;
+    locked.current = true; setBusy(true);
+    try {
+      const saved = await persistTextDrawing(fetch, datasetId, id, draft, clientId);
+      if (!isCurrent() || generation !== readGeneration.current) throw new Error(copy.marketReplay.textAutosaveError);
+      publish(current.current.some(item => item.id === saved.id) ? current.current.map(item => item.id === saved.id ? saved : item) : [...current.current, saved]);
+      setError(null); return saved;
+    } finally { if (generation === readGeneration.current) { locked.current = false; setBusy(false); } }
+  });
+  return { drawings, loaded, busy, error, refresh, create, update, remove, clear, saveText };
 }
