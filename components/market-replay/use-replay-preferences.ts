@@ -10,6 +10,7 @@ import {
   DEFAULT_FIBONACCI_RETRACEMENT_STYLE,
   DEFAULT_TREND_LINE_STYLE,
   DEFAULT_RECTANGLE_STYLE,
+  DEFAULT_TEXT_STYLE, parseTextPreferences, type TextDrawingStyle, type TextTemplate,
   parseRectanglePreferences,
   type RectangleStyle,
   type RectangleTemplate,
@@ -58,6 +59,7 @@ const CANDLESTICK_STYLE_STORAGE_KEY = "market-replay-candlestick-style-v1";
 const TREND_LINE_PREFERENCES_STORAGE_KEY = "market-replay-trend-line-preferences-v1";
 const RECTANGLE_PREFERENCES_STORAGE_KEY = "market-replay-rectangle-preferences-v1";
 const FIBONACCI_PREFERENCES_STORAGE_KEY = "market-replay-fibonacci-preferences-v1";
+const TEXT_PREFERENCES_STORAGE_KEY = "market-replay-text-preferences-v1";
 const CHART_VISIBILITY_STORAGE_KEY = "market-replay-chart-visibility-v1";
 
 export const EMA_COLORS = ["#f59e0b", "#2563eb", "#7c3aed", "#0f766e", "#e11d48"];
@@ -140,6 +142,8 @@ export function useReplayPreferences(dataset: { id: string; startTime: string; t
   const [fibonacciTemplates, setFibonacciTemplates] = useState<FibonacciRetracementTemplate[]>([]);
   const [defaultRectangleStyle, setDefaultRectangleStyle] = useState<RectangleStyle>(() => ({ ...DEFAULT_RECTANGLE_STYLE }));
   const [rectangleTemplates, setRectangleTemplates] = useState<RectangleTemplate[]>([]);
+  const [defaultTextStyle, setDefaultTextStyle] = useState<TextDrawingStyle>(() => ({ ...DEFAULT_TEXT_STYLE }));
+  const [textTemplates, setTextTemplates] = useState<TextTemplate[]>([]);
   const [drawingPreferencesLoaded, setDrawingPreferencesLoaded] = useState(false);
   const [displayUtcOffsetMinutes, setDisplayUtcOffsetMinutes] = useState(() => (
     utcOffsetMinutesForTimezone(dataset.startTime, dataset.timezone)
@@ -316,7 +320,9 @@ export function useReplayPreferences(dataset: { id: string; startTime: string; t
     let preferences = parseTrendLinePreferences(null);
     let fibonacciPreferences = parseFibonacciRetracementPreferences(null);
     let rectanglePreferences = parseRectanglePreferences(null);
+    let textPreferences = parseTextPreferences(null);
     try {
+      textPreferences = parseTextPreferences(window.localStorage.getItem(TEXT_PREFERENCES_STORAGE_KEY));
       rectanglePreferences = parseRectanglePreferences(window.localStorage.getItem(RECTANGLE_PREFERENCES_STORAGE_KEY));
       preferences = parseTrendLinePreferences(window.localStorage.getItem(TREND_LINE_PREFERENCES_STORAGE_KEY));
       fibonacciPreferences = parseFibonacciRetracementPreferences(window.localStorage.getItem(FIBONACCI_PREFERENCES_STORAGE_KEY));
@@ -329,6 +335,8 @@ export function useReplayPreferences(dataset: { id: string; startTime: string; t
     setFibonacciTemplates(fibonacciPreferences.templates);
     setDefaultRectangleStyle(rectanglePreferences.defaultStyle);
     setRectangleTemplates(rectanglePreferences.templates);
+    setDefaultTextStyle(textPreferences.defaultStyle);
+    setTextTemplates(textPreferences.templates);
     setDrawingPreferencesLoaded(true);
   }, []);
 
@@ -336,6 +344,7 @@ export function useReplayPreferences(dataset: { id: string; startTime: string; t
     if (!drawingPreferencesLoaded) return;
     try {
       window.localStorage.setItem(RECTANGLE_PREFERENCES_STORAGE_KEY, JSON.stringify({ defaultStyle: defaultRectangleStyle, templates: rectangleTemplates }));
+      window.localStorage.setItem(TEXT_PREFERENCES_STORAGE_KEY, JSON.stringify({ defaultStyle: defaultTextStyle, templates: textTemplates }));
       window.localStorage.setItem(TREND_LINE_PREFERENCES_STORAGE_KEY, JSON.stringify({
         defaultStyle: defaultTrendLineStyle,
         templates: trendLineTemplates,
@@ -347,7 +356,7 @@ export function useReplayPreferences(dataset: { id: string; startTime: string; t
     } catch {
       // Drawing preferences still apply until this page closes.
     }
-  }, [defaultRectangleStyle, rectangleTemplates, defaultFibonacciStyle, defaultTrendLineStyle, drawingPreferencesLoaded, fibonacciTemplates, trendLineTemplates]);
+  }, [defaultTextStyle, textTemplates, defaultRectangleStyle, rectangleTemplates, defaultFibonacciStyle, defaultTrendLineStyle, drawingPreferencesLoaded, fibonacciTemplates, trendLineTemplates]);
 
   return {
     candlestickStyle,
@@ -373,6 +382,7 @@ export function useReplayPreferences(dataset: { id: string; startTime: string; t
     chartVisibility,
     setChartVisibility,
     defaultRectangleStyle,
+    defaultTextStyle, setDefaultTextStyle, textTemplates, setTextTemplates,
     setDefaultRectangleStyle,
     rectangleTemplates,
     setRectangleTemplates,

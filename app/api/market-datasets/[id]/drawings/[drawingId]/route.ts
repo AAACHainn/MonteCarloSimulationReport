@@ -4,7 +4,9 @@ import { prisma } from "@/lib/db";
 import { copy } from "@/lib/i18n";
 import {
   drawingStyleMatchesType,
-  isValidRectangleGeometry,
+  drawingGeometryMatchesType,
+  DRAWING_TYPES,
+  type DrawingType,
   serializeMarketDrawing,
   updateMarketDrawingSchema,
 } from "@/lib/market-replay/chart-drawings";
@@ -22,12 +24,12 @@ async function handlePATCH(request: Request, context: RouteContext) {
     const existing = await tx.marketDrawing.findFirst({ where: { id: drawingId, datasetId: id, ...drawingScopeWhere() } });
     if (!existing) return NextResponse.json({ error: copy.marketReplay.drawingNotFound }, { status: 404 });
     if (parsed.data.style && (
-      (existing.type !== "TREND_LINE" && existing.type !== "FIB_RETRACEMENT" && existing.type !== "RECTANGLE")
-      || !drawingStyleMatchesType(existing.type, parsed.data.style)
+      !DRAWING_TYPES.includes(existing.type as DrawingType)
+      || !drawingStyleMatchesType(existing.type as DrawingType, parsed.data.style)
     )) {
       return NextResponse.json({ error: copy.marketReplay.invalidDrawing }, { status: 400 });
     }
-    if (existing.type === "RECTANGLE" && parsed.data.geometry && !isValidRectangleGeometry(parsed.data.geometry)) {
+    if (parsed.data.geometry && !drawingGeometryMatchesType(existing.type, parsed.data.geometry)) {
       return NextResponse.json({ error: copy.marketReplay.invalidDrawing }, { status: 400 });
     }
     const drawing = await tx.marketDrawing.update({

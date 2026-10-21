@@ -33,7 +33,7 @@ import { ReplayPlaybackBar } from "@/components/market-replay/replay-playback-ba
 import { RectangleSettingsDialog, RectangleToolOption } from "./rectangle-controls";
 import { LineSettingsDialog } from "./line-settings-dialog";
 import { useReplayShortcuts } from "@/components/market-replay/use-replay-shortcuts";
-import { createReplayStepShortcut, isReplayPlaybackShortcut, isReplayShortcutInputTarget, replayDrawingShortcutKey } from "@/lib/market-replay/keyboard-shortcuts";
+import { createReplayStepShortcut, isReplayPlaybackShortcut, hasVisibleReplayDialog, isReplayShortcutInputTarget, replayDrawingShortcutKey } from "@/lib/market-replay/keyboard-shortcuts";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
@@ -44,6 +44,10 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { copy } from "@/lib/i18n";
+import { Type as TextIcon } from "lucide-react";
+import { TextSettingsDialog, TextToolOption } from "./text-settings-dialog";
+import { useTextDrawingEditor } from "./use-text-drawing-editor";
+import { drawingObjectName, drawingObjectColor, drawingSettingsLabel, drawingDeleteLabel } from "@/lib/market-replay/drawing-presentation";
 import {
   createReplayState,
   calculatePlaybackAdvance,
@@ -121,6 +125,7 @@ import {
   DRAWING_TYPE_FIB_RETRACEMENT,
   DRAWING_TYPE_TREND_LINE,
   DRAWING_TYPE_RECTANGLE,
+  DRAWING_TYPE_TEXT, drawingGeometryMatchesType, type TwoPointDrawingTool, type DrawingGeometry,
   drawingStyleMatchesType,
   type DrawingTool,
   type FibonacciRetracementStyle,
@@ -368,6 +373,7 @@ export function MarketReplayClient({ dataset: initialDataset, initialJournalFocu
     chartVisibility,
     setChartVisibility,
     defaultRectangleStyle, setDefaultRectangleStyle, rectangleTemplates, setRectangleTemplates,
+    defaultTextStyle, setDefaultTextStyle, textTemplates, setTextTemplates,
     defaultTrendLineStyle,
     setDefaultTrendLineStyle,
     trendLineTemplates,
@@ -379,6 +385,10 @@ export function MarketReplayClient({ dataset: initialDataset, initialJournalFocu
     displayUtcOffsetMinutes,
     setDisplayUtcOffsetMinutes,
   } = useReplayPreferences(dataset);
+  const textDrawing = useTextDrawingEditor(
+    dataset.id + ":" + replaySession?.id + ":" + replaySession?.activeProjectionId,
+    chartVisibility.drawings, drawings, defaultTextStyle);
+  const { open: openTextDrawing, guard: textScopeGuard } = textDrawing;
   const visibleBarCountConfig = useMemo(() => (
     chartVisibility.indicators ? barCountConfig : { ...barCountConfig, enabled: false }
   ), [barCountConfig, chartVisibility.indicators]);
@@ -506,7 +516,7 @@ export function MarketReplayClient({ dataset: initialDataset, initialJournalFocu
   const armTrendLine = useCallback(() => armDrawing(DRAWING_TYPE_TREND_LINE), [armDrawing]);
   const armFibonacciRetracement = useCallback(() => armDrawing(DRAWING_TYPE_FIB_RETRACEMENT), [armDrawing]);
 
-  const createDrawing = useCallback(async (type: DrawingTool, geometry: TrendLineGeometry) => {
+  const createDrawing = useCallback(async (type: TwoPointDrawingTool, geometry: TrendLineGeometry) => {
     if (clearingDrawingsRef.current) return;
     const temporaryId = createLocalDrawingId("temporary");
     const now = new Date().toISOString();
@@ -541,11 +551,15 @@ export function MarketReplayClient({ dataset: initialDataset, initialJournalFocu
 
   const updateDrawing = useCallback(async (
     id: string,
-    patch: { geometry?: TrendLineGeometry; style?: MarketDrawingStyle },
+    patch: { geometry?: DrawingGeometry; style?: MarketDrawingStyle },
   ) => {
     const previous = drawings.find((drawing) => drawing.id === id);
     if (clearingDrawingsRef.current || !previous || id.startsWith("temporary-") || pendingDrawingIds.has(id)) return false;
     if (patch.style && !drawingStyleMatchesType(previous.type, patch.style)) return false;
+    if (patch.geometry && !drawingGeometryMatchesType(previous.type, patch.geometry)) return false;
+    if ((!patch.geometry || JSON.stringify(patch.geometry) === JSON.stringify(previous.geometry))
+      && (!patch.style || JSON.stringify(patch.style) === JSON.stringify(previous.style))) return true;
+    const currentScope = textScopeGuard();
     const optimistic = { ...previous, ...patch, updatedAt: new Date().toISOString() } as MarketDrawing;
     setDrawings((current) => current.map((drawing) => drawing.id === id ? optimistic : drawing));
     setDrawingPending(id, true);
@@ -556,18 +570,20 @@ export function MarketReplayClient({ dataset: initialDataset, initialJournalFocu
         body: JSON.stringify(patch),
       });
       const data = await response.json() as { drawing?: MarketDrawing; error?: string };
+      if (!currentScope()) return false;
       if (!response.ok || !data.drawing) throw new Error(data.error);
       setDrawings((current) => current.map((drawing) => drawing.id === id ? data.drawing! : drawing));
       setDrawingError(null);
       return true;
     } catch {
+      if (!currentScope()) return false;
       setDrawings((current) => current.map((drawing) => drawing.id === id ? previous : drawing));
       setDrawingError(copy.marketReplay.drawingSaveError);
       return false;
     } finally {
-      setDrawingPending(id, false);
+      if (currentScope()) setDrawingPending(id, false);
     }
-  }, [dataset.id, drawings, pendingDrawingIds, setDrawingPending, fetch]);
+  }, [dataset.id, drawings, pendingDrawingIds, setDrawingPending, fetch, textScopeGuard]);
 
   const deleteDrawing = useCallback(async (id: string) => {
     const index = drawings.findIndex((drawing) => drawing.id === id);
@@ -612,16 +628,17 @@ export function MarketReplayClient({ dataset: initialDataset, initialJournalFocu
     finally { clearingDrawingsRef.current = false; setClearingDrawings(false); }
   };
 
-  const openDrawingStyle = useCallback((id: string) => {
+  const openDrawingStyle = useCallback((id: string, inlineText = false) => {
     const drawing = drawings.find((item) => item.id === id);
     if (!drawing) return;
     setSelectedDrawingId(id);
+    if (drawing.type === DRAWING_TYPE_TEXT) { openTextDrawing(drawing, inlineText); return; }
     if (drawing.type === DRAWING_TYPE_RECTANGLE) { setRectangleStyleId(id); return; }
     setStyleDrawingId(id);
     setStyleDraft(drawing.type === DRAWING_TYPE_TREND_LINE
       ? { ...drawing.style }
       : cloneFibonacciStyle(drawing.style));
-  }, [drawings]);
+  }, [drawings, openTextDrawing]);
 
   const displayedDrawings = useMemo(() => (
     styleDrawingId && styleDraft
@@ -1836,18 +1853,18 @@ export function MarketReplayClient({ dataset: initialDataset, initialJournalFocu
   useEffect(() => {
     const onKeyDown = (event: KeyboardEvent) => {
       const key = replayDrawingShortcutKey(event);
-      if (!key) return;
+      if (!key || hasVisibleReplayDialog()) return;
       if (
         settingsDialog || gateDialogOpen || checkingOrder || startDialogOpen || confirmAction || styleDrawingId
         || isReplayShortcutInputTarget(event.target)
       ) return;
       event.preventDefault();
-      if (event.repeat || rectangleStyleId) return;
-      if (key === "r") armDrawing(DRAWING_TYPE_RECTANGLE); else if (key === "f") armFibonacciRetracement(); else armTrendLine();
+      if (event.repeat || rectangleStyleId || textDrawing.editor) return;
+      armDrawing(key);
     };
     window.addEventListener("keydown", onKeyDown);
     return () => window.removeEventListener("keydown", onKeyDown);
-  }, [armDrawing, rectangleStyleId, armFibonacciRetracement, armTrendLine, confirmAction, gateDialogOpen, checkingOrder, settingsDialog, startDialogOpen, styleDrawingId]);
+  }, [armDrawing, rectangleStyleId, textDrawing.editor, confirmAction, gateDialogOpen, checkingOrder, settingsDialog, startDialogOpen, styleDrawingId]);
 
   function changeSpeed(value: number) {
     const current = latestReplayRef.current;
@@ -2528,6 +2545,7 @@ export function MarketReplayClient({ dataset: initialDataset, initialJournalFocu
                   <kbd className="ml-auto whitespace-nowrap font-mono text-[11px] text-slate-400">{shortcuts.fibonacciRetracement}</kbd>
                 </button>
                 <RectangleToolOption shortcut={shortcuts.rectangle} onArm={() => armDrawing(DRAWING_TYPE_RECTANGLE)} />
+              <TextToolOption onArm={() => armDrawing(DRAWING_TYPE_TEXT)} />
               </Popover.Content>
             </Popover.Portal>
           </Popover.Root>
@@ -2604,6 +2622,7 @@ export function MarketReplayClient({ dataset: initialDataset, initialJournalFocu
             onMeasurementArmedChange={setMeasurementArmed}
             drawingTool={drawingTool}
             onDrawingToolChange={setDrawingTool}
+            onPlaceText={textDrawing.place} drawingApiRef={textDrawing.apiRef}
             trendLineDraftStyle={defaultTrendLineStyle}
             fibonacciDraftStyle={defaultFibonacciStyle}
             rectangleDraftStyle={defaultRectangleStyle}
@@ -2672,9 +2691,7 @@ export function MarketReplayClient({ dataset: initialDataset, initialJournalFocu
                 {drawings.length ? drawings.map((drawing, index) => {
                   const pending = clearingDrawings || pendingDrawingIds.has(drawing.id);
                   const selected = selectedDrawingId === drawing.id;
-                  const drawingColor = drawing.type === DRAWING_TYPE_RECTANGLE ? drawing.style.fillColor : drawing.type === DRAWING_TYPE_TREND_LINE
-                    ? drawing.style.color
-                    : drawing.style.levels.find((level) => level.enabled)?.color ?? "#787B86";
+                  const drawingColor = drawingObjectColor(drawing);
                   return (
                     <div
                       key={drawing.id}
@@ -2692,18 +2709,17 @@ export function MarketReplayClient({ dataset: initialDataset, initialJournalFocu
                     >
                       {drawing.type === DRAWING_TYPE_RECTANGLE ? <Square className="h-4 w-4 shrink-0" style={{ color: drawingColor }} aria-hidden="true" /> : drawing.type === DRAWING_TYPE_TREND_LINE
                         ? <TrendingUp className="h-4 w-4 shrink-0" style={{ color: drawingColor, opacity: drawing.style.opacity / 100 }} />
+                        : drawing.type === DRAWING_TYPE_TEXT ? <TextIcon className="h-4 w-4 shrink-0" style={{ color: drawingColor }} aria-hidden="true" />
                         : <span className="flex h-4 w-4 shrink-0 items-center justify-center font-mono text-[9px] font-bold" style={{ color: drawingColor }}>Fib</span>}
-                      <span className="min-w-0 flex-1 truncate font-medium">{drawing.type === DRAWING_TYPE_RECTANGLE ? copy.marketReplay.rectangleObjectName(index + 1) : drawing.type === DRAWING_TYPE_TREND_LINE
-                        ? copy.marketReplay.trendLineObjectName(index + 1)
-                        : copy.marketReplay.fibonacciObjectName(index + 1)}</span>
-                      {drawing.type === DRAWING_TYPE_RECTANGLE ? <Button type="button" variant="ghost" size="icon" disabled={pending}
-                        aria-label={copy.marketReplay.rectangleSettings} onClick={event => { event.stopPropagation(); openDrawingStyle(drawing.id); }}>
+                      <span className="min-w-0 flex-1 truncate font-medium">{drawingObjectName(drawing, index + 1)}</span>
+                      {drawing.type === DRAWING_TYPE_RECTANGLE || drawing.type === DRAWING_TYPE_TEXT ? <Button type="button" variant="ghost" size="icon" disabled={pending}
+                        aria-label={drawingSettingsLabel(drawing)} onClick={event => { event.stopPropagation(); openDrawingStyle(drawing.id); }}>
                         <Settings2 className="h-4 w-4" aria-hidden="true" />
                       </Button> : null}
                       <button
                         type="button"
                         disabled={pending}
-                        aria-label={drawing.type === DRAWING_TYPE_RECTANGLE ? copy.marketReplay.rectangleDelete : drawing.type === DRAWING_TYPE_TREND_LINE ? copy.marketReplay.trendLineDelete : copy.marketReplay.fibonacciDelete}
+                        aria-label={drawingDeleteLabel(drawing)}
                         className="rounded p-1 text-slate-400 hover:bg-red-50 hover:text-red-600 disabled:opacity-40"
                         onClick={(event) => {
                           event.stopPropagation();
@@ -2743,6 +2759,26 @@ export function MarketReplayClient({ dataset: initialDataset, initialJournalFocu
           onFocusJournalEntry={(entry) => void enterJournalReview({ sequence: entry.openedSequence, no: entry.no, globalNo: entry.globalNo })}
         />
       </div>
+
+      {textDrawing.editor ? <TextSettingsDialog key={textDrawing.editor.key} editor={textDrawing.editor}
+        apiRef={textDrawing.apiRef}
+        templates={textTemplates} onTemplatesChange={setTextTemplates} onPreview={textDrawing.preview} onClose={textDrawing.close}
+        onSave={async (geometry, style) => {
+          const current = textDrawing.guard();
+          const id = textDrawing.editor!.id;
+          if (id) {
+            if (!await updateDrawing(id, { geometry, style }) || !current()) return false;
+          } else {
+            const response = await fetch(`/api/market-datasets/${dataset.id}/drawings`, {
+              method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ type: "TEXT", geometry, style }),
+            });
+            const data = await response.json() as { drawing?: MarketDrawing };
+            if (!response.ok || !data.drawing || !current()) return false;
+            const saved = data.drawing;
+            setDrawings(items => [...items, saved]); setSelectedDrawingId(saved.id);
+          }
+          setDefaultTextStyle({ ...style }); return true;
+        }} /> : null}
 
       {(() => {
         const drawing = drawings.find(d => d.id === rectangleStyleId);
@@ -2859,7 +2895,7 @@ export function MarketReplayClient({ dataset: initialDataset, initialJournalFocu
       </Dialog>
       {(() => {
         const drawing = drawings.find(item => item.id === styleDrawingId);
-        return drawing && drawing.type !== DRAWING_TYPE_RECTANGLE && styleDraft ? <LineSettingsDialog key={drawing.id}
+        return drawing && drawing.type !== DRAWING_TYPE_RECTANGLE && drawing.type !== DRAWING_TYPE_TEXT && styleDraft ? <LineSettingsDialog key={drawing.id}
           drawing={drawing} draft={styleDraft} onDraftChange={setStyleDraft}
           templates={drawing.type === DRAWING_TYPE_FIB_RETRACEMENT ? fibonacciTemplates : trendLineTemplates}
           onTemplatesChange={templates => {

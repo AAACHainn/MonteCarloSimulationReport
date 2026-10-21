@@ -9,7 +9,7 @@ import { aggregateHasGap, aggregatePhase } from "@/lib/market-replay/bar-quality
 import { formatInteger } from "@/lib/format";
 
 import {
-  useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState,
+  useCallback, useEffect, useImperativeHandle, useLayoutEffect, useMemo, useRef, useState, type Ref,
   type MouseEvent as ReactMouseEvent,
   type PointerEvent as ReactPointerEvent,
 } from "react";
@@ -55,6 +55,7 @@ import {
   DRAWING_TYPE_FIB_RETRACEMENT,
   DRAWING_TYPE_TREND_LINE,
   DRAWING_TYPE_RECTANGLE,
+  DRAWING_TYPE_TEXT, type TextDrawing, type TextGeometry, type DrawingGeometry, type TwoPointDrawingTool,
   isValidRectangleGeometry,
   type RectangleDrawing,
   type RectangleStyle,
@@ -71,6 +72,7 @@ import { drawingTimelineBars, DrawingTimelineLocator } from "@/lib/market-replay
 import { RectanglePrimitive, resizeRectangleGeometry, type RectangleHandle } from "@/lib/market-replay/rectangle-primitive";
 import { TrendLinePrimitive } from "@/lib/market-replay/trend-line-primitive";
 import { FibonacciRetracementPrimitive } from "@/lib/market-replay/fibonacci-retracement-primitive";
+import { TextDrawingPrimitive, type TextDrawingApi, type TextEditPreview, type TextEditorPosition } from "@/lib/market-replay/text-drawing-primitive";
 import { formatUtcDateTime, formatUtcOffset } from "@/lib/market-replay/display-timezone";
 import { formatPriceForTick, priceDecimalsForTick, snapPriceToTick } from "@/lib/market-replay/price-ticks";
 import { ReplayTradeAnnotationPrimitive } from "@/lib/market-replay/trade-annotation-primitive";
@@ -92,7 +94,7 @@ import {
 } from "@/lib/paper-trading/line-r-multiple";
 import type { PaperSessionSnapshot, PaperSide, ReplayTradeAnnotationData } from "@/lib/paper-trading/types";
 import { useReplayChartEma } from "./use-replay-chart-ema";
-import { isReplayDrawingDeleteShortcut, isReplayShortcutInputTarget } from "@/lib/market-replay/keyboard-shortcuts";
+import { hasVisibleReplayDialog, isReplayDrawingDeleteShortcut, isReplayShortcutInputTarget } from "@/lib/market-replay/keyboard-shortcuts";
 import { chartRewindTarget, type ChartRewindRange, type ChartRewindTarget } from "@/lib/market-replay/chart-rewind";
 import { chartBarsBeforeHiddenBoundary, chartHiddenSeriesData, chartHideAfterTarget, type ChartHideAfter } from "@/lib/market-replay/chart-hide-after";
 
@@ -250,7 +252,7 @@ export function ReplayChart({
   datasetId, dataRevision = "", priceTickSize, bars, warmupBars, displayUtcOffsetMinutes, displayIntervalSeconds, measurementArmed,
   candlestickStyle, gridVisible = true, onToggleGrid,
   onMeasurementArmedChange, drawingTool, onDrawingToolChange, trendLineDraftStyle, fibonacciDraftStyle, rectangleDraftStyle, drawings, selectedDrawingId,
-  onSelectedDrawingIdChange, onCreateDrawing, onUpdateDrawing, onDeleteDrawing,
+  onSelectedDrawingIdChange, onCreateDrawing, onUpdateDrawing, onDeleteDrawing, onPlaceText, drawingApiRef,
   onOpenDrawingStyle, emaEnabled, emaIndicators, abrEnabled, abrLength, volumeVisible,
   displaySession, barCountSession, barCountConfig, paperSnapshot,
   tradeAnnotations, tradeAnnotationsTruncated, focusSequence = null, onFocusApplied,
@@ -283,10 +285,12 @@ export function ReplayChart({
   drawings: MarketDrawing[];
   selectedDrawingId: string | null;
   onSelectedDrawingIdChange: (id: string | null) => void;
-  onCreateDrawing: (type: DrawingTool, geometry: TrendLineGeometry) => void;
-  onUpdateDrawing: (id: string, geometry: TrendLineGeometry) => void;
+  onCreateDrawing: (type: TwoPointDrawingTool, geometry: TrendLineGeometry) => void;
+  onUpdateDrawing: (id: string, geometry: DrawingGeometry) => void;
+  onPlaceText?: (anchor: DrawingAnchor) => void;
+  drawingApiRef?: Ref<TextDrawingApi>;
   onDeleteDrawing: (id: string) => void;
-  onOpenDrawingStyle: (id: string) => void;
+  onOpenDrawingStyle: (id: string, inlineText?: boolean) => void;
   emaEnabled: boolean;
   emaIndicators: EmaIndicatorConfig[];
   abrEnabled: boolean;
@@ -340,6 +344,12 @@ export function ReplayChart({
   const rectanglePrimitiveRef = useRef<RectanglePrimitive | null>(null);
   const trendLinePrimitiveRef = useRef<TrendLinePrimitive | null>(null);
   const fibonacciPrimitiveRef = useRef<FibonacciRetracementPrimitive | null>(null);
+  const textPrimitiveRef = useRef<TextDrawingPrimitive | null>(null);
+  const textEditRef = useRef<TextEditPreview | null>(null);
+  const textPositionRef = useRef<{ anchor: DrawingAnchor; listener: (position: TextEditorPosition | null) => void } | null>(null);
+  const textDragRef = useRef<{ id: string; geometry: TextGeometry } | null>(null);
+  const onPlaceTextRef = useRef(onPlaceText); onPlaceTextRef.current = onPlaceText;
+  const textVolumeRef = useRef(volumeVisible); textVolumeRef.current = volumeVisible;
   const lastDataRef = useRef<AggregatedMarketBarData[]>([]);
   const lastDataRevisionRef = useRef(dataRevision);
   const lastHiddenAfterRef = useRef<ChartHideAfter | null>(null);
@@ -380,13 +390,14 @@ export function ReplayChart({
   const drawingToolRef = useRef(drawingTool);
   const drawingsRef = useRef(drawings);
   const drawingGroups = useMemo(() => {
-    const trend: TrendLineDrawing[] = [], fibonacci: FibonacciRetracementDrawing[] = [], rectangle: RectangleDrawing[] = [];
+    const trend: TrendLineDrawing[] = [], fibonacci: FibonacciRetracementDrawing[] = [], rectangle: RectangleDrawing[] = [], text: TextDrawing[] = [];
     for (const drawing of drawings) {
       if (drawing.type === DRAWING_TYPE_RECTANGLE) rectangle.push(drawing);
       else if (drawing.type === DRAWING_TYPE_TREND_LINE) trend.push(drawing);
-      else fibonacci.push(drawing);
+      else if (drawing.type === DRAWING_TYPE_FIB_RETRACEMENT) fibonacci.push(drawing);
+      else if (drawing.type === DRAWING_TYPE_TEXT) text.push(drawing);
     }
-    return { trend, fibonacci, rectangle };
+    return { trend, fibonacci, rectangle, text };
   }, [drawings]);
   const drawingGroupsRef = useRef(drawingGroups);
   drawingGroupsRef.current = drawingGroups;
@@ -507,8 +518,30 @@ export function ReplayChart({
         session: drawingSessionRef.current,
         priceTickSize: priceTickSizeRef.current,
       });
+      const height = chartRef.current?.panes()[0]?.getHeight() ?? 0;
+      const bottom = textVolumeRef.current ? candleRef.current?.priceScale().options().scaleMargins.bottom ?? 0 : 0;
+      textPrimitiveRef.current?.setDrawings({ drawings: drawingGroupsRef.current.text, timeline,
+        selectedDrawingId: selectedDrawingIdRef.current, edit: textEditRef.current, drag: textDragRef.current,
+        paneHeight: height * (1 - bottom) });
+      const position = textPositionRef.current;
+      if (position) {
+        const chart = chartRef.current, series = candleRef.current, host = interactionRef.current;
+        const index = timeline.logicalIndexForAnchor(position.anchor);
+        const x = index === null ? null : chart?.timeScale().logicalToCoordinate(index as never);
+        const y = series?.priceToCoordinate(position.anchor.price);
+        position.listener(host && x != null && y != null && Number.isFinite(x) && Number.isFinite(y)
+          ? { host, x: Number(x), y: Number(y), width: chart?.timeScale().width() ?? 0, height: height * (1 - bottom) } : null);
+      }
     });
   }, []);
+  useImperativeHandle(drawingApiRef, () => ({
+    previewText(preview) { textEditRef.current = preview; syncDrawingPrimitive(); },
+    subscribePosition(anchor, listener) {
+      const subscription = { anchor, listener };
+      textPositionRef.current = subscription; syncDrawingPrimitive();
+      return () => { if (textPositionRef.current === subscription) textPositionRef.current = null; };
+    },
+  }), [syncDrawingPrimitive]);
 
   const setChartCursor = useCallback((cursor: "" | "crosshair" | "ns-resize" | "move" | "pointer") => {
     const container = containerRef.current;
@@ -701,6 +734,7 @@ export function ReplayChart({
     });
     const trendLinePrimitive = new TrendLinePrimitive();
     const fibonacciPrimitive = new FibonacciRetracementPrimitive();
+    const textPrimitive = new TextDrawingPrimitive();
     const tradeAnnotationPrimitive = new ReplayTradeAnnotationPrimitive();
     const barCountPrimitive = new BarCountPrimitive();
     const candleCountdownPrimitive = new CandleCountdownPrimitive();
@@ -708,6 +742,7 @@ export function ReplayChart({
     candles.attachPrimitive(rectanglePrimitive);
     candles.attachPrimitive(trendLinePrimitive);
     candles.attachPrimitive(fibonacciPrimitive);
+    candles.attachPrimitive(textPrimitive);
     candles.attachPrimitive(tradeAnnotationPrimitive);
     candles.attachPrimitive(barCountPrimitive);
     candles.attachPrimitive(candleCountdownPrimitive);
@@ -720,16 +755,21 @@ export function ReplayChart({
         chart.applyOptions({ width: entry.contentRect.width, height: entry.contentRect.height });
         syncLineActionCoordinates();
         syncMeasurementCoordinates();
+        syncDrawingPrimitive();
       }
     });
     observer.observe(container);
     chart.timeScale().subscribeVisibleLogicalRangeChange(syncLineActionCoordinates);
     chart.timeScale().subscribeVisibleLogicalRangeChange(syncMeasurementCoordinates);
     chart.timeScale().subscribeVisibleLogicalRangeChange(syncVisibleSequenceRange);
+    const syncTextPosition = () => { if (textPositionRef.current) syncDrawingPrimitive(); };
+    chart.timeScale().subscribeVisibleLogicalRangeChange(syncTextPosition);
+    container.addEventListener("wheel", syncTextPosition, { passive: true });
     chartRef.current = chart; candleRef.current = candles; volumeRef.current = null;
     rectanglePrimitiveRef.current = rectanglePrimitive;
     trendLinePrimitiveRef.current = trendLinePrimitive;
     fibonacciPrimitiveRef.current = fibonacciPrimitive;
+    textPrimitiveRef.current = textPrimitive;
     tradeAnnotationPrimitiveRef.current = tradeAnnotationPrimitive;
     barCountPrimitiveRef.current = barCountPrimitive;
     candleCountdownPrimitiveRef.current = candleCountdownPrimitive;
@@ -743,15 +783,19 @@ export function ReplayChart({
       chart.timeScale().unsubscribeVisibleLogicalRangeChange(syncLineActionCoordinates);
       chart.timeScale().unsubscribeVisibleLogicalRangeChange(syncMeasurementCoordinates);
       chart.timeScale().unsubscribeVisibleLogicalRangeChange(syncVisibleSequenceRange);
+      chart.timeScale().unsubscribeVisibleLogicalRangeChange(syncTextPosition);
+      container.removeEventListener("wheel", syncTextPosition);
       candles.detachPrimitive(rectanglePrimitive);
       candles.detachPrimitive(trendLinePrimitive);
       candles.detachPrimitive(fibonacciPrimitive);
+      candles.detachPrimitive(textPrimitive);
       candles.detachPrimitive(tradeAnnotationPrimitive);
       candles.detachPrimitive(barCountPrimitive);
       candles.detachPrimitive(candleCountdownPrimitive);
       rectanglePrimitiveRef.current = null;
       trendLinePrimitiveRef.current = null;
       fibonacciPrimitiveRef.current = null;
+      textPrimitiveRef.current = null; textEditRef.current = null; textDragRef.current = null;
       tradeAnnotationPrimitiveRef.current = null;
       barCountPrimitiveRef.current = null;
       candleCountdownPrimitiveRef.current = null;
@@ -1052,6 +1096,8 @@ export function ReplayChart({
       start: { x: number; y: number };
       end: { x: number; y: number };
     } | null = null;
+    let textDragging: { id: string; clientX: number; clientY: number; geometry: TextGeometry; x: number; y: number } | null = null;
+    let capturedPointer: number | null = null;
 
     const pointAtCoordinate = (x: number, y: number, requireInside: boolean): PositionedAnchor | null => {
       const currentBars = barsRef.current;
@@ -1104,26 +1150,34 @@ export function ReplayChart({
       const trend = trendLinePrimitiveRef.current?.hitTestAt(point) ?? null;
       const fibonacci = fibonacciPrimitiveRef.current?.hitTestAt(point) ?? null;
       const rectangle = rectanglePrimitiveRef.current?.hitTestAt(point) ?? null;
-      return [trend, fibonacci, rectangle].filter(item => item !== null)
-        .sort((a, b) => b.priority - a.priority || a.distance - b.distance)[0] ?? null;
+      const text = textPrimitiveRef.current?.hitTestAt(point) ?? null;
+      return [trend, fibonacci, rectangle, text].filter(item => item !== null)
+        .sort((a, b) => b.priority - a.priority || Number(b.part === "text") - Number(a.part === "text") || a.distance - b.distance)[0] ?? null;
     };
     const drawingCoordinates = (drawing: MarketDrawing) => (
       drawing.type === DRAWING_TYPE_RECTANGLE ? rectanglePrimitiveRef.current?.getDrawingCoordinates(drawing.id)
         : drawing.type === DRAWING_TYPE_TREND_LINE
         ? trendLinePrimitiveRef.current?.getDrawingCoordinates(drawing.id)
-        : fibonacciPrimitiveRef.current?.getDrawingCoordinates(drawing.id)
+        : drawing.type === DRAWING_TYPE_FIB_RETRACEMENT ? fibonacciPrimitiveRef.current?.getDrawingCoordinates(drawing.id) : null
     );
 
     const down = (event: PointerEvent) => {
       if (event.pointerType !== "mouse" || event.button !== 0 || !interaction.contains(event.target as Node)) return;
       const target = event.target as HTMLElement;
-      if (target.closest("button,input,[data-context-menu],[data-order-ticket],[data-line-action]")) return;
+      if (target.closest("button,input,textarea,[data-text-editor],[data-context-menu],[data-order-ticket],[data-line-action]")) return;
 
       if (drawingToolRef.current) {
         const activeTool = drawingToolRef.current;
         const initial = pointAt(event.clientX, event.clientY);
         if (!initial) return;
         stopEvent(event);
+        if (activeTool === DRAWING_TYPE_TEXT) {
+          const height = chart.panes()[0]?.getHeight() ?? 0;
+          const bottom = textVolumeRef.current ? series.priceScale().options().scaleMargins.bottom : 0;
+          if (initial.coordinate.y > height * (1 - bottom)) return;
+          commitDraft(null, null); drawingToolRef.current = null; onDrawingToolChangeRef.current(null);
+          onPlaceTextRef.current?.(initial.anchor); setChartCursor(""); return;
+        }
         const current = drawingDraftRef.current;
         if (!current) {
           commitDraft(
@@ -1172,6 +1226,16 @@ export function ReplayChart({
         })) return;
       const id = hit.drawingId;
       const drawing = drawingsRef.current.find((item) => item.id === id);
+      if (drawing?.type === DRAWING_TYPE_TEXT) {
+        const textCoordinate = textPrimitiveRef.current?.getDrawingCoordinates(id);
+        if (!textCoordinate || id.startsWith("temporary-")) return;
+        if ([...lineTargetsRef.current.values()].some(target => {
+          const y = series.priceToCoordinate(target.price); return y !== null && Math.abs(Number(y) - (event.clientY - rect.top)) <= 8;
+        })) return;
+        stopEvent(event); onSelectedDrawingIdChangeRef.current(id); selectedDrawingIdRef.current = id;
+        textDragging = { id, clientX: event.clientX, clientY: event.clientY, geometry: drawing.geometry, x: textCoordinate.x, y: textCoordinate.y };
+        capturedPointer = event.pointerId; interaction.setPointerCapture(event.pointerId); chart.applyOptions({ handleScroll: false }); setChartCursor("move"); return;
+      }
       const coordinate = drawing ? drawingCoordinates(drawing) : null;
       if (!drawing || !coordinate || id.startsWith("temporary-")) return;
       stopEvent(event);
@@ -1179,7 +1243,7 @@ export function ReplayChart({
       selectedDrawingIdRef.current = id;
       dragging = {
         id,
-        kind: hit.part,
+        kind: hit.part as "start" | "end" | "line" | RectangleHandle,
         clientX: event.clientX,
         clientY: event.clientY,
         geometry: drawing.geometry,
@@ -1187,11 +1251,25 @@ export function ReplayChart({
         end: coordinate.end,
       };
       interaction.setPointerCapture(event.pointerId);
+      capturedPointer = event.pointerId;
       chart.applyOptions({ handleScroll: false });
       setChartCursor(dragging.kind === "line" ? "move" : "crosshair");
     };
 
     const processDrawingMove = (event: PointerEvent) => {
+      if (textDragging) {
+        stopEvent(event);
+        const dx = event.clientX - textDragging.clientX, dy = event.clientY - textDragging.clientY;
+        const positioned = pointAtCoordinate(textDragging.x + dx, textDragging.y + dy, false);
+        if (positioned) {
+          const original = textDragging.geometry.anchor;
+          const anchor = { ...positioned.anchor };
+          if (dx === 0 || positioned.coordinate.x === textDragging.x) { anchor.timestamp = original.timestamp; anchor.sourceSequence = original.sourceSequence; }
+          if (dy === 0 || positioned.coordinate.y === textDragging.y) anchor.price = original.price;
+          textDragRef.current = { id: textDragging.id, geometry: { anchor, text: textDragging.geometry.text } }; syncDrawingPrimitive();
+        }
+        return;
+      }
       const draft = drawingDraftRef.current;
       if (drawingToolRef.current && draft) {
         const initial = pointAt(event.clientX, event.clientY);
@@ -1261,7 +1339,7 @@ export function ReplayChart({
       pendingPointer = null;
     };
     const move = (event: PointerEvent) => {
-      if (!dragging && !(drawingToolRef.current && drawingDraftRef.current)) return;
+      if (!dragging && !textDragging && !(drawingToolRef.current && drawingDraftRef.current)) return;
       stopEvent(event);
       pendingPointer = event;
       if (pointerFrame !== null) return;
@@ -1272,6 +1350,16 @@ export function ReplayChart({
       });
     };
     const finish = (event: PointerEvent) => {
+      if (textDragging) {
+        const moved = pendingPointer !== null || event.clientX !== textDragging.clientX || event.clientY !== textDragging.clientY;
+        clearPointerFrame(); if (moved) processDrawingMove(event); stopEvent(event);
+        const preview = textDragRef.current;
+        if (preview && JSON.stringify(preview.geometry) !== JSON.stringify(textDragging.geometry)) onUpdateDrawingRef.current(preview.id, preview.geometry);
+        textDragging = null; textDragRef.current = null; syncDrawingPrimitive();
+        if (interaction.hasPointerCapture(event.pointerId)) interaction.releasePointerCapture(event.pointerId);
+        capturedPointer = null;
+        chart.applyOptions({ handleScroll: true }); setChartCursor(""); return;
+      }
       if (!dragging) return;
       const moved = pendingPointer !== null || event.clientX !== dragging.clientX || event.clientY !== dragging.clientY;
       clearPointerFrame();
@@ -1283,19 +1371,25 @@ export function ReplayChart({
         return before.price !== after.price || before.timestamp !== after.timestamp || before.sourceSequence !== after.sourceSequence;
       })) onUpdateDrawingRef.current(preview.id, preview.geometry);
       dragging = null;
+      textDragging = null; textDragRef.current = null;
       requestAnimationFrame(() => commitPreview(null));
       if (interaction.hasPointerCapture(event.pointerId)) interaction.releasePointerCapture(event.pointerId);
+      capturedPointer = null;
       chart.applyOptions({ handleScroll: true });
       setChartCursor("");
     };
     const cancelDrag = () => {
       clearPointerFrame();
       dragging = null;
+      textDragging = null; textDragRef.current = null;
       commitPreview(null);
+      if (capturedPointer !== null && interaction.hasPointerCapture(capturedPointer)) interaction.releasePointerCapture(capturedPointer);
+      capturedPointer = null;
       chart.applyOptions({ handleScroll: true });
       setChartCursor(drawingToolRef.current ? "crosshair" : "");
     };
     const doubleClick = (event: MouseEvent) => {
+      if ((event.target as HTMLElement).closest("[data-text-editor]")) return;
       const rect = container.getBoundingClientRect();
       const id = hitDrawingAt({
         x: event.clientX - rect.left,
@@ -1303,11 +1397,11 @@ export function ReplayChart({
       })?.drawingId;
       if (!id || id.startsWith("temporary-")) return;
       stopEvent(event);
-      onOpenDrawingStyleRef.current(id);
+      onOpenDrawingStyleRef.current(id, true);
     };
     const key = (event: KeyboardEvent) => {
-      if (event.defaultPrevented || event.isComposing || isReplayShortcutInputTarget(event.target)) return;
-      if (event.key === "Escape" && dragging) {
+      if (event.defaultPrevented || event.isComposing || hasVisibleReplayDialog() || isReplayShortcutInputTarget(event.target)) return;
+      if (event.key === "Escape" && (dragging || textDragging)) {
         stopEvent(event);
         cancelDrag();
         return;
@@ -1339,6 +1433,9 @@ export function ReplayChart({
     window.addEventListener("keydown", key, true);
     return () => {
       clearPointerFrame();
+      textDragRef.current = null;
+      if (capturedPointer !== null && interaction.hasPointerCapture(capturedPointer)) interaction.releasePointerCapture(capturedPointer);
+      if (chartRef.current === chart) { chart.applyOptions({ handleScroll: true }); commitPreview(null); }
       interaction.removeEventListener("pointerdown", down, true);
       window.removeEventListener("pointermove", move, true);
       window.removeEventListener("pointerup", finish, true);
@@ -1347,7 +1444,7 @@ export function ReplayChart({
       interaction.removeEventListener("dblclick", doubleClick, true);
       window.removeEventListener("keydown", key, true);
     };
-  }, [priceTickSize, setChartCursor, syncDrawingPrimitive]);
+  }, [priceTickSize, setChartCursor, syncDrawingPrimitive, visibilityScope]);
 
   useEffect(() => {
     if (drawingTool) {
@@ -1639,7 +1736,7 @@ export function ReplayChart({
       if (drawingToolRef.current || drawingDraftRef.current || drawingPreviewRef.current
         || measurementArmedRef.current || measurementRef.current) return;
       const target = event.target as HTMLElement;
-      if (target.closest("button,input,[data-context-menu],[data-order-ticket],[data-line-action]") || nearOrderLine(event.clientY)) return;
+      if (target.closest("button,input,textarea,[data-text-editor],[data-context-menu],[data-order-ticket],[data-line-action]") || nearOrderLine(event.clientY)) return;
       pointerId = event.pointerId;
       start = { x: event.clientX, y: event.clientY };
       latestPointer = start;
@@ -1706,7 +1803,7 @@ export function ReplayChart({
       .sort((a, b) => Math.abs(Number(a.coordinate) - y) - Math.abs(Number(b.coordinate) - y))[0];
     const down = (event: PointerEvent) => {
       if (event.shiftKey || measurementArmedRef.current || drawingToolRef.current || drawingDraftRef.current || drawingPreviewRef.current) return;
-      if ((event.target as HTMLElement | null)?.closest("button,input,[data-context-menu]")) return;
+      if ((event.target as HTMLElement | null)?.closest("button,input,textarea,[data-text-editor],[data-context-menu]")) return;
       const y = event.clientY - container.getBoundingClientRect().top;
       const dragKey = (event.target as HTMLElement | null)?.closest<HTMLElement>("[data-line-drag-key]")?.dataset.lineDragKey;
       const directTarget = dragKey ? lineTargetsRef.current.get(dragKey) : undefined;
@@ -1773,7 +1870,7 @@ export function ReplayChart({
   function openContextMenu(event: ReactMouseEvent<HTMLDivElement>) {
     event.preventDefault();
     if (drawingToolRef.current || drawingDraftRef.current || drawingPreviewRef.current) return;
-    if ((event.target as HTMLElement).closest("[data-order-ticket],[data-context-menu],[data-line-action],[data-hidden-bars-notice]")) return;
+    if ((event.target as HTMLElement).closest("[data-text-editor],[data-order-ticket],[data-context-menu],[data-line-action],[data-hidden-bars-notice]")) return;
     const series = candleRef.current;
     const root = event.currentTarget.getBoundingClientRect();
     const rawPrice = series?.coordinateToPrice((event.clientY - root.top) as never);

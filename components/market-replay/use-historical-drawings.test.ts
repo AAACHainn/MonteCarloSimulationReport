@@ -1,7 +1,7 @@
 import { webcrypto } from "node:crypto";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { useHistoricalDrawings } from "./use-historical-drawings";
-import { DEFAULT_RECTANGLE_STYLE, type MarketDrawing } from "@/lib/market-replay/chart-drawings";
+import { DEFAULT_RECTANGLE_STYLE, DEFAULT_TEXT_STYLE, type MarketDrawing, type TextDrawing } from "@/lib/market-replay/chart-drawings";
 
 // Keep state/ref slots across explicit renders; exercise network and storage behavior without adding a DOM dependency.
 const hooks = vi.hoisted(() => ({ index: 0, slots: [] as unknown[], effects: [] as Array<() => () => void> }));
@@ -58,6 +58,30 @@ function harness() {
 }
 
 describe("historical drawing persistence", () => {
+  it("keeps text creation out of the optimistic collection during delayed POST and reconciles once", async () => {
+    const app = harness(); const api = await app.ready();
+    let resolve!: (response: Response) => void;
+    fetcher.mockImplementationOnce(() => new Promise<Response>(done => { resolve = done; }));
+    const candidate = { datasetId: "dataset", type: "TEXT" as const, geometry: { anchor: original.geometry.start, text: "文字" }, style: DEFAULT_TEXT_STYLE };
+    const operation = api.create(candidate);
+    expect(app.render().drawings).toEqual([original]); expect(app.render().busy).toBe(true);
+    expect(await app.render().create(candidate)).toBeNull();
+    const saved: TextDrawing = { ...candidate, id: "text-saved", createdAt: original.createdAt, updatedAt: original.updatedAt };
+    resolve(json({ drawing: saved }, 201)); expect(await operation).toEqual(saved);
+    expect(app.render().drawings).toEqual([original, saved]);
+    expect(await app.render().update(saved.id, { geometry: saved.geometry, style: saved.style })).toBe(true);
+    expect(fetcher.mock.calls.filter(([, init]) => init?.method === "POST")).toHaveLength(1);
+    expect(fetcher.mock.calls.filter(([, init]) => init?.method === "PATCH")).toHaveLength(0);
+  });
+  it("ignores late text writes after scope cleanup", async () => {
+    const app = harness(); const api = await app.ready();
+    let resolve!: (response: Response) => void;
+    fetcher.mockImplementationOnce(() => new Promise<Response>(done => { resolve = done; }));
+    const candidate = { datasetId: "dataset", type: "TEXT" as const, geometry: { anchor: original.geometry.start, text: "文字" }, style: DEFAULT_TEXT_STYLE };
+    const operation = api.create(candidate); app.cleanup();
+    resolve(json({ drawing: { ...candidate, id: "late", createdAt: original.createdAt, updatedAt: original.updatedAt } }, 201));
+    expect(await operation).toBeNull(); expect(app.render().drawings).toEqual([original]);
+  });
   it("uses the server as authority and never merges stale browser originals on reload", async () => {
     storage.getItem.mockReturnValue(JSON.stringify([{ ...original, style: { ...DEFAULT_RECTANGLE_STYLE, fillOpacity: 75 } }, { ...original, id: "history-journal-local" }]));
     const app = harness(); const api = await app.ready();

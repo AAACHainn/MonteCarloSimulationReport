@@ -8,11 +8,13 @@ import type { AggregatedMarketBarData, TradingSessionConfig } from "@/lib/market
 export const DRAWING_TYPE_TREND_LINE = "TREND_LINE" as const;
 export const DRAWING_TYPE_FIB_RETRACEMENT = "FIB_RETRACEMENT" as const;
 export const DRAWING_TYPE_RECTANGLE = "RECTANGLE" as const;
+export const DRAWING_TYPE_TEXT = "TEXT" as const;
 export const TREND_LINE_STYLES = ["SOLID", "DASHED", "DOTTED"] as const;
-export const DRAWING_TYPES = [DRAWING_TYPE_TREND_LINE, DRAWING_TYPE_FIB_RETRACEMENT, DRAWING_TYPE_RECTANGLE] as const;
+export const DRAWING_TYPES = [DRAWING_TYPE_TREND_LINE, DRAWING_TYPE_FIB_RETRACEMENT, DRAWING_TYPE_RECTANGLE, DRAWING_TYPE_TEXT] as const;
 
 export type DrawingType = (typeof DRAWING_TYPES)[number];
 export type DrawingTool = DrawingType;
+export type TwoPointDrawingTool = Exclude<DrawingTool, "TEXT">;
 
 export type DrawingAnchor = {
   timestamp: string;
@@ -86,8 +88,41 @@ export const DEFAULT_RECTANGLE_STYLE: RectangleStyle = {
   fillColor: "#2962FF", fillOpacity: 15, borderStyle: "NONE", borderColor: "#2962FF", borderWidth: 1,
 };
 
-export type MarketDrawing = TrendLineDrawing | FibonacciRetracementDrawing | RectangleDrawing;
-export type MarketDrawingStyle = TrendLineStyle | FibonacciRetracementStyle | RectangleStyle;
+export const TEXT_FONT_SIZES = [12, 14, 16, 18, 20, 24, 28, 32, 36, 48] as const;
+export const TEXT_MAX_LENGTH = 2000;
+export const TEXT_MAX_LINES = 50;
+export type TextGeometry = { anchor: DrawingAnchor; text: string };
+export type TextDrawingStyle = {
+  color: string; fontSize: (typeof TEXT_FONT_SIZES)[number]; bold: boolean; italic: boolean;
+  backgroundEnabled: boolean; backgroundColor: string; backgroundOpacity: number;
+  borderEnabled: boolean; borderColor: string; wrapEnabled: boolean; wrapWidth: number;
+};
+export type TextDrawing = Omit<TrendLineDrawing, "type" | "geometry" | "style"> & {
+  type: "TEXT"; geometry: TextGeometry; style: TextDrawingStyle;
+};
+export type TextTemplate = { id: string; name: string; style: TextDrawingStyle };
+export type TextPreferences = { defaultStyle: TextDrawingStyle; templates: TextTemplate[] };
+export const DEFAULT_TEXT_STYLE: TextDrawingStyle = {
+  color: "#2962FF", fontSize: 18, bold: false, italic: false,
+  backgroundEnabled: false, backgroundColor: "#FFFFFF", backgroundOpacity: 90,
+  borderEnabled: false, borderColor: "#2962FF", wrapEnabled: false, wrapWidth: 240,
+};
+export function normalizeDrawingText(text: string) { return text.replace(/\r\n?/g, "\n"); }
+export type TwoPointDrawing = TrendLineDrawing | FibonacciRetracementDrawing | RectangleDrawing;
+export type MarketDrawing = TwoPointDrawing | TextDrawing;
+export type DrawingGeometry = TrendLineGeometry | TextGeometry;
+export type MarketDrawingStyle = TrendLineStyle | FibonacciRetracementStyle | RectangleStyle | TextDrawingStyle;
+type NewDrawing<T> = T extends MarketDrawing ? Omit<T, "id" | "createdAt" | "updatedAt"> : never;
+export type NewMarketDrawing = NewDrawing<MarketDrawing>;
+export function twoPointDrawingInput(datasetId: string, type: TwoPointDrawingTool, geometry: TrendLineGeometry,
+  styles: { rectangle: RectangleStyle; trend: TrendLineStyle; fibonacci: FibonacciRetracementStyle }): NewMarketDrawing {
+  const base = { datasetId, geometry };
+  switch (type) {
+    case "RECTANGLE": return { ...base, type, style: { ...styles.rectangle } };
+    case "TREND_LINE": return { ...base, type, style: { ...styles.trend } };
+    case "FIB_RETRACEMENT": return { ...base, type, style: { ...styles.fibonacci, levels: styles.fibonacci.levels.map(level => ({ ...level })) } };
+  }
+}
 
 export type TrendLineTemplate = {
   id: string;
@@ -146,6 +181,28 @@ const drawingAnchorSchema = z.object({
   sourceSequence: z.number().int().nonnegative().nullable(),
   price: finiteNumber,
 }).strict();
+
+export const textGeometrySchema = z.object({
+  anchor: drawingAnchorSchema,
+  text: z.string().transform(normalizeDrawingText).pipe(z.string().max(TEXT_MAX_LENGTH)
+    .refine(text => text.length <= TEXT_MAX_LENGTH && text.trim().length > 0 && text.split("\n").length <= TEXT_MAX_LINES)),
+}).strict();
+export const textDrawingStyleSchema = z.object({
+  color: z.string().regex(/^#[0-9a-f]{6}$/i),
+  fontSize: z.number().refine((size): size is TextDrawingStyle["fontSize"] => TEXT_FONT_SIZES.includes(size as TextDrawingStyle["fontSize"])),
+  bold: z.boolean(), italic: z.boolean(), backgroundEnabled: z.boolean(),
+  backgroundColor: z.string().regex(/^#[0-9a-f]{6}$/i), backgroundOpacity: z.number().int().min(0).max(100),
+  borderEnabled: z.boolean(), borderColor: z.string().regex(/^#[0-9a-f]{6}$/i),
+  wrapEnabled: z.boolean(), wrapWidth: z.number().int().min(120).max(800),
+}).strict();
+const textPreferencesSchema = z.object({ defaultStyle: textDrawingStyleSchema,
+  templates: z.array(z.object({ id: z.string().min(1), name: z.string().trim().min(1).max(50), style: textDrawingStyleSchema }).strict()).max(50),
+}).strict();
+export function parseTextPreferences(value: string | null): TextPreferences {
+  try { const parsed = textPreferencesSchema.safeParse(value ? JSON.parse(value) : null); if (parsed.success) return parsed.data; }
+  catch { /* Invalid or unavailable storage uses defaults. */ }
+  return { defaultStyle: { ...DEFAULT_TEXT_STYLE }, templates: [] };
+}
 
 export const trendLineGeometrySchema = z.object({
   start: drawingAnchorSchema,
@@ -232,6 +289,8 @@ export const fibonacciRetracementPreferencesSchema = z.object({
 }).strict();
 
 export const createMarketDrawingSchema = z.discriminatedUnion("type", [
+  z.object({ type: z.literal(DRAWING_TYPE_TEXT), geometry: textGeometrySchema,
+    style: textDrawingStyleSchema.default(DEFAULT_TEXT_STYLE) }).strict(),
   z.object({
     type: z.literal(DRAWING_TYPE_RECTANGLE),
     geometry: trendLineGeometrySchema.refine(isValidRectangleGeometry),
@@ -250,8 +309,8 @@ export const createMarketDrawingSchema = z.discriminatedUnion("type", [
 ]);
 
 export const updateMarketDrawingSchema = z.object({
-  geometry: trendLineGeometrySchema.optional(),
-  style: z.union([trendLineStyleSchema, fibonacciRetracementStyleSchema, rectangleStyleSchema]).optional(),
+  geometry: z.union([trendLineGeometrySchema, textGeometrySchema]).optional(),
+  style: z.union([trendLineStyleSchema, fibonacciRetracementStyleSchema, rectangleStyleSchema, textDrawingStyleSchema]).optional(),
 }).strict().refine((value) => value.geometry !== undefined || value.style !== undefined);
 
 type StoredDrawing = {
@@ -268,22 +327,26 @@ export function serializeMarketDrawing(record: StoredDrawing): MarketDrawing {
   const base = {
     id: record.id,
     datasetId: record.datasetId,
-    geometry: trendLineGeometrySchema.parse(JSON.parse(record.geometry)),
     createdAt: record.createdAt.toISOString(),
     updatedAt: record.updatedAt.toISOString(),
   };
+  if (record.type === DRAWING_TYPE_TEXT) return { ...base, type: DRAWING_TYPE_TEXT,
+    geometry: textGeometrySchema.parse(JSON.parse(record.geometry)), style: textDrawingStyleSchema.parse(JSON.parse(record.style)) };
+  const geometry = trendLineGeometrySchema.parse(JSON.parse(record.geometry));
   if (record.type === DRAWING_TYPE_TREND_LINE) return {
     ...base,
+    geometry,
     type: DRAWING_TYPE_TREND_LINE,
     style: trendLineStyleSchema.parse(JSON.parse(record.style)),
   };
   if (record.type === DRAWING_TYPE_FIB_RETRACEMENT) return {
     ...base,
+    geometry,
     type: DRAWING_TYPE_FIB_RETRACEMENT,
     style: fibonacciRetracementStyleSchema.parse(JSON.parse(record.style)),
   };
   if (record.type === DRAWING_TYPE_RECTANGLE) return {
-    ...base, type: DRAWING_TYPE_RECTANGLE, style: rectangleStyleSchema.parse(JSON.parse(record.style)),
+    ...base, geometry, type: DRAWING_TYPE_RECTANGLE, style: rectangleStyleSchema.parse(JSON.parse(record.style)),
   };
   throw new Error("Unsupported drawing type");
 }
@@ -311,10 +374,18 @@ export function parseFibonacciRetracementPreferences(value: string | null): Fibo
 }
 
 export function drawingStyleMatchesType(type: DrawingType, style: MarketDrawingStyle) {
+  if (type === DRAWING_TYPE_TEXT) return textDrawingStyleSchema.safeParse(style).success;
   if (type === DRAWING_TYPE_RECTANGLE) return rectangleStyleSchema.safeParse(style).success;
   return type === DRAWING_TYPE_TREND_LINE
     ? trendLineStyleSchema.safeParse(style).success
     : fibonacciRetracementStyleSchema.safeParse(style).success;
+}
+
+export function drawingGeometryMatchesType(type: string, geometry: DrawingGeometry) {
+  if (!DRAWING_TYPES.includes(type as DrawingType)) return false;
+  if (type === DRAWING_TYPE_TEXT) return textGeometrySchema.safeParse(geometry).success;
+  const result = trendLineGeometrySchema.safeParse(geometry);
+  return result.success && (type !== DRAWING_TYPE_RECTANGLE || isValidRectangleGeometry(result.data));
 }
 
 export function fibonacciPriceAtLevel(geometry: TrendLineGeometry, level: number) {

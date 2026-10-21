@@ -16,15 +16,17 @@ let listeners: Set<(event: KeyboardEvent) => void>;
 let cleanups: Array<() => void>;
 
 function control() {
-  const element = { tagName: "BUTTON", isConnected: true, getClientRects: () => [1], focus: vi.fn(() => { activeElement = element; }) };
+  const element = { tagName: "BUTTON", initialFocus: false, hasAttribute: (name: string) => name === "data-dialog-initial-focus" && element.initialFocus,
+    isConnected: true, getClientRects: () => [1], focus: vi.fn(() => { activeElement = element; }) };
   return element;
 }
 
-function DialogLifecycleHarness(modal: boolean) {
+function DialogLifecycleHarness(modal: boolean, explicitFocus = false) {
   const previous = control();
   activeElement = previous;
   const first = control();
   const last = control();
+  last.initialFocus = explicitFocus;
   const panel = {
     contains: (element: unknown) => element === first || element === last,
     querySelectorAll: () => [first, last],
@@ -40,8 +42,8 @@ function DialogLifecycleHarness(modal: boolean) {
   } };
 }
 
-function key(key: string, shiftKey = false, defaultPrevented = false) {
-  const event = { key, shiftKey, defaultPrevented, preventDefault: vi.fn(() => { event.defaultPrevented = true; }) };
+function key(key: string, shiftKey = false, defaultPrevented = false, isComposing = false) {
+  const event = { key, shiftKey, defaultPrevented, isComposing, preventDefault: vi.fn(() => { event.defaultPrevented = true; }) };
   for (const listener of listeners) listener(event as unknown as KeyboardEvent);
   return event;
 }
@@ -68,6 +70,15 @@ afterEach(() => {
 });
 
 describe("modal and floating dialog lifecycle", () => {
+  it("focuses the explicitly marked text editor instead of the first control", () => {
+    const dialog = DialogLifecycleHarness(true, true);
+    vi.runAllTimers(); expect(activeElement).toBe(dialog.last);
+  });
+  it("keeps the dialog open while Escape belongs to the composing input method", () => {
+    const dialog = DialogLifecycleHarness(true);
+    key("Escape", false, false, true); expect(dialog.onClose).not.toHaveBeenCalled();
+    key("Escape"); expect(dialog.onClose).toHaveBeenCalledOnce();
+  });
   it("allows chart scrolling and keyboard focus outside a floating window", () => {
     const dialog = DialogLifecycleHarness(false);
     vi.runAllTimers();

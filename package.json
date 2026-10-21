@@ -11,6 +11,7 @@
     "test": "vitest run",
     "benchmark:drawing-projection": "node --import tsx scripts/benchmark-drawing-projection.ts",
     "benchmark:rectangle-drawings": "node --import tsx scripts/benchmark-rectangle-drawings.ts",
+    "benchmark:text-drawings": "node --import tsx scripts/benchmark-text-drawings.ts",
     "benchmark:market-import-memory": "node --max-old-space-size=1024 --import tsx scripts/benchmark-market-import-memory.ts",
     "prisma:generate": "prisma generate",
     "prisma:migrate": "prisma migrate dev",

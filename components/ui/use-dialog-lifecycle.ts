@@ -30,10 +30,14 @@ export function useDialogLifecycle(open: boolean, panelRef: RefObject<HTMLElemen
     const focusable = () => [...(panel?.querySelectorAll<HTMLElement>('button:not([disabled]), input:not([disabled]), select:not([disabled]), textarea:not([disabled]), a[href], [tabindex="0"]') ?? [])]
       .filter((element) => element.getClientRects().length > 0);
     const timer = window.setTimeout(() => {
-      if (isTopDialog()) (focusable().find((element) => element.tagName === "INPUT") ?? focusable()[0] ?? panel)?.focus();
+      if (isTopDialog()) {
+        const controls = focusable();
+        (controls.find(element => element.hasAttribute("data-dialog-initial-focus"))
+          ?? controls.find(element => element.tagName === "INPUT") ?? controls[0] ?? panel)?.focus();
+      }
     }, 0);
     const onKeyDown = (event: KeyboardEvent) => {
-      if (!isTopDialog() || event.defaultPrevented) return;
+      if (!isTopDialog() || event.defaultPrevented || event.isComposing) return;
       if (event.key === "Escape") onCloseRef.current();
       if (modal && event.key === "Tab") {
         const elements = focusable();

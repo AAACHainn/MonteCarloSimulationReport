@@ -45,13 +45,14 @@ export function createReplayStepShortcut() {
   };
 }
 
-export function replayDrawingShortcutKey(event: ShortcutKeyEvent): "t" | "f" | "r" | null {
+export function replayDrawingShortcutKey(event: ShortcutKeyEvent): "TREND_LINE" | "FIB_RETRACEMENT" | "RECTANGLE" | "TEXT" | null {
   if (event.defaultPrevented || event.isComposing || event.ctrlKey || event.metaKey) return null;
   // Option changes event.key on macOS; prefer physical keys for all drawing tools.
   const key = event.code === "KeyT" ? "t" : event.code === "KeyF" ? "f" : event.code === "KeyR" ? "r"
     : !event.code || event.code === "Unidentified" ? event.key.toLowerCase() : null;
-  if (key === "r") return event.shiftKey && !event.altKey ? "r" : null;
-  return event.altKey && !event.shiftKey && (key === "t" || key === "f") ? key : null;
+  if (event.shiftKey && !event.altKey) return key === "r" ? "RECTANGLE" : key === "t" ? "TEXT" : null;
+  if (event.altKey && !event.shiftKey) return key === "t" ? "TREND_LINE" : key === "f" ? "FIB_RETRACEMENT" : null;
+  return null;
 }
 
 export function isReplayDrawingDeleteShortcut(event: ShortcutKeyEvent) {

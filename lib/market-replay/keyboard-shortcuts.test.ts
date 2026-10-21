@@ -5,26 +5,33 @@ afterEach(() => vi.unstubAllGlobals());
 describe("rectangle shortcut", () => {
   const key = { key: "R", code: "KeyR", altKey: false, ctrlKey: false, metaKey: false, shiftKey: true, isComposing: false, defaultPrevented: false };
   it("uses Shift + R with physical keys and unidentified keyboards", () => {
-    expect(replayDrawingShortcutKey(key)).toBe("r");
-    expect(replayDrawingShortcutKey({ ...key, code: "Unidentified" })).toBe("r");
-    expect(replayDrawingShortcutKey({ ...key, code: "" })).toBe("r");
+    expect(replayDrawingShortcutKey(key)).toBe("RECTANGLE");
+    expect(replayDrawingShortcutKey({ ...key, code: "Unidentified" })).toBe("RECTANGLE");
+    expect(replayDrawingShortcutKey({ ...key, code: "" })).toBe("RECTANGLE");
   });
   it.each(["altKey", "ctrlKey", "metaKey", "isComposing", "defaultPrevented"])("ignores %s", modifier => {
     expect(replayDrawingShortcutKey({ ...key, [modifier]: true })).toBeNull();
   });
-  it("releases Alt + R and ignores unmodified letters and Shift + T/F", () => {
+  it("releases Alt + R, assigns Shift + T, and ignores Shift + F", () => {
     expect(replayDrawingShortcutKey({ ...key, shiftKey: false, altKey: true })).toBeNull();
     expect(replayDrawingShortcutKey({ ...key, shiftKey: false })).toBeNull();
-    expect(replayDrawingShortcutKey({ ...key, code: "KeyT" })).toBeNull();
+    expect(replayDrawingShortcutKey({ ...key, code: "KeyT" })).toBe("TEXT");
     expect(replayDrawingShortcutKey({ ...key, code: "KeyF" })).toBeNull();
     expect(replayDrawingShortcutKey({ ...key, code: "KeyA" })).toBeNull();
   });
   it("preserves Alt + T/F, including Option-modified keys on macOS", () => {
     const alt = { ...key, altKey: true, shiftKey: false, key: "†" };
-    expect(replayDrawingShortcutKey({ ...alt, code: "KeyT" })).toBe("t");
-    expect(replayDrawingShortcutKey({ ...alt, code: "KeyF" })).toBe("f");
-    expect(replayDrawingShortcutKey({ ...alt, code: "Unidentified", key: "t" })).toBe("t");
+    expect(replayDrawingShortcutKey({ ...alt, code: "KeyT" })).toBe("TREND_LINE");
+    expect(replayDrawingShortcutKey({ ...alt, code: "KeyF" })).toBe("FIB_RETRACEMENT");
+    expect(replayDrawingShortcutKey({ ...alt, code: "Unidentified", key: "t" })).toBe("TREND_LINE");
     expect(replayDrawingShortcutKey({ ...alt, code: "KeyT", shiftKey: true })).toBeNull();
+  });
+  it("handles Shift + T fallbacks and rejects composition or other modifiers", () => {
+    expect(replayDrawingShortcutKey({ ...key, key: "T", code: "" })).toBe("TEXT");
+    expect(replayDrawingShortcutKey({ ...key, key: "t", code: "Unidentified" })).toBe("TEXT");
+    for (const modifier of ["ctrlKey", "altKey", "metaKey", "isComposing", "defaultPrevented"]) {
+      expect(replayDrawingShortcutKey({ ...key, code: "KeyT", [modifier]: true })).toBeNull();
+    }
   });
 });
 function dialog({ hidden = false, visible = true } = {}) {
