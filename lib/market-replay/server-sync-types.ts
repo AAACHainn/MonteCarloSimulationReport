@@ -1,8 +1,9 @@
-import type { PaperFillData, PaperSessionSnapshot } from "@/lib/paper-trading/types";
+import type { PaperFillData, PaperSessionSnapshot, PaperSessionSnapshotUpdate } from "@/lib/paper-trading/types";
 import type { ReplayContextRun } from "@/lib/replay-sessions/context-runs";
 
 /** Requests contain progress and chart context, never client trade results. */
 export type ReplayServerRequest = {
+  snapshotMode?: "LIVE";
   batchMode?: "BULK";
   generation: number;
   requestId: string;
@@ -26,4 +27,9 @@ export type ReplayServerResult = {
   fills: PaperFillData[];
   snapshot: PaperSessionSnapshot | null;
   displayAdvance?: DisplayAdvanceResult;
+};
+
+/** LIVE responses may omit unchanged history; resolve against the confirmed base before use. */
+export type ReplayServerResponse = Omit<ReplayServerResult, "snapshot"> & {
+  snapshot: PaperSessionSnapshotUpdate | null;
 };

@@ -9,7 +9,7 @@ import { aggregateMarketBars, getAggregationBucket } from "@/lib/market-replay/a
 import { barEmissionMode, closeAggregatedBar } from "@/lib/market-replay/bar-quality";
 import { resolveDisplaySession } from "@/lib/market-replay/chart-sessions";
 import { datasetSourceInterval, serializeSourceBar } from "@/lib/market-replay/dataset";
-import type { ReplayServerResult } from "@/lib/market-replay/server-sync-types";
+import type { ReplayServerResponse } from "@/lib/market-replay/server-sync-types";
 import { syncReplayToTarget } from "@/lib/market-replay/replay-sync";
 import { MAX_DISPLAY_ADVANCE_SOURCE_BARS, isValidDisplayInterval } from "@/lib/market-replay/types";
 import { paperAdvanceSchema } from "@/lib/validations";
@@ -32,7 +32,7 @@ async function handlePOST(request: Request, context: RouteContext) {
       response.headers.set("X-Replay-Source-Rows", String(outcome.metrics.sourceRows));
       response.headers.set("X-Replay-Summary-Rows", String(outcome.metrics.summaryRows));
     }
-    return attachReplayDiagnostics(response, { startedAt, queryStart, strategy: "flat-display-advance" });
+    return attachReplayDiagnostics(response, { startedAt, queryStart, strategy: "flat-display-advance", phases: outcome.phases });
   }
 
   const [dataset, progress] = await Promise.all([
@@ -42,7 +42,7 @@ async function handlePOST(request: Request, context: RouteContext) {
   if (!dataset || !progress) return NextResponse.json({ error: copy.marketReplay.datasetNotFound }, { status: 404 });
   if (parsed.data.historyVersion !== undefined && parsed.data.historyVersion !== dataset.historyVersion) return NextResponse.json({ error: copy.marketSync.historyChanged, code: "HISTORY_CHANGED" }, { status: 409 });
   const cached = parsed.data.requestId && progress.lastSyncRequestId === parsed.data.requestId && progress.lastSyncResponse
-    ? JSON.parse(progress.lastSyncResponse) as ReplayServerResult : null;
+    ? JSON.parse(progress.lastSyncResponse) as ReplayServerResponse : null;
   if (cached && (cached.fromSequence !== parsed.data.expectedCurrentSequence || !cached.displayAdvance)) {
     return NextResponse.json({ error: copy.paperTrading.conflict }, { status: 409 });
   }
@@ -76,6 +76,7 @@ async function handlePOST(request: Request, context: RouteContext) {
   }
 
   const outcome = cached ? { status: 200 as const, response: cached, error: null, processedBars: undefined } : await syncReplayToTarget(id, {
+    snapshotMode: parsed.data.snapshotMode,
     historyVersion: parsed.data.historyVersion,
     generation: progress.generation,
     requestId: parsed.data.requestId ?? `legacy_${randomUUID()}`,
@@ -140,7 +141,8 @@ async function handlePOST(request: Request, context: RouteContext) {
     startedAt,
     queryStart,
     strategy: parsed.data.displayIntervalSeconds === undefined ? "source-advance" : "display-bucket-advance",
+    phases: "phases" in outcome ? outcome.phases : undefined,
   });
 }
 
-export const POST = withReplaySessionRoute(handlePOST, { write: true, annotation: false });
+export const POST = withReplaySessionRoute(handlePOST, { write: true, annotation: false, diagnostics: true });

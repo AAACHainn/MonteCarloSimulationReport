@@ -180,6 +180,7 @@ export const paperOrderUpdateSchema = z.object({
 copy.paperTrading.orderUpdateRequired);
 
 export const paperAdvanceSchema = z.object({
+  snapshotMode: z.literal("LIVE").optional(),
   flatOnly: z.boolean().optional(),
   abrHistoryStartSequence: z.number().int().nonnegative().optional(),
   requestId: z.string().trim().min(1).max(120).optional(),
@@ -323,6 +324,7 @@ export const replaySyncSchema = z.object({
 });
 
 export const replayServerSyncSchema = z.object({
+  snapshotMode: z.literal("LIVE").optional(),
   batchMode: z.literal("BULK").optional(),
   generation: z.number().int().positive(), requestId: z.string().trim().min(1).max(120),
   confirmedSequence: z.number().int().min(-1), syncVersion: z.number().int().min(0),

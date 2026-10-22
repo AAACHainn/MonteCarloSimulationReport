@@ -13,8 +13,8 @@ const { DatabaseSync } = createRequire(import.meta.url)("node:sqlite") as typeof
 const clients: PrismaClient[] = [];
 const files: string[] = [];
 function file() { const path = join(tmpdir(), "sqlite-client-" + randomUUID() + ".db"); files.push(path); return path; }
-function client(path: string, mode: "wal" | "delete" = "wal", allowCreate = true) {
-  const value = createDatabaseClient({ datasourceUrl: "file:" + path }, { env: { SQLITE_DRIVER: "better-sqlite3", SQLITE_JOURNAL_MODE: mode }, allowCreate });
+function client(path: string, mode: "wal" | "delete" = "wal", allowCreate = true, synchronous = "FULL") {
+  const value = createDatabaseClient({ datasourceUrl: "file:" + path }, { env: { SQLITE_DRIVER: "better-sqlite3", SQLITE_JOURNAL_MODE: mode, SQLITE_SYNCHRONOUS: synchronous }, allowCreate });
   clients.push(value); return value;
 }
 afterEach(async () => {
@@ -47,14 +47,40 @@ describe("configured SQLite runtime", () => {
       expect(Number((await db.$queryRawUnsafe<Array<{ foreign_keys: number }>>("PRAGMA foreign_keys"))[0].foreign_keys)).toBe(1);
     }
   });
-  it("preserves millisecond dates across commit/reopen and rolls back failed writes", async () => {
-    const path = file(); const db = client(path);
+  it("defaults to FULL unless NORMAL is explicitly configured", async () => {
+    const db = createDatabaseClient({ datasourceUrl: "file:" + file() }, {
+      env: { SQLITE_DRIVER: "better-sqlite3", SQLITE_JOURNAL_MODE: "wal" }, allowCreate: true,
+    });
+    clients.push(db);
+    expect(Number((await db.$queryRawUnsafe<Array<{ synchronous: number }>>("PRAGMA synchronous"))[0].synchronous)).toBe(2);
+  });
+  it("applies WAL NORMAL and foreign keys on every independently opened connection", async () => {
+    const path = file();
+    for (const db of [client(path, "wal", true, "NORMAL"), client(path, "wal", true, "NORMAL")]) {
+      expect(await db.$queryRawUnsafe("PRAGMA journal_mode")).toEqual([{ journal_mode: "wal" }]);
+      expect(Number((await db.$queryRawUnsafe<Array<{ synchronous: number }>>("PRAGMA synchronous"))[0].synchronous)).toBe(1);
+      expect(Number((await db.$queryRawUnsafe<Array<{ foreign_keys: number }>>("PRAGMA foreign_keys"))[0].foreign_keys)).toBe(1);
+    }
+  });
+  it("rejects unsupported sync levels and NORMAL without WAL before creating a database", () => {
+    for (const synchronous of ["OFF", "EXTRA", "normal", "1"]) {
+      const path = file();
+      expect(() => client(path, "wal", true, synchronous)).toThrow("SQLITE_SYNCHRONOUS must be FULL or NORMAL");
+      expect(existsSync(path)).toBe(false);
+    }
+    const path = file();
+    expect(() => client(path, "delete", true, "NORMAL")).toThrow("requires WAL");
+    expect(existsSync(path)).toBe(false);
+    expect(() => createDatabaseClient({}, { env: { SQLITE_DRIVER: "native", SQLITE_SYNCHRONOUS: "NORMAL" } })).toThrow("requires SQLITE_DRIVER=better-sqlite3");
+  });
+  it.each(["FULL", "NORMAL"])("preserves millisecond dates and rolls back failed writes with %s", async synchronous => {
+    const path = file(); const db = client(path, "wal", true, synchronous);
     await db.$executeRawUnsafe('CREATE TABLE AiSetting (id TEXT PRIMARY KEY, value TEXT NOT NULL, version INTEGER NOT NULL DEFAULT 1, updatedAt DATETIME NOT NULL)');
     const date = new Date("2026-10-18T01:02:03.123Z");
     await db.aiSetting.create({ data: { id: "kept", value: "test", updatedAt: date } });
     await expect(db.$transaction(async tx => { await tx.aiSetting.create({ data: { id: "rolled-back", value: "test", updatedAt: date } }); throw new Error("expected rollback"); })).rejects.toThrow("expected rollback");
     await db.$disconnect();
-    const reopened = client(path, "wal", false);
+    const reopened = client(path, "wal", false, synchronous);
     expect((await reopened.aiSetting.findUniqueOrThrow({ where: { id: "kept" } })).updatedAt.toISOString()).toBe(date.toISOString());
     expect(await reopened.aiSetting.count()).toBe(1);
     await reopened.$disconnect();
@@ -92,7 +118,7 @@ describe("configured SQLite runtime", () => {
       expect(await db.$queryRawUnsafe("SELECT value FROM BusyProbe")).toEqual([{ value: "saved" }]);
     } finally { if (blocker.isTransaction) blocker.exec("ROLLBACK"); blocker.close(); }
   });
-  it("uses the same fixed driver and FULL setting in an independently launched Node worker", async () => {
+  it.each(["FULL", "NORMAL"])("propagates the fixed driver and %s setting to an independent Node worker", async synchronous => {
     const path = file(); const db = client(path); await db.$queryRawUnsafe("SELECT 1"); await db.$disconnect();
     const script = [
       'import { createDatabaseClient } from "./lib/sqlite-client.mjs";',
@@ -101,9 +127,9 @@ describe("configured SQLite runtime", () => {
     ].join("\n");
     const result = JSON.parse(execFileSync(process.execPath, ["--input-type=module", "--eval", script], {
       cwd: process.cwd(), encoding: "utf8", windowsHide: true,
-      env: { ...process.env, DATABASE_URL: "file:" + path, SQLITE_DRIVER: "better-sqlite3", SQLITE_JOURNAL_MODE: "wal" },
+      env: { ...process.env, DATABASE_URL: "file:" + path, SQLITE_DRIVER: "better-sqlite3", SQLITE_JOURNAL_MODE: "wal", SQLITE_SYNCHRONOUS: synchronous },
     }));
-    expect(result).toEqual({ version: [{ version: "3.51.3" }], mode: [{ journal_mode: "wal" }], sync: [{ synchronous: 2 }] });
+    expect(result).toEqual({ version: [{ version: "3.51.3" }], mode: [{ journal_mode: "wal" }], sync: [{ synchronous: synchronous === "NORMAL" ? 1 : 2 }] });
   });
 
 });

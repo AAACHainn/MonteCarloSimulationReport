@@ -11,7 +11,7 @@ const preload = join(directory, "preload.cjs").replaceAll("\\", "/");
 function run(mode, arguments_) {
   console.log("SQLite validation:", mode, arguments_.join(" "));
   const env = { ...process.env, MARKET_DATA_SYNC_ENABLED: "0", SQLITE_WAL_VALIDATION_MODE: mode, SQLITE_WAL_VALIDATION_TRACE: "1",
-    SQLITE_WAL_USE_APPLICATION_DRIVER: "1", SQLITE_DRIVER: mode === "native-delete" ? "native" : "better-sqlite3", SQLITE_JOURNAL_MODE: mode === "wal" ? "wal" : "delete",
+    SQLITE_WAL_USE_APPLICATION_DRIVER: "1", SQLITE_SYNCHRONOUS: "FULL", SQLITE_DRIVER: mode === "native-delete" ? "native" : "better-sqlite3", SQLITE_JOURNAL_MODE: mode === "wal" ? "wal" : "delete",
     NODE_OPTIONS: ((process.env.NODE_OPTIONS ?? "") + ' --require="' + preload + '"').trim() };
   const result = spawnSync(process.execPath, [join(root, "node_modules/vitest/vitest.mjs"), "run", ...arguments_, "--maxWorkers=1", "--minWorkers=1", "--hookTimeout=120000", "--testTimeout=180000"],
     { cwd: root, env, stdio: "inherit", windowsHide: true });

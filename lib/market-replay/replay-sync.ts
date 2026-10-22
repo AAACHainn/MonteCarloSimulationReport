@@ -24,12 +24,13 @@ import { saveReplayCheckpoint, REPLAY_CHECKPOINT_STRIDE } from "@/lib/replay-ses
 import { persistContextRuns } from "@/lib/replay-sessions/context-storage";
 import { validContextRuns } from "@/lib/replay-sessions/context-runs";
 import type { ReplayContextRun } from "@/lib/replay-sessions/context-runs";
-import type { ReplayServerResult, DisplayAdvanceResult } from "./server-sync-types";
+import type { ReplayServerResponse, DisplayAdvanceResult } from "./server-sync-types";
 
 
 import { marketVersionMatches } from "./history-version";
 
 export type ReplaySyncInput = {
+  snapshotMode?: "LIVE";
   historyVersion?: number;
   dataVersion?: number;
   contextRuns?: ReplayContextRun[];
@@ -45,7 +46,7 @@ export type ReplaySyncInput = {
   preserveSyncSamples?: boolean;
 };
 
-export type ReplaySyncSuccess = ReplayServerResult;
+export type ReplaySyncSuccess = ReplayServerResponse;
 
 export type ReplaySyncOutcome =
   | { status: 200; error: null; response: ReplaySyncSuccess; processedBars?: MarketBar[] }
@@ -55,8 +56,13 @@ export async function syncReplayToTarget(
   datasetId: string,
   input: ReplaySyncInput,
   maximumSourceBars = MAX_REPLAY_SYNC_SOURCE_BARS,
-): Promise<ReplaySyncOutcome> {
+): Promise<ReplaySyncOutcome & { phases: Record<string, number> }> {
+  const startedAt = performance.now();
+  let enteredAt = startedAt;
+  let completedAt = startedAt;
+  const phases: Record<string, number> = {};
   const outcome = await sqliteWriteTransaction(prisma, async (tx) => {
+    enteredAt = performance.now();
     await assertReplayWritable(tx);
     const [dataset, progress, session] = await Promise.all([
       tx.marketDataset.findUnique({ where: { id: datasetId } }),
@@ -104,6 +110,7 @@ export async function syncReplayToTarget(
     }
 
     const fills: PaperFillData[] = [];
+    let historyChanged = false;
     let snapshotSession: SessionRecord | null = session;
     let snapshotGate = getReplayScope()?.trainingGate;
     if (session) {
@@ -155,6 +162,7 @@ export async function syncReplayToTarget(
         account = await persistDerivedBatch(tx, account, progress.generation, { state, orders: [...changed.values()], fills: chunkFills, lots, entries, equityPoints },
           { previousLots, updateProjection: false });
         fills.push(...chunkFills);
+        historyChanged ||= changed.size > 0 || chunkFills.length > 0;
         await persistContextRuns(tx, input.contextRuns
           ? input.contextRuns.filter(run => run.toSequence >= bars[0].sequence && run.fromSequence <= state.lastProcessedSequence)
             .map(run => ({ ...run, fromSequence: Math.max(run.fromSequence, bars[0].sequence), toSequence: Math.min(run.toSequence, state.lastProcessedSequence) }))
@@ -167,6 +175,14 @@ export async function syncReplayToTarget(
       return { status: 409, error: copy.paperTrading.conflict } as const;
     }
 
+    phases.advance = performance.now() - enteredAt;
+    const snapshotStartedAt = performance.now();
+    const snapshot = await getPaperSessionSnapshot(datasetId, tx, {
+      session: snapshotSession, trainingGate: snapshotGate, trainingLotsHydrated: true, currentBar: dbBars.at(-1),
+      includeHistory: input.snapshotMode !== "LIVE" || historyChanged,
+    });
+    phases.snapshot = performance.now() - snapshotStartedAt;
+    const receiptStartedAt = performance.now();
     const syncVersion = progress.syncVersion + 1;
     const response: ReplaySyncSuccess = {
       requestId: input.requestId,
@@ -178,17 +194,20 @@ export async function syncReplayToTarget(
       syncVersion,
       dataVersion: dataset.dataVersion,
       fills,
-      snapshot: await getPaperSessionSnapshot(datasetId, tx, {
-        session: snapshotSession, trainingGate: snapshotGate, trainingLotsHydrated: true, currentBar: dbBars.at(-1),
-      }),
+      snapshot,
     };
     await tx.replayProgress.update({
       where: { id: progress.id },
       data: { currentSequence: input.targetSequence, syncVersion, lastSyncRequestId: input.requestId, lastSyncResponse: JSON.stringify(response) },
     });
     await markReplayMutation(tx, input.targetSequence);
+    completedAt = performance.now();
+    phases.receipt = completedAt - receiptStartedAt;
     // Internal reuse by the display advance route; API handlers only serialize response.
     return { status: 200, error: null, response, processedBars: dbBars } as const;
   }, { timeout: 120_000 });
-  return outcome;
+  phases.transaction = performance.now() - startedAt;
+  phases.wait = enteredAt - startedAt;
+  if (completedAt > startedAt) phases.commit = performance.now() - completedAt;
+  return { ...outcome, phases };
 }

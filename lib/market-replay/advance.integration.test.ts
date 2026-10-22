@@ -49,6 +49,7 @@ async function buildAggregations(id: string) { const job = await queueAggregatio
 import { readLaterHistoryWindow, mergeHistoricalBars } from "./historical-window";
 import type { AggregatedMarketBarData } from "./types";
 import type { ReplayServerResult } from "./server-sync-types";
+import { resolveReplayServerResponse } from "./server-response";
 
 
 const fixtureSessions = new Map<string, string>();
@@ -170,6 +171,103 @@ describe("replay advance with real SQLite", () => {
       expectedVersion: (await getPaperSessionSnapshot(id))?.session.version ?? null, displayIntervalSeconds,
       displaySession: "ETH", count: 1, abrLength: 2, displayUtcOffsetMinutes: 0 };
   }
+
+  it.each(["flat", "sync", "display"] as const)("omits unchanged history from %s responses and receipts without losing client history", async path => {
+    const id = "compact-payload-" + path;
+    await seed(id, 1, 300, 199);
+    const account = await prisma.paperTradingSession.findFirstOrThrow({ where: { datasetId: id } });
+    const discipline = JSON.stringify({ strategyId: "strategy", strategyName: "历史策略", checklistVersion: 1,
+      checklist: Array.from({ length: 20 }, (_, n) => ({ id: String(n), text: "核对市场结构与入场条件，保留原始检查记录。".repeat(2) })),
+      confirmedAt: new Date(baseTime).toISOString() });
+    const orderIds = Array.from({ length: 30 }, (_, n) => projectionRecordId(account.projectionId, "history-" + n));
+    await prisma.paperOrder.createMany({ data: orderIds.map((orderId, n) => ({ id: orderId, sessionId: account.id,
+      side: "BUY", type: "MARKET", status: "FILLED", quantity: 1, createdSequence: n, activeFromSequence: n,
+      filledSequence: n, filledPrice: 100, filledAt: new Date(baseTime + n * 1000), discipline })) });
+    await prisma.paperFill.createMany({ data: Array.from({ length: 50 }, (_, n) => ({ id: id + "-fill-" + n,
+      sessionId: account.id, orderId: orderIds[n % 30], sequence: n, timestamp: new Date(baseTime + n * 1000),
+      side: "BUY", price: 100, quantity: 1, fee: 0, slippageCost: 0, realizedPnl: 0,
+      closedQuantity: 0, openedQuantity: 1, netQuantityAfter: 0, reason: "ENTRY" })) });
+    await prisma.paperTrade.createMany({ data: Array.from({ length: 30 }, (_, n) => ({ id: id + "-trade-" + n,
+      sessionId: account.id, side: "LONG", status: "CLOSED", openedSequence: n * 2,
+      openedAt: new Date(baseTime + n * 2000), closedSequence: n * 2 + 1, closedAt: new Date(baseTime + n * 2000 + 1000) })) });
+    const makeBody = async (live: boolean) => path === "sync"
+      ? { ...await serverSyncBody(id, (await prisma.replayProgress.findFirstOrThrow({ where: { datasetId: id } })).currentSequence + 1,
+        live ? "compact" : "full"), ...(live ? { snapshotMode: "LIVE" } : {}) }
+      : { ...await flatBody(id, 5, live ? "compact" : "full"), flatOnly: path === "flat", ...(live ? { snapshotMode: "LIVE" } : {}) };
+    const send = async (body: Awaited<ReturnType<typeof makeBody>>) => path === "sync"
+      ? syncPOST(syncRequest(body), context(id)) : POST(request(body), context(id));
+    const fullResponse = await send(await makeBody(false));
+    expect(fullResponse.status).toBe(200);
+    const fullText = await fullResponse.text();
+    const full = JSON.parse(fullText);
+    const body = await makeBody(true);
+    const firstQuery = queryAudit.statements.length;
+    const leanResponse = await send(body);
+    const statements = queryAudit.statements.slice(firstQuery);
+    expect(leanResponse.status).toBe(200);
+    const leanText = await leanResponse.text();
+    const lean = JSON.parse(leanText);
+    for (const key of ["recentOrders", "recentFills", "recentTrades"]) expect(lean.snapshot).not.toHaveProperty(key);
+    expect(statements.some(sql => sql.startsWith("SELECT ") && sql.includes('"PaperFill"'))).toBe(false);
+    const fullBytes = Buffer.byteLength(fullText), leanBytes = Buffer.byteLength(leanText);
+    expect(fullBytes).toBeGreaterThan(50_000);
+    expect(leanBytes).toBeLessThan(6_000);
+    expect(leanBytes / fullBytes).toBeLessThan(0.1);
+    expect(resolveReplayServerResponse(lean, full.snapshot, full.snapshot.session.version).snapshot)
+      .toEqual(JSON.parse(JSON.stringify(await getPaperSessionSnapshot(id))));
+    const progress = await prisma.replayProgress.findFirstOrThrow({ where: { datasetId: id } });
+    expect(Buffer.byteLength(progress.lastSyncResponse!)).toBeLessThan(6_000);
+    expect(await (await send(body)).json()).toEqual(lean);
+    const timings = leanResponse.headers.get("Server-Timing")!;
+    for (const phase of ["wait", "snapshot", "receipt", "commit", "scope", "guard", "request"]) expect(timings).toContain(phase + ";dur=");
+  }, 20_000);
+
+  it("refreshes LIVE history on fills and OCO cancellation, but reuses it while a position is held", async () => {
+    const id = "compact-trade-changes";
+    await seed(id, 1, 10);
+    const account = await prisma.paperTradingSession.findFirstOrThrow({ where: { datasetId: id } });
+    await seedOrder({ id: "entry", sessionId: account.id, side: "BUY", type: "MARKET", quantity: 2,
+      stopLoss: 95, takeProfit: 110, createdSequence: -1, activeFromSequence: 0 });
+    const send = async (target: number) => syncPOST(syncRequest({ ...await serverSyncBody(id, target, "live-" + target), snapshotMode: "LIVE" }), context(id));
+    const entryResponse = await send(0);
+    expect(entryResponse.status).toBe(200);
+    const entry = await entryResponse.json();
+    expect(entry.fills).toHaveLength(1);
+    expect(entry.snapshot.recentOrders).toHaveLength(1);
+    expect(entry.snapshot.activeOrders).toHaveLength(2);
+    const heldResponse = await send(1);
+    expect(heldResponse.status).toBe(200);
+    const held = await heldResponse.json();
+    expect(held.snapshot).not.toHaveProperty("recentFills");
+    expect(resolveReplayServerResponse(held, entry.snapshot, entry.snapshot.session.version).snapshot)
+      .toEqual(JSON.parse(JSON.stringify(await getPaperSessionSnapshot(id))));
+    await prisma.marketBar.update({ where: { datasetId_sequence: { datasetId: id, sequence: 2 } }, data: { high: 111, close: 110 } });
+    const exitResponse = await send(2);
+    expect(exitResponse.status).toBe(200);
+    const exit = await exitResponse.json();
+    expect(exit.fills).toHaveLength(1);
+    expect(exit.snapshot.recentOrders.some((order: { status: string }) => order.status === "CANCELLED")).toBe(true);
+    expect(exit.snapshot.activeOrders).toEqual([]);
+    expect(exit.snapshot).toEqual(JSON.parse(JSON.stringify(await getPaperSessionSnapshot(id))));
+  });
+
+  it("refreshes LIVE history when an order is cancelled without producing any fill", async () => {
+    const id = "compact-cancellation";
+    await seed(id, 1, 4);
+    const account = await prisma.paperTradingSession.findFirstOrThrow({ where: { datasetId: id } });
+    await seedOrder({ id: "empty-close", sessionId: account.id, side: "SELL", type: "MARKET", quantity: 1,
+      reduceOnly: true, createdSequence: -1, activeFromSequence: 0 });
+    const body = { ...await serverSyncBody(id, 0, "cancel-without-fill"), snapshotMode: "LIVE" };
+    const response = await syncPOST(syncRequest(body), context(id));
+    expect(response.status).toBe(200);
+    const result = await response.json();
+    expect(result.fills).toEqual([]);
+    expect(result.snapshot.activeOrders).toEqual([]);
+    expect(result.snapshot.recentOrders).toEqual([expect.objectContaining({ id: "empty-close", status: "CANCELLED" })]);
+    expect(result.snapshot.recentFills).toEqual([]);
+    expect(result.snapshot.recentTrades).toEqual([]);
+    expect(await (await syncPOST(syncRequest(body), context(id))).json()).toEqual(result);
+  });
 
   it.each([
     { name: "short-sparse", seconds: [0, 2], phase: "FORMING", quality: "NORMAL" },

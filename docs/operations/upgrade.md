@@ -105,12 +105,26 @@ corepack pnpm run db:init-sqlite
 | Prisma Client / CLI / 适配器 | [package.json](../../package.json) 与 [pnpm-lock.yaml](../../pnpm-lock.yaml)，均锁定 `6.19.3` |
 | 新驱动 | `better-sqlite3` 锁定 `12.8.0`，内置 SQLite `3.51.3` |
 | 适配器传递依赖 | [pnpm-workspace.yaml](../../pnpm-workspace.yaml) 定向覆盖为同一驱动版本 |
-| 运行时校验 | [连接工厂](../../lib/sqlite-client.mjs) 对新驱动每条实际连接要求 `3.51.3`、外键开启、`synchronous=2`（FULL），日期保留 Unix 毫秒 |
+| 运行时校验 | [连接工厂](../../lib/sqlite-client.mjs) 对新驱动每条实际连接要求 `3.51.3`、外键开启、同步级别与配置一致（默认 FULL=2；显式 WAL + NORMAL=1），日期保留 Unix 毫秒 |
 | 默认安装 | [环境示例](../../.env.example) 为 `SQLITE_DRIVER=native`、`SQLITE_JOURNAL_MODE=delete`；native 引擎版本取决于 Prisma 内置引擎，本机实测为 `3.46.0` |
 
 适配器 `6.19.3` 上游声明的驱动范围是 `^11.9.0`，本项目的 `12.8.0` 覆盖超出该范围。这组锁定组合已在 Windows / Node 24.15.0 验证；Linux、其他 Node 版本与生产镜像需在目标环境完成验收。不要单独升级 Prisma、驱动或锁文件后沿用旧结论；连接工厂会拒绝未经校验的 SQLite 版本。版本依据、测试范围及剩余事项见 [SQLite 验证记录](sqlite-wal-validation.md)。
 
-更新操作系统的 SQLite 工具不会更换应用引擎；仅拉取代码也不会自动启用 WAL。FULL 由连接工厂强制设置，没有需要额外配置的 FULL 环境变量。
+更新操作系统的 SQLite 工具不会更换应用引擎；仅拉取代码也不会自动启用 WAL。同步级别默认 FULL；可按下文配置为 NORMAL，连接工厂会核对每条连接的实际值。
+
+#### 同步级别
+
+默认 `SQLITE_SYNCHRONOUS="FULL"`。若接受断电或系统崩溃后最近已提交事务可能丢失，可在已有 better-sqlite3 + WAL 安装中设置：
+
+```dotenv
+SQLITE_DRIVER="better-sqlite3"
+SQLITE_JOURNAL_MODE="wal"
+SQLITE_SYNCHRONOUS="NORMAL"
+```
+
+NORMAL 仅支持上述驱动与日志模式组合，不提供 OFF 配置。按第 2 节完成备份，再更新配置、构建并重启本项目服务和 worker，核对运行日志为 `wal / synchronous:1 / synchronousMode:NORMAL`。旧版本将 FULL 写死，仅加环境变量不会生效；容器必须显式传入该变量。
+
+恢复 FULL 时将 `SQLITE_SYNCHRONOUS` 改回 `FULL` 并重启所有相关进程，核对 `wal / synchronous:2 / synchronousMode:FULL`。只改变同步级别无需迁移表结构或恢复旧数据库，保留现有 WAL/SHM。
 
 #### 副本演练与正式切换
 
@@ -138,7 +152,9 @@ corepack pnpm run db:init-sqlite
 
 6. 正式连接前再次确认备份和目标路径，以正式环境执行 `corepack pnpm run db:runtime --integrity`，核对同一组结果，再启动新服务并按第 6 节验收。服务环境变量优先于 `.env`；不要让正式启动继承演练库的 `DATABASE_URL` 或临时覆盖。
 
-**`db:runtime` 会打开应用连接并应用配置的日志模式，它不是纯只读诊断。** 在正式库运行前必须停止服务/worker、备份并确认路径；切换模式失败时保留现场，不删除 `-wal` / `-shm`。实际页面/API 建立连接后，服务器 `sqlite-runtime` 日志应再次显示 `3.51.3 / wal / synchronous:2`；只检查安装输出或环境变量不足以证明生效。
+**`db:runtime` 会打开应用连接并应用配置的日志模式，它不是纯只读诊断。** 在正式库运行前必须停止服务/worker、备份并确认路径；切换模式失败时保留现场，不删除 `-wal` / `-shm`。实际页面/API 建立连接后，服务器 `sqlite-runtime` 日志应再次显示 `3.51.3 / wal / synchronous:2`；只检查安装输出或环境变量不足以证明生效。若已明确选用 NORMAL，同步级别应为 `1 / NORMAL`，并确保应用和 worker 都继承同一配置。
+
+提交延迟可用 `corepack pnpm run diagnose:sqlite-commit --samples 160` 作隔离诊断：工具只在 `tmp/sqlite-commit-diagnostics/` 新建合成库和文件，不读取业务数据库；对比直接 COMMIT、Prisma、检查点和文件同步，最后输出报告路径。NORMAL 对照仅作用于合成库，不能将其结果直接视为生产环境收益。
 
 #### 已有 WAL 库的迁移顺序
 
@@ -147,10 +163,11 @@ corepack pnpm run db:init-sqlite
 ~~~powershell
 $env:SQLITE_DRIVER = "better-sqlite3"
 $env:SQLITE_JOURNAL_MODE = "delete"
+$env:SQLITE_SYNCHRONOUS = "FULL"
 corepack pnpm run db:runtime --integrity
 ~~~
 
-确认 `journalMode=delete`、完整性/外键正常后，再按路径 A 执行迁移，或按路径 B 处理已核实适用的旧库。迁移进程全部退出后，将正式配置恢复为 `better-sqlite3 / wal`，重新执行诊断并启动应用。演练库与正式库分别执行此流程；不能只设置环境变量而未确认库已转为 DELETE。若仅部署此前无结构变更的性能代码，不必为提速运行初始化脚本。
+确认 `journalMode=delete`、完整性/外键正常后，再按路径 A 执行迁移，或按路径 B 处理已核实适用的旧库。迁移进程全部退出后，将正式配置恢复为 `better-sqlite3 / wal` 以及原先选定的同步级别，清除维护终端的临时覆盖，重新执行诊断并启动应用。演练库与正式库分别执行此流程；不能只设置环境变量而未确认库已转为 DELETE。若仅部署此前无结构变更的性能代码，不必为提速运行初始化脚本。
 
 ## 4. 本阶段的重要迁移
 
@@ -238,7 +255,7 @@ services:
 
 先在演练副本执行，再对正式实例进行只读核对：
 
-- SQLite `PRAGMA integrity_check` 为 `ok`，`PRAGMA foreign_key_check` 无记录；使用 Prisma 迁移的安装没有未完成或失败迁移。WAL 实例须核对应用实际连接的 SQLite `3.51.3`、`wal`、FULL；迁移历史核对在前述 DELETE 维护阶段完成。
+- SQLite `PRAGMA integrity_check` 为 `ok`，`PRAGMA foreign_key_check` 无记录；使用 Prisma 迁移的安装没有未完成或失败迁移。WAL 实例须核对应用实际连接的 SQLite `3.51.3`、`wal` 及所选同步级别（默认 FULL=2，显式 NORMAL=1）；迁移历史核对在前述 DELETE 维护阶段完成。
 - 原行情根数、起止时间和已有源序号保留；自动同步关闭期间不能将额外追加误认为迁移结果。
 - 旧会话及已归档会话可查，账户权益、持仓、当前成交、交易理由、Setup 和复盘备注对应正确；一个独立会话只显示一份正确结果。
 - 浏览器刷新后，在副本或隔离验收会话验证播放、下一根、暂停立即平仓、跨非交易时段推进、秒线显示高周期、日期快进、手动平移不跳回、会话切换、图表标记与日志、Excel/PDF；实盘重演额外验证回退预览/取消/确认及 worker。不要在用户原交易上试验撤销或删除。
@@ -256,7 +273,7 @@ services:
 
 先区分日志模式回退与数据库结构回退：
 
-- **仅停用 WAL，保留本次新增交易：** 停止服务和 worker，备份当前数据，保留新驱动按“已有 WAL 库的迁移顺序”离线转为 DELETE，确认完整性和外键正常。随后将正式配置改为 `SQLITE_DRIVER=native`、`SQLITE_JOURNAL_MODE=delete`，清除启动环境中的临时覆盖，再重启兼容当前表结构的代码。不能直接用 native 打开 WAL 库；应用会拒绝该组合。不要手动删除 WAL/SHM，也不要用升级前备份覆盖试用后新增交易。
+- **仅停用 WAL，保留本次新增交易：** 停止服务和 worker，备份当前数据，保留新驱动按“已有 WAL 库的迁移顺序”离线转为 DELETE，确认完整性和外键正常。随后将正式配置改为 `SQLITE_DRIVER=native`、`SQLITE_JOURNAL_MODE=delete`、`SQLITE_SYNCHRONOUS=FULL`，清除启动环境中的临时覆盖，再重启兼容当前表结构的代码。不能直接用 native 打开 WAL 库；应用会拒绝该组合。不要手动删除 WAL/SHM，也不要用升级前备份覆盖试用后新增交易。
 - **回退代码或结构迁移：** 停止新服务，保留失败日志与升级后的数据库副本；先核实旧代码与当前表结构是否兼容。需要恢复时，使用匹配的旧代码/镜像、升级前一致性数据库备份、环境变量、原密钥及必要文件，再启动旧服务。恢复的备份若仍为 WAL，也须使用可用的新驱动离线转为 DELETE 后才能交给旧 native 引擎。不能只退代码继续读取不兼容的新结构数据库。
 
 恢复升级前备份会舍弃升级之后的新写入，因此正式开放写入前先完成核对。回退涉及替换现有数据时，明确恢复点和受影响内容，不自动覆盖用户新增交易。

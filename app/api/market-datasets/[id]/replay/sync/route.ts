@@ -29,7 +29,8 @@ async function handlePOST(request: Request, context: RouteContext) {
     startedAt,
     queryStart,
     strategy: "idempotent-replay-sync",
+    phases: outcome.phases,
   });
 }
 
-export const POST = withReplaySessionRoute(handlePOST, { write: true, annotation: false });
+export const POST = withReplaySessionRoute(handlePOST, { write: true, annotation: false, diagnostics: true });

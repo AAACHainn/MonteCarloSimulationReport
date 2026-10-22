@@ -16,8 +16,8 @@ export const prisma =
       ...(queryMetricsEnabled ? [{ emit: "event" as const, level: "query" as const }] : []),
     ],
   }, {
-    onConnected: ({ sqliteVersion, journalMode, synchronous }) => {
-      console.info(JSON.stringify({ event: "sqlite-runtime", sqliteVersion, journalMode, synchronous }));
+    onConnected: ({ sqliteVersion, journalMode, synchronous, synchronousMode }) => {
+      console.info(JSON.stringify({ event: "sqlite-runtime", sqliteVersion, journalMode, synchronous, synchronousMode }));
     },
   });
 

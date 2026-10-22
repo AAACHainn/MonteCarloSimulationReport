@@ -213,6 +213,10 @@ export type PaperSessionSnapshot = {
   stats: PaperTradingStats;
 };
 
+/** Omitted history lists are unchanged, not empty. Only used by opted-in advance clients. */
+export type PaperSessionSnapshotUpdate = Omit<PaperSessionSnapshot, "recentOrders" | "recentFills" | "recentTrades">
+  & Partial<Pick<PaperSessionSnapshot, "recentOrders" | "recentFills" | "recentTrades">>;
+
 export type PaperAdvanceResult = {
   state: PaperSessionState;
   orders: PaperOrderData[];

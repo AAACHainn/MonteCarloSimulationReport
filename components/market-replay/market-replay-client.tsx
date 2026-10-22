@@ -142,6 +142,8 @@ import {
   useReplayPreferences,
 } from "@/components/market-replay/use-replay-preferences";
 
+import { resolveReplayServerResponse } from "@/lib/market-replay/server-response";
+import type { ReplayServerResponse } from "@/lib/market-replay/server-sync-types";
 import { useDelayedActivity } from "@/lib/use-delayed-activity";
 import { replayPlaybackStatusText, type ReplaySaveStatus } from "@/lib/market-replay/playback-status";
 
@@ -1219,7 +1221,8 @@ export function MarketReplayClient({ dataset: initialDataset, initialJournalFocu
     let suspension: ReplaySuspension | null = null;
     setSaveStatus("saving");
     try {
-      const data = await requestReplayAdvance<ServerAdvancePayload>({ fetch, url, body: JSON.stringify(body), signal,
+      const wire = await requestReplayAdvance<Omit<ServerAdvancePayload, "snapshot"> & ReplayServerResponse>({
+        fetch, url, body: JSON.stringify({ ...body, snapshotMode: "LIVE" }), signal,
         onRetry: () => {
           suspension ??= suspendPlayback();
           requestRetryingRef.current = true; setRetrying(true);
@@ -1227,7 +1230,9 @@ export function MarketReplayClient({ dataset: initialDataset, initialJournalFocu
         },
       });
       if (signal.aborted) return false;
-      if (data.flatAdvanceUnavailable) { setSaveStatus("saved"); return false; }
+      if (wire.flatAdvanceUnavailable) { setSaveStatus("saved"); return false; }
+      const data = resolveReplayServerResponse(wire, confirmedPaperSnapshotRef.current,
+        (body.expectedPaperVersion ?? body.expectedVersion ?? null) as number | null);
       const current = latestReplayRef.current;
       if (!current) return false;
       assertForwardReplayResult(current, data);
@@ -1255,7 +1260,7 @@ export function MarketReplayClient({ dataset: initialDataset, initialJournalFocu
         restorePlayback(suspension);
       }
     }
-  }, [autoPausePlayback, dataset.historyVersion, fetch, latestReplayRef, restorePlayback, suspendPlayback]);
+  }, [autoPausePlayback, confirmedPaperSnapshotRef, dataset.historyVersion, fetch, latestReplayRef, restorePlayback, suspendPlayback]);
 
   const flushVisible = useCallback(async () => {
     await advanceCompletionRef.current;

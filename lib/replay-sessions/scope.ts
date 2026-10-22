@@ -100,9 +100,10 @@ export function replayErrorResponse(error: unknown) {
 
 export function withReplaySessionRoute<P extends { id: string }>(
   handler: (request: Request, context: { params: Promise<P> }) => Promise<Response>,
-  options: { write?: boolean; annotation?: boolean; allowHistoryChange?: boolean; drawing?: boolean } = {},
+  options: { write?: boolean; annotation?: boolean; allowHistoryChange?: boolean; drawing?: boolean; diagnostics?: boolean } = {},
 ) {
   return async (request: Request, context: { params: Promise<P> }) => {
+    const startedAt = performance.now();
     try {
       const { id: datasetId } = await context.params;
       const url = new URL(request.url);
@@ -113,7 +114,9 @@ export function withReplaySessionRoute<P extends { id: string }>(
       if (scope.datasetId !== datasetId || (sessionId && scope.id !== sessionId)) {
         throw new ReplaySessionError("SESSION_NOT_FOUND", 404, copy.replaySessions.missing);
       }
+      const scopeMs = performance.now() - startedAt;
       return await runWithReplayScope(scope, async () => {
+        const guardStartedAt = performance.now();
         if (options.write && !options.annotation) {
           if (request.headers.get("X-Replay-Projection") !== scope.projectionId) {
             throw new ReplaySessionError("SESSION_CONFLICT", 409, copy.replaySessions.conflict);
@@ -121,7 +124,15 @@ export function withReplaySessionRoute<P extends { id: string }>(
           if (options.drawing) await assertReplayDrawingWritable(prisma);
           else await assertReplayWritable(prisma, !options.allowHistoryChange);
         }
-        return handler(request, context);
+        const guardMs = performance.now() - guardStartedAt;
+        const response = await handler(request, context);
+        if (options.diagnostics) {
+          const timing = [response.headers.get("Server-Timing"),
+            "scope;dur=" + scopeMs.toFixed(1), "guard;dur=" + guardMs.toFixed(1),
+            "request;dur=" + (performance.now() - startedAt).toFixed(1)].filter(Boolean).join(", ");
+          response.headers.set("Server-Timing", timing);
+        }
+        return response;
       });
     } catch (error) { return replayErrorResponse(error); }
   };

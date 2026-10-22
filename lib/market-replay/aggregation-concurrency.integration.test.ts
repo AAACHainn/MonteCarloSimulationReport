@@ -17,7 +17,7 @@ class Peer {
   constructor(database: string) {
     this.child = fork(resolve("scripts/aggregation-concurrency-fixture.ts"), [], {
       execArgv: ["--import", "tsx"], silent: true,
-      env: { ...process.env, DATABASE_URL: "file:" + database, SQLITE_DRIVER: "better-sqlite3", SQLITE_JOURNAL_MODE: "wal", VITEST: "1", MARKET_DATA_SYNC_ENABLED: "0" },
+      env: { ...process.env, DATABASE_URL: "file:" + database, SQLITE_DRIVER: "better-sqlite3", SQLITE_JOURNAL_MODE: "wal", SQLITE_SYNCHRONOUS: "FULL", VITEST: "1", MARKET_DATA_SYNC_ENABLED: "0" },
     });
     this.child.stderr?.on("data", (chunk) => { this.stderr = (this.stderr + chunk).slice(-5000); });
     this.child.on("message", (message: Reply) => {
@@ -58,8 +58,8 @@ let client: ReturnType<typeof createDatabaseClient>;
 let a: Peer, b: Peer, c: Peer, session: { sessionId: string; entryId: string };
 const count = 50000;
 beforeAll(async () => {
-  execFileSync(process.execPath, ["scripts/init-sqlite.mjs"], { env: { ...process.env, DATABASE_URL: "file:" + file, SQLITE_DRIVER: "native", SQLITE_JOURNAL_MODE: "delete" }, stdio: "pipe" });
-  client = createDatabaseClient({ datasourceUrl: "file:" + file }, { env: { SQLITE_DRIVER: "better-sqlite3", SQLITE_JOURNAL_MODE: "wal" } });
+  execFileSync(process.execPath, ["scripts/init-sqlite.mjs"], { env: { ...process.env, DATABASE_URL: "file:" + file, SQLITE_DRIVER: "native", SQLITE_JOURNAL_MODE: "delete", SQLITE_SYNCHRONOUS: "FULL" }, stdio: "pipe" });
+  client = createDatabaseClient({ datasourceUrl: "file:" + file }, { env: { SQLITE_DRIVER: "better-sqlite3", SQLITE_JOURNAL_MODE: "wal", SQLITE_SYNCHRONOUS: "FULL" } });
   const start = Date.parse("2026-10-19T22:00:00Z");
   for (const id of ["a", "b"]) {
     await client.marketDataset.create({ data: { id, name: id, symbol: "ES", timeframe: "1m", timezone: "UTC", sourceIntervalSeconds: 60, barCount: count, startTime: new Date(start), endTime: new Date(start + (count - 1) * 60000) } });

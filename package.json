@@ -18,7 +18,8 @@
     "db:init-sqlite": "node scripts/init-sqlite.mjs",
     "db:runtime": "node scripts/sqlite-runtime.mjs",
     "db:prepare-sqlite": "node scripts/setup-sqlite-driver.mjs",
-    "benchmark:time-aggregation": "node --import tsx scripts/benchmark-time-aggregation.ts"
+    "benchmark:time-aggregation": "node --import tsx scripts/benchmark-time-aggregation.ts",
+    "diagnose:sqlite-commit": "node scripts/diagnose-sqlite-commit.mjs"
   },
   "dependencies": {
     "@date-fns/tz": "1.4.1",

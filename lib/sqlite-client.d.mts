@@ -5,6 +5,7 @@ export type SqliteConnectionInfo = {
   sqliteVersion: string;
   journalMode: string;
   synchronous: number;
+  synchronousMode: "FULL" | "NORMAL";
   foreignKeys: boolean;
   databasePath: string;
 };

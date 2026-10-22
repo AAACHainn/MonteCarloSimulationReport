@@ -11,6 +11,7 @@ import type {
   PaperPositionLotData,
   PaperOrderType,
   PaperSessionSnapshot,
+  PaperSessionSnapshotUpdate,
   PaperSessionState,
   PaperSide,
   PaperTradeData,
@@ -133,9 +134,14 @@ export type PreparedPaperSnapshot = {
   trainingGate?: PaperSessionState["trainingGate"];
   trainingLotsHydrated?: boolean;
   currentBar?: { close: number } | null;
+  includeHistory?: boolean;
 };
+export function getPaperSessionSnapshot(datasetId: string, db?: Prisma.TransactionClient,
+  prepared?: PreparedPaperSnapshot & { includeHistory?: true }): Promise<PaperSessionSnapshot | null>;
+export function getPaperSessionSnapshot(datasetId: string, db: Prisma.TransactionClient,
+  prepared: PreparedPaperSnapshot): Promise<PaperSessionSnapshotUpdate | null>;
 export async function getPaperSessionSnapshot(datasetId: string, db: Prisma.TransactionClient = prisma,
-  prepared?: PreparedPaperSnapshot): Promise<PaperSessionSnapshot | null> {
+  prepared?: PreparedPaperSnapshot): Promise<PaperSessionSnapshotUpdate | null> {
   const scope = getReplayScope();
   if (scope?.mode === "TRAINING") {
     if (prepared && "trainingGate" in prepared) scope.trainingGate = prepared.trainingGate;
@@ -148,11 +154,12 @@ export async function getPaperSessionSnapshot(datasetId: string, db: Prisma.Tran
   if (!storedSession) return null;
   const session = await ensurePaperTradeStats(storedSession as SessionRecord, db);
   if (scope?.mode === "TRAINING" && !prepared?.trainingLotsHydrated) await hydrateTrainingLots(db, session.id);
+  const includeHistory = prepared?.includeHistory !== false;
   const [activeOrders, recentOrders, recentFills, recentTrades, openLots, currentBar, journalEntryCount] = await Promise.all([
     db.paperOrder.findMany({ where: { sessionId: session.id, status: "PENDING" }, orderBy: [{ createdSequence: "asc" }, { createdAt: "asc" }] }),
-    db.paperOrder.findMany({ where: { sessionId: session.id, status: { not: "PENDING" } }, orderBy: { updatedAt: "desc" }, take: 30 }),
-    db.paperFill.findMany({ where: { sessionId: session.id }, orderBy: [{ sequence: "desc" }, { createdAt: "desc" }], take: 50 }),
-    db.paperTrade.findMany({ where: { sessionId: session.id }, orderBy: { openedSequence: "desc" }, take: 30 }),
+    includeHistory ? db.paperOrder.findMany({ where: { sessionId: session.id, status: { not: "PENDING" } }, orderBy: { updatedAt: "desc" }, take: 30 }) : [],
+    includeHistory ? db.paperFill.findMany({ where: { sessionId: session.id }, orderBy: [{ sequence: "desc" }, { createdAt: "desc" }], take: 50 }) : [],
+    includeHistory ? db.paperTrade.findMany({ where: { sessionId: session.id }, orderBy: { openedSequence: "desc" }, take: 30 }) : [],
     db.paperPositionLot.findMany({ where: { sessionId: session.id }, orderBy: [{ openedSequence: "asc" }, { createdAt: "asc" }] }),
     prepared && "currentBar" in prepared ? Promise.resolve(prepared.currentBar) : session.lastProcessedSequence >= 0
       ? db.marketBar.findUnique({ where: { datasetId_sequence: { datasetId, sequence: session.lastProcessedSequence } } })
@@ -165,9 +172,9 @@ export async function getPaperSessionSnapshot(datasetId: string, db: Prisma.Tran
   const recentParentSequences = new Set(recentOrders
     .filter((order) => !order.isProtective && order.filledSequence !== null)
     .map((order) => order.filledSequence!));
-  const missingParentSequences = [...new Set(activeOrders
+  const missingParentSequences = includeHistory ? [...new Set(activeOrders
     .filter((order) => order.isProtective && !recentParentSequences.has(order.createdSequence))
-    .map((order) => order.createdSequence))];
+    .map((order) => order.createdSequence))] : [];
   const protectiveParents = missingParentSequences.length === 0
     ? []
     : await db.paperOrder.findMany({
@@ -202,9 +209,11 @@ export async function getPaperSessionSnapshot(datasetId: string, db: Prisma.Tran
   return {
     session: serializePaperSession(session),
     activeOrders: activeOrders.map(serializePaperOrder),
-    recentOrders: snapshotRecentOrders.map(serializePaperOrder),
-    recentFills: recentFills.map(serializePaperFill),
-    recentTrades: recentTrades.map(serializePaperTrade),
+    ...(includeHistory ? {
+      recentOrders: snapshotRecentOrders.map(serializePaperOrder),
+      recentFills: recentFills.map(serializePaperFill),
+      recentTrades: recentTrades.map(serializePaperTrade),
+    } : {}),
     openLots: openLots.map(serializePaperPositionLot),
     stats,
   };

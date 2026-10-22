@@ -17,19 +17,24 @@ import { readAggregationRanges, WindowSourceBudgetError, type AggregationReadMet
 import { AggregationNotReadyError } from "./aggregation-storage";
 import { closeAggregatedBar } from "./bar-quality";
 import { isValidDisplayInterval, MAX_DISPLAY_ADVANCE_SOURCE_BARS, type AggregatedMarketBarData, type MarketBarData } from "./types";
-import type { ReplayServerResult } from "./server-sync-types";
+import type { ReplayServerResponse } from "./server-sync-types";
 
 type Input = z.infer<typeof paperAdvanceSchema>;
-type FlatResponse = ReplayServerResult & { aggregatedBars: AggregatedMarketBarData[]; lastSourceBar: MarketBarData;
+type FlatResponse = ReplayServerResponse & { aggregatedBars: AggregatedMarketBarData[]; lastSourceBar: MarketBarData;
   completedDisplayBucketStart: string | null; reachedVisibleBucket: boolean; flatAdvanceKey: string };
-type Outcome = { status: 200; response: FlatResponse | { flatAdvanceUnavailable: true }; metrics?: AggregationReadMetrics }
-  | { status: 400 | 404 | 409; error: string; code?: string };
+type Outcome = ({ status: 200; response: FlatResponse | { flatAdvanceUnavailable: true }; metrics?: AggregationReadMetrics }
+  | { status: 400 | 404 | 409; error: string; code?: string }) & { phases?: Record<string, number> };
 const unavailable = { status: 200, response: { flatAdvanceUnavailable: true } } as const;
 const MAX_FLAT_SAMPLES = 4096;
 
 /** This endpoint never trusts the browser's empty-account hint. Eligibility and commit share a transaction. */
 export async function tryFlatDisplayAdvance(datasetId: string, input: Input): Promise<Outcome> {
-  return sqliteWriteTransaction(prisma, async tx => {
+  const startedAt = performance.now();
+  let enteredAt = startedAt;
+  let completedAt = startedAt;
+  const phases: Record<string, number> = {};
+  const outcome: Outcome = await sqliteWriteTransaction(prisma, async tx => {
+    enteredAt = performance.now();
     await assertReplayWritable(tx);
     const [dataset, progress, stored] = await Promise.all([
       tx.marketDataset.findUnique({ where: { id: datasetId } }), tx.replayProgress.findFirst({ where: progressWhere(datasetId) }),
@@ -38,7 +43,7 @@ export async function tryFlatDisplayAdvance(datasetId: string, input: Input): Pr
     if (!dataset || !progress) return { status: 404, error: copy.marketReplay.datasetNotFound };
     if (input.historyVersion !== undefined && input.historyVersion !== dataset.historyVersion) return { status: 409, error: copy.marketSync.historyChanged, code: "HISTORY_CHANGED" };
     const key = JSON.stringify([input.expectedCurrentSequence, input.expectedVersion, input.count,
-      input.displayIntervalSeconds, input.displaySession, input.abrLength, input.displayUtcOffsetMinutes, input.abrHistoryStartSequence]);
+      input.displayIntervalSeconds, input.displaySession, input.abrLength, input.displayUtcOffsetMinutes, input.abrHistoryStartSequence, ...(input.snapshotMode ? [input.snapshotMode] : [])]);
     if (input.requestId && progress.lastSyncRequestId === input.requestId && progress.lastSyncResponse) {
       const cached = JSON.parse(progress.lastSyncResponse) as FlatResponse;
       return cached.flatAdvanceKey === key ? { status: 200, response: cached }
@@ -63,9 +68,12 @@ export async function tryFlatDisplayAdvance(datasetId: string, input: Input): Pr
     if (!Number.isSafeInteger(stride) || stride < 1) return unavailable;
     const maximumSources = Math.floor(Math.min(MAX_DISPLAY_ADVANCE_SOURCE_BARS,
       Math.floor((MAX_FLAT_SAMPLES - 2) / (1 / stride + 1 / 100))) / 100) * 100;
+    const planStartedAt = performance.now();
     const metrics: AggregationReadMetrics = { sourceRows: 0, summaryRows: 0 };
     const plan = await planFlatDisplayAdvance(tx, { datasetId, currentSequence: progress.currentSequence,
       barCount: dataset.barCount, maximumSources, sourceSeconds, displaySeconds, session, count: input.count, metrics });
+    phases.plan = performance.now() - planStartedAt;
+    const aggregationStartedAt = performance.now();
     const last = await tx.marketBar.findUniqueOrThrow({ where: { datasetId_sequence: { datasetId, sequence: plan.targetSequence } } });
     metrics.sourceRows++;
     let aggregates: AggregatedMarketBarData[];
@@ -78,6 +86,8 @@ export async function tryFlatDisplayAdvance(datasetId: string, input: Input): Pr
       throw error;
     }
     aggregates = aggregates.map(bar => bar.timestamp === plan.completedDisplayBucketStart ? closeAggregatedBar(bar) : bar);
+    phases.aggregation = performance.now() - aggregationStartedAt;
+    const persistenceStartedAt = performance.now();
     let account = stored ? await ensurePaperTradeStats(stored as SessionRecord, tx) : null;
     if (account) {
       await ensureReplayJournalSession(tx, account, progress.generation);
@@ -117,15 +127,26 @@ export async function tryFlatDisplayAdvance(datasetId: string, input: Input): Pr
         abrLength: input.abrLength, displayIntervalSeconds: displaySeconds, displaySession: input.displaySession,
         displayUtcOffsetMinutes: input.displayUtcOffsetMinutes, priceTickSize: dataset.priceTickSize,
         abrHistoryStartSequence: input.abrHistoryStartSequence ?? 0 } }]);
+    phases.persist = performance.now() - persistenceStartedAt;
+    const snapshotStartedAt = performance.now();
+    const snapshot = await getPaperSessionSnapshot(datasetId, tx, { session: account, trainingGate: getReplayScope()?.trainingGate,
+      trainingLotsHydrated: true, currentBar: last, includeHistory: input.snapshotMode !== "LIVE" });
+    phases.snapshot = performance.now() - snapshotStartedAt;
+    const receiptStartedAt = performance.now();
     const response: FlatResponse = { requestId: input.requestId!, fromSequence: progress.currentSequence, currentSequence: plan.targetSequence,
       generation: progress.generation, syncVersion: progress.syncVersion + 1, historyVersion: dataset.historyVersion, dataVersion: dataset.dataVersion,
-      fills: [], snapshot: await getPaperSessionSnapshot(datasetId, tx, { session: account, trainingGate: getReplayScope()?.trainingGate,
-        trainingLotsHydrated: true, currentBar: last }), aggregatedBars: aggregates, lastSourceBar: serializeSourceBar(last),
+      fills: [], snapshot, aggregatedBars: aggregates, lastSourceBar: serializeSourceBar(last),
       completedDisplayBucketStart: plan.completedDisplayBucketStart, reachedVisibleBucket: plan.reachedVisibleBucket,
       displayAdvance: { completedDisplayBucketStart: plan.completedDisplayBucketStart, reachedVisibleBucket: plan.reachedVisibleBucket }, flatAdvanceKey: key };
     await tx.replayProgress.update({ where: { id: progress.id }, data: { currentSequence: plan.targetSequence,
       syncVersion: response.syncVersion, lastSyncRequestId: input.requestId, lastSyncResponse: JSON.stringify(response) } });
     await markReplayMutation(tx, plan.targetSequence);
+    completedAt = performance.now();
+    phases.receipt = completedAt - receiptStartedAt;
     return { status: 200, response, metrics };
   }, { timeout: 120_000 });
+  phases.transaction = performance.now() - startedAt;
+  phases.wait = enteredAt - startedAt;
+  if (completedAt > startedAt) phases.commit = performance.now() - completedAt;
+  return { ...outcome, phases };
 }
