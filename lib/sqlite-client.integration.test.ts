@@ -1,6 +1,7 @@
 import { isSqliteBusy } from "./sqlite-write";
 import { randomUUID } from "node:crypto";
-import { execFileSync } from "node:child_process";
+import { execFileSync, spawn } from "node:child_process";
+import { once } from "node:events";
 import { existsSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
@@ -106,17 +107,34 @@ describe("configured SQLite runtime", () => {
     await db.$executeRawUnsafe("CREATE TABLE BusyProbe (id INTEGER PRIMARY KEY, value TEXT)");
     await db.$executeRawUnsafe("INSERT INTO BusyProbe VALUES (1, 'original')");
     await db.$queryRawUnsafe("PRAGMA busy_timeout=5");
-    const blocker = new DatabaseSync(path);
+    // Keep the lock in another process: two SQLite libraries in one Linux process
+    // can share process-scoped file locks instead of producing SQLITE_BUSY.
+    const blocker = spawn(process.execPath, ["--input-type=commonjs", "--eval", [
+      'const { DatabaseSync } = require("node:sqlite");',
+      'const db = new DatabaseSync(process.argv[1]);',
+      'db.exec("BEGIN IMMEDIATE");',
+      'process.once("message", () => { db.exec("ROLLBACK"); db.close(); process.disconnect(); });',
+      'process.send("locked");',
+    ].join("\n"), path], { stdio: ["ignore", "ignore", "inherit", "ipc"] });
+    const exited = once(blocker, "exit");
     try {
-      blocker.exec("BEGIN IMMEDIATE");
+      const [ready] = await Promise.race([
+        once(blocker, "message"),
+        exited.then(() => { throw new Error("SQLite blocker exited before acquiring its lock"); }),
+      ]);
+      expect(ready).toBe("locked");
       let error: unknown;
       try { await db.$executeRawUnsafe("UPDATE BusyProbe SET value = 'blocked' WHERE id=1"); } catch (caught) { error = caught; }
       expect(error).toBeDefined(); expect(isSqliteBusy(error)).toBe(true);
       expect((error as { meta?: { code?: string } }).meta?.code).toBe("5");
-      blocker.exec("ROLLBACK");
+      blocker.send("release");
+      await exited;
       await db.$executeRawUnsafe("UPDATE BusyProbe SET value = 'saved' WHERE id=1");
       expect(await db.$queryRawUnsafe("SELECT value FROM BusyProbe")).toEqual([{ value: "saved" }]);
-    } finally { if (blocker.isTransaction) blocker.exec("ROLLBACK"); blocker.close(); }
+    } finally {
+      if (blocker.connected) blocker.send("release");
+      await exited;
+    }
   });
   it.each(["FULL", "NORMAL"])("propagates the fixed driver and %s setting to an independent Node worker", async synchronous => {
     const path = file(); const db = client(path); await db.$queryRawUnsafe("SELECT 1"); await db.$disconnect();
