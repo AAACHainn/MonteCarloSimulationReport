@@ -25,6 +25,12 @@ afterAll(async () => {
 });
 describe("application lifecycle scheduler", () => {
   it("does not run during build or tests", () => { expect(startMarketSyncRuntime()).toBeUndefined(); vi.stubEnv("VITEST", ""); vi.stubEnv("NEXT_PHASE", "phase-production-build"); expect(startMarketSyncRuntime()).toBeUndefined(); });
+  it("does not persist a scheduler heartbeat when there is no due or pending work", async () => {
+    vi.stubEnv("VITEST", ""); vi.stubEnv("NEXT_PHASE", "phase-production-server"); vi.stubEnv("MARKET_DATA_SYNC_ENABLED", "1");
+    const runtime = startMarketSyncRuntime();
+    await vi.waitFor(async () => { await runtime!.tick(); expect(await prisma.marketSyncSchedulerLease.count()).toBe(0); });
+    runtime!.stop(); delete (globalThis as unknown as { marketSyncRuntime?: unknown }).marketSyncRuntime;
+  });
   it("coalesces missed automatic plans and leaves disabled/manual datasets alone", async () => {
     vi.stubEnv("VITEST", ""); vi.stubEnv("NEXT_PHASE", "phase-production-server"); vi.stubEnv("MARKET_DATA_SYNC_ENABLED", "1");
     for (const mode of ["OFF", "MANUAL", "AUTO"]) {

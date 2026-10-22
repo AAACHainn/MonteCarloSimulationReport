@@ -1,3 +1,4 @@
+import { sqliteWriteTransaction } from "@/lib/sqlite-write";
 import { prisma } from "@/lib/db";
 import type { Prisma } from "@prisma/client";
 import { copy } from "@/lib/i18n";
@@ -53,12 +54,12 @@ export async function toolLoop(runId: string, scope: ToolScope, config: ToolLoop
     if (run.status !== "RUNNING") throw new AiError("CANCELLED", copy.ai.stopped);
     return run;
   }
-  async function commit(action: (tx: Prisma.TransactionClient) => Promise<unknown>) {
-    await prisma.$transaction(async (tx) => {
+  async function commit<T>(action: (tx: Prisma.TransactionClient) => Promise<T>) {
+    return sqliteWriteTransaction(prisma, async (tx) => {
       signal.throwIfAborted();
       const guard = await tx.aiRun.updateMany({ where: { id: runId, status: "RUNNING" }, data: { heartbeatAt: new Date() } });
       if (!guard.count) throw new AiError("CANCELLED", copy.ai.stopped);
-      await action(tx);
+      return action(tx);
     });
   }
   async function handle(turn: ModelTurn, stepNo: number) {
@@ -114,11 +115,11 @@ export async function toolLoop(runId: string, scope: ToolScope, config: ToolLoop
         const payload = JSON.stringify(result);
         resultBytes += Buffer.byteLength(payload); protocolBytes += Buffer.byteLength(payload);
         if (protocolBytes > maxProtocolBytes) throw budgetError("protocolBytes", protocolBytes, maxProtocolBytes);
-        await commit(async (tx) => {
-          const saved = await tx.aiToolCall.update({ where: { runId_toolCallId: { runId, toolCallId: request.id } }, data: { status: result.ok ? "COMPLETED" : "FAILED", result: payload,
+        const saved = await commit(async (tx) => {
+          return tx.aiToolCall.update({ where: { runId_toolCallId: { runId, toolCallId: request.id } }, data: { status: result.ok ? "COMPLETED" : "FAILED", result: payload,
             receipts: JSON.stringify(result.sources), errorCode: result.error?.code ?? null, durationMs: Date.now() - started } });
-          savedCalls.push(saved);
         });
+        savedCalls.push(saved);
         if (result.ok) receipts.push(...result.sources);
         event({ type: result.ok ? "tool_completed" : "tool_failed", stepNo, toolCallId: request.id, name: request.function.name, errorCode: result.error?.code ?? null });
       }

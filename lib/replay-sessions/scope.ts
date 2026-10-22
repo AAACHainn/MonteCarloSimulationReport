@@ -1,3 +1,4 @@
+import { sqliteErrorResponse } from "@/lib/sqlite-write-response";
 import { parseTrainingGate, type TrainingGateState } from "@/lib/paper-trading/training-gate";
 import { AsyncLocalStorage } from "node:async_hooks";
 import { NextResponse } from "next/server";
@@ -91,6 +92,7 @@ export async function markReplayMutation(tx: Prisma.TransactionClient, currentSe
 }
 
 export function replayErrorResponse(error: unknown) {
+  const busy = sqliteErrorResponse(error); if (busy) return busy;
   if (error instanceof ReplaySessionError) return NextResponse.json({ error: error.message, code: error.code }, { status: error.status });
   console.error("Replay session request failed.", error);
   return NextResponse.json({ error: copy.replaySessions.requestFailed }, { status: 500 });

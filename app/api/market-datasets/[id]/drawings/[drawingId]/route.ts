@@ -1,3 +1,4 @@
+import { sqliteWriteTransaction } from "@/lib/sqlite-write";
 import { withReplaySessionRoute, drawingScopeWhere, assertReplayDrawingWritable } from '@/lib/replay-sessions/scope';
 import { NextResponse } from "next/server";
 import { prisma } from "@/lib/db";
@@ -19,7 +20,7 @@ async function handlePATCH(request: Request, context: RouteContext) {
   if (!parsed.success) {
     return NextResponse.json({ error: copy.marketReplay.invalidDrawing }, { status: 400 });
   }
-  return prisma.$transaction(async tx => {
+  return sqliteWriteTransaction(prisma, async tx => {
     await assertReplayDrawingWritable(tx);
     const existing = await tx.marketDrawing.findFirst({ where: { id: drawingId, datasetId: id, ...drawingScopeWhere() } });
     if (!existing) return NextResponse.json({ error: copy.marketReplay.drawingNotFound }, { status: 404 });
@@ -45,7 +46,7 @@ async function handlePATCH(request: Request, context: RouteContext) {
 
 async function handleDELETE(_request: Request, context: RouteContext) {
   const { id, drawingId } = await context.params;
-  return prisma.$transaction(async tx => {
+  return sqliteWriteTransaction(prisma, async tx => {
     await assertReplayDrawingWritable(tx);
     const existing = await tx.marketDrawing.findFirst({
       where: { id: drawingId, datasetId: id, ...drawingScopeWhere() },

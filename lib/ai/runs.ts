@@ -1,3 +1,5 @@
+import { retrySqliteWrite } from "@/lib/sqlite-write";
+import { sqliteWriteTransaction } from "@/lib/sqlite-write";
 import { randomUUID } from "node:crypto";
 import { spawn } from "node:child_process";
 import { join } from "node:path";
@@ -29,7 +31,7 @@ const localControllers = new Map<string, AbortController>();
 export async function recoverRuns() {
   const cutoff = new Date(Date.now() - 180000);
   const stale = await prisma.aiRun.findMany({ where: { status: { in: ["RUNNING", "QUEUED"] }, heartbeatAt: { lt: cutoff } }, select: { id: true, conversationId: true } });
-  for (const run of stale) await prisma.$transaction(async (tx) => {
+  for (const run of stale) await sqliteWriteTransaction(prisma, async (tx) => {
     const changed = await tx.aiRun.updateMany({ where: { id: run.id, status: { in: ["RUNNING", "QUEUED"] }, heartbeatAt: { lt: cutoff } }, data: { status: "INTERRUPTED", error: copy.ai.interrupted } });
     if (changed.count) await tx.aiConversation.updateMany({ where: { id: run.conversationId, activeRunId: run.id }, data: { activeRunId: null } });
   });
@@ -72,7 +74,7 @@ export async function createRun(input: RunInput) {
     toolSchemaVersion: "2", imageRequest, adapterVersion: (resolved.endpoint.adapterProfile ?? "generic") + ":2", contextHash: context ? hashValue(context) : undefined,
     reference: context ? context.sessionName + " · " + context.symbol + " · " + context.asOfTime + " · " + (context.selectedEntryId ? context.entries[0].sourceId : copy.ai.wholeSession) : copy.ai.noContext,
   };
-  const created = await prisma.$transaction(async (tx) => {
+  const created = await sqliteWriteTransaction(prisma, async (tx) => {
     const claimed = await tx.aiConversation.updateMany({ where: { id: input.conversationId, activeRunId: null }, data: { activeRunId: input.requestId } });
     if (!claimed.count) throw new AiError("BUSY", copy.ai.busy, 409);
     const run = await tx.aiRun.create({ data: { id: input.requestId, conversationId: input.conversationId, contextId: input.contextId, task: input.task, snapshot: JSON.stringify(snapshot),
@@ -89,11 +91,11 @@ export async function cancelRun(id: string) {
   localControllers.get(id)?.abort();
   const run = await prisma.aiRun.findUnique({ where: { id } });
   if (!run) return;
-  await prisma.$transaction([
-    prisma.aiRun.updateMany({ where: { id, status: { in: ["RUNNING", "QUEUED"] } }, data: { status: "CANCELLED", error: copy.ai.stopped } }),
-    prisma.aiRunStep.updateMany({ where: { runId: id, phase: "CAPTURE", status: { in: ["REQUESTED", "CAPTURING"] } }, data: { status: "CANCELLED" } }),
-    prisma.aiConversation.updateMany({ where: { id: run.conversationId, activeRunId: id }, data: { activeRunId: null } }),
-  ]);
+  await sqliteWriteTransaction(prisma, async (tx) => { await Promise.all([
+    tx.aiRun.updateMany({ where: { id, status: { in: ["RUNNING", "QUEUED"] } }, data: { status: "CANCELLED", error: copy.ai.stopped } }),
+    tx.aiRunStep.updateMany({ where: { runId: id, phase: "CAPTURE", status: { in: ["REQUESTED", "CAPTURING"] } }, data: { status: "CANCELLED" } }),
+    tx.aiConversation.updateMany({ where: { id: run.conversationId, activeRunId: id }, data: { activeRunId: null } }),
+  ]); });
   await retainInterruptedImageReply(id);
 }
 export async function retryRun(id: string, overrides?: Partial<AiLimits>) {
@@ -107,7 +109,7 @@ export async function retryRun(id: string, overrides?: Partial<AiLimits>) {
   snapshot.limits = resolveLimits(snapshot.limits, overrides);
   if (snapshot.routing) snapshot.routing = { ...snapshot.routing, reused: true };
   const retryId = randomUUID();
-  return prisma.$transaction(async (tx) => {
+  return sqliteWriteTransaction(prisma, async (tx) => {
     const claimed = await tx.aiConversation.updateMany({ where: { id: original.conversationId, activeRunId: null }, data: { activeRunId: retryId } });
     if (!claimed.count) throw new AiError("BUSY", copy.ai.busy, 409);
     const run = await tx.aiRun.create({ data: { id: retryId, conversationId: original.conversationId,
@@ -123,7 +125,7 @@ export function startAnalysisWorker(id: string) {
   child.on("error", () => { void cancelRun(id); }); child.unref();
   child.on("exit", (code) => {
     if (code === 0) return;
-    void prisma.$transaction(async (tx) => {
+    void sqliteWriteTransaction(prisma, async (tx) => {
       const failed = await tx.aiRun.updateMany({ where: { id, status: { in: ["QUEUED", "RUNNING"] } }, data: { status: "INTERRUPTED", error: copy.ai.interrupted } });
       if (failed.count) await tx.aiConversation.updateMany({ where: { activeRunId: id }, data: { activeRunId: null } });
     }).catch(() => undefined);
@@ -133,7 +135,7 @@ export async function resumeRun(id: string, overrides?: Partial<AiLimits>) {
   await recoverRuns();
   const original = await prisma.aiRun.findUnique({ where: { id }, select: { contextId: true } });
   if (original?.contextId) await checkCurrentContext(await readContext(original.contextId));
-  return prisma.$transaction(async (tx) => {
+  return sqliteWriteTransaction(prisma, async (tx) => {
     const run = await tx.aiRun.findUnique({ where: { id } });
     if (!run || run.task !== "sessionReview" || !["INTERRUPTED", "FAILED", "CANCELLED", "INVALID_RESULT"].includes(run.status)) throw new AiError("INVALID", copy.ai.invalid);
     const claimed = await tx.aiConversation.updateMany({ where: { id: run.conversationId, activeRunId: null }, data: { activeRunId: id } });
@@ -187,14 +189,14 @@ export function resultText(result: NonNullable<ReturnType<typeof validatedResult
 export async function executeRun(id: string, emit: (event: unknown) => void = () => undefined, externalSignal?: AbortSignal) {
   const initial = await prisma.aiRun.findUniqueOrThrow({ where: { id } });
   const limits = resolveLimits(JSON.parse(initial.snapshot).limits);
-  const claimed = await prisma.aiRun.updateMany({ where: { id, status: "QUEUED" }, data: { status: "RUNNING", heartbeatAt: new Date() } });
+  const claimed = await retrySqliteWrite(() => prisma.aiRun.updateMany({ where: { id, status: "QUEUED" }, data: { status: "RUNNING", heartbeatAt: new Date() } }));
   if (!claimed.count) return;
   const controller = new AbortController(); localControllers.set(id, controller);
   const signal = AbortSignal.any([controller.signal, AbortSignal.timeout(limits.runSeconds * 1000), ...(externalSignal ? [externalSignal] : [])]);
   const poll = setInterval(() => {
     void prisma.aiRun.findUnique({ where: { id }, select: { status: true } }).then((r) => {
       if (r?.status !== "RUNNING") controller.abort();
-      else return prisma.aiRun.updateMany({ where: { id, status: "RUNNING" }, data: { heartbeatAt: new Date() } });
+      else return retrySqliteWrite(() => prisma.aiRun.updateMany({ where: { id, status: "RUNNING" }, data: { heartbeatAt: new Date() } }));
     }).catch(() => controller.abort());
   }, 1000);
   try {
@@ -221,15 +223,15 @@ export async function executeRun(id: string, emit: (event: unknown) => void = ()
       if (calls >= maxCalls) throw budgetError(run.task === "sessionReview" ? "maxAnalysisCalls" : "maxModelCalls", calls + routingCalls + (config.executionMode === "tools-v1" ? limits.maxModelCalls : 0) + 1, run.task === "sessionReview" ? limits.maxAnalysisCalls : limits.maxModelCalls);
       totalChars += cost; calls += 1;
       delete config.response;
-      await prisma.aiRun.update({ where: { id }, data: { calls, snapshot: JSON.stringify({ ...config, estimatedChars: totalChars }) } });
+      await retrySqliteWrite(() => prisma.aiRun.update({ where: { id }, data: { calls, snapshot: JSON.stringify({ ...config, estimatedChars: totalChars }) } }));
       usages.push({ input: null, output: null });
-      await prisma.aiRun.update({ where: { id }, data: { usage: JSON.stringify(usages) } });
+      await retrySqliteWrite(() => prisma.aiRun.update({ where: { id }, data: { usage: JSON.stringify(usages) } }));
       const parts: Exclude<ModelMessage["content"], string> = [{ type: "text", text: config.question + "\nATTACHED_IMAGE_COUNT=" + imageIds.length + "\nREFERENCE_DATA:\n" + text }];
       for (const assetId of imageIds) parts.push({ type: "image_url", image_url: { url: await assetDataUrl(assetId, signal) } });
       if (stream) emit({ type: "response-start", startedAt: new Date().toISOString() });
       let answer: { content: string; usage: Usage };
       const requestMessages: ModelMessage[] = [{ role: "system", content: config.prompt + "\n" + EVIDENCE_RULES }, ...history, { role: "user", content: parts }];
-      if (config.executionMode === "tools-v1") await prisma.aiRunStep.create({ data: { runId: id, stepNo: calls, phase: "PROGRAM", status: "REQUESTED", adapterVersion: (config.endpoint.adapterProfile ?? "generic") + ":1", requestHash } });
+      if (config.executionMode === "tools-v1") await retrySqliteWrite(() => prisma.aiRunStep.create({ data: { runId: id, stepNo: calls, phase: "PROGRAM", status: "REQUESTED", adapterVersion: (config.endpoint.adapterProfile ?? "generic") + ":1", requestHash } }));
       try {
         const turn = await generateTurn(config.endpoint, config.model, requestMessages, signal,
           stream ? (delta) => emit({ type: "delta", text: delta }) : undefined,
@@ -238,21 +240,21 @@ export async function executeRun(id: string, emit: (event: unknown) => void = ()
         answer = { content: turn.content, usage: turn.usage };
         if (config.executionMode === "tools-v1") {
           signal.throwIfAborted();
-          await prisma.$transaction(async (tx) => {
+          await sqliteWriteTransaction(prisma, async (tx) => {
             const active = await tx.aiRun.updateMany({ where: { id, status: "RUNNING" }, data: { heartbeatAt: new Date() } });
             if (!active.count) throw new AiError("CANCELLED", copy.ai.stopped);
             await tx.aiRunStep.update({ where: { runId_stepNo: { runId: id, stepNo: calls } }, data: { status: "COMPLETED", payload: JSON.stringify(turn), usage: JSON.stringify(turn.usage) } });
           });
         }
       } finally {
-        await prisma.aiRun.update({ where: { id }, data: { usage: JSON.stringify(usages) } });
+        await retrySqliteWrite(() => prisma.aiRun.update({ where: { id }, data: { usage: JSON.stringify(usages) } }));
         if (config.response) {
-          await prisma.aiRun.update({ where: { id }, data: { snapshot: JSON.stringify({ ...config, estimatedChars: totalChars }) } });
+          await retrySqliteWrite(() => prisma.aiRun.update({ where: { id }, data: { snapshot: JSON.stringify({ ...config, estimatedChars: totalChars }) } }));
           emit({ type: "response-details", details: config.response });
         }
       }
       usages[usages.length - 1] = answer.usage;
-      await prisma.aiRun.update({ where: { id }, data: { usage: JSON.stringify(usages) } });
+      await retrySqliteWrite(() => prisma.aiRun.update({ where: { id }, data: { usage: JSON.stringify(usages) } }));
       return answer;
     }
     let answer: { content: string; usage: Usage };
@@ -279,7 +281,7 @@ export async function executeRun(id: string, emit: (event: unknown) => void = ()
         const batch = config.executionMode === "tools-v1" ? programBatch({ id, secret: config.scopeSecret!, context }, unit.entries, unit.charts, unit.charts.filter((c) => assets.some((a) => a.chartHash === c.hash && uniqueAssets.includes(a.id))).map((c) => c.hash), signal) : null;
         const partial = await call({ ...(batch?.payload ?? contextText({ ...context, entries: unit.entries, charts: unit.charts })), instruction: "This is one batch only. Extract concise observations and source IDs; do not claim complete coverage. Keep under 1500 characters. Include both support and contrary cases; an empty review is still a real sample." }, uniqueAssets);
         checkpoint.push({ ...partial, ...(batch ? { coverage: batch.coverage } : {}) }); signal.throwIfAborted();
-        const saved = await prisma.aiRun.updateMany({ where: { id, status: "RUNNING" }, data: { checkpoint: JSON.stringify(checkpoint) } });
+        const saved = await retrySqliteWrite(() => prisma.aiRun.updateMany({ where: { id, status: "RUNNING" }, data: { checkpoint: JSON.stringify(checkpoint) } }));
         if (!saved.count) throw new AiError("CANCELLED", copy.ai.stopped);
         emit({ type: "progress", done: i + 1, total: units.length });
         if (batch) emit({ type: "coverage_updated", runId: id, stepNo: calls, eventNo: calls * 10, coverage: coverageLedger(context, checkpoint.flatMap((p) => p.coverage ? [p.coverage] : [])) });
@@ -300,7 +302,7 @@ export async function executeRun(id: string, emit: (event: unknown) => void = ()
           const result = await call({ batches: groups[i], instruction: "Compress all these batches into under 1200 characters. Preserve useful observations, counterexamples and actual source IDs. No overall statistical claims." }, []);
           if (result.content.length > 4000) throw new AiError("SUMMARY_SIZE", copy.ai.summaryTooLarge);
           checkpoint.push({ ...result, stage }); reduced.push(result.content);
-          const saved = await prisma.aiRun.updateMany({ where: { id, status: "RUNNING" }, data: { checkpoint: JSON.stringify(checkpoint) } });
+          const saved = await retrySqliteWrite(() => prisma.aiRun.updateMany({ where: { id, status: "RUNNING" }, data: { checkpoint: JSON.stringify(checkpoint) } }));
           if (!saved.count) throw new AiError("CANCELLED", copy.ai.stopped);
         }
         summaries = reduced; if (++level > 6) throw new AiError("SUMMARY_SIZE", copy.ai.summaryTooLarge);
@@ -330,7 +332,7 @@ export async function executeRun(id: string, emit: (event: unknown) => void = ()
     }
     signal.throwIfAborted();
     const result = run.task === "reviewDraft" && !canAdopt ? null : validatedResult(run.task, answer.content, context, receipts), content = result ? resultText(result) : answer.content;
-    await prisma.$transaction(async (tx) => {
+    await sqliteWriteTransaction(prisma, async (tx) => {
       const valid = Boolean(result) || !["reviewDraft", "sessionReview"].includes(run.task);
       const current = await tx.aiRun.updateMany({ where: { id, status: "RUNNING" }, data: { status: valid ? "COMPLETED" : "INVALID_RESULT", error: valid ? null : copy.ai.invalidResult } });
       const conversation = await tx.aiConversation.updateMany({ where: { id: run.conversationId, activeRunId: id }, data: { activeRunId: null } });
@@ -350,10 +352,10 @@ export async function executeRun(id: string, emit: (event: unknown) => void = ()
     const latest = await prisma.aiRun.findUniqueOrThrow({ where: { id } });
     const snapshot: RunSnapshot = JSON.parse(latest.snapshot);
     if (failure instanceof AiError && failure.budget) snapshot.budgetExceeded = failure.budget;
-    await prisma.$transaction([
-      prisma.aiRun.updateMany({ where: { id, status: "RUNNING" }, data: { status, error: message, snapshot: JSON.stringify(snapshot) } }),
-      prisma.aiConversation.updateMany({ where: { activeRunId: id }, data: { activeRunId: null } }),
-    ]);
+    await sqliteWriteTransaction(prisma, async (tx) => { await Promise.all([
+      tx.aiRun.updateMany({ where: { id, status: "RUNNING" }, data: { status, error: message, snapshot: JSON.stringify(snapshot) } }),
+      tx.aiConversation.updateMany({ where: { activeRunId: id }, data: { activeRunId: null } }),
+    ]); });
     await retainInterruptedImageReply(id);
     emit({ type: "error", error: message });
   } finally { clearInterval(poll); localControllers.delete(id); }

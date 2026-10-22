@@ -1,3 +1,4 @@
+import { sqliteWriteTransaction } from "@/lib/sqlite-write";
 import { createCipheriv, createDecipheriv, randomBytes } from "node:crypto";
 import { prisma } from "@/lib/db";
 import { copy } from "@/lib/i18n";
@@ -80,7 +81,7 @@ export async function saveSettings(input: unknown, expectedVersion: number) {
       && !endpoint.apiKey?.trim() && !endpoint.clearApiKey ? previous.capabilities : {};
     delete endpoint.apiKey; delete endpoint.clearApiKey;
   }
-  await prisma.$transaction(async (tx) => {
+  await sqliteWriteTransaction(prisma, async (tx) => {
     if (expectedVersion === 0) {
       const exists = await tx.aiSetting.findUnique({ where: { id: "config" } });
       if (exists) throw new AiError("CONFIG_CONFLICT", copy.ai.conflict, 409);

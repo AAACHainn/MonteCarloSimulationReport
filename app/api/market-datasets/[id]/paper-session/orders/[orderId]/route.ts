@@ -1,3 +1,4 @@
+import { sqliteWriteTransaction } from "@/lib/sqlite-write";
 import { withReplaySessionRoute } from '@/lib/replay-sessions/scope';
 import { accountWhere, progressWhere, assertReplayWritable, markReplayMutation, storageId } from '@/lib/replay-sessions/scope';
 import { recordReplayCommand } from '@/lib/replay-sessions/service';
@@ -16,7 +17,7 @@ async function handlePATCH(request: Request, context: RouteContext) {
   const { id, orderId } = await context.params;
   const parsed = paperOrderUpdateSchema.safeParse(await request.json());
   if (!parsed.success) return NextResponse.json({ error: parsed.error.issues[0]?.message }, { status: 400 });
-  const result = await prisma.$transaction(async (tx) => {
+  const result = await sqliteWriteTransaction(prisma, async (tx) => {
     await assertReplayWritable(tx);
     const session = await tx.paperTradingSession.findFirst({ where: accountWhere(id) });
     if (!session) return { status: 404, error: copy.paperTrading.sessionNotFound };
@@ -98,7 +99,7 @@ async function handleDELETE(request: Request, context: RouteContext) {
   const { id, orderId } = await context.params;
   const body = z.object({ expectedVersion: z.number().int().positive() }).safeParse(await request.json().catch(() => ({})));
   if (!body.success) return NextResponse.json({ error: copy.paperTrading.conflict }, { status: 400 });
-  const result = await prisma.$transaction(async (tx) => {
+  const result = await sqliteWriteTransaction(prisma, async (tx) => {
     await assertReplayWritable(tx);
     const session = await tx.paperTradingSession.findFirst({ where: accountWhere(id) });
     if (!session) return { status: 404, error: copy.paperTrading.sessionNotFound };

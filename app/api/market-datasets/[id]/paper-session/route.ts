@@ -1,3 +1,5 @@
+import { sqliteErrorResponse } from "@/lib/sqlite-write-response";
+import { sqliteWriteTransaction } from "@/lib/sqlite-write";
 import { withReplaySessionRoute } from '@/lib/replay-sessions/scope';
 import { progressWhere, getReplayScope, assertReplayWritable, markReplayMutation, storageId } from '@/lib/replay-sessions/scope';
 import { recordReplayCommand } from '@/lib/replay-sessions/service';
@@ -23,7 +25,7 @@ async function handlePOST(request: Request, context: RouteContext) {
   if (!parsed.success) return NextResponse.json({ error: parsed.error.issues[0]?.message }, { status: 400 });
   let created = false;
   try {
-    created = await prisma.$transaction(async (tx) => {
+    created = await sqliteWriteTransaction(prisma, async (tx) => {
       await assertReplayWritable(tx);
       const [progress, dataset] = await Promise.all([
         tx.replayProgress.findFirst({ where: progressWhere(id), select: { currentSequence: true, generation: true } }),
@@ -61,7 +63,8 @@ async function handlePOST(request: Request, context: RouteContext) {
       await markReplayMutation(tx);
       return true;
     });
-  } catch {
+  } catch (error) {
+    const busy = sqliteErrorResponse(error); if (busy) return busy;
     return NextResponse.json({ error: copy.paperTrading.requestFailed }, { status: 409 });
   }
   if (!created) return NextResponse.json({ error: copy.marketReplay.validation.progressInvalid }, { status: 400 });
@@ -70,7 +73,7 @@ async function handlePOST(request: Request, context: RouteContext) {
 
 async function handleDELETE(_request: Request, context: RouteContext) {
   const { id } = await context.params;
-  await prisma.$transaction((tx) => archiveAndDeletePaperSession(tx, id));
+  await sqliteWriteTransaction(prisma, (tx) => archiveAndDeletePaperSession(tx, id));
   return NextResponse.json({ ok: true });
 }
 

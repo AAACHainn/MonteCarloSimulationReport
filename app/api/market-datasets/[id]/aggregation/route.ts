@@ -1,8 +1,9 @@
+import { sqliteErrorResponse } from "@/lib/sqlite-write-response";
 import { NextResponse } from "next/server";
 import { z } from "zod";
 import { prisma } from "@/lib/db";
 import { aggregationStatus, cancelAggregation, queueAggregation } from "@/lib/market-replay/aggregation-jobs";
-import { startAggregationWorker } from "@/lib/market-replay/aggregation-worker";
+import { wakeAggregationQueue } from "@/lib/market-replay/aggregation-runtime";
 import { copy } from "@/lib/i18n";
 import { SyncError } from "@/lib/market-sync/security";
 
@@ -21,17 +22,12 @@ export async function POST(request: Request, context: Context) {
   try {
     if (parsed.data.action === "cancel") await cancelAggregation(id);
     else {
-      const job = await queueAggregation(id, parsed.data.action === "resume" ? parsed.data.jobId : undefined);
-      if (job.status === "QUEUED") {
-        try { startAggregationWorker(job.id); }
-        catch (error) {
-          await prisma.marketAggregationJob.updateMany({ where: { id: job.id, status: "QUEUED" }, data: { status: "FAILED", activeDatasetId: null, error: copy.marketReplay.aggregation.failed } });
-          throw error;
-        }
-      }
+      await queueAggregation(id, parsed.data.action === "resume" ? parsed.data.jobId : undefined);
     }
+    wakeAggregationQueue();
     return NextResponse.json(await aggregationStatus(id), { status: 202 });
   } catch (error) {
+    const busy = sqliteErrorResponse(error); if (busy) return busy;
     return NextResponse.json({ error: error instanceof Error ? error.message : copy.marketReplay.aggregation.failed }, { status: error instanceof SyncError ? error.status : 409 });
   }
 }

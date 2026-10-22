@@ -1,3 +1,4 @@
+import { isSqliteBusy } from "./sqlite-write";
 import { randomUUID } from "node:crypto";
 import { execFileSync } from "node:child_process";
 import { existsSync, rmSync } from "node:fs";
@@ -73,6 +74,23 @@ describe("configured SQLite runtime", () => {
     const rollback = client(path, "delete", false); await rollback.$queryRawUnsafe("SELECT 1"); await rollback.$disconnect();
     const original = createDatabaseClient({ datasourceUrl: "file:" + path }, { env: { SQLITE_DRIVER: "native" } }); clients.push(original);
     expect(await original.$queryRawUnsafe("PRAGMA journal_mode")).toEqual([{ journal_mode: "delete" }]);
+  });
+  it("preserves primary SQLITE_BUSY as a structured code instead of an incompatible SocketTimeout", async () => {
+    const path = file(), db = client(path);
+    await db.$executeRawUnsafe("CREATE TABLE BusyProbe (id INTEGER PRIMARY KEY, value TEXT)");
+    await db.$executeRawUnsafe("INSERT INTO BusyProbe VALUES (1, 'original')");
+    await db.$queryRawUnsafe("PRAGMA busy_timeout=5");
+    const blocker = new DatabaseSync(path);
+    try {
+      blocker.exec("BEGIN IMMEDIATE");
+      let error: unknown;
+      try { await db.$executeRawUnsafe("UPDATE BusyProbe SET value = 'blocked' WHERE id=1"); } catch (caught) { error = caught; }
+      expect(error).toBeDefined(); expect(isSqliteBusy(error)).toBe(true);
+      expect((error as { meta?: { code?: string } }).meta?.code).toBe("5");
+      blocker.exec("ROLLBACK");
+      await db.$executeRawUnsafe("UPDATE BusyProbe SET value = 'saved' WHERE id=1");
+      expect(await db.$queryRawUnsafe("SELECT value FROM BusyProbe")).toEqual([{ value: "saved" }]);
+    } finally { if (blocker.isTransaction) blocker.exec("ROLLBACK"); blocker.close(); }
   });
   it("uses the same fixed driver and FULL setting in an independently launched Node worker", async () => {
     const path = file(); const db = client(path); await db.$queryRawUnsafe("SELECT 1"); await db.$disconnect();

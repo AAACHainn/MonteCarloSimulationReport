@@ -1,3 +1,4 @@
+import { sqliteWriteTransaction } from "@/lib/sqlite-write";
 import { NextResponse } from "next/server";
 import { z } from "zod";
 import { prisma } from "@/lib/db";
@@ -31,7 +32,7 @@ export async function PATCH(request: Request, context: Context) {
     if (scope.version !== parsed.data.expectedVersion) return NextResponse.json({ error: copy.replaySessions.conflict, code: "SESSION_CONFLICT" }, { status: 409 });
     await runWithReplayScope(scope, async () => {
       if (parsed.data.riskPreferences) return updateSessionPreferences(scope.id, parsed.data.expectedVersion, JSON.stringify(parsed.data.riskPreferences));
-      await prisma.$transaction(async (tx) => {
+      await sqliteWriteTransaction(prisma, async (tx) => {
         if (parsed.data.status) return archiveReplaySession(tx);
         await renameReplaySession(tx, parsed.data.name!);
       });
@@ -45,7 +46,7 @@ export async function DELETE(request: Request, context: Context) {
     const parsed = deleteReplaySessionSchema.safeParse(await request.json().catch(() => null));
     if (!parsed.success) return NextResponse.json({ error: copy.replaySessions.deleteInvalid }, { status: 400 });
     const scope = await loadReplayScope((await context.params).sessionId);
-    await runWithReplayScope(scope, () => prisma.$transaction((tx) => deleteReplaySession(tx, parsed.data.expectedVersion)));
+    await runWithReplayScope(scope, () => sqliteWriteTransaction(prisma, (tx) => deleteReplaySession(tx, parsed.data.expectedVersion)));
     return NextResponse.json({ ok: true });
   } catch (error) { return replayErrorResponse(error); }
 }

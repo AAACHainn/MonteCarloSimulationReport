@@ -1,3 +1,4 @@
+import { retrySqliteWrite } from "@/lib/sqlite-write";
 import { z } from "zod";
 import { prisma } from "@/lib/db";
 import { readExportWindow, planExportWindow } from "@/lib/market-replay/export-window";
@@ -86,7 +87,7 @@ export async function executeChartTool(scope: ToolScope, contextId: string, raw:
           if (!await versionValid()) throw new Error("STALE_CONTEXT");
         }
         chart = annotatedChart(c, chart);
-        signal.throwIfAborted(); await prisma.aiChartVariant.upsert({ where: { id: variantId }, create: { id: variantId, contextId, value: JSON.stringify(chart) }, update: {} });
+        signal.throwIfAborted(); await retrySqliteWrite(() => prisma.aiChartVariant.upsert({ where: { id: variantId }, create: { id: variantId, contextId, value: JSON.stringify(chart) }, update: {} }));
       }
       const bars = chart.window.bars, more = chart.window.nextSequence !== null; complete &&= !more;
       let asset: ImageAsset | null = await prisma.aiAsset.findFirst({ where: { id: { in: allowedAssetIds }, contextId, chartHash: chart.hash }, orderBy: { createdAt: "asc" } });

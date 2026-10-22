@@ -4,9 +4,9 @@ import { copy } from "@/lib/i18n";
 import { AGGREGATION_RULE_VERSION, aggregateTimeChunk, aggregationFingerprint, type AggregationInput, type AggregationTail } from "./time-aggregation";
 
 type Db = Prisma.TransactionClient | PrismaClient;
-export function createAggregationGeneration(db: Db, dataset: MarketDataset) {
+export function createAggregationGeneration(db: Db, dataset: MarketDataset, id?: string) {
   return db.marketAggregationGeneration.create({ data: {
-    datasetId: dataset.id, ruleVersion: AGGREGATION_RULE_VERSION, historyVersion: dataset.historyVersion,
+    id, datasetId: dataset.id, ruleVersion: AGGREGATION_RULE_VERSION, historyVersion: dataset.historyVersion,
     fingerprint: aggregationFingerprint(dataset),
   } });
 }

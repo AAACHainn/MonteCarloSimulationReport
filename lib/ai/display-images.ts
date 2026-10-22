@@ -1,3 +1,4 @@
+import { sqliteWriteTransaction } from "@/lib/sqlite-write";
 import { prisma } from "@/lib/db";
 import { copy } from "@/lib/i18n";
 import { assetDataUrl } from "./assets";
@@ -14,7 +15,7 @@ export async function loadDisplayedImages(runIds: string[]) {
 }
 
 export async function retainInterruptedImageReply(runId: string) {
-  await prisma.$transaction(async (tx) => {
+  await sqliteWriteTransaction(prisma, async (tx) => {
     const run = await tx.aiRun.findUnique({ where: { id: runId } });
     if (!run || !["FAILED", "CANCELLED", "INTERRUPTED"].includes(run.status)) return;
     // A cleared/deleted conversation must never be recreated by a late worker.

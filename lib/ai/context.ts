@@ -1,3 +1,4 @@
+import { retrySqliteWrite } from "@/lib/sqlite-write";
 import { sessionMetrics } from "./statistics";
 export { sessionMetrics } from "./statistics";
 import { createHash } from "node:crypto";
@@ -236,7 +237,7 @@ export async function createContext(input: z.input<typeof contextRequestSchema>)
     warnings: [copy.ai.noHistory, ...(!events.length ? [copy.ai.noEvents] : []), ...(input.depth === "quick" && !input.entryId ? [copy.ai.noCharts] : [])],
   };
   value.charts = charts.map((chart) => annotatedChart(value, chart));
-  const row = await prisma.aiContext.create({ data: { value: JSON.stringify(value) } });
+  const row = await retrySqliteWrite(() => prisma.aiContext.create({ data: { value: JSON.stringify(value) } }));
   return { id: row.id, ...value };
 }
 export async function readContext(id: string): Promise<ContextValue> {

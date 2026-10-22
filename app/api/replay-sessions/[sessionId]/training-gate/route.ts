@@ -1,3 +1,4 @@
+import { sqliteWriteTransaction } from "@/lib/sqlite-write";
 import { NextResponse } from "next/server";
 import { z } from "zod";
 import { prisma } from "@/lib/db";
@@ -25,7 +26,7 @@ async function write(request: Request, context: Context, start: boolean) {
       throw new ReplaySessionError("SESSION_CONFLICT", 409, copy.replaySessions.conflict);
     }
     return await runWithReplayScope(scope, async () => {
-      const gate = await prisma.$transaction(async (tx) => {
+      const gate = await sqliteWriteTransaction(prisma, async (tx) => {
         await assertReplayWritable(tx);
         const owner = await tx.replaySession.findUniqueOrThrow({ where: { id: scope.id } });
         let gate = parseTrainingGate(owner.trainingGate);

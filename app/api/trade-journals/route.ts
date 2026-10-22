@@ -1,3 +1,5 @@
+import { withSqliteErrors } from "@/lib/sqlite-write-response";
+import { retrySqliteWrite } from "@/lib/sqlite-write";
 import { NextResponse } from "next/server";
 import { prisma } from "@/lib/db";
 import { tradeJournalSchema } from "@/lib/validations";
@@ -11,13 +13,13 @@ export async function GET() {
   );
 }
 
-export async function POST(request: Request) {
+async function handlePOST(request: Request) {
   const parsed = tradeJournalSchema.safeParse(await request.json());
   if (!parsed.success) {
     return NextResponse.json({ error: parsed.error.flatten() }, { status: 400 });
   }
 
-  const dataset = await prisma.tradeDataset.create({
+  const dataset = await retrySqliteWrite(() => prisma.tradeDataset.create({
     data: {
       name: `交易日志 · ${parsed.data.name}`,
       description: parsed.data.description || null,
@@ -29,7 +31,9 @@ export async function POST(request: Request) {
       },
     },
     include: { tradeJournal: true },
-  });
+  }));
 
   return NextResponse.json(dataset.tradeJournal, { status: 201 });
 }
+
+export const POST = withSqliteErrors(handlePOST);

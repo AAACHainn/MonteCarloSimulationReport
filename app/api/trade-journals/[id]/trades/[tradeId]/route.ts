@@ -1,3 +1,5 @@
+import { withSqliteErrors, sqliteErrorResponse } from "@/lib/sqlite-write-response";
+import { retrySqliteWrite } from "@/lib/sqlite-write";
 import { NextResponse } from "next/server";
 import { prisma } from "@/lib/db";
 import { calculateJournalTrade } from "@/lib/trade-journal/calculations";
@@ -13,7 +15,7 @@ async function getTrade(id: string, tradeId: string) {
   });
 }
 
-export async function PUT(request: Request, context: RouteContext) {
+async function handlePUT(request: Request, context: RouteContext) {
   const { id, tradeId } = await context.params;
   let newScreenshotPath: string | null = null;
 
@@ -34,7 +36,7 @@ export async function PUT(request: Request, context: RouteContext) {
       newScreenshotPath = await writeUploadedScreenshot(id, instrument.name, screenshot);
     }
 
-    const updated = await prisma.trade.update({
+    const updated = await retrySqliteWrite(() => prisma.trade.update({
       where: { id: tradeId },
       data: {
         date: input.date,
@@ -53,22 +55,27 @@ export async function PUT(request: Request, context: RouteContext) {
         screenshotPath: newScreenshotPath ?? trade.screenshotPath,
       },
       include: { instrumentOption: true, strategyOption: true, tags: { orderBy: { name: "asc" } } },
-    });
+    }));
 
     if (newScreenshotPath) await removeScreenshot(trade.screenshotPath);
     return NextResponse.json(updated);
   } catch (error) {
     await removeScreenshot(newScreenshotPath);
+    const busy = sqliteErrorResponse(error); if (busy) return busy;
     return NextResponse.json({ error: error instanceof Error ? error.message : "无法更新交易记录。" }, { status: 400 });
   }
 }
 
-export async function DELETE(_request: Request, context: RouteContext) {
+async function handleDELETE(_request: Request, context: RouteContext) {
   const { id, tradeId } = await context.params;
   const trade = await getTrade(id, tradeId);
   if (!trade) return NextResponse.json({ error: "未找到交易记录。" }, { status: 404 });
 
-  await prisma.trade.delete({ where: { id: tradeId } });
+  await retrySqliteWrite(() => prisma.trade.delete({ where: { id: tradeId } }));
   await removeScreenshot(trade.screenshotPath);
   return NextResponse.json({ ok: true });
 }
+
+export const PUT = withSqliteErrors(handlePUT);
+
+export const DELETE = withSqliteErrors(handleDELETE);

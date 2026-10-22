@@ -1,3 +1,4 @@
+import { sqliteWriteTransaction } from "@/lib/sqlite-write";
 import type { MarketBar } from "@prisma/client";
 import { hydrateTrainingLots } from "@/lib/paper-trading/serialize";
 import { progressWhere, accountWhere, assertReplayWritable, markReplayMutation, getReplayScope } from '@/lib/replay-sessions/scope';
@@ -55,7 +56,7 @@ export async function syncReplayToTarget(
   input: ReplaySyncInput,
   maximumSourceBars = MAX_REPLAY_SYNC_SOURCE_BARS,
 ): Promise<ReplaySyncOutcome> {
-  const outcome = await prisma.$transaction(async (tx) => {
+  const outcome = await sqliteWriteTransaction(prisma, async (tx) => {
     await assertReplayWritable(tx);
     const [dataset, progress, session] = await Promise.all([
       tx.marketDataset.findUnique({ where: { id: datasetId } }),

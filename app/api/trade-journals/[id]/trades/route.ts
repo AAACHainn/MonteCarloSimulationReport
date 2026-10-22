@@ -1,3 +1,5 @@
+import { withSqliteErrors, sqliteErrorResponse } from "@/lib/sqlite-write-response";
+import { retrySqliteWrite } from "@/lib/sqlite-write";
 import { randomUUID } from "node:crypto";
 import { NextResponse } from "next/server";
 import { prisma } from "@/lib/db";
@@ -8,7 +10,7 @@ import { parseJournalTradeFormData } from "@/lib/trade-journal/trade-input";
 
 type RouteContext = { params: Promise<{ id: string }> };
 
-export async function POST(request: Request, context: RouteContext) {
+async function handlePOST(request: Request, context: RouteContext) {
   const { id } = await context.params;
   let screenshotPath: string | null = null;
 
@@ -28,7 +30,7 @@ export async function POST(request: Request, context: RouteContext) {
     const tradeId = randomUUID();
     screenshotPath = await writeUploadedScreenshot(id, instrument.name, screenshot);
 
-    const trade = await prisma.trade.create({
+    const trade = await retrySqliteWrite(() => prisma.trade.create({
       data: {
         id: tradeId,
         datasetId: journal.datasetId,
@@ -48,10 +50,13 @@ export async function POST(request: Request, context: RouteContext) {
         screenshotPath,
       },
       include: { instrumentOption: true, strategyOption: true, tags: { orderBy: { name: "asc" } } },
-    });
+    }));
     return NextResponse.json(trade, { status: 201 });
   } catch (error) {
     await removeScreenshot(screenshotPath);
+    const busy = sqliteErrorResponse(error); if (busy) return busy;
     return NextResponse.json({ error: error instanceof Error ? error.message : "无法保存交易记录。" }, { status: 400 });
   }
 }
+
+export const POST = withSqliteErrors(handlePOST);

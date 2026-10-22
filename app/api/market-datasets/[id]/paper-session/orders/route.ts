@@ -1,3 +1,4 @@
+import { sqliteWriteTransaction } from "@/lib/sqlite-write";
 import { isClosingOrder, parseChecklist, parseTrainingGate, type EntryDiscipline } from "@/lib/paper-trading/training-gate";
 import { withReplaySessionRoute } from '@/lib/replay-sessions/scope';
 import { accountWhere, progressWhere, assertReplayWritable, markReplayMutation, getReplayScope, storageId } from '@/lib/replay-sessions/scope';
@@ -20,7 +21,7 @@ async function handlePOST(request: Request, context: RouteContext) {
   const { id } = await context.params;
   const parsed = paperOrderSchema.safeParse(await request.json());
   if (!parsed.success) return NextResponse.json({ error: parsed.error.issues[0]?.message }, { status: 400 });
-  const result = await prisma.$transaction(async (tx) => {
+  const result = await sqliteWriteTransaction(prisma, async (tx) => {
     await assertReplayWritable(tx);
     const session = await tx.paperTradingSession.findFirst({ where: accountWhere(id) });
     if (!session) return { status: 404, error: copy.paperTrading.sessionNotFound };
@@ -122,7 +123,7 @@ async function handleDELETE(request: Request, context: RouteContext) {
     scope: z.enum(["ALL", "BRACKET"]).default("ALL"),
   }).safeParse(await request.json().catch(() => ({})));
   if (!body.success) return NextResponse.json({ error: copy.paperTrading.conflict }, { status: 400 });
-  const result = await prisma.$transaction(async (tx) => {
+  const result = await sqliteWriteTransaction(prisma, async (tx) => {
     await assertReplayWritable(tx);
     const session = await tx.paperTradingSession.findFirst({ where: accountWhere(id) });
     if (!session) return { status: 404, error: copy.paperTrading.sessionNotFound } as const;

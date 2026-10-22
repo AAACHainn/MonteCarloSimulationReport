@@ -1,3 +1,6 @@
+import { withSqliteErrors } from "@/lib/sqlite-write-response";
+import { retrySqliteWrite } from "@/lib/sqlite-write";
+import { sqliteWriteTransaction } from "@/lib/sqlite-write";
 import { NextResponse } from "next/server";
 import { prisma } from "@/lib/db";
 import { copy } from "@/lib/i18n";
@@ -28,7 +31,7 @@ export async function GET(_request: Request, context: RouteContext) {
   return NextResponse.json(journal);
 }
 
-export async function PATCH(request: Request, context: RouteContext) {
+async function handlePATCH(request: Request, context: RouteContext) {
   const { id } = await context.params;
   const parsed = tradeJournalSchema.safeParse(await request.json());
   if (!parsed.success) {
@@ -41,7 +44,7 @@ export async function PATCH(request: Request, context: RouteContext) {
   }
 
   const description = parsed.data.description || null;
-  const updated = await prisma.$transaction(async (tx) => {
+  const updated = await sqliteWriteTransaction(prisma, async (tx) => {
     await tx.tradeDataset.update({
       where: { id: journal.datasetId },
       data: {
@@ -62,14 +65,18 @@ export async function PATCH(request: Request, context: RouteContext) {
   return NextResponse.json(updated);
 }
 
-export async function DELETE(_request: Request, context: RouteContext) {
+async function handleDELETE(_request: Request, context: RouteContext) {
   const { id } = await context.params;
   const journal = await prisma.tradeJournal.findUnique({ where: { id } });
   if (!journal) {
     return NextResponse.json({ error: copy.api.journalNotFound }, { status: 404 });
   }
 
-  await prisma.tradeDataset.delete({ where: { id: journal.datasetId } });
+  await retrySqliteWrite(() => prisma.tradeDataset.delete({ where: { id: journal.datasetId } }));
   await removeJournalScreenshots(id);
   return NextResponse.json({ ok: true });
 }
+
+export const PATCH = withSqliteErrors(handlePATCH);
+
+export const DELETE = withSqliteErrors(handleDELETE);

@@ -1,3 +1,4 @@
+import { sqliteWriteTransaction } from "@/lib/sqlite-write";
 import { NextResponse } from 'next/server';
 import { prisma } from '@/lib/db';
 import { paperResetSchema } from '@/lib/validations';
@@ -8,7 +9,7 @@ export const POST = withReplaySessionRoute(async (request: Request) => {
   const parsed = paperResetSchema.safeParse(await request.json());
   if (!parsed.success) return NextResponse.json({ error: copy.replaySessions.invalid }, { status: 400 });
   if (parsed.data.action === 'CHANGE_START') {
-    await prisma.$transaction((tx) => archiveReplaySession(tx));
+    await sqliteWriteTransaction(prisma, (tx) => archiveReplaySession(tx));
     return NextResponse.json({ ok: true, selectNewSession: true, datasetId: getReplayScope()!.datasetId });
   }
   const next = await restartReplaySession();

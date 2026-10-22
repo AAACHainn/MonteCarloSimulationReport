@@ -12,9 +12,9 @@ import { aggregateMarketBars } from "./aggregation";
 import { resolveDisplaySession } from "./chart-sessions";
 import { serializeSourceBar } from "./dataset";
 import { readExportWindow } from "./export-window";
-import { queueAggregation, processAggregationJob, cancelAggregation, aggregationStatus } from "./aggregation-jobs";
+import { queueAggregation, processAggregationJob, cancelAggregation, aggregationStatus, AGGREGATION_BATCH_SIZE } from "./aggregation-jobs";
 import { AggregationNotReadyError } from "./aggregation-storage";
-import { acquireDatasetLease, assertDatasetIdle, releaseDatasetLease } from "@/lib/market-sync/lease";
+import { acquireDatasetLease, assertDatasetIdle, releaseDatasetLease, recoverAggregationJobs } from "@/lib/market-sync/lease";
 import { POST as aggregationPOST, GET as aggregationGET } from "@/app/api/market-datasets/[id]/aggregation/route";
 import { GET as windowGET } from "@/app/api/market-datasets/[id]/bars/window/route";
 import { PATCH as datasetPATCH } from "@/app/api/market-datasets/[id]/route";
@@ -117,7 +117,7 @@ describe("time aggregation lifecycle and indexed readers", () => {
     expect((await queueAggregation(dataset.id)).id).toBe(rebuild.id);
     await expect(acquireDatasetLease(prisma, dataset.id, "import_other")).rejects.toThrow();
     await expect(processAggregationJob(rebuild.id, { afterBatch: async () => { throw new Error("simulated crash"); } })).rejects.toThrow("simulated crash");
-    expect((await aggregationStatus(dataset.id))).toMatchObject({ ready: true, generationId: active, job: { status: "FAILED", processed: 4096 } });
+    expect((await aggregationStatus(dataset.id))).toMatchObject({ ready: true, generationId: active, job: { status: "FAILED", processed: AGGREGATION_BATCH_SIZE } });
     await queueAggregation(dataset.id, rebuild.id); await processAggregationJob(rebuild.id);
     expect((await aggregationStatus(dataset.id))).toMatchObject({ ready: true, generationId: rebuild.generationId, job: { status: "COMPLETED", processed: 8500 } });
     expect((await readExportWindow({ dataset: inFlightDataset, datasetId: dataset.id, anchorSequence: 8499, endSequence: 8499, direction: "backward", count: 5, warmupCount: 0, sourceSeconds: 1, displaySeconds: 900, session: resolveDisplaySession(dataset, "ETH")! })).bars).toHaveLength(5);
@@ -132,6 +132,7 @@ describe("time aggregation lifecycle and indexed readers", () => {
     const staleOwner = `aggregation_${job.id}_stale`;
     await prisma.marketAggregationJob.update({ where: { id: job.id }, data: { status: "RUNNING", workerToken: "stale", leaseUntil: new Date(0) } });
     await prisma.marketDatasetUpdateLease.create({ data: { datasetId: dataset.id, owner: staleOwner, expiresAt: new Date(0) } });
+    await recoverAggregationJobs();
     await assertDatasetIdle(dataset.id);
     expect((await aggregationStatus(dataset.id)).job?.status).toBe("INTERRUPTED");
     await acquireDatasetLease(prisma, dataset.id, "metadata_new");
@@ -140,6 +141,44 @@ describe("time aggregation lifecycle and indexed readers", () => {
     await releaseDatasetLease(dataset.id, "metadata_new");
     await queueAggregation(dataset.id, job.id); await processAggregationJob(job.id);
     expect((await aggregationStatus(dataset.id)).ready).toBe(true);
+  });
+  it("keeps long queued reservations and serializes every direct worker entry", async () => {
+    await seed("queue-first", 60, 5000); await seed("queue-second", 60, 50);
+    const first = await queueAggregation("queue-first"), second = await queueAggregation("queue-second");
+    await prisma.marketAggregationJob.update({ where: { id: first.id }, data: { createdAt: new Date(1), updatedAt: new Date(1) } });
+    expect((await aggregationStatus("queue-first")).job?.status).toBe("QUEUED");
+    expect(await prisma.marketDatasetUpdateLease.count()).toBe(0);
+    expect((await processAggregationJob(second.id)).status).toBe("DEFERRED");
+    let checked = false;
+    expect((await processAggregationJob(first.id, { afterBatch: async () => {
+      if (checked) return; checked = true;
+      expect((await processAggregationJob(second.id)).status).toBe("DEFERRED");
+      expect(await prisma.marketAggregationJob.count({ where: { status: "RUNNING" } })).toBe(1);
+    } })).status).toBe("COMPLETED");
+    expect((await processAggregationJob(second.id)).status).toBe("COMPLETED");
+  });
+  it("rejects a delayed cancel and spawn from a previous queue identity in the same millisecond", async () => {
+    await seed("queue-identity", 60, 50);
+    const first = await queueAggregation("queue-identity");
+    const snapshot = await prisma.marketAggregationJob.findUniqueOrThrow({ where: { id: first.id } });
+    await cancelAggregation("queue-identity");
+    const resumed = await queueAggregation("queue-identity", first.id);
+    await prisma.marketAggregationJob.update({ where: { id: first.id }, data: { updatedAt: snapshot.updatedAt } });
+    expect(resumed.workerToken).not.toBe(first.workerToken);
+    await expect(cancelAggregation("queue-identity", snapshot)).rejects.toThrow();
+    expect((await processAggregationJob(first.id, undefined, first.workerToken)).status).toBe("DEFERRED");
+    expect((await processAggregationJob(first.id, undefined, resumed.workerToken)).status).toBe("COMPLETED");
+  });
+  it("does not revive a worker whose lease expired between committed batches", async () => {
+    await seed("queue-expired-worker", 60, 5000);
+    const job = await queueAggregation("queue-expired-worker");
+    await expect(processAggregationJob(job.id, { afterBatch: async () => {
+      await prisma.marketAggregationJob.update({ where: { id: job.id }, data: { leaseUntil: new Date(0) } });
+    } })).rejects.toThrow();
+    await recoverAggregationJobs();
+    expect((await aggregationStatus("queue-expired-worker")).job).toMatchObject({ status: "INTERRUPTED", processed: AGGREGATION_BATCH_SIZE });
+    await queueAggregation("queue-expired-worker", job.id);
+    expect((await processAggregationJob(job.id)).status).toBe("COMPLETED");
   });
   it("uses explicit index range searches in every raw and summary branch", async () => {
     const raw = await prisma.$queryRawUnsafe<Array<{ detail: string }>>(`EXPLAIN QUERY PLAN SELECT * FROM "MarketBar" INDEXED BY "MarketBar_datasetId_timestamp_key" WHERE "datasetId" = ? AND "timestamp" >= ? AND "timestamp" < ? UNION ALL SELECT * FROM "MarketBar" INDEXED BY "MarketBar_datasetId_timestamp_key" WHERE "datasetId" = ? AND "timestamp" >= ? AND "timestamp" < ?`, "custom-60", 0, 100, "custom-60", 200, 300);

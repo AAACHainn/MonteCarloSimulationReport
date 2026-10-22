@@ -619,7 +619,8 @@ export function PaperJournalTable({
     if (cancelledInlineReviewIdsRef.current.delete(entry.id)) return;
     const value = reviewDrafts[entry.id];
     if (value === undefined) return;
-    void updateReview(entry, value).finally(() => {
+    void updateReview(entry, value).then((saved) => {
+      if (!saved) return;
       setReviewDrafts((current) => {
         const next = { ...current };
         delete next[entry.id];

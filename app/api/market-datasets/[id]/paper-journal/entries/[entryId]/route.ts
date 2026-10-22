@@ -1,3 +1,4 @@
+import { sqliteWriteTransaction } from "@/lib/sqlite-write";
 import { withReplaySessionRoute, journalScopeWhere, entryProjectionWhere, getReplayScope } from '@/lib/replay-sessions/scope';
 import { NextResponse } from "next/server";
 import { prisma } from "@/lib/db";
@@ -74,7 +75,7 @@ async function handlePATCH(request: Request, context: RouteContext) {
   }
   let updated;
   try {
-    updated = await prisma.$transaction(async (tx) => {
+    updated = await sqliteWriteTransaction(prisma, async (tx) => {
       const session = await tx.replaySession.findUnique({ where: { id: scope.id } });
       if (!session || session.activeProjectionId !== scope.projectionId) throw new AiError("CONFLICT", copy.ai.conflict, 409);
       if (aiBaseline) {

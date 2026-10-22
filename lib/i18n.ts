@@ -1462,6 +1462,8 @@ export const dictionaries = {
       journalDatasetUploadForbidden: "交易日志生成的数据集不能通过 CSV 覆盖。",
     },
     common: {
+      databaseBusy: "数据库暂时繁忙，内容尚未保存，请稍后重试。",
+      databaseUncertain: "操作结果尚未确认，请先核对当前状态再重试。",
       none: "无",
       close: "关闭",
       searchOptions: "搜索选项…",

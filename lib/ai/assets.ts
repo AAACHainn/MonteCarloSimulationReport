@@ -1,5 +1,6 @@
+import { retrySqliteWrite } from "@/lib/sqlite-write";
 import { randomUUID, createHash } from "node:crypto";
-import { mkdir, readFile, writeFile } from "node:fs/promises";
+import { mkdir, readFile, writeFile, unlink } from "node:fs/promises";
 import { join } from "node:path";
 import { prisma } from "@/lib/db";
 import { copy } from "@/lib/i18n";
@@ -18,7 +19,7 @@ export async function saveAsset(dataUrl: string, contextId?: string, chartHash?:
   return storeChartAsset(dataUrl, contextId, chartHash);
 }
 // Called by the capture-task completion path after validating its lease and frozen variant.
-export async function storeChartAsset(dataUrl: string, contextId?: string, chartHash?: string, client: Prisma.TransactionClient = prisma) {
+export async function prepareChartAsset(dataUrl: string, contextId?: string, chartHash?: string) {
   const match = dataUrl.match(/^data:(image\/(?:png|jpeg|webp));base64,([A-Za-z0-9+/=]+)$/);
   if (!match) throw new AiError("ASSET", copy.ai.uploadLimit);
   const bytes = Buffer.from(match[2], "base64");
@@ -26,7 +27,14 @@ export async function storeChartAsset(dataUrl: string, contextId?: string, chart
   validateScreenshotBuffer(bytes, match[1] === "image/jpeg" ? "image.jpg" : match[1] === "image/webp" ? "image.webp" : "image.png");
   const id = randomUUID(); await mkdir(join(process.cwd(), "storage", "ai"), { recursive: true });
   await writeFile(assetPath(id), bytes, { flag: "wx" });
-  return client.aiAsset.create({ data: { id, mime: match[1], bytes: bytes.length, contextId, chartHash, contentHash: createHash("sha256").update(bytes).digest("hex") } });
+  return { id, mime: match[1], bytes: bytes.length, contextId, chartHash, contentHash: createHash("sha256").update(bytes).digest("hex") };
+}
+export async function discardPreparedChartAsset(asset: Awaited<ReturnType<typeof prepareChartAsset>>) {
+  await unlink(assetPath(asset.id)).catch((error: NodeJS.ErrnoException) => { if (error.code !== "ENOENT") throw error; });
+}
+export async function storeChartAsset(dataUrl: string, contextId?: string, chartHash?: string, client: Prisma.TransactionClient = prisma) {
+  const data = await prepareChartAsset(dataUrl, contextId, chartHash);
+  return client === prisma ? retrySqliteWrite(() => client.aiAsset.create({ data })) : client.aiAsset.create({ data });
 }
 export async function assetDataUrl(id: string, signal?: AbortSignal) {
   signal?.throwIfAborted();

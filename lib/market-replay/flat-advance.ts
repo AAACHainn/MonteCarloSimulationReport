@@ -1,3 +1,4 @@
+import { sqliteWriteTransaction } from "@/lib/sqlite-write";
 import type { z } from "zod";
 import { prisma } from "@/lib/db";
 import { copy } from "@/lib/i18n";
@@ -28,7 +29,7 @@ const MAX_FLAT_SAMPLES = 4096;
 
 /** This endpoint never trusts the browser's empty-account hint. Eligibility and commit share a transaction. */
 export async function tryFlatDisplayAdvance(datasetId: string, input: Input): Promise<Outcome> {
-  return prisma.$transaction(async tx => {
+  return sqliteWriteTransaction(prisma, async tx => {
     await assertReplayWritable(tx);
     const [dataset, progress, stored] = await Promise.all([
       tx.marketDataset.findUnique({ where: { id: datasetId } }), tx.replayProgress.findFirst({ where: progressWhere(datasetId) }),

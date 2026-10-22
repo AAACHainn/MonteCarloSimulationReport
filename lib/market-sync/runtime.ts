@@ -15,6 +15,13 @@ export function startMarketSyncRuntime() {
     checking = true;
     try {
       const now = new Date();
+      if (!running) {
+        const [due, pending] = await Promise.all([
+          prisma.marketDatasetSyncConfig.findFirst({ where: { mode: "AUTO", pausedReason: null, nextRunAt: { lte: now } }, select: { datasetId: true } }),
+          prisma.marketDataSyncRun.findFirst({ where: { OR: [{ status: { in: ["QUEUED", "INTERRUPTED"] } }, { status: "RUNNING", leaseUntil: { lte: now } }] }, select: { id: true } }),
+        ]);
+        if (!due && !pending) return;
+      }
       await prisma.marketSyncSchedulerLease.upsert({ where: { id: "dispatcher" }, create: { id: "dispatcher", owner: "", expiresAt: new Date(0), heartbeat: now }, update: {} });
       const elected = await prisma.marketSyncSchedulerLease.updateMany({ where: { id: "dispatcher", OR: [{ owner }, { expiresAt: { lte: now } }] }, data: { owner, heartbeat: now, expiresAt: new Date(now.getTime() + 45000) } });
       if (!elected.count) { jobController?.abort(); return; }

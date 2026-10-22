@@ -1,3 +1,4 @@
+import { sqliteErrorResponse } from "@/lib/sqlite-write-response";
 import { NextResponse } from "next/server";
 import { copy } from "@/lib/i18n";
 import { assertSameOrigin } from "@/lib/market-sync/security";
@@ -7,6 +8,7 @@ export class AiError extends Error {
   constructor(public code: string, message: string, public status = 400) { super(message); }
 }
 export function aiError(error: unknown) {
+  const busy = sqliteErrorResponse(error); if (busy) return busy;
   if (error instanceof AiError) return NextResponse.json({ error: error.message, code: error.code }, { status: error.status });
   return NextResponse.json({ error: copy.ai.failed, code: "INTERNAL" }, { status: 500 });
 }

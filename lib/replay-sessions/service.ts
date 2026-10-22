@@ -1,3 +1,4 @@
+import { sqliteWriteTransaction } from "@/lib/sqlite-write";
 import { parseTrainingGate, restartTrainingGate } from "@/lib/paper-trading/training-gate";
 import type { Prisma } from "@prisma/client";
 import { z } from "zod";
@@ -20,7 +21,7 @@ export type CreateReplaySessionInput = z.infer<typeof createReplaySessionSchema>
 export const deleteReplaySessionSchema = z.object({ expectedVersion: z.number().int().positive() }).strict();
 
 export async function createReplaySession(datasetId: string, input: CreateReplaySessionInput) {
-  return prisma.$transaction(async (tx) => createSessionInTransaction(tx, datasetId, input));
+  return sqliteWriteTransaction(prisma, async (tx) => createSessionInTransaction(tx, datasetId, input));
 }
 
 export async function createSessionInTransaction(tx: Prisma.TransactionClient, datasetId: string, input: CreateReplaySessionInput) {
@@ -92,7 +93,7 @@ export async function deleteReplaySession(tx: Prisma.TransactionClient, expected
 export async function restartReplaySession(input?: CreateReplaySessionInput) {
   const scope = getReplayScope();
   if (!scope) throw new ReplaySessionError("SESSION_REQUIRED", 409, copy.replaySessions.required);
-  return prisma.$transaction(async (tx) => {
+  return sqliteWriteTransaction(prisma, async (tx) => {
     await assertReplayWritable(tx, false);
     const existing = await tx.replaySession.findUniqueOrThrow({ where: { id: scope.id }, include: { progress: true } });
     if (!existing.progress) throw new ReplaySessionError("SESSION_NOT_FOUND", 404, copy.replaySessions.missing);
@@ -145,7 +146,7 @@ export async function recordReplayCommand(tx: Prisma.TransactionClient, sourceSe
 export async function updateSessionPreferences(id: string, expectedVersion: number, preferences: string) {
   const scope = getReplayScope();
   if (!scope || id !== scope.id) throw new ReplaySessionError("SESSION_NOT_FOUND", 404, copy.replaySessions.missing);
-  await prisma.$transaction(async (tx) => {
+  await sqliteWriteTransaction(prisma, async (tx) => {
     await assertReplayWritable(tx);
     if (expectedVersion !== scope.version) throw new ReplaySessionError("SESSION_CONFLICT", 409, copy.replaySessions.conflict);
     await tx.replaySession.update({ where: { id }, data: { riskPreferences: preferences } });

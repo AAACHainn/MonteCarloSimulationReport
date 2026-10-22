@@ -1,10 +1,11 @@
+import { sqliteWriteTransaction, retrySqliteWrite, SqliteCommitUncertainError } from "@/lib/sqlite-write";
 import { randomUUID } from "node:crypto";
 import type { Prisma } from "@prisma/client";
 import { prisma } from "@/lib/db";
 import { copy } from "@/lib/i18n";
 import { AiError } from "./errors";
 import { hashValue, readContext, type ContextChart } from "./context";
-import { storeChartAsset } from "./assets";
+import { prepareChartAsset, discardPreparedChartAsset } from "./assets";
 import type { CaptureJob } from "./chart-images-contract";
 
 type CaptureState = { contextId: string; variantId: string; chartHash: string; deadline: number; lease?: string; leaseUntil?: number; assetId?: string; error?: string };
@@ -21,7 +22,7 @@ export async function requestChartImage(runId: string, contextId: string, varian
   if (cached) return cached;
   if (deadline <= Date.now()) throw new AiError("CHART_CAPTURE_TIMEOUT", copy.ai.captureTimeout);
   const requestHash = hashValue({ contextId, variantId, chartHash: chart.hash });
-  const task = await prisma.$transaction(async (tx) => {
+  const task = await sqliteWriteTransaction(prisma, async (tx) => {
     const active = await tx.aiRun.updateMany({ where: { id: runId, contextId, status: "RUNNING" }, data: { heartbeatAt: new Date() } });
     if (!active.count) throw fail();
     const existing = await tx.aiRunStep.findFirst({ where: { runId, phase: "CAPTURE", requestHash } });
@@ -44,13 +45,13 @@ export async function requestChartImage(runId: string, contextId: string, varian
       }
       if (!pending.includes(current.status)) throw new AiError("CHART_CAPTURE_FAILED", copy.ai.captureFailed);
       if (Date.now() >= state.deadline) {
-        await prisma.aiRunStep.updateMany({ where: { id: task.id, status: { in: pending } }, data: { status: "EXPIRED" } });
+        await retrySqliteWrite(() => prisma.aiRunStep.updateMany({ where: { id: task.id, status: { in: pending } }, data: { status: "EXPIRED" } }));
         throw new AiError("CHART_CAPTURE_TIMEOUT", copy.ai.captureTimeout);
       }
       await sleep(signal);
     }
   } finally {
-    if (signal.aborted) await prisma.aiRunStep.updateMany({ where: { id: task.id, status: { in: pending } }, data: { status: "CANCELLED" } });
+    if (signal.aborted) await retrySqliteWrite(() => prisma.aiRunStep.updateMany({ where: { id: task.id, status: { in: pending } }, data: { status: "CANCELLED" } }));
   }
 }
 export async function listChartCaptures(runIds: string[]) {
@@ -67,7 +68,7 @@ async function lockedTask(tx: Prisma.TransactionClient, id: string) {
   return { task, state };
 }
 export async function claimChartCapture(id: string): Promise<CaptureJob> {
-  const claimed = await prisma.$transaction(async (tx) => {
+  const claimed = await sqliteWriteTransaction(prisma, async (tx) => {
     const { task, state } = await lockedTask(tx, id);
     if (!pending.includes(task.status) || (task.status === "CAPTURING" && (state.leaseUntil ?? 0) > Date.now())) throw fail();
     state.lease = randomUUID(); state.leaseUntil = Math.min(state.deadline, Date.now() + 30000);
@@ -83,19 +84,39 @@ export async function claimChartCapture(id: string): Promise<CaptureJob> {
       entries: [] } };
 }
 export async function finishChartCapture(id: string, lease: string, input: { dataUrl?: string; failed?: boolean; heartbeat?: boolean }) {
-  return prisma.$transaction(async (tx) => {
+  const selected = await sqliteWriteTransaction(prisma, async (tx) => {
     const { task, state } = await lockedTask(tx, id);
     if (state.lease !== lease) throw fail();
-    if (task.status === "READY" && state.assetId) return { id: state.assetId };
+    if (task.status === "READY" && state.assetId) return { result: { id: state.assetId } };
     if (task.status !== "CAPTURING" || (state.leaseUntil ?? 0) <= Date.now()) throw fail();
     if (input.heartbeat) {
       state.leaseUntil = Math.min(state.deadline, Date.now() + 30000);
-      await tx.aiRunStep.update({ where: { id }, data: { payload: JSON.stringify(state) } }); return { ok: true };
+      await tx.aiRunStep.update({ where: { id }, data: { payload: JSON.stringify(state) } }); return { result: { ok: true } };
     }
-    if (input.failed) { await tx.aiRunStep.update({ where: { id }, data: { status: "FAILED" } }); return { ok: true }; }
+    if (input.failed) { await tx.aiRunStep.update({ where: { id }, data: { status: "FAILED" } }); return { result: { ok: true } }; }
     if (!input.dataUrl) throw fail();
-    const asset = await storeChartAsset(input.dataUrl, state.contextId, state.chartHash, tx);
-    state.assetId = asset.id;
-    await tx.aiRunStep.update({ where: { id }, data: { status: "READY", payload: JSON.stringify(state) } }); return { id: asset.id };
-  }, { timeout: 15000 });
+    return { state };
+  });
+  if (selected.result) return selected.result;
+  const state = selected.state!;
+  // File creation happens once, outside all retried database callbacks.
+  const prepared = await prepareChartAsset(input.dataUrl!, state.contextId, state.chartHash);
+  try {
+    const result = await sqliteWriteTransaction(prisma, async (tx) => {
+      const current = await lockedTask(tx, id);
+      if (current.state.lease !== lease || current.state.contextId !== state.contextId || current.state.chartHash !== state.chartHash) throw fail();
+      if (current.task.status === "READY" && current.state.assetId) return { id: current.state.assetId };
+      if (current.task.status !== "CAPTURING" || (current.state.leaseUntil ?? 0) <= Date.now()) throw fail();
+      await tx.aiAsset.create({ data: prepared });
+      current.state.assetId = prepared.id;
+      await tx.aiRunStep.update({ where: { id }, data: { status: "READY", payload: JSON.stringify(current.state) } });
+      return { id: prepared.id };
+    });
+    if (result.id !== prepared.id) await discardPreparedChartAsset(prepared);
+    return result;
+  } catch (error) {
+    // An uncertain commit may have published this exact asset. Preserve its file.
+    if (!(error instanceof SqliteCommitUncertainError)) await discardPreparedChartAsset(prepared).catch(() => undefined);
+    throw error;
+  }
 }

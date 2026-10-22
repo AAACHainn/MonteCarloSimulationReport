@@ -1,3 +1,4 @@
+import { sqliteWriteTransaction } from "@/lib/sqlite-write";
 import { withReplaySessionRoute, drawingScopeWhere, assertReplayDrawingWritable, ReplaySessionError } from '@/lib/replay-sessions/scope';
 import { z } from "zod";
 import { NextResponse } from "next/server";
@@ -30,7 +31,7 @@ async function handlePOST(request: Request, context: RouteContext) {
   }
   const dataset = await prisma.marketDataset.findUnique({ where: { id }, select: { id: true } });
   if (!dataset) return NextResponse.json({ error: copy.marketReplay.datasetNotFound }, { status: 404 });
-  const drawing = await prisma.$transaction(async tx => {
+  const drawing = await sqliteWriteTransaction(prisma, async tx => {
     await assertReplayDrawingWritable(tx);
     const data = {
         datasetId: id,
@@ -61,7 +62,7 @@ export const DELETE = withReplaySessionRoute(async (request: Request, context: R
   const { id } = await context.params;
   const parsed = clearDrawingsSchema.safeParse(await request.json());
   if (!parsed.success) return NextResponse.json({ error: copy.marketReplay.invalidDrawing }, { status: 400 });
-  const drawings = await prisma.$transaction(async tx => {
+  const drawings = await sqliteWriteTransaction(prisma, async tx => {
     await assertReplayDrawingWritable(tx);
     const where = { datasetId: id, ...drawingScopeWhere() };
     await tx.marketDrawing.deleteMany({ where: { ...where, id: { in: parsed.data.ids } } });

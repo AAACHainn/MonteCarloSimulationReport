@@ -1,3 +1,4 @@
+import { sqliteWriteTransaction } from "@/lib/sqlite-write";
 import { withReplaySessionRoute, journalScopeWhere, getReplayScope, assertReplayWritable, markReplayMutation } from '@/lib/replay-sessions/scope';
 import { deleteReplaySession, deleteReplaySessionSchema } from '@/lib/replay-sessions/service';
 import { NextResponse } from "next/server";
@@ -18,7 +19,7 @@ async function handlePATCH(request: Request, context: RouteContext) {
     select: { id: true },
   });
   if (!session) return NextResponse.json({ error: copy.paperTrading.journalNotFound }, { status: 404 });
-  const updated = await prisma.$transaction(async (tx) => {
+  const updated = await sqliteWriteTransaction(prisma, async (tx) => {
     await assertReplayWritable(tx);
     const updated = await tx.replayJournalSession.update({
       where: { id: sessionId }, data: { name: parsed.data.name }, select: { id: true, name: true },
@@ -36,7 +37,7 @@ async function handleDELETE(request: Request, context: RouteContext) {
   if (!parsed.success) return NextResponse.json({ error: copy.replaySessions.deleteInvalid }, { status: 400 });
   const session = await prisma.replayJournalSession.findFirst({ where: { id: sessionId, datasetId: id, ...journalScopeWhere() } });
   if (!session) return NextResponse.json({ error: copy.paperTrading.journalNotFound }, { status: 404 });
-  await prisma.$transaction((tx) => deleteReplaySession(tx, parsed.data.expectedVersion));
+  await sqliteWriteTransaction(prisma, (tx) => deleteReplaySession(tx, parsed.data.expectedVersion));
   return NextResponse.json({ ok: true });
 }
 

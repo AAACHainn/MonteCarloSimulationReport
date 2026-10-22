@@ -10,7 +10,7 @@ async function main() {
   process.env.MARKET_DATA_SYNC_ENABLED = "0";
   process.env.REPLAY_QUERY_METRICS = "1";
   const { prisma } = await import("../lib/db");
-  const { queueAggregation, processAggregationJob } = await import("../lib/market-replay/aggregation-jobs");
+  const { queueAggregation, processAggregationJob, AGGREGATION_BATCH_SIZE } = await import("../lib/market-replay/aggregation-jobs");
   const { availableDisplaySessions } = await import("../lib/market-replay/chart-sessions");
   const { GET } = await import("../app/api/market-datasets/[id]/bars/window/route");
   const results: unknown[] = [];
@@ -21,7 +21,8 @@ async function main() {
         const started = performance.now();
         const job = await queueAggregation(dataset.id);
         let batches = 0;
-        await processAggregationJob(job.id, { afterBatch: async () => { if (++batches % 50 === 0) console.info(JSON.stringify({ datasetId: dataset.id, processed: Math.min(batches * 4096, dataset.barCount), total: dataset.barCount })); } });
+        const buildResult = await processAggregationJob(job.id, { afterBatch: async () => { if (++batches % 50 === 0) console.info(JSON.stringify({ datasetId: dataset.id, processed: Math.min(job.cursor + 1 + batches * AGGREGATION_BATCH_SIZE, dataset.barCount), total: dataset.barCount })); } });
+        if (buildResult.status !== "COMPLETED") throw new Error("Aggregation did not complete: " + buildResult.status);
         console.info(JSON.stringify({ datasetId: dataset.id, buildMs: performance.now() - started }));
       }
       for (const scope of availableDisplaySessions(dataset.symbol)) for (const seconds of [3600, 14400, 21600, 28800, 86400, 3900]) {

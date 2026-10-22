@@ -1,3 +1,5 @@
+import { retrySqliteWrite } from "@/lib/sqlite-write";
+import { sqliteWriteTransaction } from "@/lib/sqlite-write";
 import { NextResponse } from "next/server";
 import { z } from "zod";
 import { prisma } from "@/lib/db";
@@ -93,7 +95,7 @@ async function handle(request: Request, { params }: Context) {
     if (kind === "conversations") {
       await recoverRuns();
       if (request.method === "GET" && !id) return json(await prisma.aiConversation.findMany({ orderBy: [{ updatedAt: "desc" }, { id: "desc" }], take: 30, ...(query.get("cursor") ? { cursor: { id: query.get("cursor")! }, skip: 1 } : {}) }));
-      if (request.method === "POST" && !id) return json(await prisma.aiConversation.create({ data: { name: copy.ai.newChat } }));
+      if (request.method === "POST" && !id) return json(await retrySqliteWrite(() => prisma.aiConversation.create({ data: { name: copy.ai.newChat } })));
       if (!id) throw new AiError("INVALID", copy.ai.invalid);
       const conversation = await prisma.aiConversation.findUnique({ where: { id } });
       if (!conversation) throw new AiError("NOT_FOUND", copy.ai.missing, 404);
@@ -116,11 +118,11 @@ async function handle(request: Request, { params }: Context) {
       }
       if (request.method === "PATCH") {
         const body = z.object({ name: z.string().trim().min(1).max(100) }).parse(await readBody(request));
-        return json(await prisma.aiConversation.update({ where: { id }, data: body }));
+        return json(await retrySqliteWrite(() => prisma.aiConversation.update({ where: { id }, data: body })));
       }
       if (request.method === "DELETE" || action === "clear") {
         if (conversation.activeRunId) await cancelRun(conversation.activeRunId);
-        await prisma.$transaction(async (tx) => {
+        await sqliteWriteTransaction(prisma, async (tx) => {
           const latest = await tx.aiConversation.findUnique({ where: { id } });
           if (latest?.activeRunId) await tx.aiRun.updateMany({ where: { id: latest.activeRunId, status: { in: ["RUNNING", "QUEUED"] } }, data: { status: "CANCELLED", error: copy.ai.stopped } });
           if (action === "clear") {
