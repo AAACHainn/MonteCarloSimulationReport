@@ -596,7 +596,7 @@ export function MarketReplayClient({ dataset: initialDataset, initialJournalFocu
         onAddEma={addEma}
         emaError={emaError}
       />
-      <Dialog open={settingsDialog === "paper" && !checkingOrder} keepMounted={settingsDialog === "paper"} title={paperSnapshot ? copy.marketReplay.accountSettings : copy.propPractice.createAccountTitle} description={paperSnapshot ? copy.marketReplay.accountSettingsDescription : copy.propPractice.createAccountHint} className={paperSnapshot ? "max-w-3xl" : "max-w-2xl"} onClose={() => setSettingsDialog(null)}>
+      <Dialog open={settingsDialog === "paper" && !checkingOrder} keepMounted={settingsDialog === "paper"} title={paperSnapshot ? copy.marketReplay.accountSettings : copy.propPractice.createAccountTitle} description={paperSnapshot ? copy.marketReplay.accountSettingsDescription : copy.propPractice.createAccountHint} className={paperSnapshot ? "max-w-4xl" : "max-w-2xl"} onClose={() => setSettingsDialog(null)}>
         <div className="space-y-4">
           {replaySession && (paperSnapshot?.propAccount ?? replaySession.propAccount) ? <PropAccountPanel sessionId={replaySession.id} runtime={(paperSnapshot?.propAccount ?? replaySession.propAccount)!} tradingSnapshot={paperSnapshot} busy={paperBusy || dateForwarding || isLoading}
             onBeforeOpen={async () => { core.pausePlayback(); await core.advanceCompletionRef.current; await core.paperMutationChainRef.current; await engine.reloadPaper(); }} onChanged={engine.reloadPaper} /> : <PaperAccountStrip snapshot={paperSnapshot} compact />}

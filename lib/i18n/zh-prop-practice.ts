@@ -1,4 +1,6 @@
 export const propPractice = {
+    dailyLedger: "日终账本",
+    rulesSnapshotHint: "账户创建时保存的模板规则与配置，后续模板修改不影响此快照。",
     createAccountTitle: "创建账户", createPracticeAccount: "创建自营练习账户",
     createAccountHint: "选择本会话使用的账户，创建后开始记账。",
     accountFixed: "账户创建后，类别和规则版本固定，不能切换或并存。",

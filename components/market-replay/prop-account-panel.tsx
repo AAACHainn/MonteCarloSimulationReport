@@ -18,6 +18,7 @@ import type { PropRuntime, readPropAccount } from "@/lib/prop-practice/service";
 import type { PaperSessionSnapshot } from "@/lib/paper-trading/types";
 import { PaperAccountMetrics } from "./paper-trading-panel";
 const t = copy.propPractice;
+type AccountView = "rules" | "payout" | "history" | "events";
 type AccountData = NonNullable<Awaited<ReturnType<typeof readPropAccount>>>;
 function ruleRows(rules: object, prefix = ""): { path: string; label: string; value: string }[] {
   return Object.entries(rules).flatMap(([key, value]) => {
@@ -59,8 +60,7 @@ export function PropAccountPanel({ sessionId, runtime, tradingSnapshot, busy: ex
   sessionId: string; runtime: PropRuntime; tradingSnapshot?: PaperSessionSnapshot | null; busy?: boolean; onBeforeOpen?: () => Promise<void>; onChanged?: () => Promise<unknown>;
 }) {
   const [open, setOpen] = useState(false), [data, setData] = useState<AccountData | null>(null);
-  const [view, setView] = useState<"rules" | "payout">("rules");
-  const [rulesTab, setRulesTab] = useState<"snapshot" | "history" | "events">("snapshot");
+  const [view, setView] = useState<AccountView>("rules");
   const [version, setVersion] = useState(0), [busy, setBusy] = useState(false), [error, setError] = useState<string | null>(null);
   const [amount, setAmount] = useState(""), [confirmation, setConfirmation] = useState<{ amount: number; requestId: string; version: number } | null>(null);
   const [success, setSuccess] = useState(false), [sessionStatus, setSessionStatus] = useState("ACTIVE");
@@ -72,8 +72,7 @@ export function PropAccountPanel({ sessionId, runtime, tradingSnapshot, busy: ex
     const result = await response.json(); if (!response.ok || !result.account) throw new Error(result.error ?? t.requestFailed);
     setData(result.account); setVersion(result.version); setSessionStatus(result.status); return result.account as AccountData;
   }
-  async function begin(nextView: "rules" | "payout") {
-    setRulesTab("snapshot");
+  async function begin(nextView: AccountView) {
     setView(nextView); setBusy(true); setError(null); setSuccess(false); setOpen(true);
     try { await onBeforeOpen?.(); const result = await reload(); setAmount(String(result.preview.maximum)); }
     catch (e) { setError(e instanceof Error ? e.message : t.requestFailed); } finally { setBusy(false); }
@@ -87,6 +86,8 @@ export function PropAccountPanel({ sessionId, runtime, tradingSnapshot, busy: ex
       setConfirmation(null); setSuccess(true); await reload(); await onChanged?.();
     } catch (e) { setError(e instanceof Error ? e.message : t.requestFailed); } finally { setBusy(false); }
   }
+  const summaryItems: [string, string][] = [[t.profit, money(f.profit)], [t.totalReceived, money(state.totalReceived)]];
+  const viewTitle = { rules: t.rules, payout: t.payout, history: t.dailyLedger, events: t.events }[view];
   const requested = confirmation?.amount ?? Number(amount), received = Math.round(requested * snapshot.rules.payout.traderShare * 100) / 100;
   const confirmationDescription = `${t.requested}: ${money(requested)} · ${t.received}: ${money(received)} · ${t.balanceAfter}: ${money(preview.balance - requested)} · ${t.floorAfter}: ${money(preview.floorAfter)}。${t.payoutHint}`;
   return <>
@@ -98,42 +99,37 @@ export function PropAccountPanel({ sessionId, runtime, tradingSnapshot, busy: ex
         <div className="grid grid-cols-4 gap-4 text-sm tabular-nums">
           {[[t.balance, f.balance], [t.equity, f.equity], [t.floor, f.floor], [t.remainingRisk, f.equity - f.floor]].map(([label, value]) => <div key={label}><p className="text-xs text-slate-500">{label}</p><p className="mt-1 font-medium text-slate-950">{money(Number(value))}</p></div>)}
         </div>
-        {tradingSnapshot ? <div className="border-t pt-3"><PaperAccountMetrics snapshot={tradingSnapshot} compact includeBalances={false} /></div> : null}
-        {state.pause !== "NONE" ? <p className="text-xs text-amber-800">{t[state.pause]}</p> : null}
+        {tradingSnapshot ? <div className="border-t pt-3"><PaperAccountMetrics snapshot={tradingSnapshot} compact includeBalances={false} extraItems={summaryItems} /></div> : <div className="grid grid-cols-4 gap-4 border-t pt-3 text-sm tabular-nums">{summaryItems.map(([label, value]) => <div key={label}><p className="text-xs text-slate-500">{label}</p><p className="font-medium">{value}</p></div>)}</div>}
+        <p className={state.pause === "NONE" ? "text-xs text-slate-500" : "text-xs text-amber-800"}>{t.pause}: {t[state.pause]}</p>
+        {state.result ? <p className="text-xs text-amber-800">{t.terminalHint}</p> : null}
+        {state.failure ? <p className="text-xs text-red-700">{t.failure}: {state.failure.sequence} / {money(state.failure.equity)} / {money(state.failure.floor)} · {state.failure.phase === "EVALUATION" ? t.evaluation : t.funded}</p> : null}
+        {state.phase === "EVALUATION" ? <div className="grid grid-cols-3 gap-4 border-t pt-3 text-sm tabular-nums">
+          <div><p className="text-xs text-slate-500">{t.requiredProfit}</p><p className="mt-1 font-medium">{money(progress.requiredProfit)}</p></div>
+          <div><p className="text-xs text-slate-500">{t.tradingDays}</p><p className="mt-1 font-medium">{progress.tradingDays} / {snapshot.rules.evaluation.minTradingDays ?? copy.common.dash}</p></div>
+          <div><p className="text-xs text-slate-500">{t.qualifiedDays}</p><p className="mt-1 font-medium">{progress.qualifyingDays} / {snapshot.rules.evaluation.qualifyingDays ?? copy.common.dash}</p></div>
+        </div> : null}
         <div className="flex justify-end gap-2 border-t pt-4">
           <Button variant="outline" disabled={busy || externalBusy} onClick={() => void begin("rules")}>{t.rules}</Button>
+          <Button variant="outline" disabled={busy || externalBusy} onClick={() => void begin("history")}>{t.dailyLedger}</Button>
+          <Button variant="outline" disabled={busy || externalBusy} onClick={() => void begin("events")}>{t.events}</Button>
           <Button disabled={busy || externalBusy} onClick={() => void begin("payout")}>{t.payout}</Button>
         </div>
       </CardContent>
     </Card>
-    <Dialog open={open && !confirmation} title={view === "rules" ? t.rules : t.payout} description={view === "rules" ? t.ledgerHint : t.payoutHint} className={view === "rules" ? "max-w-6xl" : "max-w-2xl"} onClose={() => { if (!busy) setOpen(false); }}>
+    <Dialog open={open && !confirmation} title={viewTitle} description={view === "rules" ? t.rulesSnapshotHint : view === "payout" ? t.payoutHint : undefined} className={view === "rules" ? "max-w-6xl" : view === "history" ? "max-w-4xl" : "max-w-2xl"} onClose={() => { if (!busy) setOpen(false); }}>
       <div className="space-y-4" aria-busy={busy}>
         {busy ? <p role="status">{copy.marketReplay.loading}</p> : null}
         {error ? <Alert role="alert" className="border-red-200 bg-red-50"><AlertDescription>{error}</AlertDescription></Alert> : null}
         {success ? <Alert role="status" aria-live="polite" className="border-emerald-200 bg-emerald-50"><AlertDescription>{t.payoutSuccess}</AlertDescription></Alert> : null}
-        <Card><CardHeader className="p-4 pb-2"><CardTitle>{propResultLabel(state, currency, formatMoney)}</CardTitle></CardHeader><CardContent className="space-y-1 px-4 pb-4 text-sm tabular-nums"><p>{t.pause}: {t[state.pause]}</p><p>{t.balance}: {money(f.balance)} · {t.equity}: {money(f.equity)} · {t.floor}: {money(f.floor)}</p><p>{t.profit}: {money(f.profit)} · {t.totalReceived}: {money(state.totalReceived)}</p>
-          {state.result ? <p className="text-amber-800">{t.terminalHint}</p> : null}
-          {state.failure ? <p className="text-red-700">{t.failure}: {state.failure.sequence} / {money(state.failure.equity)} / {money(state.failure.floor)} · {state.failure.phase === "EVALUATION" ? t.evaluation : t.funded}</p> : null}
-          {state.phase === "EVALUATION" ? <p>{t.progress}: {t.requiredProfit} {money(progress.requiredProfit)} · {t.tradingDays} {progress.tradingDays} / {snapshot.rules.evaluation.minTradingDays ?? copy.common.dash} · {t.qualifiedDays} {progress.qualifyingDays} / {snapshot.rules.evaluation.qualifyingDays ?? copy.common.dash}</p> : null}
-        </CardContent></Card>
         {view === "payout" && (state.phase !== "FUNDED" || state.result) ? <Alert><AlertDescription>{t.previewUnavailable}</AlertDescription></Alert> : null}
         {view === "payout" && state.phase === "FUNDED" && !state.result ? <Card><CardHeader><CardTitle>{t.payout}</CardTitle></CardHeader><CardContent className="space-y-4"><p className="text-xs text-slate-500">{t.payoutHint}</p><p className="text-sm tabular-nums">{t.maximumAvailable}: {money(preview.maximum)} · {t.minimum}: {money(snapshot.rules.payout.minimum)}</p><p className="text-xs text-slate-500">{t.limits}: {money(preview.limits.fraction)} / {preview.limits.maximum === null ? copy.common.dash : money(preview.limits.maximum)} / {preview.limits.buffer === null ? copy.common.dash : money(preview.limits.buffer)} / {money(preview.limits.risk)}</p>
           <form className="space-y-4" onSubmit={e => { e.preventDefault(); if (preview.eligible) { setError(null); setConfirmation({ amount: Number(amount), requestId: createUuid(), version }); } }}><div className="space-y-2"><Label htmlFor="prop-payout-amount">{t.requested}</Label><Input id="prop-payout-amount" type="number" step="0.01" min={snapshot.rules.payout.minimum} max={preview.maximum} required value={amount} onChange={e => setAmount(e.target.value)} disabled={busy || !preview.eligible} /></div><p className="text-xs tabular-nums">{t.received}: {money(received)} · {t.balanceAfter}: {money(preview.balance - Number(amount))} · {t.floorAfter}: {money(preview.floorAfter)}</p>{!preview.eligible ? <p className="text-xs text-amber-800">{t.previewUnavailable}</p> : null}<div className="flex justify-end border-t pt-4"><Button disabled={busy || !preview.eligible || sessionStatus !== "ACTIVE" || !data} type="submit">{t.payout}</Button></div></form>
         </CardContent></Card> : null}
-        {view === "rules" ? <>
-          <div className="flex items-center justify-between gap-3">
-            <div className="flex gap-2">
-              <Button variant={rulesTab === "snapshot" ? "secondary" : "outline"} aria-pressed={rulesTab === "snapshot"} onClick={() => setRulesTab("snapshot")}>{t.snapshot}</Button>
-              <Button variant={rulesTab === "history" ? "secondary" : "outline"} aria-pressed={rulesTab === "history"} onClick={() => setRulesTab("history")}>{t.history}</Button>
-              <Button variant={rulesTab === "events" ? "secondary" : "outline"} aria-pressed={rulesTab === "events"} onClick={() => setRulesTab("events")}>{t.events}</Button>
-            </div>
-            <Button asChild variant="outline"><Link href={`/api/replay-sessions/${encodeURIComponent(sessionId)}/prop-practice?download=1`}>{t.exportLedger}</Link></Button>
-          </div>
-          {rulesTab === "snapshot" ? <RuleSnapshotCards snapshot={snapshot} /> : null}
-        </> : null}
-        {view === "rules" && rulesTab === "history" ? <Card><CardHeader><CardTitle>{t.history}</CardTitle></CardHeader><CardContent><Table><TableHeader><TableRow><TableHead>{t.day}</TableHead><TableHead>{t.pause}</TableHead><TableHead className="text-right">{t.dayProfit}</TableHead><TableHead className="text-right">{t.balance}</TableHead></TableRow></TableHeader><TableBody>{state.stages.flatMap(st => st.days.map(day => <TableRow key={st.kind + day.day}><TableCell>{new Date(day.day).toLocaleString("zh-CN", { timeZone: snapshot.calendar.session.timezone })} · {st.kind === "EVALUATION" ? t.evaluation : t.funded}</TableCell><TableCell>{day.settled ? t.settled : t.pendingSettlement}</TableCell><TableCell className="text-right tabular-nums">{money(day.endRawNet - day.startRawNet)}</TableCell><TableCell className="text-right tabular-nums">{money(day.balance)}</TableCell></TableRow>))}</TableBody></Table></CardContent></Card> : null}
+        {view === "rules" ? <RuleSnapshotCards snapshot={snapshot} /> : null}
+        {view === "history" ? <div className="flex justify-end"><Button asChild variant="outline"><Link href={`/api/replay-sessions/${encodeURIComponent(sessionId)}/prop-practice?download=1`}>{t.exportLedger}</Link></Button></div> : null}
+        {view === "history" ? <Card><CardHeader><CardTitle>{t.history}</CardTitle></CardHeader><CardContent><Table><TableHeader><TableRow><TableHead>{t.day}</TableHead><TableHead>{t.pause}</TableHead><TableHead className="text-right">{t.dayProfit}</TableHead><TableHead className="text-right">{t.balance}</TableHead></TableRow></TableHeader><TableBody>{state.stages.flatMap(st => st.days.map(day => <TableRow key={st.kind + day.day}><TableCell>{new Date(day.day).toLocaleString("zh-CN", { timeZone: snapshot.calendar.session.timezone })} · {st.kind === "EVALUATION" ? t.evaluation : t.funded}</TableCell><TableCell>{day.settled ? t.settled : t.pendingSettlement}</TableCell><TableCell className="text-right tabular-nums">{money(day.endRawNet - day.startRawNet)}</TableCell><TableCell className="text-right tabular-nums">{money(day.balance)}</TableCell></TableRow>))}</TableBody></Table></CardContent></Card> : null}
         {view === "payout" ? <Card><CardHeader><CardTitle>{t.payouts}</CardTitle></CardHeader><CardContent>{data?.payouts.length ? <Table><TableHeader><TableRow><TableHead>{t.day}</TableHead><TableHead className="text-right">{t.requested}</TableHead><TableHead className="text-right">{t.share}</TableHead><TableHead className="text-right">{t.received}</TableHead></TableRow></TableHeader><TableBody>{data.payouts.map(p => <TableRow key={p.id}><TableCell>{JSON.parse(p.evidence).day}</TableCell><TableCell className="text-right tabular-nums">{money(p.amount)}</TableCell><TableCell className="text-right tabular-nums">{money(p.share)}</TableCell><TableCell className="text-right tabular-nums">{money(p.received)}</TableCell></TableRow>)}</TableBody></Table> : <p className="text-sm text-slate-500">{t.noPayouts}</p>}</CardContent></Card> : null}
-        {view === "rules" && rulesTab === "events" ? <Card><CardHeader><CardTitle>{t.events}</CardTitle></CardHeader><CardContent>{data?.events.length ? <ul className="space-y-2 text-sm">{data.events.map(e => <li key={e.id}>{e.type in t ? String(t[e.type as keyof typeof t]) : e.type}</li>)}</ul> : <p className="text-sm text-slate-500">{t.noEvents}</p>}</CardContent></Card> : null}
+        {view === "events" ? <Card><CardHeader><CardTitle>{t.events}</CardTitle></CardHeader><CardContent>{data?.events.length ? <ul className="space-y-2 text-sm">{data.events.map(e => <li key={e.id}>{e.type in t ? String(t[e.type as keyof typeof t]) : e.type}</li>)}</ul> : <p className="text-sm text-slate-500">{t.noEvents}</p>}</CardContent></Card> : null}
 
       </div>
     </Dialog>

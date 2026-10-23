@@ -91,7 +91,7 @@ export function PaperAccountStrip({ snapshot, compact = false }: { snapshot: Pap
   return <Card><CardContent className="p-4"><PaperAccountMetrics snapshot={snapshot} compact={compact} /></CardContent></Card>;
 }
 
-export function PaperAccountMetrics({ snapshot, compact = false, includeBalances = true }: { snapshot: PaperSessionSnapshot | null; compact?: boolean; includeBalances?: boolean }) {
+export function PaperAccountMetrics({ snapshot, compact = false, includeBalances = true, extraItems = [] }: { snapshot: PaperSessionSnapshot | null; compact?: boolean; includeBalances?: boolean; extraItems?: [string, string][] }) {
   if (!snapshot) return null;
   const { session, stats } = snapshot;
   const position = session.netQuantity > 0 ? copy.paperTrading.long : session.netQuantity < 0 ? copy.paperTrading.short : copy.paperTrading.flat;
@@ -106,6 +106,7 @@ export function PaperAccountMetrics({ snapshot, compact = false, includeBalances
     [copy.paperTrading.averagePrice, session.averageEntryPrice == null ? "—" : number(session.averageEntryPrice, 8)],
     [copy.paperTrading.fees, number(session.totalFees)],
     [copy.paperTrading.maxDrawdown, `${number(session.maxDrawdown * 100)}%`],
+    ...extraItems,
   ];
   return (
     <div className={compact ? "grid grid-cols-4 gap-4 text-sm tabular-nums" : "grid gap-3 text-sm sm:grid-cols-2 lg:grid-cols-4 xl:grid-cols-8"}>
