@@ -5,7 +5,7 @@ import { sqliteWriteTransaction } from "@/lib/sqlite-write";
 import { getReplayScope, assertReplayWritable, markReplayMutation, ReplaySessionError, accountWhere, progressWhere } from "@/lib/replay-sessions/scope";
 import { archiveReplaySession, recordReplayCommand } from "@/lib/replay-sessions/service";
 import { getPaperSessionSnapshot } from "@/lib/paper-trading/serialize";
-import { applyPayout, payoutPreview, propRulesSchema, observeProp, settlePropDay, type PropState, type PropRules } from "./rules";
+import { applyPayout, payoutPreview, promotePropManually, promotionPreview, propRulesSchema, observeProp, settlePropDay, type PropState, type PropRules } from "./rules";
 import { propTradingDay, type PropCalendar } from "./trading-day";
 
 export type PropSnapshot = { rules: PropRules; calendar: PropCalendar; currency: string; accountConfig: import("@/lib/paper-trading/types").PaperAccountConfig };
@@ -99,6 +99,32 @@ export async function confirmPropPayout(input: { expectedVersion: number; reques
     await recordReplayCommand(tx, result.state.last!.sequence, "PROP_PAYOUT", { ...result.evidence, payoutId: payout.id, amount: input.amount, received: result.received });
     await markReplayMutation(tx);
     return payout;
+  });
+}
+export async function confirmPropPromotion(input: { expectedVersion: number; requestId: string }) {
+  const scope = getReplayScope()!;
+  return sqliteWriteTransaction(prisma, async tx => {
+    const receiptId = `prop-promotion:${scope.id}:${input.requestId}`;
+    const existing = await tx.propPracticeEvent.findUnique({ where: { id: receiptId } });
+    if (existing) return existing;
+    await assertReplayWritable(tx);
+    if (scope.version !== input.expectedVersion) throw new ReplaySessionError("SESSION_CONFLICT", 409, copy.replaySessions.conflict);
+    const prop = await loadPropAccount(tx);
+    if (!prop) throw new ReplaySessionError("PROP_REQUIRED", 400, copy.propPractice.invalidRules);
+    // Read the completed original result, including current-close fees and pending
+    // orders. Opening a preview never runs this observation or settles a day.
+    await observePropOperation(tx, false);
+    const updated = (await loadPropAccount(tx))!;
+    let state: PropState;
+    try { state = promotePropManually(updated.snapshot.rules, updated.state); }
+    catch { throw new ReplaySessionError("PROP_PROMOTION_INVALID", 409, copy.propPractice.promotionUnavailable); }
+    const evidence = { requestId: input.requestId, manual: true, sequence: state.last!.sequence, day: state.last!.day,
+      progress: promotionPreview(updated.snapshot.rules, updated.state), state };
+    await tx.propPracticeAccount.update({ where: { replaySessionId: scope.id }, data: { state: JSON.stringify(state) } });
+    const receipt = await tx.propPracticeEvent.create({ data: { id: receiptId, replaySessionId: scope.id, type: "PROMOTED", evidence: JSON.stringify(evidence) } });
+    await recordReplayCommand(tx, state.last!.sequence, "PROP_PROMOTED", evidence);
+    await markReplayMutation(tx);
+    return receipt;
   });
 }
 export async function listPropTemplates() {

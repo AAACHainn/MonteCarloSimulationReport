@@ -12,8 +12,8 @@ import { prisma } from "@/lib/db";
 import { createReplaySession, archiveReplaySession, deleteReplaySession, restartReplaySession } from "@/lib/replay-sessions/service";
 import { loadReplayScope, runWithReplayScope } from "@/lib/replay-sessions/scope";
 import { getPaperSessionSnapshot } from "@/lib/paper-trading/serialize";
-import { defaultPropRules, payoutPreview, payoutQualification, type PropRules } from "./rules";
-import { confirmPropPayout, deletePropTemplate, loadPropAccount, savePropTemplate, listPropTemplates } from "./service";
+import { defaultPropRules, payoutPreview, payoutQualification, promotionPreview, type PropRules } from "./rules";
+import { confirmPropPayout, confirmPropPromotion, deletePropTemplate, loadPropAccount, savePropTemplate, listPropTemplates } from "./service";
 import { POST as accountPOST } from "@/app/api/market-datasets/[id]/paper-session/route";
 import { POST as orderPOST } from "@/app/api/market-datasets/[id]/paper-session/orders/route";
 import { POST as advancePOST } from "@/app/api/market-datasets/[id]/replay/advance/route";
@@ -21,6 +21,7 @@ import { sqliteWriteTransaction } from "@/lib/sqlite-write";
 import { tryFlatDisplayAdvance } from "@/lib/market-replay/flat-advance";
 import { defaultTrainingGate } from "@/lib/paper-trading/training-gate";
 import { DELETE as templateDELETE, POST as templatePOST } from "@/app/api/prop-practice-templates/route";
+import { POST as promotionPOST } from "@/app/api/replay-sessions/[sessionId]/prop-practice/promote/route";
 let file = "";
 const times = ["2026-10-01T23:58:00Z", "2026-10-01T23:59:00Z", "2026-10-02T00:00:00Z", "2026-10-02T00:01:00Z", "2026-10-02T23:59:00Z", "2026-10-03T00:00:00Z", "2026-10-03T23:59:00Z", "2026-10-04T00:00:00Z"];
 beforeAll(async () => {
@@ -442,5 +443,79 @@ describe("template editing and deletion guards", () => {
       else await expect(deletePropTemplate(template.id, template.version)).rejects.toThrow();
     } finally { await prisma.$executeRawUnsafe("DROP TRIGGER reject_template_mutation"); }
     expect(await prisma.propPracticeTemplate.findUnique({ where: { id: template.id }, include: { versions: true } })).toEqual(before);
+  });
+});
+
+describe("manual intraday promotion", () => {
+  async function qualifyingSession() {
+    const r = rules(); r.funded.qualifyingDays = 1; r.funded.qualifyingProfit = 1;
+    const s = await create(r);
+    await advance(s, 3); await order(s, "BUY"); await advance(s); await order(s, "SELL", 1, { executeAtCurrentClose: true });
+    expect((await snapshot(s))!.propAccount!.state.phase).toBe("EVALUATION");
+    return { r, s };
+  }
+  it("switches once under concurrent retries, preserves raw results and records funded profits the same day", async () => {
+    const { r, s } = await qualifyingSession();
+    const before = (await snapshot(s))!, scope = await loadReplayScope(s.id);
+    const progress = await prisma.replayProgress.findUniqueOrThrow({ where: { replaySessionId: s.id } });
+    expect(promotionPreview(r, before.propAccount!.state).eligible).toBe(true);
+    const input = { expectedVersion: scope.version, requestId: randomUUID() };
+    const responses = await Promise.all([promotionPOST(request(s, "POST", input), { params: Promise.resolve({ sessionId: s.id }) }), promotionPOST(request(s, "POST", input), { params: Promise.resolve({ sessionId: s.id }) })]);
+    for (const response of responses) expect(response.status).toBe(200);
+    const receipts = await Promise.all(responses.map(response => response.json()));
+    expect(receipts[0].promotion.id).toBe(receipts[1].promotion.id);
+    const after = (await snapshot(s))!;
+    expect(normalized(after)).toEqual(normalized(before));
+    expect(after.propAccount!.state).toMatchObject({ phase: "FUNDED", pause: "NONE", stages: [{}, { anchor: before.session.realizedPnl - before.session.totalFees, initialCapital: r.funded.risk.initialCapital }] });
+    expect(await prisma.replayProgress.findUnique({ where: { replaySessionId: s.id } })).toEqual(progress);
+    expect(await prisma.propPracticeEvent.count({ where: { replaySessionId: s.id, type: "PROMOTED" } })).toBe(1);
+    const checkpoint = await prisma.replayCheckpoint.findFirstOrThrow({ where: { projectionId: s.activeProjectionId }, orderBy: [{ sourceSequence: "desc" }, { commandOrdinal: "desc" }] });
+    expect(JSON.parse(checkpoint.state).propAccount).toEqual(after.propAccount);
+    await expect(scoped(s, async () => confirmPropPromotion({ expectedVersion: (await loadReplayScope(s.id)).version, requestId: randomUUID() }))).rejects.toMatchObject({ code: "PROP_PROMOTION_INVALID" });
+    await order(s, "BUY"); await advance(s); await order(s, "SELL", 1, { executeAtCurrentClose: true });
+    const traded = (await snapshot(s))!;
+    expect(traded.propAccount!.state.stages[0]).toEqual(after.propAccount!.state.stages[0]);
+    expect(traded.propAccount!.state.stages[1].days[0].day).toBe(after.propAccount!.state.stages[0].days.at(-1)!.day);
+    expect(payoutQualification(r, traded.propAccount!.state).qualifyingDays).toBe(1);
+    expect(traded.propAccount!.state.stages[1].days[0].endRawNet - traded.propAccount!.state.stages[1].days[0].startRawNet).toBeCloseTo(traded.session.realizedPnl - traded.session.totalFees - (before.session.realizedPnl - before.session.totalFees));
+    expect((await scoped(s, () => confirmPropPromotion(input))).id).toBe(receipts[0].promotion.id);
+    expect((await snapshot(s))!.propAccount).toEqual(traded.propAccount);
+  });
+  it("rejects unmet, stale, pending-order and archived requests without changing account state", async () => {
+    const s = await create(rules()); await advance(s);
+    const empty = (await snapshot(s))!, scope = await loadReplayScope(s.id);
+    const rejected = await promotionPOST(request(s, "POST", { expectedVersion: scope.version, requestId: randomUUID() }), { params: Promise.resolve({ sessionId: s.id }) });
+    expect(rejected.status).toBe(409); expect(await snapshot(s)).toEqual(empty);
+    const { s: ready } = await qualifyingSession();
+    const before = await snapshot(ready), readyScope = await loadReplayScope(ready.id);
+    await expect(scoped(ready, () => confirmPropPromotion({ expectedVersion: readyScope.version - 1, requestId: randomUUID() }))).rejects.toMatchObject({ code: "SESSION_CONFLICT" });
+    expect(await snapshot(ready)).toEqual(before);
+    await order(ready, "BUY");
+    const pending = await snapshot(ready);
+    await expect(scoped(ready, async () => confirmPropPromotion({ expectedVersion: (await loadReplayScope(ready.id)).version, requestId: randomUUID() }))).rejects.toMatchObject({ code: "PROP_PROMOTION_INVALID" });
+    expect(await snapshot(ready)).toEqual(pending);
+    await scoped(ready, () => sqliteWriteTransaction(prisma, tx => archiveReplaySession(tx)));
+    const archived = await snapshot(ready);
+    await expect(scoped(ready, async () => confirmPropPromotion({ expectedVersion: (await loadReplayScope(ready.id)).version, requestId: randomUUID() }))).rejects.toMatchObject({ code: "SESSION_ARCHIVED" });
+    expect(await snapshot(ready)).toEqual(archived);
+  });
+  it("rolls back the promotion, event, version and checkpoints if persistence fails", async () => {
+    const { s } = await qualifyingSession();
+    const before = await snapshot(s), scope = await loadReplayScope(s.id);
+    const commands = await prisma.replayCommand.count({ where: { replaySessionId: s.id } });
+    const checkpoints = await prisma.replayCheckpoint.count({ where: { projectionId: s.activeProjectionId } });
+    await prisma.$executeRawUnsafe(`CREATE TRIGGER reject_promotion BEFORE INSERT ON PropPracticeEvent WHEN NEW.type='PROMOTED' BEGIN SELECT RAISE(ABORT, 'test promotion failure'); END`);
+    try { await expect(scoped(s, () => confirmPropPromotion({ expectedVersion: scope.version, requestId: randomUUID() }))).rejects.toThrow(); }
+    finally { await prisma.$executeRawUnsafe("DROP TRIGGER reject_promotion"); }
+    expect(await snapshot(s)).toEqual(before); expect((await loadReplayScope(s.id)).version).toBe(scope.version);
+    expect(await prisma.replayCommand.count({ where: { replaySessionId: s.id } })).toBe(commands);
+    expect(await prisma.replayCheckpoint.count({ where: { projectionId: s.activeProjectionId } })).toBe(checkpoints);
+  });
+  it("keeps single and batch advancement equivalent after a same-day manual switch", async () => {
+    const { s: a } = await qualifyingSession(), { s: b } = await qualifyingSession();
+    for (const s of [a, b]) await scoped(s, async () => confirmPropPromotion({ expectedVersion: (await loadReplayScope(s.id)).version, requestId: randomUUID() }));
+    for (const s of [a, b]) { await order(s, "BUY"); await advance(s); await order(s, "SELL", 1, { executeAtCurrentClose: true }); }
+    await advance(a, 3); for (let index = 0; index < 3; index++) await advance(b);
+    expect((await snapshot(a))!.propAccount!.state).toEqual((await snapshot(b))!.propAccount!.state);
   });
 });

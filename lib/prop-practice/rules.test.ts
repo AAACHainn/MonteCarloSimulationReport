@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { applyPayout, currentStage, defaultPropRules, evaluationProgress, funds, initialPropState, observeProp, payoutPreview, payoutQualification, preparePropDay, propRulesSchema, settlePropDay, type Observation, type PropRules } from "./rules";
+import { applyPayout, currentStage, defaultPropRules, evaluationProgress, funds, initialPropState, observeProp, payoutPreview, payoutQualification, preparePropDay, promotePropManually, promotionPreview, propRulesSchema, settlePropDay, type Observation, type PropRules } from "./rules";
 import { propTradingDay } from "./trading-day";
 import { propResultLabel } from "./result-label";
 import { formatMoney } from "@/lib/format";
@@ -156,6 +156,42 @@ describe("prop account pure ledger", () => {
     expect(s.phase).toBe("EVALUATION");
     s = settlePropDay(r, observeProp(r, s, o(3000, { pending: 0, hadFill: false })));
     expect(s.phase).toBe("FUNDED");
+  });
+  it("manually promotes using intraday net, trading days and consistency without settling EOD risk", () => {
+    const r = rules(); r.funded.risk.initialCapital = 25000; r.funded.qualifyingDays = 1; r.funded.qualifyingProfit = 100;
+    let s = settlePropDay(r, observeProp(r, initialPropState(r, 0), o(1500)));
+    s = observeProp(r, preparePropDay(r, s, "day2").state, o(3000, { day: "day2", sequence: 2 }));
+    const original = structuredClone(s), highWater = currentStage(s).highWater;
+    expect(evaluationProgress(r, s).passed).toBe(false);
+    expect(promotionPreview(r, s)).toMatchObject({ eligible: true, net: 3000, tradingDays: 2, requiredProfit: 3000 });
+    const promoted = promotePropManually(r, s);
+    expect(s).toEqual(original); expect(promoted).toMatchObject({ phase: "FUNDED", pause: "NONE", pausedDay: null, last: s.last });
+    expect(promoted.stages[0]).toMatchObject({ highWater, endSequence: 2 });
+    expect(promoted.stages[0].days.at(-1)).toMatchObject({ settled: false, stageEnded: true });
+    expect(evaluationProgress(r, promoted).net).toBe(3000);
+    expect(currentStage(promoted)).toMatchObject({ initialCapital: 25000, anchor: 3000, startSequence: 3, days: [] });
+    expect(funds(promoted)).toMatchObject({ profit: 0, balance: 25000, equity: 25000, floor: 23000 });
+    expect(() => promotePropManually(r, promoted)).toThrow();
+    const sameDay = preparePropDay(r, promoted, "day2"); expect(sameDay.stop).toBe(false);
+    const traded = observeProp(r, sameDay.state, o(3100, { day: "day2", sequence: 3 }));
+    expect(funds(traded).profit).toBe(100); expect(payoutQualification(r, traded).qualifyingDays).toBe(0);
+    const settled = settlePropDay(r, traded);
+    expect(payoutQualification(r, settled).qualifyingDays).toBe(1);
+    expect(settled.stages[0]).toEqual(promoted.stages[0]);
+  });
+  it("requires every intraday evaluation condition and flat original results before manual promotion", () => {
+    const r = rules();
+    const first = settlePropDay(r, observeProp(r, initialPropState(r, 0), o(1500)));
+    const observe = (rawNet: number, rest: Partial<Observation> = {}) => observeProp(r, preparePropDay(r, first, "day2").state, o(rawNet, { day: "day2", sequence: 2, ...rest }));
+    for (const invalid of [observe(2999), observe(3000, { hadFill: false }), observe(3000, { flat: false }), observe(3000, { pending: 1 }), observe(3100), observe(1500, { unrealized: 10000 })]) {
+      expect(promotionPreview(r, invalid).eligible).toBe(false); expect(() => promotePropManually(r, invalid)).toThrow();
+    }
+    const valid = observe(3000);
+    for (const pause of ["BOUNDARY", "PAYOUT_DAY", "STAGE_WAIT"] as const) expect(promotionPreview(r, { ...valid, pause }).eligible).toBe(false);
+    expect(promotionPreview(r, { ...valid, result: "FAILED" }).eligible).toBe(false);
+    expect(promotionPreview(r, { ...valid, pause: "DATA_END" }).eligible).toBe(true);
+    const failedRisk = structuredClone(valid); currentStage(failedRisk).trailingFloor = funds(failedRisk).equity;
+    expect(promotionPreview(r, failedRisk).eligible).toBe(false);
   });
   it("deducts gross only once and allows remaining profit next day without new profit", () => {
     const r = rules(); r.evaluation.minTradingDays = null; r.evaluation.consistency = null;

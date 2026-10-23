@@ -1,4 +1,10 @@
 export const propPractice = {
+    promote: "转为出金账户", promotionTitle: "确认转为出金账户",
+    promotionHint: "达到净利润、成交日和一致性要求，且空仓无挂单后，可手动转为出金账户，当天即可继续交易。",
+    promotionUnavailable: "暂不能切换：须满足全部考核条件、空仓无挂单，且账户未失败或暂停。请刷新账户状态后重试。",
+    promotionConfirm: (capital: string) => `将以 ${capital} 开始出金阶段，考核利润保留在历史中，不转入出金资金。切换后当天即可继续交易。`,
+    promotionSuccess: "已转为出金账户，资金与风险规则已初始化；播放保持暂停，当天可继续交易。",
+    stageEnded: "阶段结束",
     templateMissing: "模板已删除，请刷新列表。",
     templateConflict: "模板已发生变化，请刷新列表后重试。",
     templateInUse: "模板已有账户使用，不能修改或删除；请复制模板。归档会话也计入使用数量。",

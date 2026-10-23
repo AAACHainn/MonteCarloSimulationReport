@@ -12,7 +12,7 @@ import { Table, TableHeader, TableHead, TableRow, TableBody, TableCell } from "@
 import { copy } from "@/lib/i18n";
 import { formatMoney, formatNumber, formatInteger } from "@/lib/format";
 import { createUuid } from "@/lib/uuid";
-import { funds, payoutPreview, evaluationProgress } from "@/lib/prop-practice/rules";
+import { funds, payoutPreview, promotionPreview } from "@/lib/prop-practice/rules";
 import { propResultLabel } from "@/lib/prop-practice/result-label";
 import type { PropRuntime, readPropAccount } from "@/lib/prop-practice/service";
 import type { PaperSessionSnapshot } from "@/lib/paper-trading/types";
@@ -66,17 +66,20 @@ export function PropAccountPanel({ sessionId, runtime, tradingSnapshot, busy: ex
   const [version, setVersion] = useState(0), [busy, setBusy] = useState(false), [error, setError] = useState<string | null>(null);
   const [amount, setAmount] = useState(""), [confirmation, setConfirmation] = useState<{ amount: number; requestId: string; version: number } | null>(null);
   const [success, setSuccess] = useState(false), [sessionStatus, setSessionStatus] = useState("ACTIVE");
+  const [promotionConfirmation, setPromotionConfirmation] = useState<{ requestId: string; version: number; capital: string } | null>(null);
+  const [promotionSuccess, setPromotionSuccess] = useState(false);
   const current = open && data ? data : runtime, { state, snapshot } = current, currency = snapshot.currency;
-  const f = funds(state), preview = payoutPreview(snapshot.rules, state), progress = evaluationProgress(snapshot.rules, state);
+  const f = funds(state), preview = payoutPreview(snapshot.rules, state), progress = promotionPreview(snapshot.rules, state);
   const money = (value: number) => formatMoney(value, currency);
   async function reload() {
     const response = await fetch(`/api/replay-sessions/${encodeURIComponent(sessionId)}/prop-practice`, { cache: "no-store" });
     const result = await response.json(); if (!response.ok || !result.account) throw new Error(result.error ?? t.requestFailed);
-    setData(result.account); setVersion(result.version); setSessionStatus(result.status); return result.account as AccountData;
+    setData(result.account); setVersion(result.version); setSessionStatus(result.status);
+    return { account: result.account as AccountData, version: result.version as number, status: result.status as string };
   }
   async function begin(nextView: AccountView) {
     setView(nextView); setBusy(true); setError(null); setSuccess(false); setOpen(true);
-    try { await onBeforeOpen?.(); const result = await reload(); setAmount(String(result.preview.maximum)); }
+    try { await onBeforeOpen?.(); const result = await reload(); setAmount(String(result.account.preview.maximum)); }
     catch (e) { setError(e instanceof Error ? e.message : t.requestFailed); } finally { setBusy(false); }
   }
   async function payout() {
@@ -86,6 +89,25 @@ export function PropAccountPanel({ sessionId, runtime, tradingSnapshot, busy: ex
       const response = await fetch(`/api/replay-sessions/${encodeURIComponent(sessionId)}/prop-practice`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ expectedVersion: confirmation.version, requestId: confirmation.requestId, amount: confirmation.amount }) });
       const result = await response.json(); if (!response.ok) throw new Error(result.error ?? t.requestFailed);
       setConfirmation(null); setSuccess(true); await reload(); await onChanged?.();
+    } catch (e) { setError(e instanceof Error ? e.message : t.requestFailed); } finally { setBusy(false); }
+  }
+  async function beginPromotion() {
+    if (busy || externalBusy) return;
+    setBusy(true); setError(null); setPromotionSuccess(false);
+    try {
+      await onBeforeOpen?.();
+      const result = await reload();
+      if (result.status !== "ACTIVE" || !promotionPreview(result.account.snapshot.rules, result.account.state).eligible) throw new Error(t.promotionUnavailable);
+      setPromotionConfirmation({ requestId: createUuid(), version: result.version, capital: formatMoney(result.account.snapshot.rules.funded.risk.initialCapital, result.account.snapshot.currency) });
+    } catch (e) { setError(e instanceof Error ? e.message : t.requestFailed); } finally { setBusy(false); }
+  }
+  async function promote() {
+    if (!promotionConfirmation || busy) return;
+    setBusy(true); setError(null);
+    try {
+      const response = await fetch(`/api/replay-sessions/${encodeURIComponent(sessionId)}/prop-practice/promote`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ expectedVersion: promotionConfirmation.version, requestId: promotionConfirmation.requestId }) });
+      const result = await response.json(); if (!response.ok) throw new Error(result.error ?? t.requestFailed);
+      setPromotionConfirmation(null); setPromotionSuccess(true); await reload(); await onChanged?.();
     } catch (e) { setError(e instanceof Error ? e.message : t.requestFailed); } finally { setBusy(false); }
   }
   const summaryItems: [string, string][] = [[t.profit, money(f.profit)], [t.totalReceived, money(state.totalReceived)]];
@@ -98,6 +120,8 @@ export function PropAccountPanel({ sessionId, runtime, tradingSnapshot, busy: ex
         <CardTitle>{snapshot.rules.name} · {propResultLabel(state, currency, formatMoney)}</CardTitle>
       </CardHeader>
       <CardContent className="space-y-3">
+        {!open && !promotionConfirmation && error ? <Alert role="alert" className="border-red-200 bg-red-50"><AlertDescription>{error}</AlertDescription></Alert> : null}
+        {promotionSuccess ? <Alert role="status" aria-live="polite" className="border-emerald-200 bg-emerald-50"><AlertDescription>{t.promotionSuccess}</AlertDescription></Alert> : null}
         <div className="grid grid-cols-4 gap-4 text-sm tabular-nums">
           {[[t.balance, f.balance], [t.equity, f.equity], [t.floor, f.floor], [t.remainingRisk, f.equity - f.floor]].map(([label, value]) => <div key={label}><p className="text-xs text-slate-500">{label}</p><p className="mt-1 font-medium text-slate-950">{money(Number(value))}</p></div>)}
         </div>
@@ -109,21 +133,22 @@ export function PropAccountPanel({ sessionId, runtime, tradingSnapshot, busy: ex
           <div><p className="text-xs text-slate-500">{t.requiredProfit}</p><p className="mt-1 font-medium">{money(progress.requiredProfit)}</p></div>
           <div><p className="text-xs text-slate-500">{t.tradingDays}</p><p className="mt-1 font-medium">{progress.tradingDays} / {snapshot.rules.evaluation.minTradingDays ?? copy.common.dash}</p></div>
         </div> : null}
+        {state.phase === "EVALUATION" && !state.result ? <p id="prop-promotion-hint" className="text-xs text-slate-500">{t.promotionHint}</p> : null}
         {state.phase === "FUNDED" && preview.qualification.requiredDays !== null ? <div className="border-t pt-3">
           <div className="grid grid-cols-2 gap-4 text-sm tabular-nums">
             <div><p className="text-xs text-slate-500">{t.qualifiedDays}</p><p className="mt-1 font-medium">{formatInteger(preview.qualification.qualifyingDays)} / {formatInteger(preview.qualification.requiredDays)}</p></div>
             <div><p className="text-xs text-slate-500">{t.qualifyingProfit}</p><p className="mt-1 font-medium">{money(preview.qualification.qualifyingProfit!)}</p></div>
           </div><p className="mt-2 text-xs text-slate-500">{t.qualifyingHint}</p>
         </div> : null}
-        <div className="flex justify-end gap-2 border-t pt-4">
+        <div className="flex flex-wrap justify-end gap-2 border-t pt-4">
           <Button variant="outline" disabled={busy || externalBusy} onClick={() => void begin("rules")}>{t.rules}</Button>
           <Button variant="outline" disabled={busy || externalBusy} onClick={() => void begin("history")}>{t.dailyLedger}</Button>
           <Button variant="outline" disabled={busy || externalBusy} onClick={() => void begin("events")}>{t.events}</Button>
-          <Button disabled={busy || externalBusy} onClick={() => void begin("payout")}>{t.payout}</Button>
+          {state.phase === "EVALUATION" && !state.result ? <Button disabled={busy || externalBusy || !progress.eligible} aria-describedby="prop-promotion-hint" onClick={() => void beginPromotion()}>{t.promote}</Button> : <Button disabled={busy || externalBusy} onClick={() => void begin("payout")}>{t.payout}</Button>}
         </div>
       </CardContent>
     </Card>
-    <Dialog open={open && !confirmation} title={viewTitle} description={view === "rules" ? t.rulesSnapshotHint : view === "payout" ? t.payoutHint : undefined} className={view === "rules" ? "max-w-6xl" : view === "history" ? "max-w-4xl" : "max-w-2xl"} onClose={() => { if (!busy) setOpen(false); }}>
+    <Dialog open={open && !confirmation && !promotionConfirmation} title={viewTitle} description={view === "rules" ? t.rulesSnapshotHint : view === "payout" ? t.payoutHint : undefined} className={view === "rules" ? "max-w-6xl" : view === "history" ? "max-w-4xl" : "max-w-2xl"} onClose={() => { if (!busy) setOpen(false); }}>
       <div className="space-y-4" aria-busy={busy}>
         {busy ? <p role="status">{copy.marketReplay.loading}</p> : null}
         {error ? <Alert role="alert" className="border-red-200 bg-red-50"><AlertDescription>{error}</AlertDescription></Alert> : null}
@@ -135,12 +160,13 @@ export function PropAccountPanel({ sessionId, runtime, tradingSnapshot, busy: ex
         </CardContent></Card> : null}
         {view === "rules" ? <RuleSnapshotCards snapshot={snapshot} /> : null}
         {view === "history" ? <div className="flex justify-end"><Button asChild variant="outline"><Link href={`/api/replay-sessions/${encodeURIComponent(sessionId)}/prop-practice?download=1`}>{t.exportLedger}</Link></Button></div> : null}
-        {view === "history" ? <Card><CardHeader><CardTitle>{t.history}</CardTitle></CardHeader><CardContent><Table><TableHeader><TableRow><TableHead>{t.day}</TableHead><TableHead>{t.pause}</TableHead><TableHead className="text-right">{t.dayProfit}</TableHead><TableHead className="text-right">{t.balance}</TableHead></TableRow></TableHeader><TableBody>{state.stages.flatMap(st => st.days.map(day => <TableRow key={st.kind + day.day}><TableCell>{new Date(day.day).toLocaleString("zh-CN", { timeZone: snapshot.calendar.session.timezone })} · {st.kind === "EVALUATION" ? t.evaluation : t.funded}</TableCell><TableCell>{day.settled ? t.settled : t.pendingSettlement}</TableCell><TableCell className="text-right tabular-nums">{money(day.endRawNet - day.startRawNet)}</TableCell><TableCell className="text-right tabular-nums">{money(day.balance)}</TableCell></TableRow>))}</TableBody></Table></CardContent></Card> : null}
+        {view === "history" ? <Card><CardHeader><CardTitle>{t.history}</CardTitle></CardHeader><CardContent><Table><TableHeader><TableRow><TableHead>{t.day}</TableHead><TableHead>{t.pause}</TableHead><TableHead className="text-right">{t.dayProfit}</TableHead><TableHead className="text-right">{t.balance}</TableHead></TableRow></TableHeader><TableBody>{state.stages.flatMap(st => st.days.map(day => <TableRow key={st.kind + day.day}><TableCell>{new Date(day.day).toLocaleString("zh-CN", { timeZone: snapshot.calendar.session.timezone })} · {st.kind === "EVALUATION" ? t.evaluation : t.funded}</TableCell><TableCell>{day.stageEnded && !day.settled ? t.stageEnded : day.settled ? t.settled : t.pendingSettlement}</TableCell><TableCell className="text-right tabular-nums">{money(day.endRawNet - day.startRawNet)}</TableCell><TableCell className="text-right tabular-nums">{money(day.balance)}</TableCell></TableRow>))}</TableBody></Table></CardContent></Card> : null}
         {view === "payout" ? <Card><CardHeader><CardTitle>{t.payouts}</CardTitle></CardHeader><CardContent>{data?.payouts.length ? <Table><TableHeader><TableRow><TableHead>{t.day}</TableHead><TableHead className="text-right">{t.requested}</TableHead><TableHead className="text-right">{t.share}</TableHead><TableHead className="text-right">{t.received}</TableHead></TableRow></TableHeader><TableBody>{data.payouts.map(p => <TableRow key={p.id}><TableCell>{JSON.parse(p.evidence).day}</TableCell><TableCell className="text-right tabular-nums">{money(p.amount)}</TableCell><TableCell className="text-right tabular-nums">{money(p.share)}</TableCell><TableCell className="text-right tabular-nums">{money(p.received)}</TableCell></TableRow>)}</TableBody></Table> : <p className="text-sm text-slate-500">{t.noPayouts}</p>}</CardContent></Card> : null}
         {view === "events" ? <Card><CardHeader><CardTitle>{t.events}</CardTitle></CardHeader><CardContent>{data?.events.length ? <ul className="space-y-2 text-sm">{data.events.map(e => <li key={e.id}>{e.type in t ? String(t[e.type as keyof typeof t]) : e.type}</li>)}</ul> : <p className="text-sm text-slate-500">{t.noEvents}</p>}</CardContent></Card> : null}
 
       </div>
     </Dialog>
     <ConfirmDialog open={!!confirmation} title={t.payoutTitle} description={confirmationDescription} confirmLabel={t.payout} confirmVariant="default" isLoading={busy} error={error} onCancel={() => setConfirmation(null)} onConfirm={() => void payout()} />
+    <ConfirmDialog open={!!promotionConfirmation} title={t.promotionTitle} description={promotionConfirmation ? t.promotionConfirm(promotionConfirmation.capital) : ""} confirmLabel={t.promote} confirmVariant="default" isLoading={busy} error={error} onCancel={() => { setPromotionConfirmation(null); setError(null); }} onConfirm={() => void promote()} />
   </>;
 }

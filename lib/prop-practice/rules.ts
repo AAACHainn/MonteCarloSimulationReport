@@ -47,7 +47,7 @@ export const defaultPropRules: PropRules = {
 };
 
 export type Observation = { sequence: number; day: string; rawNet: number; unrealized: number; flat: boolean; pending: number; hadFill: boolean };
-export type PropDay = { day: string; startRawNet: number; endRawNet: number; balance: number; traded: boolean; settled: boolean };
+export type PropDay = { day: string; startRawNet: number; endRawNet: number; balance: number; traded: boolean; settled: boolean; stageEnded?: boolean };
 export type PropStage = { kind: "EVALUATION" | "FUNDED"; initialCapital: number; anchor: number; highWater: number;
   trailingFloor: number; permanentFloor: number | null; grossPayout: number; qualifyingAfterDay: string | null;
   days: PropDay[]; startSequence: number; endSequence: number | null };
@@ -85,14 +85,33 @@ function checkRisk(s: PropState) {
     currentStage(s).endSequence = s.last.sequence;
   }
 }
-export function evaluationProgress(r: PropRules, s: PropState) {
-  const st = s.stages[0], days = st.days.filter((d) => d.settled), net = (days.at(-1)?.endRawNet ?? st.anchor) - st.anchor;
+export function evaluationProgress(r: PropRules, s: PropState, includeOpenDay = false) {
+  const st = s.stages[0], days = st.days.filter((d) => includeOpenDay || d.settled || d.stageEnded), net = (days.at(-1)?.endRawNet ?? st.anchor) - st.anchor;
   const tradingDays = days.filter((d) => d.traded).length;
   const bestDay = days.reduce((best, d) => Math.max(best, d.endRawNet - d.startRawNet), 0);
   const requiredProfit = Math.max(r.evaluation.target, r.evaluation.consistency ? bestDay / r.evaluation.consistency : 0);
   return { net, tradingDays, bestDay, requiredProfit,
     passed: net >= requiredProfit && (!r.evaluation.consistency || net > 0)
       && (r.evaluation.minTradingDays === null || tradingDays >= r.evaluation.minTradingDays) };
+}
+
+export function promotionPreview(r: PropRules, s: PropState) {
+  const progress = evaluationProgress(r, s, true), f = funds(s);
+  const available = s.phase === "EVALUATION" && !s.result && ["NONE", "DATA_END"].includes(s.pause)
+    && !!s.last && s.last.flat && s.last.pending === 0 && f.equity > f.floor;
+  return { ...progress, eligible: available && progress.passed };
+}
+
+/** Close the evaluation segment, without pretending an intraday switch is EOD. */
+export function promotePropManually(r: PropRules, before: PropState): PropState {
+  if (!promotionPreview(r, before).eligible) throw new Error(copy.propPractice.promotionUnavailable);
+  const s = copyState(before), o = s.last!, st = currentStage(s);
+  const day = st.days.at(-1);
+  if (day) day.stageEnded = true;
+  st.endSequence = o.sequence;
+  s.phase = "FUNDED"; s.pausedDay = null;
+  s.stages.push(newStage("FUNDED", r.funded.risk, o.rawNet, o.sequence + 1));
+  return s;
 }
 
 /** Count settled funded days after the last successful payout day; keep the full ledger. */
