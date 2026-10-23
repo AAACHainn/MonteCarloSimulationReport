@@ -399,6 +399,8 @@ export function useReplayActions(core: ReturnType<typeof useReplayCore>, drawing
         const current = latestReplayRef.current!;
         const processed = await processServerBars(Math.min(MAX_REPLAY_BULK_SOURCE_BARS, data.sequence - current.currentSequence), () => !cancelForwardRef.current, undefined, true);
         if (!processed || !await flushVisible()) return false;
+          const prop = confirmedPaperSnapshotRef.current?.propAccount?.state;
+          if (prop && (prop.result || prop.pause !== "NONE")) return false;
         setForwardProgress({ current: latestReplayRef.current!.currentSequence, target: data.sequence });
       }
       return true;

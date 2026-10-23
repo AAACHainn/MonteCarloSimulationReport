@@ -204,6 +204,7 @@ export type PaperTradingStats = {
 };
 
 export type PaperSessionSnapshot = {
+  propAccount?: import("@/lib/prop-practice/service").PropRuntime | null;
   session: PaperSessionState;
   activeOrders: PaperOrderData[];
   recentOrders: PaperOrderData[];

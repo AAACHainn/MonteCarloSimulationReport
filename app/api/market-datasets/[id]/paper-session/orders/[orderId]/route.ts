@@ -10,6 +10,7 @@ import { getPaperSessionSnapshot, serializePaperOrder } from "@/lib/paper-tradin
 import { calculateRiskSizing, isValidBracket } from "@/lib/paper-trading/risk-sizing";
 import { isPriceOnTick } from "@/lib/market-replay/price-ticks";
 import { paperOrderUpdateSchema } from "@/lib/validations";
+import { assertPropTradingAvailable, observePropOperation } from "@/lib/prop-practice/service";
 
 type RouteContext = { params: Promise<{ id: string; orderId: string }> };
 
@@ -19,6 +20,7 @@ async function handlePATCH(request: Request, context: RouteContext) {
   if (!parsed.success) return NextResponse.json({ error: parsed.error.issues[0]?.message }, { status: 400 });
   const result = await sqliteWriteTransaction(prisma, async (tx) => {
     await assertReplayWritable(tx);
+    await assertPropTradingAvailable(tx);
     const session = await tx.paperTradingSession.findFirst({ where: accountWhere(id) });
     if (!session) return { status: 404, error: copy.paperTrading.sessionNotFound };
     if (session.version !== parsed.data.expectedVersion) return { status: 409, error: copy.paperTrading.conflict };
@@ -88,6 +90,7 @@ async function handlePATCH(request: Request, context: RouteContext) {
     });
     await tx.paperTradingSession.update({ where: { id: session.id }, data: { version: { increment: 1 } } });
     await recordReplayCommand(tx, progress.currentSequence, "ORDER_UPDATE", { order: serializePaperOrder(updatedOrder) });
+    await observePropOperation(tx, false);
     await markReplayMutation(tx);
     return { status: 200, error: null };
   });
@@ -101,6 +104,7 @@ async function handleDELETE(request: Request, context: RouteContext) {
   if (!body.success) return NextResponse.json({ error: copy.paperTrading.conflict }, { status: 400 });
   const result = await sqliteWriteTransaction(prisma, async (tx) => {
     await assertReplayWritable(tx);
+    await assertPropTradingAvailable(tx);
     const session = await tx.paperTradingSession.findFirst({ where: accountWhere(id) });
     if (!session) return { status: 404, error: copy.paperTrading.sessionNotFound };
     if (session.version !== body.data.expectedVersion) return { status: 409, error: copy.paperTrading.conflict };
@@ -111,6 +115,7 @@ async function handleDELETE(request: Request, context: RouteContext) {
     if (!updated.count) return { status: 404, error: copy.paperTrading.orderNotFound };
     await tx.paperTradingSession.update({ where: { id: session.id }, data: { version: { increment: 1 } } });
     await recordReplayCommand(tx, session.lastProcessedSequence, "ORDER_CANCEL", { orderIds: [orderId] });
+    await observePropOperation(tx, false);
     await markReplayMutation(tx);
     return { status: 200, error: null };
   });

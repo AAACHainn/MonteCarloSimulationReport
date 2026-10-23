@@ -95,6 +95,8 @@ async function handlePOST(request: Request, context: RouteContext) {
     },
   }, MAX_DISPLAY_ADVANCE_SOURCE_BARS);
   if (outcome.status !== 200) return NextResponse.json({ error: outcome.error, code: outcome.code }, { status: outcome.status });
+  targetSequence = outcome.response.currentSequence;
+  if (outcome.response.propStopped) { completedDisplayBucketStart = null; reachedVisibleBucket = false; }
 
   const advanced = outcome.processedBars ?? await prisma.marketBar.findMany({
     where: { datasetId: id, sequence: { gt: parsed.data.expectedCurrentSequence, lte: targetSequence } },
@@ -145,4 +147,4 @@ async function handlePOST(request: Request, context: RouteContext) {
   });
 }
 
-export const POST = withReplaySessionRoute(handlePOST, { write: true, annotation: false, diagnostics: true });
+export const POST = withReplaySessionRoute(handlePOST, { write: true, annotation: false, diagnostics: true, receipt: true });

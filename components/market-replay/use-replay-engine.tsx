@@ -132,13 +132,14 @@ export function useReplayEngine(core: ReturnType<typeof useReplayCore>, drawingW
         (body.expectedPaperVersion ?? body.expectedVersion ?? null) as number | null);
       const current = latestReplayRef.current;
       if (!current) return false;
-      assertForwardReplayResult(current, data);
+      if (!(data.propStopped && data.currentSequence === current.currentSequence)) assertForwardReplayResult(current, data);
       if (data.requestId !== body.requestId || data.fromSequence !== current.currentSequence
         || data.historyVersion !== (dataset.historyVersion ?? 1)
         || (data.snapshot && data.snapshot.session.lastProcessedSequence !== data.currentSequence)) {
         throw new ReplayRequestError(copy.marketReplay.advanceConflict, 409, "STATE_CONFLICT");
       }
       await accept(data);
+      if (data.propStopped) { pausePlayback(); manualStepsRef.current.cancel(); }
       setSaveStatus("saved"); setPaperError(null);
       return true;
     } catch (error) {
@@ -157,7 +158,7 @@ export function useReplayEngine(core: ReturnType<typeof useReplayCore>, drawingW
         restorePlayback(suspension);
       }
     }
-  }, [autoPausePlayback, confirmedPaperSnapshotRef, dataset.historyVersion, fetch, latestReplayRef, restorePlayback, suspendPlayback, historyConflictRef, playbackAccumulatorRef, playbackClockRef, recoveryRequiredRef, requestRetryingRef, serverLifetimeRef, setPaperError, setRecoveryNotice, setRetrying, setSaveStatus]);
+  }, [autoPausePlayback, confirmedPaperSnapshotRef, dataset.historyVersion, fetch, latestReplayRef, restorePlayback, suspendPlayback, historyConflictRef, playbackAccumulatorRef, playbackClockRef, recoveryRequiredRef, requestRetryingRef, serverLifetimeRef, setPaperError, setRecoveryNotice, setRetrying, setSaveStatus, pausePlayback, manualStepsRef]);
 
   const flushVisible = useCallback(async () => {
     await advanceCompletionRef.current;
@@ -263,6 +264,7 @@ export function useReplayEngine(core: ReturnType<typeof useReplayCore>, drawingW
       let snapshot = confirmedPaperSnapshotRef.current;
       let lastSourceBar = currentSourceBarRef.current;
       let reachedVisibleBucket = false;
+      let propStopped = false;
       for (let attempt = 0; attempt < 64 && next.currentSequence < next.barCount - 1; attempt += 1) {
         const abrValue = calculateLatestAbr(warmupBarsRef.current, barsRef.current, abrLength);
         const historyIndex = Math.max(0, warmupBarsRef.current.length + barsRef.current.length - abrLength);
@@ -280,7 +282,8 @@ export function useReplayEngine(core: ReturnType<typeof useReplayCore>, drawingW
           }
           next = { ...next, currentSequence: data.currentSequence, confirmedSequence: data.currentSequence,
             syncVersion: data.syncVersion, status: data.currentSequence >= next.barCount - 1 ? "finished" : (latestReplayRef.current?.status ?? next.status) };
-          snapshot = data.snapshot; lastSourceBar = data.lastSourceBar ?? null;
+          snapshot = data.snapshot; lastSourceBar = data.lastSourceBar ?? lastSourceBar;
+          propStopped = Boolean(data.propStopped);
           reachedVisibleBucket = data.reachedVisibleBucket ?? false;
           commitConfirmedPaperSnapshot(snapshot);
           setReplay(next); currentSourceBarRef.current = lastSourceBar; setCurrentSourceBar(lastSourceBar);
@@ -294,7 +297,7 @@ export function useReplayEngine(core: ReturnType<typeof useReplayCore>, drawingW
           if (data.fills.length) void loadTradeAnnotations(window.bars.slice(-DEFAULT_REPLAY_MAX_VISIBLE_BARS));
         });
         if (!ok) return false;
-        if (reachedVisibleBucket || !shouldContinue()) break;
+        if (propStopped || reachedVisibleBucket || !shouldContinue()) break;
       }
       return reachedVisibleBucket || (flatOnly && next.currentSequence > current.currentSequence);
     } catch (error) {
@@ -404,17 +407,27 @@ export function useReplayEngine(core: ReturnType<typeof useReplayCore>, drawingW
         expectedPaperVersion: confirmedPaperSnapshotRef.current?.session.version ?? null,
         targetSequence: lastSourceBar.sequence, contextRuns,
       };
+      let processedCount = 0;
       const ok = await executeServerAdvance(`/api/market-datasets/${dataset.id}/replay/sync`, body, (data) => {
-        if (data.currentSequence !== lastSourceBar.sequence) throw new ReplayRequestError(copy.marketReplay.advanceConflict, 409);
-        barsRef.current = aggregates; warmupBarsRef.current = nextWarmup; currentSourceBarRef.current = lastSourceBar;
-        setBars(aggregates); setWarmupBars(nextWarmup); setCurrentSourceBar(lastSourceBar);
+        if (data.currentSequence !== lastSourceBar.sequence) {
+          if (!data.propStopped || data.currentSequence < sourceCursor || data.currentSequence > lastSourceBar.sequence) throw new ReplayRequestError(copy.marketReplay.advanceConflict, 409);
+          aggregates = barsRef.current.slice(); nextWarmup = warmupBarsRef.current;
+          for (const source of sourceBars.filter(bar => bar.sequence <= data.currentSequence)) mergeSourceBarInto(aggregates, source, {
+            emissionMode: dataset.barEmissionMode, sourceSeconds: dataset.sourceIntervalSeconds!, displaySeconds: current.displayIntervalSeconds,
+            session: displayMarketSession, finalSequence: dataset.barCount - 1,
+          });
+        }
+        const acknowledgedLast = sourceBars.find(bar => bar.sequence === data.currentSequence) ?? currentSourceBarRef.current;
+        processedCount = data.currentSequence - sourceCursor;
+        barsRef.current = aggregates; warmupBarsRef.current = nextWarmup; currentSourceBarRef.current = acknowledgedLast;
+        setBars(aggregates); setWarmupBars(nextWarmup); setCurrentSourceBar(acknowledgedLast);
         commitConfirmedPaperSnapshot(data.snapshot);
         setReplay(value => value ? { ...value, currentSequence: data.currentSequence, confirmedSequence: data.currentSequence,
           syncVersion: data.syncVersion, status: data.currentSequence >= value.barCount - 1 ? "finished" : value.status } : value);
         getDisplayCache(current!.displayIntervalSeconds, current!.displaySession).schedulePersist(advancedDisplayBars(aggregates, sourceCursor, previousDisplayTail));
         if (data.fills.length) void loadTradeAnnotations(aggregates.slice(-DEFAULT_REPLAY_MAX_VISIBLE_BARS));
       });
-      return ok ? sourceBars.length : 0;
+      return ok ? processedCount : 0;
     } catch (error) {
       endBuffering();
       if (error instanceof HistoryVersionConflict) {

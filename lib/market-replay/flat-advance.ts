@@ -29,6 +29,7 @@ const MAX_FLAT_SAMPLES = 4096;
 
 /** This endpoint never trusts the browser's empty-account hint. Eligibility and commit share a transaction. */
 export async function tryFlatDisplayAdvance(datasetId: string, input: Input): Promise<Outcome> {
+  if (getReplayScope()?.accountCategory === "PROP_PRACTICE") return unavailable;
   const startedAt = performance.now();
   let enteredAt = startedAt;
   let completedAt = startedAt;

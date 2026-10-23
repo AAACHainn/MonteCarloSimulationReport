@@ -17,6 +17,8 @@ export type ReplayServerRequest = {
 };
 export type DisplayAdvanceResult = { completedDisplayBucketStart: string | null; reachedVisibleBucket: boolean };
 export type ReplayServerResult = {
+  propStopped?: boolean;
+  requestedTargetSequence?: number;
   requestId: string;
   fromSequence: number;
   currentSequence: number;

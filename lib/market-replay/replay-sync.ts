@@ -28,6 +28,9 @@ import type { ReplayServerResponse, DisplayAdvanceResult } from "./server-sync-t
 
 
 import { marketVersionMatches } from "./history-version";
+import { loadPropAccount, persistPropAccount } from "@/lib/prop-practice/service";
+import { observeProp, preparePropDay, settlePropDay } from "@/lib/prop-practice/rules";
+import { propTradingDay } from "@/lib/prop-practice/trading-day";
 
 export type ReplaySyncInput = {
   snapshotMode?: "LIVE";
@@ -63,7 +66,8 @@ export async function syncReplayToTarget(
   const phases: Record<string, number> = {};
   const outcome = await sqliteWriteTransaction(prisma, async (tx) => {
     enteredAt = performance.now();
-    await assertReplayWritable(tx);
+    const isProp = getReplayScope()?.accountCategory === "PROP_PRACTICE";
+    if (!isProp) await assertReplayWritable(tx);
     const [dataset, progress, session] = await Promise.all([
       tx.marketDataset.findUnique({ where: { id: datasetId } }),
       tx.replayProgress.findFirst({ where: progressWhere(datasetId) }),
@@ -72,10 +76,15 @@ export async function syncReplayToTarget(
     if (!dataset || !progress) return { status: 404, error: copy.marketReplay.datasetNotFound } as const;
     if (progress.lastSyncRequestId === input.requestId && progress.lastSyncResponse) {
       const receipt = JSON.parse(progress.lastSyncResponse) as ReplaySyncSuccess;
-      if (receipt.fromSequence !== input.confirmedSequence || receipt.currentSequence !== input.targetSequence
+      if (receipt.fromSequence !== input.confirmedSequence || (receipt.requestedTargetSequence ?? receipt.currentSequence) !== input.targetSequence
         || receipt.generation !== input.generation) return { status: 409, error: copy.paperTrading.conflict } as const;
       return { status: 200, error: null, response: receipt } as const;
     }
+    if (isProp) await assertReplayWritable(tx);
+    const prop = await loadPropAccount(tx);
+    let previousProp = prop ? structuredClone(prop.state) : null;
+    let stopped = false;
+    const processedBars: MarketBar[] = [];
     if (input.historyVersion !== undefined && input.historyVersion !== dataset.historyVersion) return { status: 409, error: copy.marketSync.historyChanged, code: "HISTORY_CHANGED" } as const;
     if (
       (input.dataVersion !== undefined && !marketVersionMatches(dataset, { dataVersion: input.dataVersion, historyVersion: input.historyVersion }))
@@ -126,7 +135,7 @@ export async function syncReplayToTarget(
       })).map(serializePaperOrder);
       let lots = (await tx.paperPositionLot.findMany({ where: { sessionId: account.id }, orderBy: [{ openedSequence: "asc" }, { createdAt: "asc" }, { id: "asc" }] })).map(serializePaperPositionLot);
       let contextIndex = 0;
-      for (let offset = 0; offset < dbBars.length; offset += REPLAY_CHECKPOINT_STRIDE) {
+      for (let offset = 0; offset < dbBars.length && !stopped; offset += REPLAY_CHECKPOINT_STRIDE) {
         const previousLots = lots;
         const bars = dbBars.slice(offset, offset + REPLAY_CHECKPOINT_STRIDE);
         const changed = new Map<string, PaperOrderData>();
@@ -134,8 +143,18 @@ export async function syncReplayToTarget(
         const chunkFills: PaperFillData[] = [];
         const entries: ReplayJournalEntryDraft[] = [];
         const equityPoints: PaperEquityPointData[] = [];
-        const flat = canAdvanceFlatAccount(state, orders.length, lots.length);
+        const flat = !prop && canAdvanceFlatAccount(state, orders.length, lots.length);
+        let chunkProcessed = 0;
+        let lastPoint: PaperEquityPointData | null = null;
         for (const dbBar of bars) {
+          if (prop) {
+            const day = propTradingDay(dbBar.timestamp, prop.snapshot.calendar);
+            if (!day) { prop.state.pause = "BOUNDARY"; stopped = true; break; }
+            const prepared = preparePropDay(prop.snapshot.rules, prop.state, day.day);
+            prop.state = prepared.state;
+            if (prepared.stop) { stopped = true; break; }
+          }
+          processedBars.push(dbBar); chunkProcessed++;
           if (flat) {
             if (dbBar.sequence === input.targetSequence || dbBar.sequence === dataset.barCount - 1
               || dbBar.sequence % account.equitySampleStride === 0
@@ -154,10 +173,22 @@ export async function syncReplayToTarget(
           for (const order of result.orders) if (originals.get(order.id) !== JSON.stringify(order)) changed.set(order.id, order);
           orders = result.orders.filter((order) => order.status === "PENDING");
           chunkFills.push(...result.fills); entries.push(...result.journalEntries);
+          lastPoint = result.equityPoint;
+          if (prop && prop.state.pause === "NONE") {
+            const day = propTradingDay(dbBar.timestamp, prop.snapshot.calendar)!;
+            prop.state = observeProp(prop.snapshot.rules, prop.state, { sequence: bar.sequence, day: day.day,
+              rawNet: state.realizedPnl - state.totalFees, unrealized: result.equityPoint.equity - result.equityPoint.balance,
+              flat: state.netQuantity === 0, pending: orders.length, hadFill: result.fills.length > 0 });
+            if (day.eod && state.netQuantity === 0) prop.state = settlePropDay(prop.snapshot.rules, prop.state);
+            if (prop.state.result || prop.state.pause === "STAGE_WAIT") stopped = true;
+          }
           if (result.fills.length || bar.sequence === input.targetSequence || bar.sequence === dataset.barCount - 1
             || bar.sequence % account.equitySampleStride === 0
             || (input.preserveSyncSamples && (bar.sequence - progress.currentSequence) % MAX_REPLAY_SYNC_SOURCE_BARS === 0)) equityPoints.push(result.equityPoint);
+          if (stopped) break;
         }
+        if (!chunkProcessed) break;
+        if (prop && lastPoint && equityPoints.at(-1)?.sequence !== lastPoint.sequence) equityPoints.push(lastPoint);
         if (flat && state.lastProcessedSequence < bars.at(-1)!.sequence) state = advanceFlatAccount(state, bars.at(-1)!.sequence);
         account = await persistDerivedBatch(tx, account, progress.generation, { state, orders: [...changed.values()], fills: chunkFills, lots, entries, equityPoints },
           { previousLots, updateProjection: false });
@@ -167,7 +198,7 @@ export async function syncReplayToTarget(
           ? input.contextRuns.filter(run => run.toSequence >= bars[0].sequence && run.fromSequence <= state.lastProcessedSequence)
             .map(run => ({ ...run, fromSequence: Math.max(run.fromSequence, bars[0].sequence), toSequence: Math.min(run.toSequence, state.lastProcessedSequence) }))
           : [{ fromSequence: bars[0].sequence, toSequence: state.lastProcessedSequence, generation: progress.generation, context: input.journalContext ?? null }]);
-        await saveReplayCheckpoint(tx, state.lastProcessedSequence);
+        if (!prop) await saveReplayCheckpoint(tx, state.lastProcessedSequence);
       }
       snapshotSession = account;
       snapshotGate = state.trainingGate;
@@ -175,10 +206,20 @@ export async function syncReplayToTarget(
       return { status: 409, error: copy.paperTrading.conflict } as const;
     }
 
+    const actualSequence = processedBars.at(-1)?.sequence ?? (prop ? progress.currentSequence : input.targetSequence);
+    if (prop && previousProp) {
+      if (actualSequence === dataset.barCount - 1 && !prop.state.result && prop.state.pause === "NONE") prop.state.pause = "DATA_END";
+      await persistPropAccount(tx, prop, previousProp);
+      previousProp = prop.state;
+      await saveReplayCheckpoint(tx, actualSequence, 0, true);
+    }
+
     phases.advance = performance.now() - enteredAt;
     const snapshotStartedAt = performance.now();
     const snapshot = await getPaperSessionSnapshot(datasetId, tx, {
-      session: snapshotSession, trainingGate: snapshotGate, trainingLotsHydrated: true, currentBar: dbBars.at(-1),
+      session: snapshotSession, trainingGate: snapshotGate, trainingLotsHydrated: true,
+      currentBar: processedBars.at(-1) ?? (prop && progress.currentSequence >= 0
+        ? await tx.marketBar.findUnique({ where: { datasetId_sequence: { datasetId, sequence: progress.currentSequence } } }) : dbBars.at(-1)),
       includeHistory: input.snapshotMode !== "LIVE" || historyChanged,
     });
     phases.snapshot = performance.now() - snapshotStartedAt;
@@ -189,7 +230,8 @@ export async function syncReplayToTarget(
       fromSequence: progress.currentSequence,
       historyVersion: dataset.historyVersion,
       ...(input.displayAdvance ? { displayAdvance: input.displayAdvance } : {}),
-      currentSequence: input.targetSequence,
+      currentSequence: actualSequence,
+      ...(prop ? { requestedTargetSequence: input.targetSequence, propStopped: stopped || prop.state.pause !== "NONE" || !!prop.state.result } : {}),
       generation: progress.generation,
       syncVersion,
       dataVersion: dataset.dataVersion,
@@ -198,13 +240,13 @@ export async function syncReplayToTarget(
     };
     await tx.replayProgress.update({
       where: { id: progress.id },
-      data: { currentSequence: input.targetSequence, syncVersion, lastSyncRequestId: input.requestId, lastSyncResponse: JSON.stringify(response) },
+      data: { currentSequence: actualSequence, syncVersion, lastSyncRequestId: input.requestId, lastSyncResponse: JSON.stringify(response) },
     });
-    await markReplayMutation(tx, input.targetSequence);
+    await markReplayMutation(tx, actualSequence);
     completedAt = performance.now();
     phases.receipt = completedAt - receiptStartedAt;
     // Internal reuse by the display advance route; API handlers only serialize response.
-    return { status: 200, error: null, response, processedBars: dbBars } as const;
+    return { status: 200, error: null, response, processedBars: prop ? processedBars : dbBars } as const;
   }, { timeout: 120_000 });
   phases.transaction = performance.now() - startedAt;
   phases.wait = enteredAt - startedAt;

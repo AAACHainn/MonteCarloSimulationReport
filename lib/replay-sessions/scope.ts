@@ -15,6 +15,7 @@ export type ReplayScope = {
   status: string;
   version: number;
   trainingGate?: TrainingGateState | null;
+  accountCategory?: string;
 };
 
 export class ReplaySessionError extends Error {
@@ -55,6 +56,7 @@ export async function loadReplayScope(id: string, datasetId?: string): Promise<R
     id: session.id, datasetId: session.datasetId, projectionId: session.activeProjectionId,
     mode: session.mode as ReplayScope["mode"], status: session.status, version: session.version,
     trainingGate: session.mode === "TRAINING" ? parseTrainingGate(session.trainingGate) : null,
+    accountCategory: session.accountCategory,
   };
 }
 
@@ -100,7 +102,7 @@ export function replayErrorResponse(error: unknown) {
 
 export function withReplaySessionRoute<P extends { id: string }>(
   handler: (request: Request, context: { params: Promise<P> }) => Promise<Response>,
-  options: { write?: boolean; annotation?: boolean; allowHistoryChange?: boolean; drawing?: boolean; diagnostics?: boolean } = {},
+  options: { write?: boolean; annotation?: boolean; allowHistoryChange?: boolean; drawing?: boolean; diagnostics?: boolean; receipt?: boolean } = {},
 ) {
   return async (request: Request, context: { params: Promise<P> }) => {
     const startedAt = performance.now();
@@ -121,8 +123,18 @@ export function withReplaySessionRoute<P extends { id: string }>(
           if (request.headers.get("X-Replay-Projection") !== scope.projectionId) {
             throw new ReplaySessionError("SESSION_CONFLICT", 409, copy.replaySessions.conflict);
           }
-          if (options.drawing) await assertReplayDrawingWritable(prisma);
-          else await assertReplayWritable(prisma, !options.allowHistoryChange);
+          let retry = false;
+          if (options.receipt && scope.accountCategory === "PROP_PRACTICE") {
+            const body = await request.clone().json().catch(() => null);
+            if (body?.requestId) {
+              const progress = await prisma.replayProgress.findFirst({ where: progressWhere(datasetId) });
+              retry = progress?.lastSyncRequestId === body.requestId && !!progress?.lastSyncResponse;
+            }
+          }
+          if (!retry) {
+            if (options.drawing) await assertReplayDrawingWritable(prisma);
+            else await assertReplayWritable(prisma, !options.allowHistoryChange);
+          }
         }
         const guardMs = performance.now() - guardStartedAt;
         const response = await handler(request, context);

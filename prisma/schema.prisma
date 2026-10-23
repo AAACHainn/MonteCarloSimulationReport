@@ -677,6 +677,8 @@ model ReplaySession {
   legacy             Boolean @default(false)
   riskPreferences    String @default("{}")
   trainingGate       String @default("{}")
+  accountCategory    String @default("STANDARD")
+  propAccount        PropPracticeAccount?
   progress           ReplayProgress?
   journal            ReplayJournalSession?
   projections        ReplayProjection[] @relation("SessionProjections")
@@ -687,6 +689,60 @@ model ReplaySession {
   updatedAt          DateTime @updatedAt
 
   @@index([datasetId, status, createdAt])
+}
+
+model PropPracticeTemplate {
+  id String @id @default(cuid())
+  active Boolean @default(true)
+  version Int @default(1)
+  versions PropPracticeTemplateVersion[]
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+}
+
+model PropPracticeTemplateVersion {
+  id String @id @default(cuid())
+  templateId String
+  template PropPracticeTemplate @relation(fields: [templateId], references: [id], onDelete: Restrict)
+  version Int
+  rules String
+  accounts PropPracticeAccount[]
+  createdAt DateTime @default(now())
+  @@unique([templateId, version])
+}
+
+model PropPracticeAccount {
+  replaySessionId String @id
+  replaySession ReplaySession @relation(fields: [replaySessionId], references: [id], onDelete: Cascade)
+  templateVersionId String
+  templateVersion PropPracticeTemplateVersion @relation(fields: [templateVersionId], references: [id], onDelete: Restrict)
+  snapshot String
+  state String
+  payouts PropPracticePayout[]
+  events PropPracticeEvent[]
+}
+
+model PropPracticePayout {
+  id String @id @default(cuid())
+  replaySessionId String
+  account PropPracticeAccount @relation(fields: [replaySessionId], references: [replaySessionId], onDelete: Cascade)
+  requestId String
+  amount Float
+  received Float
+  share Float
+  evidence String
+  createdAt DateTime @default(now())
+  @@unique([replaySessionId, requestId])
+}
+
+model PropPracticeEvent {
+  id String @id @default(cuid())
+  replaySessionId String
+  account PropPracticeAccount @relation(fields: [replaySessionId], references: [replaySessionId], onDelete: Cascade)
+  type String
+  evidence String
+  createdAt DateTime @default(now())
+  @@index([replaySessionId, createdAt])
 }
 
 model ReplayProjection {

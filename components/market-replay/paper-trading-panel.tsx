@@ -93,8 +93,8 @@ export function PaperAccountStrip({ snapshot }: { snapshot: PaperSessionSnapshot
   const { session, stats } = snapshot;
   const position = session.netQuantity > 0 ? copy.paperTrading.long : session.netQuantity < 0 ? copy.paperTrading.short : copy.paperTrading.flat;
   const items = [
-    [copy.paperTrading.balance, `${number(stats.balance)} ${session.currency}`],
-    [copy.paperTrading.equity, `${number(stats.equity)} ${session.currency}`],
+    [snapshot.propAccount ? copy.propPractice.rawBalance : copy.paperTrading.balance, `${number(stats.balance)} ${session.currency}`],
+    [snapshot.propAccount ? copy.propPractice.rawEquity : copy.paperTrading.equity, `${number(stats.equity)} ${session.currency}`],
     [copy.paperTrading.realizedPnl, number(session.realizedPnl)],
     [copy.paperTrading.unrealizedPnl, number(stats.unrealizedPnl)],
     [copy.paperTrading.netPosition, `${position} ${number(Math.abs(session.netQuantity), 8)}`],

@@ -16,7 +16,9 @@ import { RenameDialog } from "@/components/ui/rename-dialog";
 import { Select, SelectTrigger, SelectValue, SelectContent, SelectItem } from "@/components/ui/select";
 import { Table, TableHeader, TableRow, TableHead, TableBody, TableCell } from "@/components/ui/table";
 import { copy } from "@/lib/i18n";
-import { formatNumber } from "@/lib/format";
+import { formatNumber, formatMoney } from "@/lib/format";
+import { PropRuleSummary, type PropTemplateRow } from "./prop-template-manager";
+import { propResultLabel } from "@/lib/prop-practice/result-label";
 import { dateTimeLocalValue, selectedTimeToTimestamp } from "@/lib/market-replay/start-time";
 import type { MarketDatasetSummary } from "@/lib/market-replay/types";
 import type { ReplaySessionSummary, ReplaySessionMode } from "@/lib/replay-sessions/types";
@@ -28,6 +30,9 @@ export function ReplaySessionsDashboard({ dataset, initialSessions, initialCreat
   const [createOpen, setCreateOpen] = useState(initialCreateOpen);
   const [name, setName] = useState(t.training as string);
   const [mode, setMode] = useState<ReplaySessionMode>("TRAINING");
+  const [category, setCategory] = useState("STANDARD"), [templateId, setTemplateId] = useState("");
+  const [templates, setTemplates] = useState<PropTemplateRow[]>([]), [templatesLoading, setTemplatesLoading] = useState(false);
+  const [accountConfig, setAccountConfig] = useState({ currency: "USD", commissionBps: 0, slippageBps: 0 });
   const [start, setStart] = useState(() => dateTimeLocalValue(dataset.startTime, dataset.timezone));
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -39,6 +44,15 @@ export function ReplaySessionsDashboard({ dataset, initialSessions, initialCreat
   const [renameError, setRenameError] = useState<string | null>(null);
   const [status, setStatus] = useState<string | null>(null);
   useEffect(() => setSessions(initialSessions), [initialSessions]);
+  useEffect(() => {
+    if (!createOpen) return;
+    const controller = new AbortController(); setTemplatesLoading(true);
+    void fetch("/api/prop-practice-templates", { signal: controller.signal, cache: "no-store" }).then(async r => {
+      const data = await r.json(); if (!r.ok) throw new Error(data.error ?? copy.propPractice.requestFailed);
+      setTemplates(data.templates.filter((row: PropTemplateRow) => row.active));
+    }).catch(e => { if (!controller.signal.aborted) setError(e.message); }).finally(() => { if (!controller.signal.aborted) setTemplatesLoading(false); });
+    return () => controller.abort();
+  }, [createOpen]);
 
   function beginRename(session: ReplaySessionSummary) {
     setRenameTarget(session); setRenameDraft(session.name); setRenameError(null); setStatus(null); setError(null);
@@ -73,7 +87,8 @@ export function ReplaySessionsDashboard({ dataset, initialSessions, initialCreat
       if (!Number.isFinite(timestamp)) throw new Error(t.invalid);
       const response = await fetch(`/api/market-datasets/${dataset.id}/replay-sessions`, {
         method: "POST", headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ name, mode, timestamp: new Date(timestamp).toISOString(), playbackRate: 1,
+        body: JSON.stringify({ name, mode: category === "PROP_PRACTICE" ? "TRAINING" : mode, accountCategory: category,
+          ...(category === "PROP_PRACTICE" ? { propTemplateVersionId: templateId, propAccountConfig: accountConfig } : {}), timestamp: new Date(timestamp).toISOString(), playbackRate: 1,
           displayIntervalSeconds: dataset.sourceIntervalSeconds, displaySession: "ETH" }),
       });
       const data = await response.json();
@@ -124,7 +139,7 @@ export function ReplaySessionsDashboard({ dataset, initialSessions, initialCreat
   return <div className="space-y-6">
     <div className="flex items-center justify-between gap-4">
       <p className="text-sm text-slate-600">{t.source}</p>
-      <Button onClick={() => { setError(null); setStatus(null); setCreateOpen(true); }} disabled={busy || !dataset.sourceIntervalSeconds}><Plus className="h-4 w-4" />{t.create}</Button>
+      <div className="flex flex-wrap gap-2"><Button asChild variant="outline"><Link href="/prop-practice-templates">{copy.propPractice.templates}</Link></Button><Button onClick={() => { setError(null); setStatus(null); setCreateOpen(true); }} disabled={busy || !dataset.sourceIntervalSeconds}><Plus className="h-4 w-4" />{t.create}</Button></div>
     </div>
     {error && !createOpen ? <Alert className="border-red-200 bg-red-50" role="alert"><AlertDescription>{error}</AlertDescription></Alert> : null}
     {status ? <Alert className="border-emerald-200 bg-emerald-50" role="status" aria-live="polite"><AlertDescription>{status}</AlertDescription></Alert> : null}
@@ -137,6 +152,7 @@ export function ReplaySessionsDashboard({ dataset, initialSessions, initialCreat
           <Button type="button" variant="ghost" size="icon" disabled={busy || Boolean(session.pendingCorrectionId)} aria-label={t.renameLabel(session.name)} title={t.rename}
             onClick={() => beginRename(session)}><Pencil className="h-4 w-4" aria-hidden="true" /></Button>
         </div><Badge className="mt-1">{session.status === "ACTIVE" ? t.active : t.archived}</Badge>
+          {session.propAccount ? <div className="mt-1 space-y-1 text-xs text-slate-600"><p>{copy.propPractice.title} · {propResultLabel(session.propAccount.state, session.propAccount.snapshot.currency, formatMoney)}</p><p>{copy.propPractice.totalReceived}: {formatMoney(session.propAccount.state.totalReceived, session.propAccount.snapshot.currency)}</p></div> : null}
           {session.pendingCorrectionId ? <p className="mt-1 text-xs text-slate-600">{t.deleteCorrectionPending}</p> : null}
         </TableCell>
         <TableCell>{session.mode === "TRAINING" ? t.training : t.liveReplay}</TableCell>
@@ -154,7 +170,13 @@ export function ReplaySessionsDashboard({ dataset, initialSessions, initialCreat
       minimum={dateTimeLocalValue(dataset.startTime, dataset.timezone)} maximum={dateTimeLocalValue(dataset.endTime, dataset.timezone)}
       timezone={dataset.timezone} busy={busy} error={error} onChange={setStart} onCancel={() => setCreateOpen(false)} onConfirm={(value) => void create(value)}>
       <div className="space-y-2"><Label htmlFor="replay-session-name">{t.name}</Label><Input id="replay-session-name" value={name} maxLength={100} onChange={(event) => setName(event.target.value)} disabled={busy} /></div>
-      <div className="space-y-2"><Label htmlFor="replay-session-mode">{t.mode}</Label><Select value={mode} disabled={busy} onValueChange={(value) => setMode(value as ReplaySessionMode)}>
+      <div className="space-y-2"><Label htmlFor="replay-account-category">{copy.propPractice.category}</Label><Select value={category} disabled={busy} onValueChange={setCategory}><SelectTrigger id="replay-account-category"><SelectValue /></SelectTrigger><SelectContent><SelectItem value="STANDARD">{copy.propPractice.standard}</SelectItem><SelectItem value="PROP_PRACTICE">{copy.propPractice.title}</SelectItem></SelectContent></Select></div>
+      {category === "PROP_PRACTICE" ? <div className="space-y-4" aria-busy={templatesLoading}><p className="text-xs text-slate-500">{copy.propPractice.trainingOnly}</p><div className="space-y-2"><Label htmlFor="replay-prop-template">{copy.propPractice.template}</Label><Select value={templateId} onValueChange={setTemplateId} disabled={busy || templatesLoading}><SelectTrigger id="replay-prop-template"><SelectValue placeholder={templatesLoading ? copy.marketReplay.loading : copy.propPractice.template} /></SelectTrigger><SelectContent>{templates.map(row => <SelectItem key={row.id} value={row.versions[0].id}>{JSON.parse(row.versions[0].rules).name} · {copy.propPractice.version} {row.version}</SelectItem>)}</SelectContent></Select></div>
+        {!templatesLoading && !templates.length ? <p className="text-xs text-slate-500">{copy.propPractice.empty}</p> : null}
+        {templates.find(row => row.versions[0].id === templateId) ? <PropRuleSummary rules={JSON.parse(templates.find(row => row.versions[0].id === templateId)!.versions[0].rules)} currency={accountConfig.currency} /> : null}
+        {(["currency", "commissionBps", "slippageBps"] as const).map(key => <div key={key} className="space-y-2"><Label htmlFor={"replay-prop-" + key}>{copy.propPractice[key]}</Label><Input id={"replay-prop-" + key} disabled={busy} type={key === "currency" ? "text" : "number"} min={0} max={10000} step="any" value={accountConfig[key]} onChange={e => setAccountConfig(c => ({ ...c, [key]: key === "currency" ? e.target.value : Number(e.target.value) }))} /></div>)}
+      </div> : null}
+      <div className="space-y-2"><Label htmlFor="replay-session-mode">{t.mode}</Label><Select value={category === "PROP_PRACTICE" ? "TRAINING" : mode} disabled={busy || category === "PROP_PRACTICE"} onValueChange={(value) => setMode(value as ReplaySessionMode)}>
         <SelectTrigger id="replay-session-mode"><SelectValue /></SelectTrigger><SelectContent><SelectItem value="TRAINING">{t.training}</SelectItem><SelectItem value="LIVE_REPLAY">{t.liveReplay}</SelectItem></SelectContent>
       </Select></div>
       {busy ? <Loader2 className="h-4 w-4 animate-spin" aria-hidden="true" /> : null}

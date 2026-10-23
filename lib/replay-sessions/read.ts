@@ -7,6 +7,7 @@ export async function listReplaySessions(datasetId: string): Promise<ReplaySessi
     where: { datasetId }, orderBy: [{ createdAt: "desc" }, { id: "desc" }],
     include: {
       progress: true,
+      propAccount: true,
       activeProjection: { select: { _count: { select: { entries: true } } } },
     },
   });
@@ -15,6 +16,8 @@ export async function listReplaySessions(datasetId: string): Promise<ReplaySessi
     mode: session.mode as ReplaySessionSummary["mode"], status: session.status as ReplaySessionSummary["status"],
     version: session.version, activeProjectionId: session.activeProjectionId!, pendingCorrectionId: session.pendingCorrectionId,
     legacy: session.legacy, riskPreferences: JSON.parse(session.riskPreferences),
+    accountCategory: session.accountCategory,
+    propAccount: session.propAccount ? { snapshot: JSON.parse(session.propAccount.snapshot), state: JSON.parse(session.propAccount.state) } : null,
     entryCount: session.activeProjection?._count.entries ?? 0,
     createdAt: session.createdAt.toISOString(), updatedAt: session.updatedAt.toISOString(),
     progress: session.progress ? {

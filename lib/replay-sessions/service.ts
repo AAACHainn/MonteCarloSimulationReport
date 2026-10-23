@@ -4,8 +4,10 @@ import type { Prisma } from "@prisma/client";
 import { z } from "zod";
 import { prisma } from "@/lib/db";
 import { copy } from "@/lib/i18n";
-import { replayStartSchema } from "@/lib/validations";
-import { datasetSourceInterval } from "@/lib/market-replay/dataset";
+import { replayStartSchema, paperSessionSchema } from "@/lib/validations";
+import { initialPropState, propRulesSchema, type PropState } from "@/lib/prop-practice/rules";
+import { propTradingDay } from "@/lib/prop-practice/trading-day";
+import { datasetSession, datasetSourceInterval } from "@/lib/market-replay/dataset";
 import { resolveDisplaySession } from "@/lib/market-replay/chart-sessions";
 import { isValidDisplayInterval } from "@/lib/market-replay/types";
 import { ReplaySessionError, getReplayScope, assertReplayWritable, markReplayMutation, runWithReplayScope } from "./scope";
@@ -15,6 +17,9 @@ import { saveReplayCheckpoint } from "./checkpoint";
 export const createReplaySessionSchema = replayStartSchema.extend({
   name: z.string().trim().min(1).max(100),
   mode: z.enum(["TRAINING", "LIVE_REPLAY"]),
+  accountCategory: z.enum(["STANDARD", "PROP_PRACTICE"]).optional(),
+  propTemplateVersionId: z.string().min(1).optional(),
+  propAccountConfig: paperSessionSchema.omit({ initialCapital: true }).optional(),
 });
 export type CreateReplaySessionInput = z.infer<typeof createReplaySessionSchema>;
 
@@ -24,7 +29,7 @@ export async function createReplaySession(datasetId: string, input: CreateReplay
   return sqliteWriteTransaction(prisma, async (tx) => createSessionInTransaction(tx, datasetId, input));
 }
 
-export async function createSessionInTransaction(tx: Prisma.TransactionClient, datasetId: string, input: CreateReplaySessionInput) {
+export async function createSessionInTransaction(tx: Prisma.TransactionClient, datasetId: string, input: CreateReplaySessionInput, restarting = false) {
   const dataset = await tx.marketDataset.findUnique({ where: { id: datasetId } });
   if (!dataset || dataset.status !== "READY") throw new ReplaySessionError("DATASET_NOT_FOUND", 404, copy.marketReplay.datasetNotFound);
   const sourceSeconds = datasetSourceInterval(dataset);
@@ -35,10 +40,18 @@ export async function createSessionInTransaction(tx: Prisma.TransactionClient, d
     throw new ReplaySessionError("INVALID_DISPLAY_SESSION", 400, copy.marketReplay.unsupportedDisplaySession);
   }
   const first = await tx.marketBar.findFirst({
-    where: { datasetId, timestamp: { gte: new Date(input.timestamp) } }, orderBy: { sequence: "asc" }, select: { sequence: true },
+    where: { datasetId, timestamp: { gte: new Date(input.timestamp) } }, orderBy: { sequence: "asc" }, select: { sequence: true, timestamp: true },
   });
   if (!first) throw new ReplaySessionError("INVALID_START", 400, copy.marketReplay.invalidStart);
-  const session = await tx.replaySession.create({ data: { datasetId, name: input.name, mode: input.mode } });
+  const isProp = input.accountCategory === "PROP_PRACTICE";
+  const template = isProp && input.propTemplateVersionId ? await tx.propPracticeTemplateVersion.findUnique({ where: { id: input.propTemplateVersionId }, include: { template: true } }) : null;
+  if (isProp && (!template || (!template.template.active && !restarting) || input.mode !== "TRAINING" || !input.propAccountConfig)) throw new ReplaySessionError("INVALID_PROP", 400, copy.propPractice.invalidRules);
+  const parsedRules = template ? propRulesSchema.safeParse(JSON.parse(template.rules)) : null;
+  if (parsedRules && !parsedRules.success) throw new ReplaySessionError("INVALID_PROP", 400, copy.propPractice.invalidRules);
+  const rules = parsedRules?.success ? parsedRules.data : null;
+  const calendar = { session: datasetSession(dataset), sourceSeconds };
+  if (isProp && (!calendar.session || !propTradingDay(first.timestamp, calendar))) throw new ReplaySessionError("PROP_CALENDAR", 400, copy.propPractice.calendarInvalid);
+  const session = await tx.replaySession.create({ data: { datasetId, name: input.name, mode: input.mode, accountCategory: isProp ? "PROP_PRACTICE" : "STANDARD" } });
   const projection = await tx.replayProjection.create({ data: {
     replaySessionId: session.id, status: "CURRENT", historyVersion: dataset.historyVersion,
     currentSequence: first.sequence - 1,
@@ -52,6 +65,18 @@ export async function createSessionInTransaction(tx: Prisma.TransactionClient, d
     projectionId: projection.id, sourceSequence: progress.currentSequence,
     state: JSON.stringify({ snapshot: null, account: null, stats: null }),
   } });
+  if (isProp && rules && template) {
+    const config = paperSessionSchema.parse({ ...input.propAccountConfig, initialCapital: rules.evaluation.risk.initialCapital });
+    const snapshot = { rules, calendar, currency: config.currency, accountConfig: config };
+    await tx.propPracticeAccount.create({ data: { replaySessionId: session.id, templateVersionId: template.id,
+      snapshot: JSON.stringify(snapshot), state: JSON.stringify(initialPropState(rules, first.sequence)) } });
+    const journal = await tx.replayJournalSession.create({ data: { datasetId, replaySessionId: session.id, name: input.name, replayGeneration: 1, ...config } });
+    await tx.paperTradingSession.create({ data: { id: projectionRecordId(projection.id, `account_${session.id}`),
+      datasetId, projectionId: projection.id, journalSessionId: journal.id, ...config,
+      lastProcessedSequence: progress.currentSequence, peakEquity: config.initialCapital, equitySampleStride: Math.max(1, Math.ceil(dataset.barCount / 20000)) } });
+    await runWithReplayScope({ id: session.id, datasetId, projectionId: projection.id, mode: "TRAINING", status: "ACTIVE", version: 1, accountCategory: "PROP_PRACTICE" },
+      () => recordReplayCommand(tx, progress.currentSequence, "ACCOUNT_INIT", { ...config, logicalAccountId: `account_${session.id}`, propSnapshot: snapshot }));
+  }
   return { ...session, activeProjectionId: projection.id, progress };
 }
 
@@ -59,6 +84,16 @@ export async function archiveReplaySession(tx: Prisma.TransactionClient) {
   const scope = getReplayScope();
   if (!scope) throw new ReplaySessionError("SESSION_REQUIRED", 409, copy.replaySessions.required);
   await assertReplayWritable(tx, false);
+  if (scope.accountCategory === "PROP_PRACTICE") {
+    const row = await tx.propPracticeAccount.findUniqueOrThrow({ where: { replaySessionId: scope.id } });
+    const state: PropState = JSON.parse(row.state);
+    if (!state.result) {
+      state.result = "STOPPED";
+      state.stages[state.stages.length - 1].endSequence = state.last?.sequence ?? null;
+      await tx.propPracticeAccount.update({ where: { replaySessionId: scope.id }, data: { state: JSON.stringify(state) } });
+      await tx.propPracticeEvent.create({ data: { replaySessionId: scope.id, type: "STOPPED", evidence: JSON.stringify(state) } });
+    }
+  }
   await tx.replaySession.update({ where: { id: scope.id }, data: { status: "ARCHIVED", version: { increment: 1 } } });
   await tx.replayJournalSession.updateMany({ where: { replaySessionId: scope.id }, data: { archivedAt: new Date() } });
 }
@@ -100,14 +135,20 @@ export async function restartReplaySession(input?: CreateReplaySessionInput) {
     const start = await tx.marketBar.findUniqueOrThrow({
       where: { datasetId_sequence: { datasetId: scope.datasetId, sequence: existing.progress.startSequence } },
     });
-    const next = await createSessionInTransaction(tx, scope.datasetId, input ?? {
+    const previousAccount = await tx.paperTradingSession.findUnique({ where: { projectionId: scope.projectionId } });
+    const previousProp = existing.accountCategory === "PROP_PRACTICE" ? await tx.propPracticeAccount.findUniqueOrThrow({ where: { replaySessionId: scope.id } }) : null;
+    const nextInput = input ?? {
       name: existing.name, mode: scope.mode, timestamp: start.timestamp.toISOString(),
       playbackRate: existing.progress.playbackRate,
       displayIntervalSeconds: existing.progress.displayIntervalSeconds!,
       displaySession: existing.progress.displaySession as "ETH" | "RTH",
-    });
+    };
+    const next = await createSessionInTransaction(tx, scope.datasetId, { ...nextInput,
+      ...(previousProp && previousAccount ? { mode: "TRAINING" as const, accountCategory: "PROP_PRACTICE" as const, propTemplateVersionId: previousProp.templateVersionId,
+        propAccountConfig: { currency: previousAccount.currency, commissionBps: previousAccount.commissionBps, slippageBps: previousAccount.slippageBps } } : {}),
+    }, true);
     const account = await tx.paperTradingSession.findUnique({ where: { projectionId: scope.projectionId } });
-    if (account) {
+    if (account && next.accountCategory !== "PROP_PRACTICE") {
       const config = { initialCapital: account.initialCapital, currency: account.currency,
         commissionBps: account.commissionBps, slippageBps: account.slippageBps };
       const journal = await tx.replayJournalSession.create({ data: {

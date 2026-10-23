@@ -208,6 +208,10 @@ export async function getPaperSessionSnapshot(datasetId: string, db: Prisma.Tran
   };
   return {
     session: serializePaperSession(session),
+    ...(scope?.accountCategory === "PROP_PRACTICE" ? { propAccount: await (async () => {
+      const prop = await db.propPracticeAccount.findUniqueOrThrow({ where: { replaySessionId: scope.id } });
+      return { snapshot: JSON.parse(prop.snapshot), state: JSON.parse(prop.state) };
+    })() } : {}),
     activeOrders: activeOrders.map(serializePaperOrder),
     ...(includeHistory ? {
       recentOrders: snapshotRecentOrders.map(serializePaperOrder),

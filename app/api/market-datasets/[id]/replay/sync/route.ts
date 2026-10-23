@@ -33,4 +33,4 @@ async function handlePOST(request: Request, context: RouteContext) {
   });
 }
 
-export const POST = withReplaySessionRoute(handlePOST, { write: true, annotation: false, diagnostics: true });
+export const POST = withReplaySessionRoute(handlePOST, { write: true, annotation: false, diagnostics: true, receipt: true });

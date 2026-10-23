@@ -654,6 +654,14 @@ try {
     }
     await prisma.$executeRawUnsafe(statement.replace(/^CREATE TABLE /, "CREATE TABLE IF NOT EXISTS ").replace(/^CREATE UNIQUE INDEX /, "CREATE UNIQUE INDEX IF NOT EXISTS ").replace(/^CREATE INDEX /, "CREATE INDEX IF NOT EXISTS "));
   }
+  const propMigration = readFileSync(new URL("../prisma/migrations/20261023120000_prop_practice/migration.sql", import.meta.url), "utf8");
+  for (const statement of propMigration.replace(/^\s*--.*$/gm, "").split(";").map(s => s.trim()).filter(Boolean)) {
+    if (statement.startsWith('ALTER TABLE "ReplaySession"')) {
+      const columns = await prisma.$queryRawUnsafe('PRAGMA table_info("ReplaySession")');
+      if (columns.some(c => c.name === "accountCategory")) continue;
+    }
+    await prisma.$executeRawUnsafe(statement.replace(/^CREATE TABLE /, "CREATE TABLE IF NOT EXISTS ").replace(/^CREATE UNIQUE INDEX /, "CREATE UNIQUE INDEX IF NOT EXISTS ").replace(/^CREATE INDEX /, "CREATE INDEX IF NOT EXISTS "));
+  }
 } finally {
   await prisma.$disconnect();
 }

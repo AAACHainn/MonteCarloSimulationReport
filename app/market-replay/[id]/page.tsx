@@ -12,6 +12,7 @@ import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { listReplaySessions } from "@/lib/replay-sessions/read";
 import { PaperAccountStrip } from "@/components/market-replay/paper-trading-panel";
+import { PropAccountPanel } from "@/components/market-replay/prop-account-panel";
 import { getPaperSessionSnapshot } from "@/lib/paper-trading/serialize";
 import { runWithReplayScope } from "@/lib/replay-sessions/scope";
 import { withReplayJournalDisplayNumbers } from "@/lib/paper-trading/journal-numbering";
@@ -46,7 +47,7 @@ export default async function MarketReplayDetailPage({ params, searchParams }: {
   </div>;
   if (selected.status === "ARCHIVED") {
     const snapshot = await runWithReplayScope({ id: selected.id, datasetId: id, projectionId: selected.activeProjectionId,
-      mode: selected.mode, status: "ARCHIVED", version: selected.version }, () => getPaperSessionSnapshot(id));
+      mode: selected.mode, status: "ARCHIVED", version: selected.version, accountCategory: selected.accountCategory }, () => getPaperSessionSnapshot(id));
     return <ReplaySessionProvider session={selected}><div className="space-y-6">
       <Breadcrumbs items={[{ label: copy.marketReplay.title, href: "/market-replay" }, { label: dataset.name, href: `/market-replay/${id}` }, { label: selected.name }]} />
       <section className="flex items-center justify-between gap-4 border-b pb-6">
@@ -54,6 +55,7 @@ export default async function MarketReplayDetailPage({ params, searchParams }: {
         <Button asChild variant="outline"><Link href={`/market-replay/${id}`}>{copy.replaySessions.allSessions}</Link></Button>
       </section>
       <PaperAccountStrip snapshot={snapshot} />
+      {selected.propAccount ? <PropAccountPanel sessionId={selected.id} runtime={selected.propAccount} /> : null}
       <PaperJournalTable datasetId={id} scope="history" replaySessions={sessions} />
     </div></ReplaySessionProvider>;
   }

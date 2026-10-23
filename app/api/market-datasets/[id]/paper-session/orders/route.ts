@@ -15,6 +15,7 @@ import { isValidDisplayInterval } from "@/lib/market-replay/types";
 import { paperOrderSchema } from "@/lib/validations";
 import { serializeSourceBar } from "@/lib/market-replay/dataset";
 import { executeCurrentPriceClose } from "@/lib/paper-trading/current-price-close";
+import { assertPropTradingAvailable, observePropOperation } from "@/lib/prop-practice/service";
 
 type RouteContext = { params: Promise<{ id: string }> };
 
@@ -24,6 +25,7 @@ async function handlePOST(request: Request, context: RouteContext) {
   if (!parsed.success) return NextResponse.json({ error: parsed.error.issues[0]?.message }, { status: 400 });
   const result = await sqliteWriteTransaction(prisma, async (tx) => {
     await assertReplayWritable(tx);
+    await assertPropTradingAvailable(tx);
     const session = await tx.paperTradingSession.findFirst({ where: accountWhere(id) });
     if (!session) return { status: 404, error: copy.paperTrading.sessionNotFound };
     if (session.version !== parsed.data.expectedVersion) return { status: 409, error: copy.paperTrading.conflict };
@@ -123,6 +125,7 @@ async function handlePOST(request: Request, context: RouteContext) {
       order: recordedOrder,
       ...(parsed.data.executeAtCurrentClose ? { executeAtCurrentClose: true, generation: progress.generation } : {}),
     });
+    await observePropOperation(tx, Boolean(parsed.data.executeAtCurrentClose));
     await markReplayMutation(tx);
     return { status: 201, error: null };
   });
@@ -139,6 +142,7 @@ async function handleDELETE(request: Request, context: RouteContext) {
   if (!body.success) return NextResponse.json({ error: copy.paperTrading.conflict }, { status: 400 });
   const result = await sqliteWriteTransaction(prisma, async (tx) => {
     await assertReplayWritable(tx);
+    await assertPropTradingAvailable(tx);
     const session = await tx.paperTradingSession.findFirst({ where: accountWhere(id) });
     if (!session) return { status: 404, error: copy.paperTrading.sessionNotFound } as const;
     if (session.version !== body.data.expectedVersion) {
@@ -160,6 +164,7 @@ async function handleDELETE(request: Request, context: RouteContext) {
         data: { version: { increment: 1 } },
       });
       await recordReplayCommand(tx, session.lastProcessedSequence, "ORDER_CANCEL", { orderIds: targets.map((order) => logicalId(order.id)) });
+      await observePropOperation(tx, false);
       await markReplayMutation(tx);
     }
     return { status: 200, error: null } as const;

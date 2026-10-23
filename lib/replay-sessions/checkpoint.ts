@@ -6,6 +6,7 @@ import type { IncrementalTradeStats } from "@/lib/paper-trading/trade-stats";
 
 export const REPLAY_CHECKPOINT_STRIDE = 4096;
 export type CheckpointState = {
+  propAccount?: import("@/lib/prop-practice/service").PropRuntime | null;
   account: PaperSessionState | null;
   stats: IncrementalTradeStats | null;
   activeOrders?: PaperOrderData[];
@@ -23,6 +24,7 @@ export async function saveReplayCheckpoint(tx: Prisma.TransactionClient, sourceS
   const snapshot = account ? await getPaperSessionSnapshot(scope.datasetId, tx) : null;
   const activeTrade = account ? await tx.paperTrade.findFirst({ where: { sessionId: account.id, status: "OPEN" } }) : null;
   const state: CheckpointState = {
+    ...(snapshot?.propAccount ? { propAccount: snapshot.propAccount } : {}),
     account: snapshot?.session ?? null, stats: account ? tradeStatsFromSession(account) : null,
     activeOrders: snapshot?.activeOrders ?? [], lots: snapshot?.openLots ?? [],
     activeTrade: activeTrade ? serializePaperTrade(activeTrade) : null, equitySampleStride: account?.equitySampleStride,
