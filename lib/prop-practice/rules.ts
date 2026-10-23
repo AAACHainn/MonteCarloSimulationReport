@@ -23,15 +23,13 @@ const risk = z.object({
   if (r.mode === "EOD_BALANCE" && r.capOffset !== null && r.capOffset < -r.drawdown) ctx.addIssue({ code: "custom", message: copy.propPractice.invalidCap, path: ["capOffset"] });
 });
 export const propRulesSchema = z.object({
-  schemaVersion: z.literal(1),
+  schemaVersion: z.literal(2),
   name: z.string().trim().min(1).max(100), description: z.string().trim().max(2000),
   purchaseCost: optionalMoney, activationCost: optionalMoney,
-  evaluation: z.object({ risk, target: positive, minTradingDays: count, qualifyingDays: count,
-    qualifyingProfit: positive.nullable(), consistency: ratio.nullable(),
-  }).strict().superRefine((r, ctx) => {
+  evaluation: z.object({ risk, target: positive, minTradingDays: count, consistency: ratio.nullable() }).strict(),
+  funded: z.object({ risk, qualifyingDays: count, qualifyingProfit: positive.nullable() }).strict().superRefine((r, ctx) => {
     if (r.qualifyingDays !== null && r.qualifyingProfit === null) ctx.addIssue({ code: "custom", message: copy.propPractice.invalidRules, path: ["qualifyingProfit"] });
   }),
-  funded: z.object({ risk }).strict(),
   payout: z.object({ minimum: positive, fraction: ratio, maximum: positive.nullable(), buffer: money.nullable(),
     traderShare: ratio, permanentFloorOffset: signedMoney.nullable(),
   }).strict().superRefine((r, ctx) => {
@@ -41,17 +39,18 @@ export const propRulesSchema = z.object({
 export type PropRules = z.infer<typeof propRulesSchema>;
 export type RiskRules = PropRules["funded"]["risk"];
 export const defaultPropRules: PropRules = {
-  schemaVersion: 1, name: "", description: "", purchaseCost: null, activationCost: null,
+  schemaVersion: 2, name: "", description: "", purchaseCost: null, activationCost: null,
   evaluation: { risk: { initialCapital: 50000, drawdown: 2000, mode: "EOD_BALANCE", capOffset: 0 }, target: 3000,
-    minTradingDays: 2, qualifyingDays: null, qualifyingProfit: null, consistency: 0.5 },
-  funded: { risk: { initialCapital: 50000, drawdown: 2000, mode: "EOD_BALANCE", capOffset: 100 } },
+    minTradingDays: 2, consistency: 0.5 },
+  funded: { risk: { initialCapital: 50000, drawdown: 2000, mode: "EOD_BALANCE", capOffset: 100 }, qualifyingDays: null, qualifyingProfit: null },
   payout: { minimum: 500, fraction: 0.5, maximum: 2000, buffer: 2100, traderShare: 0.9, permanentFloorOffset: null },
 };
 
 export type Observation = { sequence: number; day: string; rawNet: number; unrealized: number; flat: boolean; pending: number; hadFill: boolean };
 export type PropDay = { day: string; startRawNet: number; endRawNet: number; balance: number; traded: boolean; settled: boolean };
 export type PropStage = { kind: "EVALUATION" | "FUNDED"; initialCapital: number; anchor: number; highWater: number;
-  trailingFloor: number; permanentFloor: number | null; grossPayout: number; days: PropDay[]; startSequence: number; endSequence: number | null };
+  trailingFloor: number; permanentFloor: number | null; grossPayout: number; qualifyingAfterDay: string | null;
+  days: PropDay[]; startSequence: number; endSequence: number | null };
 export type PropState = { stages: PropStage[]; phase: "EVALUATION" | "FUNDED"; pause: "NONE" | "STAGE_WAIT" | "PAYOUT_DAY" | "BOUNDARY" | "DATA_END";
   pausedDay: string | null; totalRequested: number; totalReceived: number; payoutCount: number;
   result: "FAILED" | "STOPPED" | null; failure: { sequence: number; equity: number; floor: number; phase: string } | null;
@@ -67,7 +66,7 @@ export function currentStage(s: PropState) { return s.stages[s.stages.length - 1
 export function stageRules(r: PropRules, s: PropState) { return s.phase === "EVALUATION" ? r.evaluation.risk : r.funded.risk; }
 function newStage(kind: PropStage["kind"], r: RiskRules, anchor: number, sequence: number): PropStage {
   return { kind, initialCapital: r.initialCapital, anchor, highWater: r.initialCapital, trailingFloor: r.initialCapital - r.drawdown,
-    permanentFloor: null, grossPayout: 0, days: [], startSequence: sequence, endSequence: null };
+    permanentFloor: null, grossPayout: 0, qualifyingAfterDay: null, days: [], startSequence: sequence, endSequence: null };
 }
 export function initialPropState(r: PropRules, sequence: number): PropState {
   return { stages: [newStage("EVALUATION", r.evaluation.risk, 0, sequence)], phase: "EVALUATION", pause: "NONE", pausedDay: null,
@@ -89,13 +88,20 @@ function checkRisk(s: PropState) {
 export function evaluationProgress(r: PropRules, s: PropState) {
   const st = s.stages[0], days = st.days.filter((d) => d.settled), net = (days.at(-1)?.endRawNet ?? st.anchor) - st.anchor;
   const tradingDays = days.filter((d) => d.traded).length;
-  const qualifyingDays = days.filter((d) => d.traded && d.endRawNet - d.startRawNet >= (r.evaluation.qualifyingProfit ?? Infinity)).length;
   const bestDay = days.reduce((best, d) => Math.max(best, d.endRawNet - d.startRawNet), 0);
   const requiredProfit = Math.max(r.evaluation.target, r.evaluation.consistency ? bestDay / r.evaluation.consistency : 0);
-  return { net, tradingDays, qualifyingDays, bestDay, requiredProfit,
+  return { net, tradingDays, bestDay, requiredProfit,
     passed: net >= requiredProfit && (!r.evaluation.consistency || net > 0)
-      && (r.evaluation.minTradingDays === null || tradingDays >= r.evaluation.minTradingDays)
-      && (r.evaluation.qualifyingDays === null || qualifyingDays >= r.evaluation.qualifyingDays) };
+      && (r.evaluation.minTradingDays === null || tradingDays >= r.evaluation.minTradingDays) };
+}
+
+/** Count settled funded days after the last successful payout day; keep the full ledger. */
+export function payoutQualification(r: PropRules, s: PropState) {
+  const st = currentStage(s), { qualifyingDays: requiredDays, qualifyingProfit } = r.funded;
+  const start = st.qualifyingAfterDay === null ? 0 : st.days.findIndex(d => d.day === st.qualifyingAfterDay) + 1;
+  const qualifyingDays = s.phase === "FUNDED" ? st.days.slice(start).filter(d => d.settled && d.traded
+    && d.endRawNet - d.startRawNet >= (qualifyingProfit ?? Infinity)).length : 0;
+  return { qualifyingDays, requiredDays, qualifyingProfit, passed: requiredDays === null || qualifyingDays >= requiredDays };
 }
 
 /** Consume only completed original results. No engine state is ever changed. */
@@ -157,7 +163,8 @@ export function payoutPreview(r: PropRules, s: PropState) {
   // binary representation. Genuine sub-cent limits still round strictly down.
   const maximum = Math.max(0, hasMoneyPrecision(limit) ? limit : Math.floor(limit * 100) / 100);
   const available = s.phase === "FUNDED" && !s.result && ["NONE", "DATA_END"].includes(s.pause) && !!s.last && s.last.flat && s.last.pending === 0;
-  return { ...f, floorAfter, remaining, limits, maximum, eligible: available && maximum >= p.minimum };
+  const qualification = payoutQualification(r, s);
+  return { ...f, floorAfter, remaining, limits, maximum, qualification, eligible: available && qualification.passed && maximum >= p.minimum };
 }
 export function applyPayout(r: PropRules, before: PropState, amount: number) {
   const preview = payoutPreview(r, before);
@@ -166,11 +173,13 @@ export function applyPayout(r: PropRules, before: PropState, amount: number) {
     || amount < r.payout.minimum || amount > preview.maximum || received <= 0 || preview.balance - amount <= preview.floorAfter) throw new Error(copy.propPractice.payoutInvalid);
   const s = copyState(before), st = currentStage(s);
   st.grossPayout += amount;
+  st.qualifyingAfterDay = s.last!.day;
   if (r.payout.permanentFloorOffset !== null) st.permanentFloor = Math.max(st.permanentFloor ?? -Infinity, st.initialCapital + r.payout.permanentFloorOffset);
   s.totalRequested += amount; s.totalReceived = Math.round((s.totalReceived + received) * 100) / 100; s.payoutCount++;
   s.pause = "PAYOUT_DAY"; s.pausedDay = s.last!.day;
   const day = st.days.at(-1);
   if (day && !day.settled) day.balance = funds(s).balance;
   return { state: s, received, share: Math.round((amount - received) * 100) / 100,
-    evidence: { sequence: s.last!.sequence, day: s.last!.day, balanceBefore: preview.balance, balanceAfter: funds(s).balance, floor: preview.floorAfter } };
+    evidence: { sequence: s.last!.sequence, day: s.last!.day, balanceBefore: preview.balance, balanceAfter: funds(s).balance, floor: preview.floorAfter,
+      qualification: preview.qualification } };
 }

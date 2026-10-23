@@ -1,11 +1,11 @@
 import { describe, expect, it } from "vitest";
-import { applyPayout, currentStage, defaultPropRules, evaluationProgress, funds, initialPropState, observeProp, payoutPreview, preparePropDay, propRulesSchema, settlePropDay, type Observation, type PropRules } from "./rules";
+import { applyPayout, currentStage, defaultPropRules, evaluationProgress, funds, initialPropState, observeProp, payoutPreview, payoutQualification, preparePropDay, propRulesSchema, settlePropDay, type Observation, type PropRules } from "./rules";
 import { propTradingDay } from "./trading-day";
 import { propResultLabel } from "./result-label";
 import { formatMoney } from "@/lib/format";
 const rules = (): PropRules => structuredClone({ ...defaultPropRules, name: "Test" });
 const o = (rawNet: number, rest: Partial<Observation> = {}): Observation => ({ sequence: 1, day: "day1", rawNet, unrealized: 0, flat: true, pending: 0, hadFill: true, ...rest });
-const monetaryPaths = ["purchaseCost", "activationCost", "evaluation.risk.initialCapital", "evaluation.risk.drawdown", "evaluation.risk.capOffset", "evaluation.target", "evaluation.qualifyingProfit", "funded.risk.initialCapital", "funded.risk.drawdown", "funded.risk.capOffset", "payout.minimum", "payout.maximum", "payout.buffer", "payout.permanentFloorOffset"];
+const monetaryPaths = ["purchaseCost", "activationCost", "evaluation.risk.initialCapital", "evaluation.risk.drawdown", "evaluation.risk.capOffset", "evaluation.target", "funded.qualifyingProfit", "funded.risk.initialCapital", "funded.risk.drawdown", "funded.risk.capOffset", "payout.minimum", "payout.maximum", "payout.buffer", "payout.permanentFloorOffset"];
 function setAmount(r: PropRules, path: string, amount: number) {
   const keys = path.split("."); let object = r as unknown as Record<string, unknown>;
   for (const key of keys.slice(0, -1)) object = object[key] as Record<string, unknown>;
@@ -87,12 +87,53 @@ describe("prop account pure ledger", () => {
     const s = settlePropDay(r, observeProp(r, initialPropState(r, 0), o(3000, { unrealized: -2000, flat: false })));
     expect(s.result).toBe("FAILED"); expect(s.phase).toBe("EVALUATION");
   });
-  it("ignores unrealized profit for qualification and needs actual fills", () => {
-    const r = rules(); r.evaluation.qualifyingDays = 1; r.evaluation.qualifyingProfit = 1; r.evaluation.minTradingDays = null;
-    let s = settlePropDay(r, observeProp(r, initialPropState(r, 0), o(3000, { hadFill: false })));
-    expect(evaluationProgress(r, s).qualifyingDays).toBe(0); expect(s.phase).toBe("EVALUATION");
+  it("ignores unrealized profit for evaluation and never checks funded qualifying days when promoting", () => {
+    const r = rules(); r.funded.qualifyingDays = 5; r.funded.qualifyingProfit = 100; r.evaluation.minTradingDays = null; r.evaluation.consistency = null;
+    let s = settlePropDay(r, observeProp(r, initialPropState(r, 0), o(3000)));
+    expect(s.phase).toBe("FUNDED"); expect(payoutQualification(r, s).qualifyingDays).toBe(0);
     s = settlePropDay(r, observeProp(r, initialPropState(r, 0), o(0, { unrealized: 10000, flat: false })));
     expect(evaluationProgress(r, s).net).toBe(0);
+  });
+  it("accepts qualifying-day configuration only in funded rules, with a positive cent threshold and integer day count", () => {
+    const r = rules(); r.funded.qualifyingDays = 2; r.funded.qualifyingProfit = 100;
+    expect(propRulesSchema.parse(r)).toEqual(r);
+    for (const qualifyingDays of [0, 1.5, 10001]) expect(propRulesSchema.safeParse({ ...r, funded: { ...r.funded, qualifyingDays } }).success).toBe(false);
+    for (const qualifyingProfit of [null, 0, -1, 0.001]) expect(propRulesSchema.safeParse({ ...r, funded: { ...r.funded, qualifyingProfit } }).success).toBe(false);
+    expect(propRulesSchema.safeParse({ ...r, evaluation: { ...r.evaluation, qualifyingDays: 2, qualifyingProfit: 100 } }).success).toBe(false);
+    expect(propRulesSchema.safeParse({ ...r, schemaVersion: 1 }).success).toBe(false);
+  });
+  it("counts only settled funded days with fills and net profit, once per day, then resets after every payout without erasing history", () => {
+    const r = rules(); r.evaluation.minTradingDays = null; r.evaluation.consistency = null;
+    r.funded.qualifyingDays = 2; r.funded.qualifyingProfit = 100;
+    let s = settlePropDay(r, observeProp(r, initialPropState(r, 0), o(3000)));
+    s = observeProp(r, preparePropDay(r, s, "day2").state, o(8000, { day: "day2", sequence: 2 }));
+    expect(payoutPreview(r, s)).toMatchObject({ maximum: 2000, eligible: false, qualification: { qualifyingDays: 0 } });
+    expect(() => applyPayout(r, s, 500)).toThrow();
+    s = settlePropDay(r, s); s = settlePropDay(r, observeProp(r, s, o(8000, { day: "day2", sequence: 2 })));
+    expect(payoutQualification(r, s).qualifyingDays).toBe(1);
+    // Positive daily net without fills and floating-only gains are not qualifying days.
+    s = settlePropDay(r, observeProp(r, preparePropDay(r, s, "day3").state, o(8200, { day: "day3", sequence: 3, hadFill: false })));
+    s = settlePropDay(r, observeProp(r, preparePropDay(r, s, "day4").state, o(8200, { day: "day4", sequence: 4, unrealized: 1000 })));
+    s = settlePropDay(r, observeProp(r, preparePropDay(r, s, "day5").state, o(8299.99, { day: "day5", sequence: 5 })));
+    expect(payoutQualification(r, s).qualifyingDays).toBe(1);
+    s = settlePropDay(r, observeProp(r, preparePropDay(r, s, "day6").state, o(8399.99, { day: "day6", sequence: 6 })));
+    expect(payoutPreview(r, s).eligible).toBe(true);
+    const original = s, before = structuredClone(s), ledger = structuredClone(currentStage(s).days);
+    s = applyPayout(r, s, 500).state;
+    expect(original).toEqual(before);
+    expect(currentStage(s).days).toEqual(ledger); expect(currentStage(s).anchor).toBe(currentStage(before).anchor);
+    expect(funds(s).profit).toBe(funds(before).profit); expect(s.last).toEqual(before.last);
+    expect(payoutQualification(r, s).qualifyingDays).toBe(0);
+    s = settlePropDay(r, s); expect(payoutQualification(r, s).qualifyingDays).toBe(0);
+    s = settlePropDay(r, observeProp(r, preparePropDay(r, s, "day7").state, o(8399.99, { day: "day7", sequence: 7, hadFill: false })));
+    expect(payoutPreview(r, s).maximum).toBeGreaterThanOrEqual(500); expect(payoutPreview(r, s).eligible).toBe(false);
+    // Day labels are identities, not lexically compared: day10 follows day9.
+    s = settlePropDay(r, observeProp(r, preparePropDay(r, s, "day9").state, o(8500, { day: "day9", sequence: 9 })));
+    s = settlePropDay(r, observeProp(r, preparePropDay(r, s, "day10").state, o(8600, { day: "day10", sequence: 10 })));
+    expect(payoutQualification(r, s)).toMatchObject({ qualifyingDays: 2, passed: true });
+    const second = applyPayout(r, s, 500);
+    expect(second.state.payoutCount).toBe(2); expect(payoutQualification(r, second.state).qualifyingDays).toBe(0);
+    expect(currentStage(second.state).days).toEqual(currentStage(s).days);
   });
   it("keeps consistency unmet at nonpositive net and reports required profit", () => {
     const r = rules(); let s = settlePropDay(r, observeProp(r, initialPropState(r, 0), o(2000)));

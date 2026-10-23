@@ -12,7 +12,7 @@ import { prisma } from "@/lib/db";
 import { createReplaySession, archiveReplaySession, restartReplaySession } from "@/lib/replay-sessions/service";
 import { loadReplayScope, runWithReplayScope } from "@/lib/replay-sessions/scope";
 import { getPaperSessionSnapshot } from "@/lib/paper-trading/serialize";
-import { defaultPropRules, type PropRules } from "./rules";
+import { defaultPropRules, payoutPreview, payoutQualification, type PropRules } from "./rules";
 import { confirmPropPayout, loadPropAccount, savePropTemplate } from "./service";
 import { POST as accountPOST } from "@/app/api/market-datasets/[id]/paper-session/route";
 import { POST as orderPOST } from "@/app/api/market-datasets/[id]/paper-session/orders/route";
@@ -278,6 +278,39 @@ describe("prop orchestration versus original flow", () => {
     const next = await snapshot(s); expect(next!.propAccount!.state.pause).toBe("NONE");
     const second = await scoped(s, async () => confirmPropPayout({ expectedVersion: (await loadReplayScope(s.id)).version, requestId: randomUUID(), amount: 1 }));
     expect(second.received).toBe(0.9); expect((await snapshot(s))!.session).toMatchObject({ realizedPnl: before!.session.realizedPnl, totalFees: before!.session.totalFees });
+  });
+  it("enforces settled funded qualifying days server-side and resets once under concurrent payout retries", async () => {
+    const r = rules(); r.funded.qualifyingDays = 1; r.funded.qualifyingProfit = 1;
+    const s = await create(r);
+    await advance(s); await order(s, "BUY"); await advance(s); await order(s, "SELL", 1, { executeAtCurrentClose: true });
+    expect((await snapshot(s))!.propAccount!.state.phase).toBe("FUNDED");
+    await advance(s); await order(s, "BUY"); await advance(s); await order(s, "SELL", 1, { executeAtCurrentClose: true });
+    const pending = (await snapshot(s))!.propAccount!;
+    expect(payoutPreview(r, pending.state)).toMatchObject({ eligible: false, qualification: { qualifyingDays: 0 } });
+    await expect(scoped(s, async () => confirmPropPayout({ expectedVersion: (await loadReplayScope(s.id)).version, requestId: randomUUID(), amount: 5 }))).rejects.toThrow();
+    expect(await prisma.propPracticePayout.count({ where: { replaySessionId: s.id } })).toBe(0);
+    await advance(s); // final source candle settles the funded day
+    const before = (await snapshot(s))!, scope = await loadReplayScope(s.id);
+    expect(payoutPreview(r, before.propAccount!.state)).toMatchObject({ eligible: true, qualification: { qualifyingDays: 1 } });
+    const input = { expectedVersion: scope.version, requestId: randomUUID(), amount: 5 };
+    const results = await Promise.all([runWithReplayScope(scope, () => confirmPropPayout(input)), runWithReplayScope(scope, () => confirmPropPayout(input))]);
+    expect(results[0].id).toBe(results[1].id);
+    const after = (await snapshot(s))!;
+    expect(after.session).toEqual(before.session); expect(after.stats).toEqual(before.stats);
+    expect(after.propAccount!.state.stages.map(stage => stage.days)).toEqual(before.propAccount!.state.stages.map(stage => stage.days));
+    expect(after.propAccount!.state).toMatchObject({ payoutCount: 1, totalRequested: 5 });
+    expect(payoutQualification(r, after.propAccount!.state).qualifyingDays).toBe(0);
+    await advance(s); // new day still has withdrawable profits, but no new qualifying day
+    const next = (await snapshot(s))!.propAccount!;
+    expect(payoutPreview(r, next.state)).toMatchObject({ eligible: false, qualification: { qualifyingDays: 0 } });
+    expect(payoutPreview(r, next.state).maximum).toBeGreaterThanOrEqual(1);
+    await expect(scoped(s, async () => confirmPropPayout({ expectedVersion: (await loadReplayScope(s.id)).version, requestId: randomUUID(), amount: 1 }))).rejects.toThrow();
+    await order(s, "BUY"); await advance(s); await order(s, "SELL", 1, { executeAtCurrentClose: true });
+    const qualified = (await snapshot(s))!.propAccount!;
+    expect(payoutPreview(r, qualified.state)).toMatchObject({ eligible: true, qualification: { qualifyingDays: 1 } });
+    await scoped(s, async () => confirmPropPayout({ expectedVersion: (await loadReplayScope(s.id)).version, requestId: randomUUID(), amount: 1 }));
+    expect(payoutQualification(r, (await snapshot(s))!.propAccount!.state).qualifyingDays).toBe(0);
+    expect(await prisma.propPracticePayout.count({ where: { replaySessionId: s.id } })).toBe(2);
   });
   it("versions and costs remain immutable; optional activation does not block promotion or restart", async () => {
     const r = rules(); r.activationCost = undefined; r.purchaseCost = 0;

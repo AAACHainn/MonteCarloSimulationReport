@@ -10,7 +10,7 @@ import { Alert, AlertDescription } from "@/components/ui/alert";
 import { Card, CardHeader, CardTitle, CardContent } from "@/components/ui/card";
 import { Table, TableHeader, TableHead, TableRow, TableBody, TableCell } from "@/components/ui/table";
 import { copy } from "@/lib/i18n";
-import { formatMoney, formatNumber } from "@/lib/format";
+import { formatMoney, formatNumber, formatInteger } from "@/lib/format";
 import { createUuid } from "@/lib/uuid";
 import { funds, payoutPreview, evaluationProgress } from "@/lib/prop-practice/rules";
 import { propResultLabel } from "@/lib/prop-practice/result-label";
@@ -39,12 +39,14 @@ function CompactRuleTable({ rules }: { rules: object }) {
 
 function RuleSnapshotCards({ snapshot }: { snapshot: PropRuntime["snapshot"] }) {
   const { risk, ...conditions } = snapshot.rules.evaluation;
+  const { risk: fundedRisk, ...fundedConditions } = snapshot.rules.funded;
   return <div className="grid grid-cols-3 items-start gap-3">
     <Card><CardHeader className="p-4 pb-2"><CardTitle>{t.evaluation}</CardTitle></CardHeader><CardContent className="px-4 pb-4">
       <CompactRuleTable rules={{ ...risk, ...conditions }} />
     </CardContent></Card>
     <Card><CardHeader className="p-4 pb-2"><CardTitle>{t.funded}</CardTitle></CardHeader><CardContent className="space-y-3 px-4 pb-4">
-      <CompactRuleTable rules={snapshot.rules.funded.risk} />
+      <CompactRuleTable rules={{ ...fundedRisk, ...fundedConditions }} />
+      {snapshot.rules.funded.qualifyingDays !== null ? <p className="text-xs text-slate-500">{t.qualifyingHint}</p> : null}
       <div className="border-t pt-3"><p className="mb-1 text-sm font-medium">{t.payout}</p><CompactRuleTable rules={snapshot.rules.payout} /></div>
     </CardContent></Card>
     <Card><CardHeader className="p-4 pb-2"><CardTitle>{t.costs}</CardTitle></CardHeader><CardContent className="space-y-3 px-4 pb-4">
@@ -103,10 +105,15 @@ export function PropAccountPanel({ sessionId, runtime, tradingSnapshot, busy: ex
         <p className={state.pause === "NONE" ? "text-xs text-slate-500" : "text-xs text-amber-800"}>{t.pause}: {t[state.pause]}</p>
         {state.result ? <p className="text-xs text-amber-800">{t.terminalHint}</p> : null}
         {state.failure ? <p className="text-xs text-red-700">{t.failure}: {state.failure.sequence} / {money(state.failure.equity)} / {money(state.failure.floor)} · {state.failure.phase === "EVALUATION" ? t.evaluation : t.funded}</p> : null}
-        {state.phase === "EVALUATION" ? <div className="grid grid-cols-3 gap-4 border-t pt-3 text-sm tabular-nums">
+        {state.phase === "EVALUATION" ? <div className="grid grid-cols-2 gap-4 border-t pt-3 text-sm tabular-nums">
           <div><p className="text-xs text-slate-500">{t.requiredProfit}</p><p className="mt-1 font-medium">{money(progress.requiredProfit)}</p></div>
           <div><p className="text-xs text-slate-500">{t.tradingDays}</p><p className="mt-1 font-medium">{progress.tradingDays} / {snapshot.rules.evaluation.minTradingDays ?? copy.common.dash}</p></div>
-          <div><p className="text-xs text-slate-500">{t.qualifiedDays}</p><p className="mt-1 font-medium">{progress.qualifyingDays} / {snapshot.rules.evaluation.qualifyingDays ?? copy.common.dash}</p></div>
+        </div> : null}
+        {state.phase === "FUNDED" && preview.qualification.requiredDays !== null ? <div className="border-t pt-3">
+          <div className="grid grid-cols-2 gap-4 text-sm tabular-nums">
+            <div><p className="text-xs text-slate-500">{t.qualifiedDays}</p><p className="mt-1 font-medium">{formatInteger(preview.qualification.qualifyingDays)} / {formatInteger(preview.qualification.requiredDays)}</p></div>
+            <div><p className="text-xs text-slate-500">{t.qualifyingProfit}</p><p className="mt-1 font-medium">{money(preview.qualification.qualifyingProfit!)}</p></div>
+          </div><p className="mt-2 text-xs text-slate-500">{t.qualifyingHint}</p>
         </div> : null}
         <div className="flex justify-end gap-2 border-t pt-4">
           <Button variant="outline" disabled={busy || externalBusy} onClick={() => void begin("rules")}>{t.rules}</Button>
@@ -123,6 +130,7 @@ export function PropAccountPanel({ sessionId, runtime, tradingSnapshot, busy: ex
         {success ? <Alert role="status" aria-live="polite" className="border-emerald-200 bg-emerald-50"><AlertDescription>{t.payoutSuccess}</AlertDescription></Alert> : null}
         {view === "payout" && (state.phase !== "FUNDED" || state.result) ? <Alert><AlertDescription>{t.previewUnavailable}</AlertDescription></Alert> : null}
         {view === "payout" && state.phase === "FUNDED" && !state.result ? <Card><CardHeader><CardTitle>{t.payout}</CardTitle></CardHeader><CardContent className="space-y-4"><p className="text-xs text-slate-500">{t.payoutHint}</p><p className="text-sm tabular-nums">{t.maximumAvailable}: {money(preview.maximum)} · {t.minimum}: {money(snapshot.rules.payout.minimum)}</p><p className="text-xs text-slate-500">{t.limits}: {money(preview.limits.fraction)} / {preview.limits.maximum === null ? copy.common.dash : money(preview.limits.maximum)} / {preview.limits.buffer === null ? copy.common.dash : money(preview.limits.buffer)} / {money(preview.limits.risk)}</p>
+          {preview.qualification.requiredDays !== null ? <div className="space-y-1"><p className="text-sm tabular-nums">{t.qualifiedDays}: {formatInteger(preview.qualification.qualifyingDays)} / {formatInteger(preview.qualification.requiredDays)} · {t.qualifyingProfit}: {money(preview.qualification.qualifyingProfit!)}</p><p className="text-xs text-slate-500">{t.qualifyingHint}</p></div> : null}
           <form className="space-y-4" onSubmit={e => { e.preventDefault(); if (preview.eligible) { setError(null); setConfirmation({ amount: Number(amount), requestId: createUuid(), version }); } }}><div className="space-y-2"><Label htmlFor="prop-payout-amount">{t.requested}</Label><Input id="prop-payout-amount" type="number" step="0.01" min={snapshot.rules.payout.minimum} max={preview.maximum} required value={amount} onChange={e => setAmount(e.target.value)} disabled={busy || !preview.eligible} /></div><p className="text-xs tabular-nums">{t.received}: {money(received)} · {t.balanceAfter}: {money(preview.balance - Number(amount))} · {t.floorAfter}: {money(preview.floorAfter)}</p>{!preview.eligible ? <p className="text-xs text-amber-800">{t.previewUnavailable}</p> : null}<div className="flex justify-end border-t pt-4"><Button disabled={busy || !preview.eligible || sessionStatus !== "ACTIVE" || !data} type="submit">{t.payout}</Button></div></form>
         </CardContent></Card> : null}
         {view === "rules" ? <RuleSnapshotCards snapshot={snapshot} /> : null}
