@@ -26,7 +26,6 @@ export function PaperAccountCreateForm({ busy, error, onCreate }: {
   const [loadError, setLoadError] = useState<string | null>(null);
   const [retry, setRetry] = useState(0);
   const [detailsOpen, setDetailsOpen] = useState(false);
-  const [feesOpen, setFeesOpen] = useState(false);
   const [currency, setCurrency] = useState("USDT");
   const isProp = category === "PROP_PRACTICE";
   const t = copy.propPractice;
@@ -49,13 +48,7 @@ export function PaperAccountCreateForm({ busy, error, onCreate }: {
     return () => controller.abort();
   }, [isProp, retry, t.requestFailed]);
 
-  return <form className="space-y-4" aria-busy={busy || loading} onInvalid={event => {
-      const input = event.target as HTMLInputElement;
-      if (!feesOpen && (input.name === "commissionBps" || input.name === "slippageBps")) {
-        event.preventDefault(); setFeesOpen(true);
-        requestAnimationFrame(() => { input.focus(); input.reportValidity(); });
-      }
-    }} onSubmit={event => {
+  return <form className="space-y-4" aria-busy={busy || loading} onSubmit={event => {
       event.preventDefault();
       if (busy || (isProp && (!selected || loading || loadError))) return;
       const data = new FormData(event.currentTarget);
@@ -89,12 +82,9 @@ export function PaperAccountCreateForm({ busy, error, onCreate }: {
         {!isProp ? <div className="space-y-2"><Label htmlFor={`${id}-capital`}>{copy.paperTrading.initialCapital}</Label><Input id={`${id}-capital`} name="initialCapital" type="number" min="0.01" step="any" defaultValue="100000" disabled={busy} required /></div> : null}
         <div className="space-y-2"><Label htmlFor={`${id}-currency`}>{copy.paperTrading.currency}</Label><Input id={`${id}-currency`} name="currency" value={currency} onChange={event => setCurrency(event.target.value)} maxLength={12} disabled={busy} required /></div>
       </div>
-      <Button type="button" variant="outline" disabled={busy} aria-expanded={feesOpen} aria-controls={`${id}-fees`} onClick={() => setFeesOpen(value => !value)}>{feesOpen ? t.hideFees : t.showFees}</Button>
-      <div id={`${id}-fees`} hidden={!feesOpen}>
-        <div className="grid gap-4 sm:grid-cols-2">
+      <div className="grid gap-4 sm:grid-cols-2">
           <div className="space-y-2"><Label htmlFor={`${id}-fee`}>{copy.paperTrading.commissionBps}</Label><Input id={`${id}-fee`} name="commissionBps" type="number" min="0" max="10000" step="any" defaultValue="0" disabled={busy} required /></div>
           <div className="space-y-2"><Label htmlFor={`${id}-slip`}>{copy.paperTrading.slippageBps}</Label><Input id={`${id}-slip`} name="slippageBps" type="number" min="0" max="10000" step="any" defaultValue="0" disabled={busy} required /></div>
-        </div>
       </div>
       {error ? <p role="alert" className="text-sm text-red-600">{error}</p> : null}
       <div className="flex justify-end border-t pt-4"><Button type="submit" disabled={busy || (isProp && (!selected || loading || !!loadError))}>{busy ? <Loader2 className="h-4 w-4 animate-spin" aria-hidden="true" /> : null}{busy ? copy.paperTrading.creating : isProp ? t.createPracticeAccount : copy.paperTrading.createAccount}</Button></div>
