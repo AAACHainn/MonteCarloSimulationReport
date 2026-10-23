@@ -7,6 +7,7 @@ import { loadReplayScope, runWithReplayScope, replayErrorResponse } from "@/lib/
 import { archiveReplaySession, deleteReplaySession, deleteReplaySessionSchema, renameReplaySession, updateSessionPreferences } from "@/lib/replay-sessions/service";
 import { listReplaySessions } from "@/lib/replay-sessions/read";
 import { copy } from "@/lib/i18n";
+import { riskPreferencesSchema } from "@/lib/paper-trading/risk-preferences";
 
 type Context = { params: Promise<{ sessionId: string }> };
 export async function GET(_request: Request, context: Context) {
@@ -22,7 +23,7 @@ const patchSchema = z.object({
   expectedVersion: z.number().int().positive(),
   name: z.string().trim().min(1).max(100).optional(),
   status: z.literal("ARCHIVED").optional(),
-  riskPreferences: z.object({ riskAmount: z.number().finite().positive().optional(), targetR: z.number().finite().positive().optional() }).optional(),
+  riskPreferences: riskPreferencesSchema.optional(),
 }).strict().refine((value) => Number(value.name !== undefined) + Number(value.status !== undefined) + Number(value.riskPreferences !== undefined) === 1);
 export async function PATCH(request: Request, context: Context) {
   try {

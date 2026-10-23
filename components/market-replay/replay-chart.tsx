@@ -4,7 +4,8 @@
 import { aggregateHasGap, aggregatePhase } from "@/lib/market-replay/bar-quality";
 import { formatInteger } from "@/lib/format";
 import { type PointerEvent as ReactPointerEvent } from "react";
-import { EyeOff, Grid2X2, GripHorizontal, Link2, Loader2, LogOut, RotateCcw, ShieldAlert, Undo2, X } from "lucide-react";
+import { EyeOff, Grid2X2, GripHorizontal, Link2, Loader2, LogOut, RotateCcw, Settings, ShieldAlert, Undo2, X } from "lucide-react";
+import { RiskDefaultsDialog } from "./risk-defaults-dialog";
 import { Button } from "@/components/ui/button";
 import { Alert } from "@/components/ui/alert";
 import { Input } from "@/components/ui/input";
@@ -35,6 +36,7 @@ export function ReplayChart(props: ReplayChartProps) {
     orderTicketRef, orderTicketDragRef, contextMenu, setContextMenu, contextMenuRef, abrTooltip,
     setAbrTooltip, measurement, draft, setDraft, orderTicketPosition, setOrderTicketPosition,
     defaultSaved, setDefaultSaved, draftError, setDraftError, lineActions, latest,
+    riskPreferences, riskSettingsOpen, setRiskSettingsOpen,
     currentPrice, hasPendingClose, priceTickSize, bars, displayUtcOffsetMinutes, gridVisible,
     onToggleGrid, abrEnabled, abrLength, paperSnapshot, tradeAnnotationsTruncated, tradeAnnotationsVisible,
     readOnly, paperBusy, paperError, onCancelOrder, onClosePosition, entryCheckOpen,
@@ -44,7 +46,7 @@ export function ReplayChart(props: ReplayChartProps) {
     draftSizing,
   } = setup;
   const {
-    openContextMenu, resetChartView, createDraft, setDraftPrice, setTargetR, saveDefaults,
+    openContextMenu, resetChartView, createDraft, setDraftPrice, setTargetR, saveDefaults, saveRiskSettings, riskBalance,
     submitDraft, contextEntryOrderTypes, measurementColor, measurementGeometry, measurementDuration, measurementLabelLeft,
     measurementLabelTop,
   } = actions;
@@ -324,14 +326,14 @@ export function ReplayChart(props: ReplayChartProps) {
               <div><Label htmlFor="draft-tp" className="text-[10px] text-emerald-700">TP</Label><Input id="draft-tp" data-testid="draft-tp" type="number" step={priceTickSize} className="mt-1 h-8 px-2 font-mono text-xs" value={draft.takeProfit} onChange={(event) => setDraftPrice("takeProfit", Number(event.target.value))} /></div>
             </div>
             <div className="grid grid-cols-2 gap-2">
-              <div><Label htmlFor="draft-risk" className="text-[11px]">{copy.paperTrading.fixedRiskAmount}</Label><Input id="draft-risk" data-testid="draft-risk" type="number" min="0.01" step="any" className="mt-1 h-8" value={draft.riskAmount} onChange={(event) => { setDraft((current) => current ? { ...current, riskAmount: Number(event.target.value) } : current); setDraftError(null); setDefaultSaved(false); }} /></div>
+              <div><div className="flex items-center gap-1"><Label htmlFor="draft-risk" className="text-[11px]">{copy.paperTrading.fixedRiskAmount}</Label><Button type="button" variant="ghost" size="icon" className="h-5 w-5" aria-label={copy.paperTrading.riskDefaultsTitle} title={copy.paperTrading.riskDefaultsTitle} onClick={() => setRiskSettingsOpen(true)}><Settings className="h-3 w-3" aria-hidden="true" /></Button></div><Input id="draft-risk" data-testid="draft-risk" type="number" min="0.01" step="any" className="mt-1 h-8" value={draft.riskAmount} onChange={(event) => { setDraft((current) => current ? { ...current, riskAmount: Number(event.target.value) } : current); setDraftError(null); setDefaultSaved(false); }} /></div>
               <div><Label htmlFor="draft-target-r" className="text-[11px]">{copy.paperTrading.targetR}</Label><Input id="draft-target-r" data-testid="draft-target-r" type="number" min="0.01" step="0.1" className="mt-1 h-8" value={draft.targetR} onChange={(event) => { setTargetR(Number(event.target.value)); setDefaultSaved(false); }} /></div>
             </div>
             <div className="flex items-center justify-between text-[11px]">
               <span className={`inline-flex items-center gap-1 ${draft.tpMode === "LINKED" ? "text-blue-700" : "text-slate-500"}`}><Link2 className="h-3 w-3" />{draft.tpMode === "LINKED" ? copy.paperTrading.linkedTarget : copy.paperTrading.freeTarget}</span>
               <div className="flex items-center gap-1">
                 {draft.tpMode === "FREE" ? <button type="button" className="font-medium text-blue-700 hover:underline" onClick={() => setTargetR(draft.targetR)}>{copy.paperTrading.restoreTargetR}</button> : null}
-                <button type="button" className="font-medium text-slate-500 hover:text-slate-900" onClick={saveDefaults}>{defaultSaved ? copy.paperTrading.defaultSaved : copy.paperTrading.saveAsDefault}</button>
+                <button type="button" className="font-medium text-slate-500 hover:text-slate-900" title={copy.paperTrading.riskSaveFixedHint} onClick={saveDefaults}>{defaultSaved ? copy.paperTrading.defaultSaved : copy.paperTrading.saveAsDefault}</button>
               </div>
             </div>
             <div className="grid grid-cols-2 gap-x-3 gap-y-1 rounded-lg bg-slate-50 p-2.5 text-xs">
@@ -349,6 +351,7 @@ export function ReplayChart(props: ReplayChartProps) {
           </fieldset>
         </div>
       ) : null}
+      {riskSettingsOpen && draft && paperSnapshot ? <RiskDefaultsDialog preferences={riskPreferences} balance={riskBalance} currency={paperSnapshot.session.currency} onClose={() => setRiskSettingsOpen(false)} onSave={saveRiskSettings} /> : null}
     </div>
   );
 }

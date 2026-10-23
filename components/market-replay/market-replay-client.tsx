@@ -33,6 +33,8 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { copy } from "@/lib/i18n";
+import { formatMoney } from "@/lib/format";
+import { funds } from "@/lib/prop-practice/rules";
 import { Type as TextIcon } from "lucide-react";
 import { TextSettingsDialog, TextToolOption } from "./text-settings-dialog";
 import { runDrawingWrite } from "@/lib/market-replay/drawing-write-queue";
@@ -299,6 +301,7 @@ export function MarketReplayClient({ dataset: initialDataset, initialJournalFocu
           <Button type="button" variant="ghost" size="sm" className="h-8" onClick={() => setSettingsDialog("paper")}><WalletCards className="h-4 w-4" />{copy.marketReplay.accountSettings}</Button>
           <Button type="button" variant="ghost" size="sm" className="h-8" onClick={() => setSettingsDialog("trade")}><TrendingUp className="h-4 w-4" />{copy.paperTrading.title}</Button>
           <Button asChild type="button" variant="ghost" size="sm" className="h-8"><Link href={`/market-replay/${dataset.id}/trade-history?sessionId=${encodeURIComponent(replaySession?.id ?? "")}`}><BookOpen className="h-4 w-4" />{copy.paperTrading.openJournalHistory}</Link></Button>
+          {paperSnapshot ? <span className="shrink-0 whitespace-nowrap px-2 text-xs tabular-nums text-slate-500">{copy.propPractice.balance} <strong className="font-medium text-slate-800">{formatMoney(paperSnapshot.propAccount ? funds(paperSnapshot.propAccount.state).balance : paperSnapshot.stats.balance, paperSnapshot.session.currency)}</strong></span> : null}
           <div className="ml-auto flex items-center gap-1">
             <Button type="button" variant="ghost" size="sm" className="h-8" disabled={draftActive} title={draftActive ? copy.paperTrading.draftLockedReplay : undefined} onClick={() => requestConfirmation("reset")}><RotateCcw className="h-4 w-4" /><span className="hidden xl:inline">{copy.marketReplay.reset}</span></Button>
             <Button type="button" variant="ghost" size="sm" className="h-8" disabled={draftActive} title={draftActive ? copy.paperTrading.draftLockedReplay : undefined} onClick={openStartDialog}><span className="hidden xl:inline">{copy.marketReplay.chooseNewStart}</span><span className="xl:hidden">{copy.marketReplay.startAt}</span></Button>

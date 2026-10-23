@@ -1,6 +1,8 @@
 "use client";
 
 import { createUuid } from "@/lib/uuid";
+import { defaultRiskAmount, type RiskPreferences } from "@/lib/paper-trading/risk-preferences";
+import { funds } from "@/lib/prop-practice/rules";
 
 import { type MouseEvent as ReactMouseEvent } from "react";
 import { copy } from "@/lib/i18n";
@@ -18,7 +20,7 @@ export function useReplayChartActions(core: ReturnType<typeof useReplayChartCore
   const {
     replaySession, chartRef, candleRef, volumeRef, barsRef, drawingToolRef,
     contextMenu, setContextMenu, measurement, drawingDraftRef, drawingPreviewRef, draft,
-    setDraft, setOrderTicketPosition, defaultRiskAmount, setDefaultRiskAmount, defaultTargetR, setDefaultTargetR,
+    setDraft, setOrderTicketPosition, riskPreferences, setRiskPreferences, setRiskSettingsOpen,
     setDefaultSaved, setDraftError, latest, currentPrice, syncLineActionCoordinates, syncDrawingPrimitive,
     datasetId, priceTickSize, bars, displayIntervalSeconds, displaySession, paperSnapshot,
     readOnly, paperBusy, onSubmitOrder, entryCheckOpen, onRewindToBar, rewindRange,
@@ -26,6 +28,7 @@ export function useReplayChartActions(core: ReturnType<typeof useReplayChartCore
   const {
     draftSizing,
   } = setup;
+  const riskBalance = paperSnapshot ? paperSnapshot.propAccount ? funds(paperSnapshot.propAccount.state).balance : paperSnapshot.stats.balance : 0;
   function openContextMenu(event: ReactMouseEvent<HTMLDivElement>) {
     event.preventDefault();
     if (drawingToolRef.current || drawingDraftRef.current || drawingPreviewRef.current) return;
@@ -67,9 +70,9 @@ export function useReplayChartActions(core: ReturnType<typeof useReplayChartCore
       ? latest.high - latest.low
       : contextMenu.price * 0.01;
     const distance = Math.max(priceTickSize, Math.round(Math.min(rawDistance, contextMenu.price * 0.99) / priceTickSize) * priceTickSize);
-    const riskAmount = defaultRiskAmount ?? paperSnapshot.session.initialCapital * 0.01;
+    const riskAmount = defaultRiskAmount(riskPreferences, riskBalance);
     const stopLoss = snapPriceToTick(side === "BUY" ? contextMenu.price - distance : contextMenu.price + distance, priceTickSize);
-    const targetR = defaultTargetR > 0 ? defaultTargetR : 2;
+    const targetR = riskPreferences.targetR;
     setDraft({
       id: createUuid(),
       side, type, entryPrice: contextMenu.price, stopLoss,
@@ -107,31 +110,40 @@ export function useReplayChartActions(core: ReturnType<typeof useReplayChartCore
     setDraftError(null);
   }
 
-  async function saveDefaults() {
-    if (!draft || draft.riskAmount <= 0 || draft.targetR <= 0) return;
-    setDefaultRiskAmount(draft.riskAmount); setDefaultTargetR(draft.targetR);
-    try {
-      window.localStorage.setItem(`market-replay-risk-settings-v2:${replaySession?.id ?? datasetId}`, JSON.stringify({ riskAmount: draft.riskAmount, targetR: draft.targetR }));
-    } catch {
-      // Local storage is optional; the current draft remains usable.
-    }
+  async function persistRiskPreferences(preferences: RiskPreferences) {
     if (replaySession) {
-      try {
-        for (let attempt = 0; attempt < 3; attempt += 1) {
-          const response = await fetch(`/api/replay-sessions/${encodeURIComponent(replaySession.id)}`, { cache: "no-store" });
-          const data = await response.json();
-          if (!response.ok) throw new Error(data.error ?? copy.replaySessions.requestFailed);
-          const saved = await fetch(`/api/replay-sessions/${encodeURIComponent(replaySession.id)}`, {
-            method: "PATCH", headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({ expectedVersion: data.session.version, riskPreferences: { riskAmount: draft.riskAmount, targetR: draft.targetR } }),
-          });
-          if (saved.status === 409 && attempt < 2) continue;
-          if (!saved.ok) throw new Error((await saved.json()).error ?? copy.replaySessions.requestFailed);
-          break;
-        }
-      } catch (error) { setDraftError(error instanceof Error ? error.message : copy.replaySessions.requestFailed); return; }
+      for (let attempt = 0; attempt < 3; attempt += 1) {
+        const response = await fetch(`/api/replay-sessions/${encodeURIComponent(replaySession.id)}`, { cache: "no-store" });
+        const data = await response.json();
+        if (!response.ok) throw new Error(data.error ?? copy.replaySessions.requestFailed);
+        const saved = await fetch(`/api/replay-sessions/${encodeURIComponent(replaySession.id)}`, {
+          method: "PATCH", headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ expectedVersion: data.session.version, riskPreferences: preferences }),
+        });
+        if (saved.status === 409 && attempt < 2) continue;
+        if (!saved.ok) throw new Error((await saved.json()).error ?? copy.replaySessions.requestFailed);
+        break;
+      }
+    }
+    setRiskPreferences(preferences);
+    try {
+      window.localStorage.setItem(`market-replay-risk-settings-v2:${replaySession?.id ?? datasetId}`, JSON.stringify(preferences));
+    } catch {
+      // Session persistence remains authoritative when optional local storage is unavailable.
     }
     setDefaultSaved(true);
+  }
+
+  async function saveDefaults() {
+    if (!draft || draft.riskAmount <= 0 || draft.targetR <= 0) return;
+    try { await persistRiskPreferences({ ...riskPreferences, riskMode: "FIXED", riskAmount: draft.riskAmount, targetR: draft.targetR }); }
+    catch (error) { setDraftError(error instanceof Error ? error.message : copy.replaySessions.requestFailed); }
+  }
+
+  async function saveRiskSettings(preferences: RiskPreferences) {
+    await persistRiskPreferences(preferences);
+    setDraft(current => current ? { ...current, riskAmount: defaultRiskAmount(preferences, riskBalance) } : current);
+    setDraftError(null); setRiskSettingsOpen(false);
   }
 
   async function submitDraft() {
@@ -183,7 +195,7 @@ export function useReplayChartActions(core: ReturnType<typeof useReplayChartCore
     return Math.max(8, Math.min(top, Math.max(8, measurement.paneHeight - labelHeight - 8)));
   })();
   return {
-    openContextMenu, resetChartView, createDraft, setDraftPrice, setTargetR, saveDefaults,
+    openContextMenu, resetChartView, createDraft, setDraftPrice, setTargetR, saveDefaults, saveRiskSettings, riskBalance,
     submitDraft, contextEntryOrderTypes, measurementColor, measurementGeometry, measurementDuration, measurementLabelLeft,
     measurementLabelTop,
   };

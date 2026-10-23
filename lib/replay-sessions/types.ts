@@ -11,7 +11,7 @@ export type ReplaySessionSummary = {
   activeProjectionId: string;
   pendingCorrectionId: string | null;
   legacy: boolean;
-  riskPreferences: { riskAmount?: number; targetR?: number };
+  riskPreferences: import("@/lib/paper-trading/risk-preferences").RiskPreferencesInput;
   progress: ReplayProgressData | null;
   entryCount: number;
   createdAt: string;

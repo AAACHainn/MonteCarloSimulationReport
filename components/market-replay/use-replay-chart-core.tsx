@@ -1,6 +1,7 @@
 "use client";
 
 import { useReplaySession } from "./replay-session-context";
+import { normalizeRiskPreferences, type RiskPreferences } from "@/lib/paper-trading/risk-preferences";
 
 import { useCallback, useEffect, useImperativeHandle, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { type IChartApi, type IPriceLine, type ISeriesApi } from "lightweight-charts";
@@ -139,8 +140,8 @@ export function useReplayChartCore({
   const drawingPreviewRef = useRef<{ id: string; geometry: TrendLineGeometry } | null>(null);
   const [draft, setDraft] = useState<DraftOrder | null>(null);
   const [orderTicketPosition, setOrderTicketPosition] = useState<{ x: number; y: number } | null>(null);
-  const [defaultRiskAmount, setDefaultRiskAmount] = useState<number | null>(null);
-  const [defaultTargetR, setDefaultTargetR] = useState(2);
+  const [riskPreferences, setRiskPreferences] = useState<RiskPreferences>(() => normalizeRiskPreferences(null));
+  const [riskSettingsOpen, setRiskSettingsOpen] = useState(false);
   const [defaultSaved, setDefaultSaved] = useState(false);
   const [draftError, setDraftError] = useState<string | null>(null);
   const [lineActions, setLineActions] = useState<LineAction[]>([]);
@@ -347,18 +348,15 @@ export function useReplayChartCore({
 
   useEffect(() => {
     if (!paperSessionId || paperInitialCapital === null) {
-      setDefaultRiskAmount(null);
+      setRiskPreferences(normalizeRiskPreferences(null));
       return;
     }
-    const fallback = paperInitialCapital * 0.01;
     try {
-      const stored = JSON.parse(window.localStorage.getItem(`market-replay-risk-settings-v2:${replaySession?.id ?? datasetId}`) ?? "null") as { riskAmount?: unknown; targetR?: unknown } | null;
-      const preferences = stored ?? replaySession?.riskPreferences;
-      setDefaultRiskAmount(typeof preferences?.riskAmount === "number" && preferences.riskAmount > 0 ? preferences.riskAmount : fallback);
-      setDefaultTargetR(typeof preferences?.targetR === "number" && preferences.targetR > 0 ? preferences.targetR : 2);
+      const stored: unknown = JSON.parse(window.localStorage.getItem(`market-replay-risk-settings-v2:${replaySession?.id ?? datasetId}`) ?? "null");
+      const saved = replaySession?.riskPreferences;
+      setRiskPreferences(normalizeRiskPreferences(saved && Object.keys(saved).length ? saved : stored));
     } catch {
-      setDefaultRiskAmount(fallback);
-      setDefaultTargetR(2);
+      setRiskPreferences(normalizeRiskPreferences(replaySession?.riskPreferences));
     }
   }, [datasetId, paperInitialCapital, paperSessionId, replaySession]);
 
@@ -437,8 +435,8 @@ export function useReplayChartCore({
     onCreateDrawingRef, onUpdateDrawingRef, onDeleteDrawingRef, onOpenDrawingStyleRef, displayIntervalSecondsRef, requestedDisplayIntervalSecondsRef,
     sourceIntervalSecondsRef, gridVisibleRef, contextMenu, setContextMenu, contextMenuRef, abrTooltip,
     setAbrTooltip, measurement, setMeasurement, measurementRef, drawingDraftRef, drawingDraftCoordinateRef,
-    drawingPreviewRef, draft, setDraft, orderTicketPosition, setOrderTicketPosition, defaultRiskAmount,
-    setDefaultRiskAmount, defaultTargetR, setDefaultTargetR, defaultSaved, setDefaultSaved, draftError,
+    drawingPreviewRef, draft, setDraft, orderTicketPosition, setOrderTicketPosition, riskPreferences,
+    setRiskPreferences, riskSettingsOpen, setRiskSettingsOpen, defaultSaved, setDefaultSaved, draftError,
     setDraftError, lineActions, setLineActions, hasVolume, warmupBarsRef, abrLengthRef,
     latest, currentPrice, currentPriceRef, displayUtcOffsetRef, onOrderPriceChangeRef, hasPendingClose,
     syncLineActionCoordinates, syncDrawingPrimitive, setChartCursor, syncMeasurementCoordinates, syncVisibleSequenceRange, datasetId,
