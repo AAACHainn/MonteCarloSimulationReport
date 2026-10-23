@@ -1,4 +1,5 @@
 export const propPractice = {
+    evaluationInProgress: "考核中", evaluationQualified: "考核达标", fundedStage: "出金阶段",
     promote: "转为出金账户", promotionTitle: "确认转为出金账户",
     promotionHint: "达到净利润、成交日和一致性要求，且空仓无挂单后，可手动转为出金账户，当天即可继续交易。",
     promotionUnavailable: "暂不能切换：须满足全部考核条件、空仓无挂单，且账户未失败或暂停。请刷新账户状态后重试。",
