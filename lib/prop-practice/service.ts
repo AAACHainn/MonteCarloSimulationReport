@@ -5,7 +5,7 @@ import { sqliteWriteTransaction } from "@/lib/sqlite-write";
 import { getReplayScope, assertReplayWritable, markReplayMutation, ReplaySessionError, accountWhere, progressWhere } from "@/lib/replay-sessions/scope";
 import { archiveReplaySession, recordReplayCommand } from "@/lib/replay-sessions/service";
 import { getPaperSessionSnapshot } from "@/lib/paper-trading/serialize";
-import { applyPayout, payoutPreview, promotePropManually, promotionPreview, propRulesSchema, observeProp, settlePropDay, type PropState, type PropRules } from "./rules";
+import { applyPayout, payoutPreview, promotePropManually, promotionPreview, propRulesSchema, propTradingBlockReason, observeProp, settlePropDay, type PropState, type PropRules } from "./rules";
 import { propTradingDay, type PropCalendar } from "./trading-day";
 
 export type PropSnapshot = { rules: PropRules; calendar: PropCalendar; currency: string; accountConfig: import("@/lib/paper-trading/types").PaperAccountConfig };
@@ -30,7 +30,8 @@ export async function persistPropAccount(tx: Prisma.TransactionClient, runtime: 
 }
 export async function assertPropTradingAvailable(tx: Prisma.TransactionClient) {
   const prop = await loadPropAccount(tx);
-  if (prop && (prop.state.result || !["NONE", "DATA_END"].includes(prop.state.pause))) throw new ReplaySessionError("PROP_PAUSED", 409, copy.propPractice.tradingPaused);
+  const reason = prop ? propTradingBlockReason(prop.state) : null;
+  if (reason) throw new ReplaySessionError("PROP_PAUSED", 409, reason);
 }
 /** Observe original user operations after they finish, including same-candle close fees. */
 export async function observePropOperation(tx: Prisma.TransactionClient, hadFill: boolean) {

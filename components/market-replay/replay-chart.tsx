@@ -7,6 +7,7 @@ import { type PointerEvent as ReactPointerEvent } from "react";
 import { EyeOff, Grid2X2, GripHorizontal, Link2, Loader2, LogOut, RotateCcw, Settings, ShieldAlert, Undo2, X } from "lucide-react";
 import { RiskDefaultsDialog } from "./risk-defaults-dialog";
 import { Button } from "@/components/ui/button";
+import { Dialog } from "@/components/ui/dialog";
 import { Alert } from "@/components/ui/alert";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -47,6 +48,7 @@ export function ReplayChart(props: ReplayChartProps) {
   } = setup;
   const {
     openContextMenu, resetChartView, createDraft, setDraftPrice, setTargetR, saveDefaults, saveRiskSettings, riskBalance,
+    tradeBlockReason, setTradeBlockReason,
     submitDraft, contextEntryOrderTypes, measurementColor, measurementGeometry, measurementDuration, measurementLabelLeft,
     measurementLabelTop,
   } = actions;
@@ -66,6 +68,9 @@ export function ReplayChart(props: ReplayChartProps) {
         data-bar-count={bars.length}
         data-visible-bar-count={visibleBars.length}
       />
+      <Dialog open={tradeBlockReason !== null} title={copy.propPractice.orderBlockedTitle} description={tradeBlockReason ?? undefined} className="max-w-md" onClose={() => setTradeBlockReason(null)}>
+        <div className="flex justify-end"><Button onClick={() => setTradeBlockReason(null)}>{copy.common.confirm}</Button></div>
+      </Dialog>
 
       {hiddenAfter ? <Alert data-hidden-bars-notice role="status" aria-live="polite"
         className="absolute bottom-3 left-3 z-30 flex w-auto max-w-[calc(100%-1.5rem)] flex-wrap items-center gap-2 bg-white/95 px-3 py-2 shadow-lg backdrop-blur">

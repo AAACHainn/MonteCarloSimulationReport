@@ -2,9 +2,9 @@
 
 import { createUuid } from "@/lib/uuid";
 import { defaultRiskAmount, type RiskPreferences } from "@/lib/paper-trading/risk-preferences";
-import { funds } from "@/lib/prop-practice/rules";
+import { funds, propTradingBlockReason } from "@/lib/prop-practice/rules";
 
-import { type MouseEvent as ReactMouseEvent } from "react";
+import { useState, type MouseEvent as ReactMouseEvent } from "react";
 import { copy } from "@/lib/i18n";
 import { defaultReplayLogicalRange } from "@/lib/market-replay/chart-range";
 import { calculateChartMeasurementGeometry, measurementDurationParts } from "@/lib/market-replay/chart-measurement";
@@ -17,6 +17,7 @@ import type { useReplayChartCore } from "./use-replay-chart-core";
 import type { useReplayChartSetup } from "./use-replay-chart-setup";
 
 export function useReplayChartActions(core: ReturnType<typeof useReplayChartCore>, setup: ReturnType<typeof useReplayChartSetup>) {
+  const [tradeBlockReason, setTradeBlockReason] = useState<string | null>(null);
   const {
     replaySession, chartRef, candleRef, volumeRef, barsRef, drawingToolRef,
     contextMenu, setContextMenu, measurement, drawingDraftRef, drawingPreviewRef, draft,
@@ -66,6 +67,8 @@ export function useReplayChartActions(core: ReturnType<typeof useReplayChartCore
 
   function createDraft(side: PaperSide, type: "LIMIT" | "STOP") {
     if (entryCheckOpen || paperBusy || !paperSnapshot || !latest || !contextMenu || contextMenu.price <= 0) return;
+    const blocked = paperSnapshot.propAccount ? propTradingBlockReason(paperSnapshot.propAccount.state) : null;
+    if (blocked) { setContextMenu(null); setTradeBlockReason(blocked); return; }
     const rawDistance = latest.high > latest.low && Number.isFinite(latest.high - latest.low)
       ? latest.high - latest.low
       : contextMenu.price * 0.01;
@@ -195,6 +198,7 @@ export function useReplayChartActions(core: ReturnType<typeof useReplayChartCore
     return Math.max(8, Math.min(top, Math.max(8, measurement.paneHeight - labelHeight - 8)));
   })();
   return {
+    tradeBlockReason, setTradeBlockReason,
     openContextMenu, resetChartView, createDraft, setDraftPrice, setTargetR, saveDefaults, saveRiskSettings, riskBalance,
     submitDraft, contextEntryOrderTypes, measurementColor, measurementGeometry, measurementDuration, measurementLabelLeft,
     measurementLabelTop,

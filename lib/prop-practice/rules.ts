@@ -59,6 +59,18 @@ export type PropState = { stages: PropStage[]; phase: "EVALUATION" | "FUNDED"; p
 export function shouldStopPropReplay(state: PropState) {
   return !!state.result || !["NONE", "PAYOUT_DAY"].includes(state.pause);
 }
+/** Shared by draft entry and the authoritative order API. */
+export function propTradingBlockReason(state: PropState): string | null {
+  const t = copy.propPractice;
+  if (state.result === "FAILED") return t.failedOrderBlocked;
+  if (state.result === "STOPPED") return t.stoppedOrderBlocked;
+  switch (state.pause) {
+    case "PAYOUT_DAY": return t.payoutDayOrderBlocked;
+    case "STAGE_WAIT": return t.stageWaitOrderBlocked;
+    case "BOUNDARY": return t.boundaryOrderBlocked;
+    default: return null;
+  }
+}
 // Closed days and finished stages are immutable; copy only the current writable tail.
 function copyState(before: PropState): PropState {
   const stages = [...before.stages], stage = stages[stages.length - 1], days = [...stage.days];

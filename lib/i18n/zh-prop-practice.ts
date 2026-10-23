@@ -1,4 +1,10 @@
 export const propPractice = {
+    orderBlockedTitle: "当前不能布置订单",
+    payoutDayOrderBlocked: "当前回放交易日已出金，当天暂停交易。请继续推进行情，进入下一实际交易日后自动恢复。",
+    stageWaitOrderBlocked: "考核已通过，出金阶段尚在等待开始。请继续推进行情，进入下一实际交易日后恢复交易。",
+    boundaryOrderBlocked: "当前源 K 线无法归属到明确的账户交易日，账户已暂停交易。请核对数据集的源时区和交易时段设置。",
+    failedOrderBlocked: "账户已触发最大回撤规则，不能继续交易。请在模拟账户中查看失败原因；如需重新练习，请新建会话。",
+    stoppedOrderBlocked: "账户已结束或归档，不能继续交易。请切换到进行中的会话或新建会话。",
     evaluationInProgress: "考核中", evaluationQualified: "考核达标", fundedStage: "出金阶段",
     promote: "转为出金账户", promotionTitle: "确认转为出金账户",
     promotionHint: "达到净利润、成交日和一致性要求，且空仓无挂单后，可手动转为出金账户，当天即可继续交易。",
