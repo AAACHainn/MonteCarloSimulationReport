@@ -63,7 +63,7 @@ export function PropAccountPanel({ sessionId, runtime, tradingSnapshot, busy: ex
   return <>
     <Card>
       <CardHeader className="flex-row items-center justify-between gap-3 space-y-0 pb-3">
-        <CardTitle>{t.title} · {propResultLabel(state, currency, formatMoney)}</CardTitle>
+        <CardTitle>{snapshot.rules.name} · {propResultLabel(state, currency, formatMoney)}</CardTitle>
         <Button size="sm" variant="outline" disabled={busy || externalBusy} onClick={() => void begin()}>{t.rules} / {t.payout}</Button>
       </CardHeader>
       <CardContent className="space-y-3">
