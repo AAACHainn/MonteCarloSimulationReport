@@ -1,4 +1,5 @@
 "use client";
+import type { CreatePaperAccountInput } from "@/lib/prop-practice/account-input";
 
 import { createUuid } from "@/lib/uuid";
 import { type CorrectionTarget } from "./replay-correction-dialog";
@@ -449,7 +450,7 @@ export function useReplayActions(core: ReturnType<typeof useReplayCore>, drawing
     } finally { viewChangingRef.current = false; }
   }
 
-  async function createPaperAccount(config: { initialCapital: number; currency: string; commissionBps: number; slippageBps: number }) {
+  async function createPaperAccount(config: CreatePaperAccountInput) {
     return mutatePaper(`/api/market-datasets/${dataset.id}/paper-session`, () => ({
       method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(config),
     }));

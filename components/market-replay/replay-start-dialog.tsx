@@ -38,6 +38,7 @@ export function ReplayStartDialog({
   children?: ReactNode;
 }) {
   const pickerRef = useRef<DateTimePickerHandle>(null);
+  const firstAvailableDate = <Button type="button" variant="secondary" disabled={busy} onClick={() => onChange(minimum)}>{copy.marketReplay.firstAvailableDate}</Button>;
   return (
     <Dialog
       open={open}
@@ -55,15 +56,7 @@ export function ReplayStartDialog({
         {children}
         <DateTimePicker ref={pickerRef} value={value} minimum={minimum} maximum={maximum} disabled={busy} onChange={onChange} />
 
-        <Button
-          type="button"
-          variant="secondary"
-          className="mx-auto flex"
-          disabled={busy}
-          onClick={() => onChange(minimum)}
-        >
-          {copy.marketReplay.firstAvailableDate}
-        </Button>
+        <div className="flex justify-center">{firstAvailableDate}</div>
         <p className="text-center text-xs text-slate-500">{timezone} · {minimum.replace("T", " ")} – {maximum.replace("T", " ")}</p>
         {error ? <p className="text-sm text-red-600">{error}</p> : null}
         <div className="flex justify-end gap-2 border-t pt-4">

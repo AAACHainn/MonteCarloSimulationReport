@@ -4,7 +4,7 @@ import { useReplayFetch } from "./replay-session-context";
 
 import { useEffect, useRef, useState, type PointerEvent as ReactPointerEvent } from "react";
 import { createPortal } from "react-dom";
-import { ChevronDown, ChevronUp, GripHorizontal, Loader2, Trash2, X } from "lucide-react";
+import { ChevronDown, ChevronUp, GripHorizontal, Loader2, X } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
@@ -33,16 +33,14 @@ type OrderInput = {
 
 type Props = {
   priceTickSize: number;
-  snapshot: PaperSessionSnapshot | null;
+  snapshot: PaperSessionSnapshot;
   currentBar: MarketBarData | null;
   busy: boolean;
   error: string | null;
-  onCreate: (config: { initialCapital: number; currency: string; commissionBps: number; slippageBps: number }) => Promise<boolean>;
   onSubmit: (order: OrderInput, draftId?: string) => Promise<OrderSubmitResult>;
   onCancel: (orderId: string) => Promise<boolean>;
   onUpdate: (orderId: string, update: { price?: number; quantity?: number; stopLoss?: number | null; takeProfit?: number | null; riskAmount?: number | null }) => Promise<boolean>;
   onCancelScope: (scope: "ALL" | "BRACKET") => Promise<boolean>;
-  onClear: () => void;
 };
 
 type PanelSize = { width: number; height: number };
@@ -88,7 +86,7 @@ function fillReasonLabel(reason: PaperSessionSnapshot["recentFills"][number]["re
   return labels[reason];
 }
 
-export function PaperAccountStrip({ snapshot }: { snapshot: PaperSessionSnapshot | null }) {
+export function PaperAccountStrip({ snapshot, compact = false }: { snapshot: PaperSessionSnapshot | null; compact?: boolean }) {
   if (!snapshot) return null;
   const { session, stats } = snapshot;
   const position = session.netQuantity > 0 ? copy.paperTrading.long : session.netQuantity < 0 ? copy.paperTrading.short : copy.paperTrading.flat;
@@ -103,34 +101,17 @@ export function PaperAccountStrip({ snapshot }: { snapshot: PaperSessionSnapshot
     [copy.paperTrading.maxDrawdown, `${number(session.maxDrawdown * 100)}%`],
   ];
   return (
-    <Card><CardContent className="grid gap-3 p-4 text-sm sm:grid-cols-2 lg:grid-cols-4 xl:grid-cols-8">
+    <Card><CardContent className={compact ? "grid grid-cols-4 gap-4 p-4 text-sm tabular-nums" : "grid gap-3 p-4 text-sm sm:grid-cols-2 lg:grid-cols-4 xl:grid-cols-8"}>
       {items.map(([label, value]) => <div key={label}><p className="text-xs text-slate-500">{label}</p><p className="font-medium text-slate-950">{value}</p></div>)}
     </CardContent></Card>
   );
 }
 
-export function PaperTradingPanel({ priceTickSize, snapshot, currentBar, busy, error, onCreate, onSubmit, onCancel, onUpdate, onCancelScope, onClear }: Props) {
+export function PaperTradingPanel({ priceTickSize, snapshot, currentBar, busy, error, onSubmit, onCancel, onUpdate, onCancelScope }: Props) {
   const [side, setSide] = useState<PaperSide>("BUY");
   const [type, setType] = useState<PaperOrderType>("MARKET");
   const [inputQuantity, setInputQuantity] = useState(1);
   const draftIdRef = useRef<string | null>(null);
-  if (!snapshot) {
-    return (
-      <Card className="h-fit">
-        <CardHeader className="pb-3"><CardTitle className="text-lg">{copy.paperTrading.title}</CardTitle><CardDescription>{copy.paperTrading.setupDescription}</CardDescription></CardHeader>
-        <CardContent><form className="space-y-3" onSubmit={(event) => {
-          event.preventDefault(); const data = new FormData(event.currentTarget);
-          void onCreate({ initialCapital: Number(data.get("initialCapital")), currency: String(data.get("currency")), commissionBps: Number(data.get("commissionBps")), slippageBps: Number(data.get("slippageBps")) });
-        }}>
-          <div><Label htmlFor="paper-capital">{copy.paperTrading.initialCapital}</Label><Input id="paper-capital" name="initialCapital" type="number" min="0.01" step="any" defaultValue="100000" required /></div>
-          <div><Label htmlFor="paper-currency">{copy.paperTrading.currency}</Label><Input id="paper-currency" name="currency" defaultValue="USDT" maxLength={12} required /></div>
-          <div className="grid grid-cols-2 gap-2"><div><Label htmlFor="paper-fee">{copy.paperTrading.commissionBps}</Label><Input id="paper-fee" name="commissionBps" type="number" min="0" step="any" defaultValue="0" required /></div><div><Label htmlFor="paper-slip">{copy.paperTrading.slippageBps}</Label><Input id="paper-slip" name="slippageBps" type="number" min="0" step="any" defaultValue="0" required /></div></div>
-          {error ? <p className="text-sm text-red-600">{error}</p> : null}
-          <Button type="submit" disabled={busy} className="w-full">{busy ? <Loader2 className="h-4 w-4 animate-spin" /> : null}{busy ? copy.paperTrading.creating : copy.paperTrading.createAccount}</Button>
-        </form></CardContent>
-      </Card>
-    );
-  }
 
   const quantity = Math.abs(snapshot.session.netQuantity);
   return (
@@ -154,7 +135,6 @@ export function PaperTradingPanel({ priceTickSize, snapshot, currentBar, busy, e
         {quantity > 0 ? <div className="grid grid-cols-2 gap-2 border-t pt-3"><Button type="button" variant="outline" disabled={busy} onClick={() => void onSubmit({ side: snapshot.session.netQuantity > 0 ? "SELL" : "BUY", type: "MARKET", quantity, price: null, stopLoss: null, takeProfit: null, reduceOnly: true })}>{copy.paperTrading.closePosition}</Button><Button type="button" variant="outline" disabled={busy} onClick={() => void onSubmit({ side: snapshot.session.netQuantity > 0 ? "SELL" : "BUY", type: "MARKET", quantity: quantity * 2, price: null, stopLoss: null, takeProfit: null })}>{copy.paperTrading.reversePosition}</Button></div> : null}
         <div className="grid grid-cols-2 gap-2"><Button type="button" variant="ghost" size="sm" onClick={() => void onCancelScope("ALL")}>{copy.paperTrading.cancelAll}</Button><Button type="button" variant="ghost" size="sm" onClick={() => void onCancelScope("BRACKET")}>{copy.paperTrading.cancelBracket}</Button></div>
         <ActiveOrders priceTickSize={priceTickSize} orders={snapshot.activeOrders} busy={busy} onCancel={onCancel} onUpdate={onUpdate} />
-        <Button type="button" variant="ghost" size="sm" className="w-full text-red-600" onClick={onClear}><Trash2 className="h-4 w-4" />{copy.paperTrading.resetAccount}</Button>
       </CardContent>
     </Card>
   );

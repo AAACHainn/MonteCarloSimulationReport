@@ -1,9 +1,9 @@
 "use client";
 
-import { forwardRef, useEffect, useId, useImperativeHandle, useRef, useState } from "react";
+import { forwardRef, useEffect, useId, useImperativeHandle, useRef, useState, type ReactNode } from "react";
 import { format } from "date-fns";
 import { zhCN } from "date-fns/locale";
-import { ChevronLeft, ChevronRight } from "lucide-react";
+import { CalendarDays, ChevronLeft, ChevronRight } from "lucide-react";
 import { DayPicker } from "react-day-picker";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -20,13 +20,15 @@ export type DateTimePickerHandle = { validate: () => string | null };
 
 /** Shared wall-clock editor. Call validate() before submitting; callers own timezone conversion. */
 export const DateTimePicker = forwardRef<DateTimePickerHandle, {
-  value: string; minimum: string; maximum: string; disabled?: boolean; describedBy?: string;
+  value: string; minimum: string; maximum: string; disabled?: boolean; describedBy?: string; calendarDefaultOpen?: boolean;
+  calendarActions?: ReactNode;
   onChange: (value: string) => void;
-}>(function DateTimePicker({ value, minimum, maximum, disabled = false, describedBy, onChange }, ref) {
+}>(function DateTimePicker({ value, minimum, maximum, disabled = false, describedBy, calendarDefaultOpen = true, calendarActions, onChange }, ref) {
   const id = useId();
   const dateRef = useRef<HTMLInputElement>(null);
   const timeRef = useRef<HTMLInputElement>(null);
   const [showErrors, setShowErrors] = useState(false);
+  const [calendarOpen, setCalendarOpen] = useState(calendarDefaultOpen);
   const selected = splitDateTimeInput(value);
   const min = splitDateTimeInput(minimum);
   const max = splitDateTimeInput(maximum);
@@ -92,7 +94,13 @@ export const DateTimePicker = forwardRef<DateTimePickerHandle, {
       </div>
       <p id={`${id}-format`} className="text-xs text-slate-500">{copy.dateTimePicker.formatHint}</p>
       {error ? <p id={errorId} role="alert" className="text-xs text-red-600">{copy.dateTimePicker.errors[error]}</p> : null}
-      <div className="rounded-lg border border-slate-200 p-3">
+      {!calendarDefaultOpen || calendarActions ? <div className="flex flex-wrap items-center gap-2">
+      {!calendarDefaultOpen ? <Button type="button" variant="outline" disabled={disabled} aria-expanded={calendarOpen} aria-controls={`${id}-calendar`} onClick={() => setCalendarOpen(open => !open)}>
+        <CalendarDays className="h-4 w-4" aria-hidden="true" />{calendarOpen ? copy.dateTimePicker.hideCalendar : copy.dateTimePicker.showCalendar}
+      </Button> : null}
+      {calendarActions}
+      </div> : null}
+      {calendarOpen ? <div id={`${id}-calendar`} className="rounded-lg border border-slate-200 p-3">
         <div className="mb-2 flex items-center justify-between">
           <Button type="button" variant="ghost" size="icon" aria-label={copy.marketReplay.previousMonth} disabled={disabled || monthStart <= firstMonth} onClick={() => setDisplayMonth(new Date(displayMonth.getFullYear(), displayMonth.getMonth() - 1, 1))}>
             <ChevronLeft className="h-4 w-4" aria-hidden="true" />
@@ -128,7 +136,7 @@ export const DateTimePicker = forwardRef<DateTimePickerHandle, {
             disabled: "[&_button]:cursor-not-allowed [&_button]:text-slate-300",
           }}
         />
-      </div>
+      </div> : null}
     </div>
   );
 });

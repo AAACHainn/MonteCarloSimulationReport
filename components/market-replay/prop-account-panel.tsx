@@ -59,11 +59,18 @@ export function PropAccountPanel({ sessionId, runtime, busy: externalBusy, onBef
   const requested = confirmation?.amount ?? Number(amount), received = Math.round(requested * snapshot.rules.payout.traderShare * 100) / 100;
   const confirmationDescription = `${t.requested}: ${money(requested)} · ${t.received}: ${money(received)} · ${t.balanceAfter}: ${money(preview.balance - requested)} · ${t.floorAfter}: ${money(preview.floorAfter)}。${t.payoutHint}`;
   return <>
-    <div className="flex shrink-0 flex-wrap items-center gap-3 rounded-md border bg-white p-3 text-xs tabular-nums">
-      <strong>{t.title} · {propResultLabel(state, currency, formatMoney)}</strong><span>{t.balance} {money(f.balance)}</span><span>{t.equity} {money(f.equity)}</span><span>{t.floor} {money(f.floor)}</span><span>{t.remainingRisk} {money(f.equity - f.floor)}</span>
-      <Button size="sm" variant="outline" disabled={busy || externalBusy} onClick={() => void begin()}>{t.rules} / {t.payout}</Button>
-      {state.pause !== "NONE" ? <span className="text-amber-800">{t[state.pause]}</span> : null}
-    </div>
+    <Card>
+      <CardHeader className="flex-row items-center justify-between gap-3 space-y-0 pb-3">
+        <CardTitle>{t.title} · {propResultLabel(state, currency, formatMoney)}</CardTitle>
+        <Button size="sm" variant="outline" disabled={busy || externalBusy} onClick={() => void begin()}>{t.rules} / {t.payout}</Button>
+      </CardHeader>
+      <CardContent className="space-y-3">
+        <div className="grid grid-cols-4 gap-4 text-sm tabular-nums">
+          {[[t.balance, f.balance], [t.equity, f.equity], [t.floor, f.floor], [t.remainingRisk, f.equity - f.floor]].map(([label, value]) => <div key={label}><p className="text-xs text-slate-500">{label}</p><p className="mt-1 font-medium text-slate-950">{money(Number(value))}</p></div>)}
+        </div>
+        {state.pause !== "NONE" ? <p className="text-xs text-amber-800">{t[state.pause]}</p> : null}
+      </CardContent>
+    </Card>
     <Dialog open={open && !confirmation} title={t.title} description={t.ledgerHint} onClose={() => { if (!busy) setOpen(false); }}>
       <div className="space-y-4" aria-busy={busy}>
         {busy ? <p role="status">{copy.marketReplay.loading}</p> : null}

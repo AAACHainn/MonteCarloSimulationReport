@@ -41,9 +41,11 @@ async function snapshot(s: Created) { return scoped(s, () => getPaperSessionSnap
 function rules(): PropRules { const r = structuredClone(defaultPropRules); r.name = "Practice"; r.evaluation.risk = { initialCapital: 1000, drawdown: 900, mode: "STATIC", capOffset: null }; r.funded.risk = { ...r.evaluation.risk }; r.evaluation.target = 1; r.evaluation.minTradingDays = null; r.evaluation.consistency = null; r.payout = { minimum: 1, fraction: 1, maximum: null, buffer: null, traderShare: 0.9, permanentFloorOffset: null }; return r; }
 async function create(r?: PropRules) {
   const template = r ? await savePropTemplate(r) : null;
-  const s = await createReplaySession("prop", { name: "Session", mode: "TRAINING", timestamp: times[0], playbackRate: 1, displayIntervalSeconds: 60, displaySession: "ETH",
-    ...(template ? { accountCategory: "PROP_PRACTICE", propTemplateVersionId: template.versions[0].id, propAccountConfig: config } : {}) });
-  if (!r) expect((await accountPOST(request(s, "POST", config), ctx)).status).toBe(201);
+  const s = await createReplaySession("prop", { name: "Session", mode: "TRAINING", timestamp: times[0], playbackRate: 1, displayIntervalSeconds: 60, displaySession: "ETH" });
+  expect(await snapshot(s)).toBeNull();
+  const response = await accountPOST(request(s, "POST", template ? { ...config, accountCategory: "PROP_PRACTICE", propTemplateVersionId: template.versions[0].id } : config), ctx);
+  expect(response.status, JSON.stringify(await response.clone().json())).toBe(201);
+  expect((await response.json()).snapshot.propAccount != null).toBe(!!template);
   return s;
 }
 async function advance(s: Created, count = 1, requestId = randomUUID()) {
@@ -63,10 +65,15 @@ function normalized(value: unknown): unknown {
   return value;
 }
 describe("prop orchestration versus original flow", () => {
-  it("rejects a previously saved invalid version on new session creation without rewriting the version", async () => {
+  it("rejects a previously saved invalid version on account creation without rewriting the version", async () => {
     const invalid = rules(); invalid.payout.minimum = 500.001; invalid.payout.maximum = 500.001;
     const template = await prisma.propPracticeTemplate.create({ data: { versions: { create: { version: 1, rules: JSON.stringify(invalid) } } }, include: { versions: true } });
-    await expect(createReplaySession("prop", { name: "Invalid old version", mode: "TRAINING", timestamp: times[0], playbackRate: 1, displayIntervalSeconds: 60, displaySession: "ETH", accountCategory: "PROP_PRACTICE", propTemplateVersionId: template.versions[0].id, propAccountConfig: config })).rejects.toMatchObject({ status: 400, code: "INVALID_PROP" });
+    const s = await createReplaySession("prop", { name: "Invalid old version", mode: "TRAINING", timestamp: times[0], playbackRate: 1, displayIntervalSeconds: 60, displaySession: "ETH" });
+    const response = await accountPOST(request(s, "POST", { ...config, accountCategory: "PROP_PRACTICE", propTemplateVersionId: template.versions[0].id }), ctx);
+    expect(response.status).toBe(400);
+    expect(await snapshot(s)).toBeNull();
+    expect((await loadReplayScope(s.id)).accountCategory).toBe("STANDARD");
+
     expect((await prisma.propPracticeTemplateVersion.findUniqueOrThrow({ where: { id: template.versions[0].id } })).rules).toBe(JSON.stringify(invalid));
   });
   it.each(["create", "edit"])("rejects an impossible payout interval on template %s without saving any version", async action => {
@@ -83,7 +90,8 @@ describe("prop orchestration versus original flow", () => {
     await prisma.marketDataset.create({ data: { id, name: id, symbol: "ES", timeframe: "1m", timezone: "Asia/Shanghai", sessionMode: "DAILY_SESSION", sessionOpenMinute: 480, sessionCloseMinute: 600, tradingWeekdays: "4,5", sourceIntervalSeconds: 60, barCount: 3, startTime: new Date(timestamps[0]), endTime: new Date(timestamps[2]) } });
     await prisma.marketBar.createMany({ data: timestamps.map((timestamp, sequence) => ({ datasetId: id, sequence, timestamp: new Date(timestamp), open: 100, high: 100, low: 100, close: 100 })) });
     const template = await savePropTemplate(rules());
-    const s = await createReplaySession(id, { name: id, mode: "TRAINING", timestamp: timestamps[0], playbackRate: 1, displayIntervalSeconds: 60, displaySession: "ETH", accountCategory: "PROP_PRACTICE", propTemplateVersionId: template.versions[0].id, propAccountConfig: config });
+    const s = await createReplaySession(id, { name: id, mode: "TRAINING", timestamp: timestamps[0], playbackRate: 1, displayIntervalSeconds: 60, displaySession: "ETH" });
+    expect((await accountPOST(request(s, "POST", { ...config, accountCategory: "PROP_PRACTICE", propTemplateVersionId: template.versions[0].id }), { params: Promise.resolve({ id }) })).status).toBe(201);
     const snap = (await scoped(s, () => getPaperSessionSnapshot(id)))!;
     expect(snap.propAccount!.snapshot.calendar.session).toEqual({ mode: "DAILY_SESSION", timezone: "Asia/Shanghai", openMinute: 480, closeMinute: 600, weekdays: [4, 5] });
     const response = await advancePOST(request(s, "POST", { count: 2, expectedVersion: snap.session.version, expectedCurrentSequence: -1, requestId: randomUUID() }), { params: Promise.resolve({ id }) });
@@ -97,7 +105,8 @@ describe("prop orchestration versus original flow", () => {
     await prisma.marketDataset.create({ data: { id, name: id, symbol, timeframe: "1m", timezone: "UTC", sessionMode: "TWENTY_FOUR_SEVEN", sourceIntervalSeconds: 60, barCount: timestamps.length, startTime: new Date(timestamps[0]), endTime: new Date(timestamps.at(-1)!) } });
     await prisma.marketBar.createMany({ data: timestamps.map((timestamp, sequence) => ({ datasetId: id, sequence, timestamp: new Date(timestamp), open: 100 + sequence * 10, high: 115 + sequence * 10, low: 95 + sequence * 10, close: 110 + sequence * 10 })) });
     const template = await savePropTemplate(rules());
-    const s = await createReplaySession(id, { name: id, mode: "TRAINING", timestamp: timestamps[0], playbackRate: 1, displayIntervalSeconds: 60, displaySession: "RTH", accountCategory: "PROP_PRACTICE", propTemplateVersionId: template.versions[0].id, propAccountConfig: config });
+    const s = await createReplaySession(id, { name: id, mode: "TRAINING", timestamp: timestamps[0], playbackRate: 1, displayIntervalSeconds: 60, displaySession: "RTH" });
+    expect((await accountPOST(request(s, "POST", { ...config, accountCategory: "PROP_PRACTICE", propTemplateVersionId: template.versions[0].id }), { params: Promise.resolve({ id }) })).status).toBe(201);
     const localContext = { params: Promise.resolve({ id }) };
     const read = () => scoped(s, () => getPaperSessionSnapshot(id));
     async function step(count: number) {
@@ -125,6 +134,61 @@ describe("prop orchestration versus original flow", () => {
     const resumed = await step(1);
     expect(resumed.currentSequence).toBe(3); expect(resumed.snapshot.propAccount.state.pause).toBe("NONE");
     expect(resumed.snapshot.propAccount.state.stages[1].days[0].day).toBe("2026-10-02T00:00:00.000Z");
+  });
+  it("binds at the current cursor without backfilling or resetting progress, preferences and gate", async () => {
+    const s = await createReplaySession("prop", { name: "Late account", mode: "TRAINING", timestamp: times[0], playbackRate: 1, displayIntervalSeconds: 60, displaySession: "ETH" });
+    await prisma.replayProgress.update({ where: { replaySessionId: s.id }, data: { currentSequence: 3 } });
+    await prisma.replayProjection.update({ where: { id: s.activeProjectionId }, data: { currentSequence: 3 } });
+    const gate = JSON.stringify({ ...defaultTrainingGate(), lossThreshold: 4 });
+    await prisma.replaySession.update({ where: { id: s.id }, data: { trainingGate: gate, riskPreferences: "{\"riskAmount\":20}" } });
+    const template = await savePropTemplate(rules());
+    const response = await accountPOST(request(s, "POST", { ...config, accountCategory: "PROP_PRACTICE", propTemplateVersionId: template.versions[0].id }), ctx);
+    expect(response.status).toBe(201);
+    const snap = (await response.json()).snapshot;
+    expect(snap.session).toMatchObject({ lastProcessedSequence: 3, realizedPnl: 0, totalFees: 0 });
+    expect(snap.propAccount.state.stages[0]).toMatchObject({ startSequence: 4, days: [] });
+    const session = await prisma.replaySession.findUniqueOrThrow({ where: { id: s.id } });
+    expect(session).toMatchObject({ accountCategory: "PROP_PRACTICE", trainingGate: gate, riskPreferences: "{\"riskAmount\":20}" });
+    expect((await prisma.replayProgress.findUniqueOrThrow({ where: { replaySessionId: s.id } })).currentSequence).toBe(3);
+    const checkpoint = await prisma.replayCheckpoint.findFirstOrThrow({ where: { projectionId: s.activeProjectionId }, orderBy: [{ sourceSequence: "desc" }, { commandOrdinal: "desc" }] });
+    expect(JSON.parse(checkpoint.state).propAccount).toEqual(snap.propAccount);
+  });
+  it("rejects prop creation in live replay and leaves the session available for a default account", async () => {
+    const s = await createReplaySession("prop", { name: "Live", mode: "LIVE_REPLAY", timestamp: times[0], playbackRate: 1, displayIntervalSeconds: 60, displaySession: "ETH" });
+    const template = await savePropTemplate(rules());
+    expect((await accountPOST(request(s, "POST", { ...config, accountCategory: "PROP_PRACTICE", propTemplateVersionId: template.versions[0].id }), ctx)).status).toBe(400);
+    expect(await snapshot(s)).toBeNull();
+    expect((await loadReplayScope(s.id))).toMatchObject({ mode: "LIVE_REPLAY", accountCategory: "STANDARD" });
+    expect((await accountPOST(request(s, "POST", config), ctx)).status).toBe(201);
+  });
+  it("concurrent account requests bind once and cannot switch the fixed category", async () => {
+    const s = await createReplaySession("prop", { name: "Concurrent", mode: "TRAINING", timestamp: times[0], playbackRate: 1, displayIntervalSeconds: 60, displaySession: "ETH" });
+    const template = await savePropTemplate(rules());
+    const payload = { ...config, accountCategory: "PROP_PRACTICE", propTemplateVersionId: template.versions[0].id };
+    const responses = await Promise.all([accountPOST(request(s, "POST", payload), ctx), accountPOST(request(s, "POST", payload), ctx)]);
+    expect(responses.map(r => r.status).sort()).toEqual([201, 409]);
+    expect(await prisma.propPracticeAccount.count({ where: { replaySessionId: s.id } })).toBe(1);
+    expect(await prisma.paperTradingSession.count({ where: { projectionId: s.activeProjectionId } })).toBe(1);
+    expect(await prisma.replayCommand.count({ where: { replaySessionId: s.id, type: "ACCOUNT_INIT" } })).toBe(1);
+    expect((await accountPOST(request(s, "POST", config), ctx)).status).toBe(409);
+    const standard = await create();
+    expect((await accountPOST(request(standard, "POST", payload), ctx)).status).toBe(409);
+    expect((await loadReplayScope(standard.id)).accountCategory).toBe("STANDARD");
+  });
+  it("rolls back category, ledger, journal, account and command if account persistence fails", async () => {
+    const s = await createReplaySession("prop", { name: "Rollback", mode: "TRAINING", timestamp: times[0], playbackRate: 1, displayIntervalSeconds: 60, displaySession: "ETH" });
+    const before = await loadReplayScope(s.id);
+    const template = await savePropTemplate(rules());
+    await prisma.$executeRawUnsafe(`CREATE TRIGGER reject_account_init BEFORE INSERT ON ReplayCommand WHEN NEW.type='ACCOUNT_INIT' BEGIN SELECT RAISE(ABORT, 'test account failure'); END`);
+    try {
+      expect((await accountPOST(request(s, "POST", { ...config, accountCategory: "PROP_PRACTICE", propTemplateVersionId: template.versions[0].id }), ctx)).status).toBe(409);
+    } finally { await prisma.$executeRawUnsafe("DROP TRIGGER reject_account_init"); }
+    expect(await loadReplayScope(s.id)).toEqual(before);
+    expect(await snapshot(s)).toBeNull();
+    expect(await prisma.propPracticeAccount.count({ where: { replaySessionId: s.id } })).toBe(0);
+    expect(await prisma.replayJournalSession.count({ where: { replaySessionId: s.id } })).toBe(0);
+    expect(await prisma.replayCommand.count({ where: { replaySessionId: s.id } })).toBe(0);
+    expect((await accountPOST(request(s, "POST", config), ctx)).status).toBe(201);
   });
   it("keeps automatic loss gate, unchecked-order cancellation, plan and completion count identical", async () => {
     const r = rules(); r.evaluation.target = 1e8;
@@ -218,7 +282,8 @@ describe("prop orchestration versus original flow", () => {
   it("versions and costs remain immutable; optional activation does not block promotion or restart", async () => {
     const r = rules(); r.activationCost = undefined; r.purchaseCost = 0;
     const template = await savePropTemplate(r);
-    const s = await createReplaySession("prop", { name: "Versioned", mode: "TRAINING", timestamp: times[0], playbackRate: 1, displayIntervalSeconds: 60, displaySession: "ETH", accountCategory: "PROP_PRACTICE", propTemplateVersionId: template.versions[0].id, propAccountConfig: config });
+    const s = await createReplaySession("prop", { name: "Versioned", mode: "TRAINING", timestamp: times[0], playbackRate: 1, displayIntervalSeconds: 60, displaySession: "ETH" });
+    expect((await accountPOST(request(s, "POST", { ...config, accountCategory: "PROP_PRACTICE", propTemplateVersionId: template.versions[0].id }), ctx)).status).toBe(201);
     await savePropTemplate({ ...r, activationCost: 100, purchaseCost: 500 }, template.id, template.version, false);
     const prop = await scoped(s, () => loadPropAccount()); expect(prop!.snapshot.rules.purchaseCost).toBe(0); expect(prop!.snapshot.rules.activationCost).toBeUndefined();
     const next = await scoped(s, () => restartReplaySession()); expect(next.accountCategory).toBe("PROP_PRACTICE"); expect((await loadReplayScope(s.id)).status).toBe("ARCHIVED");

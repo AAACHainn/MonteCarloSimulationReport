@@ -44,13 +44,6 @@ export async function createSessionInTransaction(tx: Prisma.TransactionClient, d
   });
   if (!first) throw new ReplaySessionError("INVALID_START", 400, copy.marketReplay.invalidStart);
   const isProp = input.accountCategory === "PROP_PRACTICE";
-  const template = isProp && input.propTemplateVersionId ? await tx.propPracticeTemplateVersion.findUnique({ where: { id: input.propTemplateVersionId }, include: { template: true } }) : null;
-  if (isProp && (!template || (!template.template.active && !restarting) || input.mode !== "TRAINING" || !input.propAccountConfig)) throw new ReplaySessionError("INVALID_PROP", 400, copy.propPractice.invalidRules);
-  const parsedRules = template ? propRulesSchema.safeParse(JSON.parse(template.rules)) : null;
-  if (parsedRules && !parsedRules.success) throw new ReplaySessionError("INVALID_PROP", 400, copy.propPractice.invalidRules);
-  const rules = parsedRules?.success ? parsedRules.data : null;
-  const calendar = { session: datasetSession(dataset), sourceSeconds };
-  if (isProp && (!calendar.session || !propTradingDay(first.timestamp, calendar))) throw new ReplaySessionError("PROP_CALENDAR", 400, copy.propPractice.calendarInvalid);
   const session = await tx.replaySession.create({ data: { datasetId, name: input.name, mode: input.mode, accountCategory: isProp ? "PROP_PRACTICE" : "STANDARD" } });
   const projection = await tx.replayProjection.create({ data: {
     replaySessionId: session.id, status: "CURRENT", historyVersion: dataset.historyVersion,
@@ -65,19 +58,53 @@ export async function createSessionInTransaction(tx: Prisma.TransactionClient, d
     projectionId: projection.id, sourceSequence: progress.currentSequence,
     state: JSON.stringify({ snapshot: null, account: null, stats: null }),
   } });
-  if (isProp && rules && template) {
-    const config = paperSessionSchema.parse({ ...input.propAccountConfig, initialCapital: rules.evaluation.risk.initialCapital });
-    const snapshot = { rules, calendar, currency: config.currency, accountConfig: config };
-    await tx.propPracticeAccount.create({ data: { replaySessionId: session.id, templateVersionId: template.id,
-      snapshot: JSON.stringify(snapshot), state: JSON.stringify(initialPropState(rules, first.sequence)) } });
-    const journal = await tx.replayJournalSession.create({ data: { datasetId, replaySessionId: session.id, name: input.name, replayGeneration: 1, ...config } });
-    await tx.paperTradingSession.create({ data: { id: projectionRecordId(projection.id, `account_${session.id}`),
-      datasetId, projectionId: projection.id, journalSessionId: journal.id, ...config,
-      lastProcessedSequence: progress.currentSequence, peakEquity: config.initialCapital, equitySampleStride: Math.max(1, Math.ceil(dataset.barCount / 20000)) } });
-    await runWithReplayScope({ id: session.id, datasetId, projectionId: projection.id, mode: "TRAINING", status: "ACTIVE", version: 1, accountCategory: "PROP_PRACTICE" },
-      () => recordReplayCommand(tx, progress.currentSequence, "ACCOUNT_INIT", { ...config, logicalAccountId: `account_${session.id}`, propSnapshot: snapshot }));
+  if (isProp) {
+    await runWithReplayScope({ id: session.id, datasetId, projectionId: projection.id, mode: session.mode as "TRAINING" | "LIVE_REPLAY", status: "ACTIVE", version: 1, accountCategory: session.accountCategory },
+      () => initializePropPracticeAccount(tx, input.propTemplateVersionId, input.propAccountConfig, restarting));
   }
   return { ...session, activeProjectionId: projection.id, progress };
+}
+
+/** Account binding and ledger initialization share the account-create transaction.
+ * Also used internally when restarting an existing prop session. */
+export async function initializePropPracticeAccount(
+  tx: Prisma.TransactionClient, templateVersionId: string | undefined,
+  accountConfig: Omit<z.infer<typeof paperSessionSchema>, "initialCapital"> | undefined, restarting = false,
+) {
+  const scope = getReplayScope();
+  if (!scope || scope.mode !== "TRAINING") throw new ReplaySessionError("INVALID_PROP", 400, copy.propPractice.trainingOnly);
+  const [template, dataset, progress, owner, account, existingProp] = await Promise.all([
+    templateVersionId ? tx.propPracticeTemplateVersion.findUnique({ where: { id: templateVersionId }, include: { template: true } }) : null,
+    tx.marketDataset.findUniqueOrThrow({ where: { id: scope.datasetId } }),
+    tx.replayProgress.findUniqueOrThrow({ where: { replaySessionId: scope.id } }),
+    tx.replaySession.findUniqueOrThrow({ where: { id: scope.id } }),
+    tx.paperTradingSession.findUnique({ where: { projectionId: scope.projectionId } }),
+    tx.propPracticeAccount.findUnique({ where: { replaySessionId: scope.id } }),
+  ]);
+  if (account || existingProp) throw new ReplaySessionError("ACCOUNT_EXISTS", 409, copy.propPractice.accountFixed);
+  if (!template || (!template.template.active && !restarting) || !accountConfig) throw new ReplaySessionError("INVALID_PROP", 400, copy.propPractice.invalidRules);
+  let storedRules: unknown;
+  try { storedRules = JSON.parse(template.rules); } catch { throw new ReplaySessionError("INVALID_PROP", 400, copy.propPractice.invalidRules); }
+  const parsedRules = propRulesSchema.safeParse(storedRules);
+  if (!parsedRules.success) throw new ReplaySessionError("INVALID_PROP", 400, copy.propPractice.invalidRules);
+  const rules = parsedRules.data;
+  const sourceSeconds = datasetSourceInterval(dataset);
+  if (!sourceSeconds) throw new ReplaySessionError("PROP_CALENDAR", 400, copy.propPractice.calendarInvalid);
+  const calendar = { session: datasetSession(dataset), sourceSeconds };
+  const bar = await tx.marketBar.findUnique({ where: { datasetId_sequence: { datasetId: scope.datasetId, sequence: Math.max(progress.startSequence, progress.currentSequence) } } });
+  if (!bar || !propTradingDay(bar.timestamp, calendar)) throw new ReplaySessionError("PROP_CALENDAR", 400, copy.propPractice.calendarInvalid);
+  const config = paperSessionSchema.parse({ ...accountConfig, initialCapital: rules.evaluation.risk.initialCapital });
+  const snapshot = { rules, calendar, currency: config.currency, accountConfig: config };
+  await tx.replaySession.update({ where: { id: scope.id }, data: { accountCategory: "PROP_PRACTICE" } });
+  await tx.propPracticeAccount.create({ data: { replaySessionId: scope.id, templateVersionId: template.id,
+    snapshot: JSON.stringify(snapshot), state: JSON.stringify(initialPropState(rules, progress.currentSequence + 1)) } });
+  const journal = await tx.replayJournalSession.create({ data: { datasetId: scope.datasetId, replaySessionId: scope.id, name: owner.name, replayGeneration: progress.generation, ...config } });
+  const equitySampleStride = Math.max(1, Math.ceil(dataset.barCount / 20000));
+  await tx.paperTradingSession.create({ data: { id: projectionRecordId(scope.projectionId, `account_${scope.id}`),
+    datasetId: scope.datasetId, projectionId: scope.projectionId, journalSessionId: journal.id, ...config,
+    lastProcessedSequence: progress.currentSequence, peakEquity: config.initialCapital, equitySampleStride } });
+  await runWithReplayScope({ ...scope, accountCategory: "PROP_PRACTICE" },
+    () => recordReplayCommand(tx, progress.currentSequence, "ACCOUNT_INIT", { ...config, logicalAccountId: `account_${scope.id}`, propSnapshot: snapshot, equitySampleStride }));
 }
 
 export async function archiveReplaySession(tx: Prisma.TransactionClient) {

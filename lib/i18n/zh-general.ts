@@ -1,5 +1,6 @@
 export const zhStart = {
     dateTimePicker: {
+      showCalendar: "展开日历", hideCalendar: "收起日历",
       dateFormat: "YYYY-MM-DD", timeFormat: "HH:mm:ss",
       formatHint: "日期格式 YYYY-MM-DD；时间为 24 小时制 HH:mm，秒可省略。",
       errors: {
@@ -59,7 +60,7 @@ export const zhStart = {
       deleted: "会话已删除。", deleteFailed: "无法删除会话，请重试。", deleteInvalid: "删除请求无效，请刷新会话列表后重试。",
       deleteCorrectionPending: "此会话正在纠错，请完成或取消纠错后再删除。",
       source: "成交依据：回放撮合", empty: "暂无回放会话，请选择起点并创建会话。",
-      createDescription: "新会话共享此行情数据，独立保存回放进度、账户、交易和复盘记录。用途创建后固定。",
+      createDescription: "独立保存回放进度与交易记录。创建后在会话内选择账户；用途创建后固定。",
       missing: "回放会话不存在或不属于此行情数据集。", required: "请明确选择回放会话。",
       readOnly: "此会话已归档，可查看记录、重命名会话和编辑复盘备注。",
       modeBlocked: "训练会话不能删除交易或回退账户状态。",

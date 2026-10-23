@@ -4,6 +4,7 @@ import { dateTimeLocalValue } from "@/lib/market-replay/start-time";
 import { ReplayDateDialog } from "./replay-date-dialog";
 import { ReplaySessionSwitch } from "./replay-session-switch";
 import { PropAccountPanel } from "./prop-account-panel";
+import { PaperAccountCreateForm } from "./paper-account-create-form";
 import { ReplayCorrectionProvider } from "./replay-correction-context";
 import { ReplayCorrectionDialog } from "./replay-correction-dialog";
 import Link from "next/link";
@@ -103,8 +104,6 @@ export function MarketReplayClient({ dataset: initialDataset, initialJournalFocu
         </div>
       </header> : null}
       {!webFullscreen ? gateNoticeBlock : null}
-      {replaySession && (paperSnapshot?.propAccount ?? replaySession.propAccount) ? <PropAccountPanel sessionId={replaySession.id} runtime={(paperSnapshot?.propAccount ?? replaySession.propAccount)!} busy={paperBusy || dateForwarding || isLoading}
-        onBeforeOpen={async () => { core.pausePlayback(); await core.advanceCompletionRef.current; await core.paperMutationChainRef.current; await engine.reloadPaper(); }} onChanged={engine.reloadPaper} /> : null}
       {gateDialogOpen ? <TrainingGateConfigDialog gate={currentGate} busy={gateBusy} error={gateError} onClose={() => setGateDialogOpen(false)} onSave={saveGateConfig} /> : null}
       {checkingOrder ? <EntryCheckDialog order={checkingOrder.order} mode={currentGate.activeMode ?? "CHECKLIST"} displayIntervalSeconds={replay?.displayIntervalSeconds ?? dataset.sourceIntervalSeconds ?? 60}
         approval={entryCheckDraft?.draftId === checkingOrder.draftId ? entryCheckDraft.approval : null}
@@ -298,8 +297,8 @@ export function MarketReplayClient({ dataset: initialDataset, initialJournalFocu
           </Button>
           <Button type="button" variant="ghost" size="sm" className="h-8" onClick={() => setSettingsDialog("indicators")}><Settings2 className="h-4 w-4" />{copy.marketReplay.indicators}</Button>
           <Button type="button" variant="ghost" size="sm" className="h-8" onClick={() => setSettingsDialog("paper")}><WalletCards className="h-4 w-4" />{copy.marketReplay.accountSettings}</Button>
+          <Button type="button" variant="ghost" size="sm" className="h-8" onClick={() => setSettingsDialog("trade")}><TrendingUp className="h-4 w-4" />{copy.paperTrading.title}</Button>
           <Button asChild type="button" variant="ghost" size="sm" className="h-8"><Link href={`/market-replay/${dataset.id}/trade-history?sessionId=${encodeURIComponent(replaySession?.id ?? "")}`}><BookOpen className="h-4 w-4" />{copy.paperTrading.openJournalHistory}</Link></Button>
-          {paperSnapshot ? <div className="hidden items-center gap-3 text-xs text-slate-500 xl:flex"><span>{paperSnapshot.propAccount ? copy.propPractice.rawEquity : copy.paperTrading.equity} <strong className="font-medium text-slate-800">{paperSnapshot.stats.equity.toLocaleString("zh-CN", { maximumFractionDigits: 2 })} {paperSnapshot.session.currency}</strong></span><span>{copy.paperTrading.netPosition} <strong className="font-medium text-slate-800">{paperSnapshot.session.netQuantity}</strong></span></div> : null}
           <div className="ml-auto flex items-center gap-1">
             <Button type="button" variant="ghost" size="sm" className="h-8" disabled={draftActive} title={draftActive ? copy.paperTrading.draftLockedReplay : undefined} onClick={() => requestConfirmation("reset")}><RotateCcw className="h-4 w-4" /><span className="hidden xl:inline">{copy.marketReplay.reset}</span></Button>
             <Button type="button" variant="ghost" size="sm" className="h-8" disabled={draftActive} title={draftActive ? copy.paperTrading.draftLockedReplay : undefined} onClick={openStartDialog}><span className="hidden xl:inline">{copy.marketReplay.chooseNewStart}</span><span className="xl:hidden">{copy.marketReplay.startAt}</span></Button>
@@ -594,11 +593,20 @@ export function MarketReplayClient({ dataset: initialDataset, initialJournalFocu
         onAddEma={addEma}
         emaError={emaError}
       />
-      <Dialog open={settingsDialog === "paper" && !checkingOrder} keepMounted={settingsDialog === "paper"} title={copy.marketReplay.accountSettings} description={copy.marketReplay.accountSettingsDescription} className="max-w-3xl" onClose={() => setSettingsDialog(null)}>
+      <Dialog open={settingsDialog === "paper" && !checkingOrder} keepMounted={settingsDialog === "paper"} title={paperSnapshot ? copy.marketReplay.accountSettings : copy.propPractice.createAccountTitle} description={paperSnapshot ? copy.marketReplay.accountSettingsDescription : copy.propPractice.createAccountHint} className={paperSnapshot ? "max-w-3xl" : "max-w-2xl"} onClose={() => setSettingsDialog(null)}>
         <div className="space-y-4">
-          <PaperAccountStrip snapshot={paperSnapshot} />
-          {journalReview ? null : <PaperTradingPanel priceTickSize={dataset.priceTickSize} snapshot={paperSnapshot} currentBar={currentBar} busy={paperBusy || correctionPending || dateForwarding} error={paperError} onCreate={createPaperAccount} onSubmit={submitPaperOrder} onCancel={cancelPaperOrder} onUpdate={updatePaperOrder} onCancelScope={cancelPaperScope} onClear={() => requestConfirmation("paper-clear")} />}
+          {replaySession && (paperSnapshot?.propAccount ?? replaySession.propAccount) ? <PropAccountPanel sessionId={replaySession.id} runtime={(paperSnapshot?.propAccount ?? replaySession.propAccount)!} busy={paperBusy || dateForwarding || isLoading}
+            onBeforeOpen={async () => { core.pausePlayback(); await core.advanceCompletionRef.current; await core.paperMutationChainRef.current; await engine.reloadPaper(); }} onChanged={engine.reloadPaper} /> : null}
+          <PaperAccountStrip snapshot={paperSnapshot} compact />
+          {!paperSnapshot && !journalReview ? <PaperAccountCreateForm busy={paperBusy || correctionPending || dateForwarding} error={paperError} onCreate={createPaperAccount} /> : null}
+          {paperSnapshot && !journalReview ? <div className="flex justify-end border-t pt-4"><Button type="button" variant="ghost" className="text-red-600" onClick={() => requestConfirmation("paper-clear")}><Trash2 className="h-4 w-4" />{copy.paperTrading.resetAccount}</Button></div> : null}
         </div>
+      </Dialog>
+      <Dialog open={settingsDialog === "trade" && !checkingOrder} keepMounted={settingsDialog === "trade"} title={copy.paperTrading.title} className="max-w-2xl" onClose={() => setSettingsDialog(null)}>
+        {paperSnapshot ? journalReview ? null : <PaperTradingPanel priceTickSize={dataset.priceTickSize} snapshot={paperSnapshot} currentBar={currentBar} busy={paperBusy || correctionPending || dateForwarding} error={paperError} onSubmit={submitPaperOrder} onCancel={cancelPaperOrder} onUpdate={updatePaperOrder} onCancelScope={cancelPaperScope} /> : <div className="space-y-4">
+          <Alert><AlertDescription>{copy.marketReplay.tradeAccountRequired}</AlertDescription></Alert>
+          <div className="flex justify-end border-t pt-4"><Button type="button" onClick={() => setSettingsDialog("paper")}>{copy.marketReplay.createAccountAction}</Button></div>
+        </div>}
       </Dialog>
       {(() => {
         const drawing = drawings.find(item => item.id === styleDrawingId);
