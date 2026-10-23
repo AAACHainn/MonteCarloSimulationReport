@@ -15,6 +15,8 @@ import { createUuid } from "@/lib/uuid";
 import { funds, payoutPreview, evaluationProgress } from "@/lib/prop-practice/rules";
 import { propResultLabel } from "@/lib/prop-practice/result-label";
 import type { PropRuntime, readPropAccount } from "@/lib/prop-practice/service";
+import type { PaperSessionSnapshot } from "@/lib/paper-trading/types";
+import { PaperAccountMetrics } from "./paper-trading-panel";
 import { PropRuleSummary } from "./prop-template-manager";
 const t = copy.propPractice;
 type AccountData = NonNullable<Awaited<ReturnType<typeof readPropAccount>>>;
@@ -27,8 +29,8 @@ function ruleRows(rules: object, prefix = ""): { path: string; label: string; va
     return [{ path: prefix + key, label: prefix + (typeof label === "string" ? label : key), value: display }];
   });
 }
-export function PropAccountPanel({ sessionId, runtime, busy: externalBusy, onBeforeOpen, onChanged }: {
-  sessionId: string; runtime: PropRuntime; busy?: boolean; onBeforeOpen?: () => Promise<void>; onChanged?: () => Promise<unknown>;
+export function PropAccountPanel({ sessionId, runtime, tradingSnapshot, busy: externalBusy, onBeforeOpen, onChanged }: {
+  sessionId: string; runtime: PropRuntime; tradingSnapshot?: PaperSessionSnapshot | null; busy?: boolean; onBeforeOpen?: () => Promise<void>; onChanged?: () => Promise<unknown>;
 }) {
   const [open, setOpen] = useState(false), [data, setData] = useState<AccountData | null>(null);
   const [version, setVersion] = useState(0), [busy, setBusy] = useState(false), [error, setError] = useState<string | null>(null);
@@ -68,6 +70,7 @@ export function PropAccountPanel({ sessionId, runtime, busy: externalBusy, onBef
         <div className="grid grid-cols-4 gap-4 text-sm tabular-nums">
           {[[t.balance, f.balance], [t.equity, f.equity], [t.floor, f.floor], [t.remainingRisk, f.equity - f.floor]].map(([label, value]) => <div key={label}><p className="text-xs text-slate-500">{label}</p><p className="mt-1 font-medium text-slate-950">{money(Number(value))}</p></div>)}
         </div>
+        {tradingSnapshot ? <div className="border-t pt-3"><PaperAccountMetrics snapshot={tradingSnapshot} compact includeBalances={false} /></div> : null}
         {state.pause !== "NONE" ? <p className="text-xs text-amber-800">{t[state.pause]}</p> : null}
       </CardContent>
     </Card>

@@ -87,12 +87,19 @@ function fillReasonLabel(reason: PaperSessionSnapshot["recentFills"][number]["re
 }
 
 export function PaperAccountStrip({ snapshot, compact = false }: { snapshot: PaperSessionSnapshot | null; compact?: boolean }) {
+  if (!snapshot || snapshot.propAccount) return null;
+  return <Card><CardContent className="p-4"><PaperAccountMetrics snapshot={snapshot} compact={compact} /></CardContent></Card>;
+}
+
+export function PaperAccountMetrics({ snapshot, compact = false, includeBalances = true }: { snapshot: PaperSessionSnapshot | null; compact?: boolean; includeBalances?: boolean }) {
   if (!snapshot) return null;
   const { session, stats } = snapshot;
   const position = session.netQuantity > 0 ? copy.paperTrading.long : session.netQuantity < 0 ? copy.paperTrading.short : copy.paperTrading.flat;
   const items = [
-    [snapshot.propAccount ? copy.propPractice.rawBalance : copy.paperTrading.balance, `${number(stats.balance)} ${session.currency}`],
-    [snapshot.propAccount ? copy.propPractice.rawEquity : copy.paperTrading.equity, `${number(stats.equity)} ${session.currency}`],
+    ...(includeBalances ? [
+      [copy.paperTrading.balance, `${number(stats.balance)} ${session.currency}`],
+      [copy.paperTrading.equity, `${number(stats.equity)} ${session.currency}`],
+    ] : []),
     [copy.paperTrading.realizedPnl, number(session.realizedPnl)],
     [copy.paperTrading.unrealizedPnl, number(stats.unrealizedPnl)],
     [copy.paperTrading.netPosition, `${position} ${number(Math.abs(session.netQuantity), 8)}`],
@@ -101,9 +108,9 @@ export function PaperAccountStrip({ snapshot, compact = false }: { snapshot: Pap
     [copy.paperTrading.maxDrawdown, `${number(session.maxDrawdown * 100)}%`],
   ];
   return (
-    <Card><CardContent className={compact ? "grid grid-cols-4 gap-4 p-4 text-sm tabular-nums" : "grid gap-3 p-4 text-sm sm:grid-cols-2 lg:grid-cols-4 xl:grid-cols-8"}>
+    <div className={compact ? "grid grid-cols-4 gap-4 text-sm tabular-nums" : "grid gap-3 text-sm sm:grid-cols-2 lg:grid-cols-4 xl:grid-cols-8"}>
       {items.map(([label, value]) => <div key={label}><p className="text-xs text-slate-500">{label}</p><p className="font-medium text-slate-950">{value}</p></div>)}
-    </CardContent></Card>
+    </div>
   );
 }
 

@@ -595,9 +595,8 @@ export function MarketReplayClient({ dataset: initialDataset, initialJournalFocu
       />
       <Dialog open={settingsDialog === "paper" && !checkingOrder} keepMounted={settingsDialog === "paper"} title={paperSnapshot ? copy.marketReplay.accountSettings : copy.propPractice.createAccountTitle} description={paperSnapshot ? copy.marketReplay.accountSettingsDescription : copy.propPractice.createAccountHint} className={paperSnapshot ? "max-w-3xl" : "max-w-2xl"} onClose={() => setSettingsDialog(null)}>
         <div className="space-y-4">
-          {replaySession && (paperSnapshot?.propAccount ?? replaySession.propAccount) ? <PropAccountPanel sessionId={replaySession.id} runtime={(paperSnapshot?.propAccount ?? replaySession.propAccount)!} busy={paperBusy || dateForwarding || isLoading}
-            onBeforeOpen={async () => { core.pausePlayback(); await core.advanceCompletionRef.current; await core.paperMutationChainRef.current; await engine.reloadPaper(); }} onChanged={engine.reloadPaper} /> : null}
-          <PaperAccountStrip snapshot={paperSnapshot} compact />
+          {replaySession && (paperSnapshot?.propAccount ?? replaySession.propAccount) ? <PropAccountPanel sessionId={replaySession.id} runtime={(paperSnapshot?.propAccount ?? replaySession.propAccount)!} tradingSnapshot={paperSnapshot} busy={paperBusy || dateForwarding || isLoading}
+            onBeforeOpen={async () => { core.pausePlayback(); await core.advanceCompletionRef.current; await core.paperMutationChainRef.current; await engine.reloadPaper(); }} onChanged={engine.reloadPaper} /> : <PaperAccountStrip snapshot={paperSnapshot} compact />}
           {!paperSnapshot && !journalReview ? <PaperAccountCreateForm busy={paperBusy || correctionPending || dateForwarding} error={paperError} onCreate={createPaperAccount} /> : null}
           {paperSnapshot && !journalReview ? <div className="flex justify-end border-t pt-4"><Button type="button" variant="ghost" className="text-red-600" onClick={() => requestConfirmation("paper-clear")}><Trash2 className="h-4 w-4" />{copy.paperTrading.resetAccount}</Button></div> : null}
         </div>

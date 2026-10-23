@@ -54,8 +54,7 @@ export default async function MarketReplayDetailPage({ params, searchParams }: {
         <div><h1 className="text-3xl font-semibold tracking-tight text-slate-950">{selected.name}</h1><div className="mt-2 flex gap-2"><Badge>{copy.replaySessions.archived}</Badge><Badge>{selected.mode === "TRAINING" ? copy.replaySessions.training : copy.replaySessions.liveReplay}</Badge></div><p className="mt-2 text-sm text-slate-600">{copy.replaySessions.readOnly} · {copy.replaySessions.source}</p></div>
         <Button asChild variant="outline"><Link href={`/market-replay/${id}`}>{copy.replaySessions.allSessions}</Link></Button>
       </section>
-      <PaperAccountStrip snapshot={snapshot} />
-      {selected.propAccount ? <PropAccountPanel sessionId={selected.id} runtime={selected.propAccount} /> : null}
+      {selected.propAccount ? <PropAccountPanel sessionId={selected.id} runtime={selected.propAccount} tradingSnapshot={snapshot} /> : <PaperAccountStrip snapshot={snapshot} />}
       <PaperJournalTable datasetId={id} scope="history" replaySessions={sessions} />
     </div></ReplaySessionProvider>;
   }
