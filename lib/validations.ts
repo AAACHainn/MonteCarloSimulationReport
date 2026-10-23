@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { MARKET_CONTEXTS } from "./paper-trading/training-gate";
 import { copy } from "./i18n";
 import {
   deduplicateTagNames,
@@ -140,12 +141,22 @@ export const paperSessionSchema = z.object({
 
 export const strategyChecklistSchema = z.array(z.object({ id: z.string().min(1).max(120), text: z.string().trim().min(1).max(1000) }).strict()).max(100)
   .refine((items) => new Set(items.map((item) => item.id)).size === items.length && new Set(items.map((item) => item.text)).size === items.length, copy.trainingGate.itemRequired);
-export const entryDisciplineSchema = z.object({ strategyId: z.string().min(1), strategyName: z.string().min(1), checklistVersion: z.number().int().positive(),
+const checklistDisciplineSchema = z.object({ mode: z.literal("CHECKLIST").optional(), strategyId: z.string().min(1), strategyName: z.string().min(1), checklistVersion: z.number().int().positive(),
   checklist: strategyChecklistSchema.refine((items) => items.length > 0, copy.trainingGate.required), confirmedAt: z.string().datetime() });
+const planTextSchema = z.string().trim().min(1, copy.trainingGate.planRequired)
+  .refine((value) => Array.from(value).length <= 800, copy.trainingGate.planTooLong);
+const planDisciplineSchema = z.object({ mode: z.literal("PLAN"), context: z.enum(MARKET_CONTEXTS), plan: planTextSchema,
+  displayIntervalSeconds: z.number().int().min(1).max(MAX_DISPLAY_INTERVAL_SECONDS), confirmedSequence: z.number().int().min(-1), confirmedAt: z.string().datetime() });
+export const entryDisciplineSchema = z.union([checklistDisciplineSchema, planDisciplineSchema]);
 export const trainingGateStateSchema = z.object({ tradeCount: z.number().int().positive().max(2147483647), active: z.boolean(), targetCount: z.number().int().nonnegative(),
+  autoEnabled: z.boolean(), lossThreshold: z.number().int().positive().max(2147483647), nextMode: z.enum(["CHECKLIST", "PLAN"]), activeMode: z.enum(["CHECKLIST", "PLAN"]).nullable(),
   completedCount: z.number().int().nonnegative(), lossStreak: z.number().int().nonnegative(), activationCount: z.number().int().nonnegative(),
   source: z.enum(["MANUAL", "LOSS_STREAK"]).nullable(), activatedAtSequence: z.number().int().min(-1).nullable(), cancelledOrderCount: z.number().int().nonnegative() });
-export const gateApprovalSchema = z.object({ strategyId: z.string().min(1), checklistVersion: z.number().int().positive(), checkedItemIds: z.array(z.string().min(1)).min(1).max(100) }).strict();
+export const gateApprovalSchema = z.union([
+  z.object({ mode: z.literal("CHECKLIST").optional(), strategyId: z.string().min(1), checklistVersion: z.number().int().positive(), checkedItemIds: z.array(z.string().min(1)).min(1).max(100) }).strict(),
+  z.object({ mode: z.literal("PLAN"), context: z.enum(MARKET_CONTEXTS), plan: planTextSchema,
+    displayIntervalSeconds: z.number().int().min(1).max(MAX_DISPLAY_INTERVAL_SECONDS) }).strict(),
+]);
 
 export const paperOrderSchema = z.object({
   gateApproval: gateApprovalSchema.optional(),

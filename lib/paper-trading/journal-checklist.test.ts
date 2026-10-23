@@ -17,6 +17,7 @@ describe("journal checklist history", () => {
     expect(journalUsedChecklist(entry)).toBe(true);
     expect(journalUsedChecklist({ discipline: null })).toBe(false);
     expect(journalUsedChecklist({})).toBe(false);
+    expect(journalUsedChecklist({ discipline: { mode: "PLAN", context: "WEAK_BREAKOUT", plan: "等待回调", displayIntervalSeconds: 60, confirmedSequence: 1, confirmedAt: "2026-10-14T00:00:00.000Z" } })).toBe(false);
   });
 
   it("keeps the original checks when the strategy checklist changes or is no longer available", () => {

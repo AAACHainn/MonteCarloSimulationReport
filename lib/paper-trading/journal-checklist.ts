@@ -6,7 +6,7 @@ export type JournalSetupChecklist = { name: string; checklist: StrategyChecklist
 
 /** An editable Setup never changes whether the entry was checked before submission. */
 export function journalUsedChecklist(entry: Pick<ReplayJournalEntryData, "discipline">): boolean {
-  return Boolean(entry.discipline);
+  return Boolean(entry.discipline && entry.discipline.mode !== "PLAN");
 }
 
 export function journalSetupChecklist(
@@ -14,7 +14,7 @@ export function journalSetupChecklist(
   strategies: ReadonlyArray<{ id: string; name: string; checklist?: StrategyChecklistItem[] }>,
 ): JournalSetupChecklist | null {
   if (!entry.setupOptionId) return null;
-  if (entry.discipline?.strategyId === entry.setupOptionId) {
+  if (entry.discipline && entry.discipline.mode !== "PLAN" && entry.discipline.strategyId === entry.setupOptionId) {
     return { name: entry.setupOption?.name ?? entry.discipline.strategyName, checklist: entry.discipline.checklist, confirmed: true };
   }
   const strategy = strategies.find((option) => option.id === entry.setupOptionId);

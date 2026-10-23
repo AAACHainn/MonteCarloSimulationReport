@@ -1,4 +1,4 @@
-import type { EntryDiscipline, TrainingGateState } from "./training-gate";
+import type { EntryDiscipline, MarketContext, TrainingGateState } from "./training-gate";
 import type { MarketBarData } from "@/lib/market-replay/types";
 
 export type PaperSide = "BUY" | "SELL";
@@ -240,4 +240,5 @@ export type PaperOrderInput = {
   price: number | null; stopLoss: number | null; takeProfit: number | null; reduceOnly?: boolean;
 };
 export type OrderSubmitResult = "SUCCESS" | "CANCELLED" | "FAILED";
-export type GateApprovalInput = { strategyId: string; checklistVersion: number; checkedItemIds: string[] };
+export type GateApprovalInput = { mode?: "CHECKLIST"; strategyId: string; checklistVersion: number; checkedItemIds: string[] }
+  | { mode: "PLAN"; context: MarketContext; plan: string; displayIntervalSeconds: number };

@@ -48,4 +48,9 @@ describe("entry checklist draft memory", () => {
   it("does not choose a strategy automatically for a fresh draft", () => {
     expect(reconcileEntryCheckApproval(null, [strategy])).toBeNull();
   });
+  it("keeps a partially written plan only for the same order draft", () => {
+    const current = { draftId: "plan-one", approval: null, planDraft: { context: "WEAK_BREAKOUT" as const, plan: "等待回调" } };
+    expect(retainEntryCheckDraft(current, "plan-one")).toBe(current);
+    expect(retainEntryCheckDraft(current, "plan-two")).toEqual({ draftId: "plan-two", approval: null });
+  });
 });

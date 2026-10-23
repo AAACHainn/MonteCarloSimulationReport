@@ -2,7 +2,7 @@
 
 import { createUuid } from "@/lib/uuid";
 import { type CorrectionTarget } from "./replay-correction-dialog";
-import { isClosingOrder } from "@/lib/paper-trading/training-gate";
+import { isClosingOrder, type TrainingGateMode } from "@/lib/paper-trading/training-gate";
 import type { GateApprovalInput, PaperOrderInput, OrderSubmitResult } from "@/lib/paper-trading/types";
 import { retainEntryCheckDraft } from "@/lib/paper-trading/entry-check-draft";
 import { startTransition, useCallback } from "react";
@@ -514,14 +514,14 @@ export function useReplayActions(core: ReturnType<typeof useReplayCore>, drawing
     } catch (error) { setGateNotice(error instanceof Error ? error.message : copy.trainingGate.failed); }
     finally { setGateBusy(false); }
   }
-  async function saveGateConfig(tradeCount: number, start: boolean) {
+  async function saveGateConfig(config: { tradeCount: number; autoEnabled: boolean; lossThreshold: number; nextMode: TrainingGateMode }, start: boolean) {
     if (!replaySession || gateBusy) return;
     setGateBusy(true); setGateError(null);
     try {
       const current = await fetch(`/api/replay-sessions/${replaySession.id}/training-gate`, { cache: "no-store" });
       const latest = await current.json();
       if (!current.ok) throw new Error(latest.error ?? copy.trainingGate.failed);
-      const response = await fetch(`/api/replay-sessions/${replaySession.id}/training-gate`, { method: start ? "POST" : "PUT", headers: { "Content-Type": "application/json", "X-Replay-Projection": replaySession.activeProjectionId }, body: JSON.stringify({ tradeCount, expectedVersion: latest.version }) });
+      const response = await fetch(`/api/replay-sessions/${replaySession.id}/training-gate`, { method: start ? "POST" : "PUT", headers: { "Content-Type": "application/json", "X-Replay-Projection": replaySession.activeProjectionId }, body: JSON.stringify({ ...config, expectedVersion: latest.version }) });
       const data = await response.json();
       if (!response.ok) throw new Error(data.error ?? copy.trainingGate.failed);
       setGateSettings(data.gate); commitConfirmedPaperSnapshot(data.snapshot);
@@ -531,7 +531,7 @@ export function useReplayActions(core: ReturnType<typeof useReplayCore>, drawing
     finally { setGateBusy(false); }
   }
   const currentGate = paperSnapshot?.session.trainingGate ?? gateSettings;
-  const gateButton = replaySession?.mode === "TRAINING" ? <Button variant="outline" size="sm" className="h-10 md:h-9" disabled={gateBusy || isLoading || Boolean(loadError) || !replay || Boolean(checkingOrder) || Boolean(journalReview)} onClick={() => void openGateConfig()}>{gateBusy ? <Loader2 className="h-4 w-4 animate-spin" /> : null}{currentGate.active ? copy.trainingGate.remaining(currentGate.targetCount - currentGate.completedCount) : copy.trainingGate.title}</Button> : null;
+  const gateButton = replaySession?.mode === "TRAINING" ? <Button variant="outline" size="sm" className="h-10 md:h-9" title={copy.trainingGate.autoStatus(currentGate.autoEnabled, currentGate.lossThreshold, currentGate.lossStreak)} disabled={gateBusy || isLoading || Boolean(loadError) || !replay || Boolean(checkingOrder) || Boolean(journalReview)} onClick={() => void openGateConfig()}>{gateBusy ? <Loader2 className="h-4 w-4 animate-spin" /> : null}{currentGate.active ? copy.trainingGate.remaining(currentGate.targetCount - currentGate.completedCount) : copy.trainingGate.title}</Button> : null;
 
   const gateNoticeBlock = gateNotice ? <div className="flex shrink-0 items-center justify-between gap-2 rounded-md border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-800" role="status"><span>{gateNotice}</span><Button variant="ghost" size="icon" aria-label={copy.common.cancel} onClick={() => setGateNotice(null)}><X className="h-4 w-4" /></Button></div> : null;
 

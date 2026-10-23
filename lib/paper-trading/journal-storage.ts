@@ -3,6 +3,7 @@ import { archiveReplaySession } from '@/lib/replay-sessions/service';
 import type { Prisma } from "@prisma/client";
 import { copy } from "@/lib/i18n";
 import type { PaperPositionLotData, ReplayJournalEntryDraft } from "./types";
+import { initialPlanReview } from "./plan-review";
 
 type SessionForJournal = {
   id: string;
@@ -99,7 +100,8 @@ export async function persistPaperJournalState(
         projectionId: scope.projectionId, journalSessionId,
         no: original?.no ?? ++globalNo, accountNo: original?.accountNo ?? ++accountNo,
         openedAt: new Date(entry.openedAt), closedAt: new Date(entry.closedAt),
-        review: original?.review ?? "", setupOptionId: original ? original.setupOptionId : entry.discipline?.strategyId ?? null,
+        review: original?.review ?? initialPlanReview(entry.discipline),
+        setupOptionId: original ? original.setupOptionId : entry.discipline && entry.discipline.mode !== "PLAN" ? entry.discipline.strategyId : null,
         ...(original?.tradeReasons.length ? { tradeReasons: { connect: original.tradeReasons.map(({ id }) => ({ id })) } } : {}),
       } });
     }
@@ -120,7 +122,8 @@ export async function persistPaperJournalState(
   await tx.replayJournalEntry.createMany({
     data: entries.map((entry, index) => ({
       ...entry, discipline: entry.discipline ? JSON.stringify(entry.discipline) : null,
-      setupOptionId: entry.discipline?.strategyId ?? null,
+      setupOptionId: entry.discipline && entry.discipline.mode !== "PLAN" ? entry.discipline.strategyId : null,
+      review: initialPlanReview(entry.discipline),
       projectionId: getReplayScope()?.projectionId,
       logicalKey: entry.id,
       journalSessionId,

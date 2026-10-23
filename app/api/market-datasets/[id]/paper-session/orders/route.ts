@@ -11,6 +11,7 @@ import { copy } from "@/lib/i18n";
 import { getPaperSessionSnapshot, serializePaperOrder } from "@/lib/paper-trading/serialize";
 import { calculateRiskSizing, isValidBracket } from "@/lib/paper-trading/risk-sizing";
 import { isPriceOnTick } from "@/lib/market-replay/price-ticks";
+import { isValidDisplayInterval } from "@/lib/market-replay/types";
 import { paperOrderSchema } from "@/lib/validations";
 import { serializeSourceBar } from "@/lib/market-replay/dataset";
 import { executeCurrentPriceClose } from "@/lib/paper-trading/current-price-close";
@@ -28,7 +29,7 @@ async function handlePOST(request: Request, context: RouteContext) {
     if (session.version !== parsed.data.expectedVersion) return { status: 409, error: copy.paperTrading.conflict };
     const [progress, dataset] = await Promise.all([
       tx.replayProgress.findFirst({ where: progressWhere(id) }),
-      tx.marketDataset.findUnique({ where: { id }, select: { barCount: true, priceTickSize: true } }),
+      tx.marketDataset.findUnique({ where: { id }, select: { barCount: true, priceTickSize: true, sourceIntervalSeconds: true } }),
     ]);
     if (!progress || !dataset || progress.currentSequence < 0) return { status: 400, error: copy.paperTrading.noCurrentBar };
     if (!parsed.data.executeAtCurrentClose && progress.currentSequence >= dataset.barCount - 1) return { status: 400, error: copy.paperTrading.noNextBar };
@@ -68,18 +69,31 @@ async function handlePOST(request: Request, context: RouteContext) {
     let discipline: EntryDiscipline | null = null;
     if (getReplayScope()?.mode === "TRAINING" && !reduceOnly) {
       const owner = await tx.replaySession.findUniqueOrThrow({ where: { id: getReplayScope()!.id }, select: { trainingGate: true } });
-      if (parseTrainingGate(owner.trainingGate).active) {
+      const gate = parseTrainingGate(owner.trainingGate);
+      if (gate.active) {
         const approval = parsed.data.gateApproval;
         if (!approval) return { status: 400, error: copy.trainingGate.required };
-        const strategy = await tx.tradeOption.findFirst({ where: { id: approval.strategyId, type: "STRATEGY", active: true } });
-        const checklist = parseChecklist(strategy?.checklist);
-        if (!strategy || !checklist.length) return { status: 400, error: copy.trainingGate.invalidStrategy };
-        if (strategy.checklistVersion !== approval.checklistVersion) return { status: 409, error: copy.trainingGate.checklistChanged };
-        const checked = new Set(approval.checkedItemIds);
-        if (checked.size !== checklist.length || approval.checkedItemIds.length !== checked.size || checklist.some((item) => !checked.has(item.id))) {
-          return { status: 400, error: copy.trainingGate.required };
+        if (gate.activeMode === "PLAN") {
+          if (approval.mode !== "PLAN" || !dataset.sourceIntervalSeconds
+            || !isValidDisplayInterval(dataset.sourceIntervalSeconds, approval.displayIntervalSeconds)) {
+            return { status: 400, error: copy.trainingGate.planRequired };
+          }
+          discipline = { mode: "PLAN", context: approval.context, plan: approval.plan,
+            displayIntervalSeconds: approval.displayIntervalSeconds, confirmedSequence: progress.currentSequence,
+            confirmedAt: new Date().toISOString() };
+        } else {
+          if (approval.mode === "PLAN") return { status: 400, error: copy.trainingGate.required };
+          const strategy = await tx.tradeOption.findFirst({ where: { id: approval.strategyId, type: "STRATEGY", active: true } });
+          const checklist = parseChecklist(strategy?.checklist);
+          if (!strategy || !checklist.length) return { status: 400, error: copy.trainingGate.invalidStrategy };
+          if (strategy.checklistVersion !== approval.checklistVersion) return { status: 409, error: copy.trainingGate.checklistChanged };
+          const checked = new Set(approval.checkedItemIds);
+          if (checked.size !== checklist.length || approval.checkedItemIds.length !== checked.size || checklist.some((item) => !checked.has(item.id))) {
+            return { status: 400, error: copy.trainingGate.required };
+          }
+          discipline = { mode: "CHECKLIST", strategyId: strategy.id, strategyName: strategy.name,
+            checklistVersion: strategy.checklistVersion, checklist, confirmedAt: new Date().toISOString() };
         }
-        discipline = { strategyId: strategy.id, strategyName: strategy.name, checklistVersion: strategy.checklistVersion, checklist, confirmedAt: new Date().toISOString() };
       }
     }
     let order = await tx.paperOrder.create({

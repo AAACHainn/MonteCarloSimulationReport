@@ -8,7 +8,8 @@ import { getPaperSessionSnapshot, serializePaperOrder } from "@/lib/paper-tradin
 import { activateTrainingGate, cancelUncheckedEntries, parseTrainingGate } from "@/lib/paper-trading/training-gate";
 
 type Context = { params: Promise<{ sessionId: string }> };
-const schema = z.object({ expectedVersion: z.number().int().positive(), tradeCount: z.number().int().positive().max(2147483647) }).strict();
+const schema = z.object({ expectedVersion: z.number().int().positive(), tradeCount: z.number().int().positive().max(2147483647),
+  autoEnabled: z.boolean().optional(), lossThreshold: z.number().int().positive().max(2147483647).optional(), nextMode: z.enum(["CHECKLIST", "PLAN"]).optional() }).strict();
 export async function GET(_request: Request, context: Context) {
   try {
     const scope = await loadReplayScope((await context.params).sessionId);
@@ -31,7 +32,13 @@ async function write(request: Request, context: Context, start: boolean) {
         const owner = await tx.replaySession.findUniqueOrThrow({ where: { id: scope.id } });
         let gate = parseTrainingGate(owner.trainingGate);
         if (gate.active) throw new ReplaySessionError("GATE_ACTIVE", 409, copy.trainingGate.locked);
+        const autoEnabled = parsed.data.autoEnabled ?? gate.autoEnabled;
+        const lossThreshold = parsed.data.lossThreshold ?? gate.lossThreshold;
+        if (gate.autoEnabled !== autoEnabled || gate.lossThreshold !== lossThreshold) gate.lossStreak = 0;
         gate.tradeCount = parsed.data.tradeCount;
+        gate.autoEnabled = autoEnabled;
+        gate.lossThreshold = lossThreshold;
+        gate.nextMode = parsed.data.nextMode ?? gate.nextMode;
         if (start) {
           const progress = await tx.replayProgress.findUniqueOrThrow({ where: { replaySessionId: scope.id } });
           gate = activateTrainingGate(gate, "MANUAL", progress.currentSequence);
@@ -39,7 +46,7 @@ async function write(request: Request, context: Context, start: boolean) {
           if (account) {
             const records = await tx.paperOrder.findMany({ where: { sessionId: account.id, status: "PENDING" } });
             const orders = records.map(serializePaperOrder);
-            gate.cancelledOrderCount = cancelUncheckedEntries(orders, account.netQuantity);
+            gate.cancelledOrderCount = cancelUncheckedEntries(orders, account.netQuantity, undefined, gate.activeMode);
             for (let i = 0; i < orders.length; i++) {
               if (orders[i].status !== records[i].status || orders[i].reduceOnly !== records[i].reduceOnly) {
                 await tx.paperOrder.update({ where: { id: records[i].id }, data: {

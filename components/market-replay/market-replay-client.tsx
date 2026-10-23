@@ -103,7 +103,12 @@ export function MarketReplayClient({ dataset: initialDataset, initialJournalFocu
       </header> : null}
       {!webFullscreen ? gateNoticeBlock : null}
       {gateDialogOpen ? <TrainingGateConfigDialog gate={currentGate} busy={gateBusy} error={gateError} onClose={() => setGateDialogOpen(false)} onSave={saveGateConfig} /> : null}
-      {checkingOrder ? <EntryCheckDialog order={checkingOrder.order} approval={entryCheckDraft?.draftId === checkingOrder.draftId ? entryCheckDraft.approval : null} onApprovalChange={(approval) => setEntryCheckDraft((current) => current?.draftId === checkingOrder.draftId ? { ...current, approval } : current)} busy={paperBusy} error={paperError} onClose={cancelEntryCheck} onConfirm={confirmEntryCheck} /> : null}
+      {checkingOrder ? <EntryCheckDialog order={checkingOrder.order} mode={currentGate.activeMode ?? "CHECKLIST"} displayIntervalSeconds={replay?.displayIntervalSeconds ?? dataset.sourceIntervalSeconds ?? 60}
+        approval={entryCheckDraft?.draftId === checkingOrder.draftId ? entryCheckDraft.approval : null}
+        onApprovalChange={(approval) => setEntryCheckDraft((current) => current?.draftId === checkingOrder.draftId ? { ...current, approval } : current)}
+        planDraft={entryCheckDraft?.draftId === checkingOrder.draftId ? entryCheckDraft.planDraft ?? { context: null, plan: "" } : { context: null, plan: "" }}
+        onPlanDraftChange={(planDraft) => setEntryCheckDraft((current) => current?.draftId === checkingOrder.draftId ? { ...current, planDraft } : current)}
+        busy={paperBusy} error={paperError} onClose={cancelEntryCheck} onConfirm={confirmEntryCheck} /> : null}
       {content}
     </div>;
   }

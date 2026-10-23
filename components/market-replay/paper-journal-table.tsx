@@ -408,7 +408,7 @@ export function PaperJournalTable({
                     })),
                   ]}
                 />
-                {entry.discipline ? <Button variant="ghost" size="sm" className="h-8 max-w-full" onClick={() => setDisciplineEntry(entry)}>{copy.trainingGate.snapshot}</Button> : null}
+                {entry.discipline ? <Button variant="ghost" size="sm" className="h-8 max-w-full" onClick={() => setDisciplineEntry(entry)}>{entry.discipline.mode === "PLAN" ? copy.trainingGate.planSnapshot : copy.trainingGate.snapshot}</Button> : null}
               </div>
             </td> : null}
             {visibleColumnSet.has("checklistUsed") ? <td className="border-r px-3 py-2 text-left last:border-r-0">{journalFieldValue(entry, "checklistUsed")}</td> : null}
@@ -527,8 +527,10 @@ export function PaperJournalTable({
         </div>
       </div>
     </Dialog>
-    <Dialog open={Boolean(disciplineEntry)} title={copy.trainingGate.snapshot} onClose={() => setDisciplineEntry(null)}>
-      {disciplineEntry?.discipline ? <div className="space-y-4"><p className="text-sm font-medium">{disciplineEntry.discipline.strategyName}</p><p className="text-xs text-slate-500">{copy.trainingGate.confirmedAt} · {new Date(disciplineEntry.discipline.confirmedAt).toLocaleString("zh-CN")}</p>{disciplineEntry.discipline.checklist.map((item) => <CheckboxField key={item.id} checked disabled onChange={() => undefined}>{item.text}</CheckboxField>)}</div> : null}
+    <Dialog open={Boolean(disciplineEntry)} title={disciplineEntry?.discipline?.mode === "PLAN" ? copy.trainingGate.planSnapshot : copy.trainingGate.snapshot} onClose={() => setDisciplineEntry(null)}>
+      {disciplineEntry?.discipline ? disciplineEntry.discipline.mode === "PLAN"
+        ? <div className="space-y-3 text-sm"><p className="font-medium">{copy.trainingGate.marketContexts[disciplineEntry.discipline.context]}</p><p className="whitespace-pre-wrap break-words">{disciplineEntry.discipline.plan}</p><p className="text-xs text-slate-500">{copy.trainingGate.planSequence(disciplineEntry.discipline.confirmedSequence)} · {formatInterval(disciplineEntry.discipline.displayIntervalSeconds)} · {new Date(disciplineEntry.discipline.confirmedAt).toLocaleString("zh-CN")}</p></div>
+        : <div className="space-y-4"><p className="text-sm font-medium">{disciplineEntry.discipline.strategyName}</p><p className="text-xs text-slate-500">{copy.trainingGate.confirmedAt} · {new Date(disciplineEntry.discipline.confirmedAt).toLocaleString("zh-CN")}</p>{disciplineEntry.discipline.checklist.map((item) => <CheckboxField key={item.id} checked disabled onChange={() => undefined}>{item.text}</CheckboxField>)}</div> : null}
     </Dialog>
     <ReviewEditorDialog
       open={reviewDialogEntryId !== null}

@@ -1,6 +1,8 @@
 import type { GateApprovalInput } from "./types";
+import type { MarketContext } from "./training-gate";
 
-export type EntryCheckDraft = { draftId: string; approval: GateApprovalInput | null };
+export type PlanEntryDraft = { context: MarketContext | null; plan: string };
+export type EntryCheckDraft = { draftId: string; approval: GateApprovalInput | null; planDraft?: PlanEntryDraft };
 
 /** Checks belong to a draft identity, even when another draft has identical prices. */
 export function retainEntryCheckDraft(current: EntryCheckDraft | null, draftId: string | null): EntryCheckDraft | null {
@@ -12,8 +14,9 @@ export function retainEntryCheckDraft(current: EntryCheckDraft | null, draftId: 
 export function reconcileEntryCheckApproval(
   approval: GateApprovalInput | null,
   strategies: ReadonlyArray<{ id: string; checklistVersion: number; checklist: ReadonlyArray<{ id: string }> }>,
-): GateApprovalInput | null {
+): Extract<GateApprovalInput, { strategyId: string }> | null {
   if (!approval) return null;
+  if (approval.mode === "PLAN") return null;
   const strategy = strategies.find((item) => item.id === approval.strategyId);
   if (!strategy || !strategy.checklist.length) return null;
   const validIds = new Set(strategy.checklist.map((item) => item.id));

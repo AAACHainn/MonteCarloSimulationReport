@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { advancePaperTrading } from "./engine";
-import { activateTrainingGate, cancelUncheckedEntries, defaultTrainingGate, isClosingOrder, restartTrainingGate, settleGateEntries, type EntryDiscipline } from "./training-gate";
+import { activateTrainingGate, cancelUncheckedEntries, defaultTrainingGate, isClosingOrder, parseTrainingGate, restartTrainingGate, settleGateEntries, type EntryDiscipline } from "./training-gate";
 import type { PaperOrderData, PaperSessionState, PaperPositionLotData } from "./types";
 
 const discipline: EntryDiscipline = { strategyId: "strategy", strategyName: "趋势", checklistVersion: 1,
@@ -72,8 +72,8 @@ describe("training gate matching", () => {
     const a = run(state(), [order("a", { discipline, quantity: 2 }), order("b", { discipline: { ...discipline, strategyId: "other" } })]);
     const b = run(a.state, [order("exit", { side: "SELL", quantity: 1, reduceOnly: true })], 110, a.lots);
     const c = run(b.state, [order("rest", { side: "SELL", quantity: 2, reduceOnly: true })], 110, b.lots);
-    expect(b.journalEntries[0].discipline?.strategyId).toBe("strategy");
-    expect(c.journalEntries.map((entry) => entry.discipline?.strategyId)).toEqual(["strategy", "other"]);
+    expect(b.journalEntries[0].discipline).toMatchObject({ strategyId: "strategy" });
+    expect(c.journalEntries.map((entry) => entry.discipline)).toMatchObject([{ strategyId: "strategy" }, { strategyId: "other" }]);
   });
   it("does not activate in live replay when no training state is supplied", () => {
     const first = run(state({ trainingGate: null }), [order("a"), order("b")]);
@@ -83,6 +83,11 @@ describe("training gate matching", () => {
   });
 });
 describe("gate state rules", () => {
+  it("reads old session state with the original automatic checklist behavior", () => {
+    expect(parseTrainingGate(JSON.stringify({ tradeCount: 7, active: true }))).toMatchObject({
+      tradeCount: 7, autoEnabled: true, lossThreshold: 2, nextMode: "CHECKLIST", activeMode: "CHECKLIST",
+    });
+  });
   it("preserves protective and closing orders when starting", () => {
     const orders = [order("entry"), order("exit", { side: "SELL" }), order("protect", { side: "SELL", isProtective: true }), order("checked", { discipline })];
     expect(cancelUncheckedEntries(orders, 1)).toBe(1);
@@ -98,7 +103,22 @@ describe("gate state rules", () => {
     expect(activateTrainingGate(active, "MANUAL", 3)).toEqual(active);
   });
   it("keeps an active gate on restart but resets its completed count", () => {
-    const active = { ...activateTrainingGate({ ...defaultTrainingGate(), tradeCount: 4 }, "MANUAL", 0), completedCount: 3 };
-    expect(restartTrainingGate(active)).toMatchObject({ active: true, targetCount: 4, completedCount: 0, lossStreak: 0 });
+    const active = { ...activateTrainingGate({ ...defaultTrainingGate(), tradeCount: 4, autoEnabled: false,
+      lossThreshold: 5, nextMode: "PLAN" }, "MANUAL", 0), completedCount: 3 } as const;
+    expect(restartTrainingGate(active)).toMatchObject({ active: true, activeMode: "PLAN", autoEnabled: false,
+      lossThreshold: 5, nextMode: "PLAN", targetCount: 4, completedCount: 0, lossStreak: 0 });
+  });
+  it("uses the configured loss threshold and never triggers while automation is off", () => {
+    const disabled = { ...defaultTrainingGate(), autoEnabled: false, lossThreshold: 3, nextMode: "PLAN" as const };
+    expect(settleGateEntries(disabled, [-1, -1, -1, -1], 4)).toMatchObject({ active: false, lossStreak: 0 });
+    const enabled = { ...disabled, autoEnabled: true };
+    expect(settleGateEntries(enabled, [-1, -1], 2)).toMatchObject({ active: false, lossStreak: 2 });
+    expect(settleGateEntries(enabled, [-1, -1, -1], 3)).toMatchObject({ active: true, activeMode: "PLAN", source: "LOSS_STREAK" });
+  });
+  it("cancels pending entries approved for another mode", () => {
+    const orders = [order("old-checklist", { discipline }), order("close", { side: "SELL", reduceOnly: true })];
+    expect(cancelUncheckedEntries(orders, 1, undefined, "PLAN")).toBe(1);
+    expect(orders[0]).toMatchObject({ status: "CANCELLED", cancelReason: "TRAINING_GATE_REQUIRED" });
+    expect(orders[1].status).toBe("PENDING");
   });
 });

@@ -344,7 +344,7 @@ export function ReplayChart(props: ReplayChartProps) {
             {draftError || paperError ? <p className="text-xs text-red-600">{draftError ?? paperError}</p> : null}
             <div className="grid grid-cols-[1fr_1.6fr] gap-2">
               <Button type="button" variant="outline" size="sm" disabled={paperBusy} onClick={() => { setDraft(null); setDraftError(null); setOrderTicketPosition(null); }}>{copy.paperTrading.cancelDraft}</Button>
-              <Button type="button" size="sm" data-testid="confirm-risk-order" disabled={paperBusy || !draftSizing?.ok} onClick={() => void submitDraft()}>{paperBusy ? <Loader2 className="h-4 w-4 animate-spin" /> : null}{paperBusy ? copy.paperTrading.submitting : paperSnapshot.session.trainingGate?.active && !isClosingOrder(paperSnapshot.session.netQuantity, draft.side, draftSizing?.ok ? draftSizing.value.quantity : 0) ? copy.trainingGate.selectStrategy : copy.paperTrading.confirmDraft}</Button>
+              <Button type="button" size="sm" data-testid="confirm-risk-order" disabled={paperBusy || !draftSizing?.ok} onClick={() => void submitDraft()}>{paperBusy ? <Loader2 className="h-4 w-4 animate-spin" /> : null}{paperBusy ? copy.paperTrading.submitting : paperSnapshot.session.trainingGate?.active && !isClosingOrder(paperSnapshot.session.netQuantity, draft.side, draftSizing?.ok ? draftSizing.value.quantity : 0) ? copy.trainingGate.entryAction(paperSnapshot.session.trainingGate.activeMode ?? "CHECKLIST") : copy.paperTrading.confirmDraft}</Button>
             </div>
           </fieldset>
         </div>

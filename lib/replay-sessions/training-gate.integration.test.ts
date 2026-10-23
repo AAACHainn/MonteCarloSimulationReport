@@ -95,6 +95,61 @@ describe("training gate APIs and persistence", () => {
     expect(state.stats).toMatchObject({ tradeCount: 2, journalEntryCount: 2 });
   });
 
+  it("accepts a plan without Setup or checklist and writes its review on first close", async () => {
+    const session = await setup();
+    const scope = await loadReplayScope(session.id);
+    const configured = await gatePUT(await req(session.id, "PUT", {
+      tradeCount: 2, autoEnabled: false, lossThreshold: 3, nextMode: "PLAN", expectedVersion: scope.version,
+    }), { params: Promise.resolve({ sessionId: session.id }) });
+    expect(configured.status).toBe(200);
+    expect((await configured.json()).gate).toMatchObject({ autoEnabled: false, lossThreshold: 3, nextMode: "PLAN", lossStreak: 0 });
+    expect((await start(session.id, 2)).status).toBe(200);
+    expect((await snapshot(session.id)).session.trainingGate).toMatchObject({ active: true, activeMode: "PLAN" });
+    const plan = { mode: "PLAN", context: "WEAK_BREAKOUT", plan: "突破后等待回调；若跌回区间则离场。", displayIntervalSeconds: 60 };
+    expect((await place(session.id)).status).toBe(400);
+    expect((await place(session.id, { gateApproval: { ...plan, plan: "   " } })).status).toBe(400);
+    expect((await place(session.id, { gateApproval: { ...plan, context: "UNKNOWN" } })).status).toBe(400);
+    expect((await place(session.id, { gateApproval: { ...plan, displayIntervalSeconds: 30 } })).status).toBe(400);
+    expect((await place(session.id, { gateApproval: plan })).status).toBe(201);
+    await advance(session.id);
+    const opened = await snapshot(session.id);
+    expect(opened.openLots![0].discipline).toMatchObject({ mode: "PLAN", context: "WEAK_BREAKOUT", plan: plan.plan, confirmedSequence: 0 });
+    expect((await place(session.id, { side: "SELL", reduceOnly: true, executeAtCurrentClose: true })).status).toBe(201);
+    const entry = await prisma.replayJournalEntry.findFirstOrThrow({ where: { journalSession: { replaySessionId: session.id } } });
+    expect(entry.setupOptionId).toBeNull();
+    expect(entry.review).toContain("弱势突破");
+    expect(entry.review).toContain(plan.plan);
+    expect(entry.review).toContain("3、实际持仓过程与执行对照");
+  });
+
+  it("starts a fresh loss streak after automation or threshold changes", async () => {
+    const session = await setup("TRAINING", [100, 100, 100, 100, 100], 10);
+    async function configure(autoEnabled: boolean, lossThreshold: number) {
+      const scope = await loadReplayScope(session.id);
+      const response = await gatePUT(await req(session.id, "PUT", {
+        tradeCount: 2, autoEnabled, lossThreshold, nextMode: "PLAN", expectedVersion: scope.version,
+      }), { params: Promise.resolve({ sessionId: session.id }) });
+      expect(response.status).toBe(200);
+      return (await response.json()).gate;
+    }
+    async function lose() {
+      expect((await place(session.id)).status).toBe(201);
+      await advance(session.id);
+      expect((await place(session.id, { side: "SELL", reduceOnly: true, executeAtCurrentClose: true })).status).toBe(201);
+    }
+    await configure(false, 3);
+    await lose(); await lose(); await lose();
+    expect((await snapshot(session.id)).session.trainingGate).toMatchObject({ active: false, lossStreak: 0 });
+    await configure(true, 3);
+    await lose(); await lose();
+    expect((await snapshot(session.id)).session.trainingGate).toMatchObject({ active: false, lossStreak: 2 });
+    expect(await configure(true, 2)).toMatchObject({ active: false, lossStreak: 0 });
+    await lose();
+    expect((await snapshot(session.id)).session.trainingGate).toMatchObject({ active: false, lossStreak: 1 });
+    await lose();
+    expect((await snapshot(session.id)).session.trainingGate).toMatchObject({ active: true, activeMode: "PLAN", source: "LOSS_STREAK" });
+  });
+
   it("permits a paused immediate exit while an entry checklist gate is active", async () => {
     const session = await setup();
     expect((await place(session.id)).status).toBe(201);
@@ -156,7 +211,7 @@ describe("training gate APIs and persistence", () => {
     expect((await place(session.id, { gateApproval: approval(s) })).status).toBe(201);
     const completed = await advance(session.id);
     expect(completed.session.trainingGate).toMatchObject({ active: true, completedCount: 1, targetCount: 3 });
-    expect(completed.openLots![0].discipline?.strategyName).toBe(s.name);
+    expect(completed.openLots![0].discipline).toMatchObject({ strategyName: s.name });
   });
   it("cancels unchecked entry orders, retains pure exit orders and never gates live replay", async () => {
     const training = await setup();
@@ -252,6 +307,7 @@ describe("training gate APIs and persistence", () => {
     forged.fingerprint = paperStateFingerprint(forged.state, forged.activeOrders, forged.openLots);
     expect((await syncPOST(await req(session.id, "POST", { ...body, paperDelta: forged }), ctx(session.datasetId))).status).toBe(400);
     const forgedChecks = structuredClone(delta);
+    if (forgedChecks.orderChanges[0].discipline?.mode === "PLAN") throw new Error("Expected checklist discipline");
     forgedChecks.orderChanges[0].discipline!.strategyName = "伪造";
     expect((await syncPOST(await req(session.id, "POST", { ...body, paperDelta: forgedChecks }), ctx(session.datasetId))).status).toBe(400);
     const accepted = await syncPOST(await req(session.id, "POST", body), ctx(session.datasetId));

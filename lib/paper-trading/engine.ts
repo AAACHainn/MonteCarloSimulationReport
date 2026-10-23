@@ -1,4 +1,4 @@
-import { cancelUncheckedEntries, countGateEntry, settleGateEntries } from "./training-gate";
+import { cancelUncheckedEntries, countGateEntry, disciplineMatchesMode, settleGateEntries } from "./training-gate";
 import type {
   PaperAdvanceInput,
   PaperAdvanceResult,
@@ -190,7 +190,7 @@ function processPaperTrading(input: PaperAdvanceInput, immediateOrderId?: string
     if (state.trainingGate && closed) state.trainingGate = settleGateEntries(state.trainingGate, closed.completedNetResults, bar.sequence);
     // A reverse may close the second losing entry. Permit that close, but never
     // open its unchecked remainder after the gate has become active.
-    if (state.trainingGate?.active && openedQuantity > EPSILON && !order.discipline) {
+    if (state.trainingGate?.active && openedQuantity > EPSILON && !disciplineMatchesMode(order.discipline, state.trainingGate.activeMode)) {
       if (closedQuantity <= EPSILON) {
         order.status = "CANCELLED"; order.cancelReason = "TRAINING_GATE_REQUIRED";
         return;
@@ -242,7 +242,7 @@ function processPaperTrading(input: PaperAdvanceInput, immediateOrderId?: string
       journalEntries.push(...closed.entries.map((entry) => ({ ...entry, cycleKey: fill.cycleKey })));
     }
     if (state.trainingGate?.active && !gateWasActive) {
-      state.trainingGate.cancelledOrderCount += cancelUncheckedEntries(orders, state.netQuantity, order.id);
+      state.trainingGate.cancelledOrderCount += cancelUncheckedEntries(orders, state.netQuantity, order.id, state.trainingGate.activeMode);
     }
     if (state.trainingGate && openedQuantity > EPSILON) state.trainingGate = countGateEntry(state.trainingGate);
     if (journalTrackingBlocked && closedQuantity >= Math.abs(oldQuantity) - EPSILON) {

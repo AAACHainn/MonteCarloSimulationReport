@@ -1,0 +1,85 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1560 880" role="img" aria-labelledby="title desc">
+  <title id="title">趋势与交易区间判断图</title>
+  <desc id="desc">从趋势或区间出发，按原图的突破、通道及宽窄分支判断，并查看对应交易提示。</desc>
+  <defs>
+    <marker id="arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="8" markerHeight="8" orient="auto-start-reverse">
+      <path d="M 0 1 L 9 5 L 0 9" fill="none" stroke="#1d4ed8" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/>
+    </marker>
+    <filter id="shadow" x="-15%" y="-30%" width="130%" height="170%">
+      <feDropShadow dx="0" dy="4" stdDeviation="7" flood-color="#0f172a" flood-opacity=".08"/>
+    </filter>
+    <style>
+      .decision { fill: #eff6ff; stroke: #3b82f6; stroke-width: 2.5; filter: url(#shadow); }
+      .leaf { fill: #ffffff; stroke: #cbd5e1; stroke-width: 2; filter: url(#shadow); }
+      .edge { fill: none; stroke: #1d4ed8; stroke-width: 3; stroke-linecap: round; stroke-linejoin: round; marker-end: url(#arrow); }
+      .node-text { fill: #1e3a8a; font: 600 24px "Microsoft YaHei", "PingFang SC", "Noto Sans CJK SC", sans-serif; text-anchor: middle; dominant-baseline: middle; }
+      .leaf-text { fill: #0f172a; font: 600 20px "Microsoft YaHei", "PingFang SC", "Noto Sans CJK SC", sans-serif; text-anchor: middle; dominant-baseline: middle; }
+      .label-bg { fill: #ffffff; stroke: #bfdbfe; stroke-width: 1; }
+      .label { fill: #1d4ed8; font: 600 19px "Microsoft YaHei", "PingFang SC", "Noto Sans CJK SC", sans-serif; text-anchor: middle; dominant-baseline: middle; }
+    </style>
+  </defs>
+  <rect x="1" y="1" width="1558" height="878" rx="18" fill="#f8fafc" stroke="#e2e8f0" stroke-width="2"/>
+
+  <!-- Main branches -->
+  <path class="edge" d="M 725 136 C 660 188 526 184 425 247"/>
+  <path class="edge" d="M 835 136 C 915 186 1038 188 1135 247"/>
+  <path class="edge" d="M 1078 334 C 1013 383 940 400 850 457"/>
+  <path class="edge" d="M 1192 334 C 1230 385 1262 403 1300 457"/>
+
+  <!-- Range leaves -->
+  <path class="edge" d="M 365 334 C 300 425 225 498 190 615"/>
+  <path class="edge" d="M 485 334 C 535 433 540 510 500 615"/>
+
+  <!-- Trend leaves -->
+  <path class="edge" d="M 800 543 C 775 594 757 645 755 700"/>
+  <path class="edge" d="M 900 543 C 935 593 957 645 970 700"/>
+  <path class="edge" d="M 1250 543 C 1228 595 1209 645 1205 700"/>
+  <path class="edge" d="M 1350 543 C 1390 594 1417 645 1430 700"/>
+
+  <!-- Branch labels -->
+  <g><rect class="label-bg" x="542" y="174" width="76" height="40" rx="12"/><text class="label" x="580" y="194">区间</text></g>
+  <g><rect class="label-bg" x="948" y="174" width="76" height="40" rx="12"/><text class="label" x="986" y="194">趋势</text></g>
+  <g><rect class="label-bg" x="927" y="378" width="76" height="40" rx="12"/><text class="label" x="965" y="398">突破</text></g>
+  <g><rect class="label-bg" x="1192" y="378" width="76" height="40" rx="12"/><text class="label" x="1230" y="398">通道</text></g>
+  <g><rect class="label-bg" x="246" y="462" width="50" height="40" rx="12"/><text class="label" x="271" y="482">窄</text></g>
+  <g><rect class="label-bg" x="520" y="462" width="50" height="40" rx="12"/><text class="label" x="545" y="482">宽</text></g>
+  <g><rect class="label-bg" x="735" y="607" width="50" height="40" rx="12"/><text class="label" x="760" y="627">强</text></g>
+  <g><rect class="label-bg" x="925" y="607" width="50" height="40" rx="12"/><text class="label" x="950" y="627">弱</text></g>
+  <g><rect class="label-bg" x="1180" y="607" width="50" height="40" rx="12"/><text class="label" x="1205" y="627">窄</text></g>
+  <g><rect class="label-bg" x="1387" y="607" width="50" height="40" rx="12"/><text class="label" x="1412" y="627">宽</text></g>
+
+  <!-- Decision nodes -->
+  <rect class="decision" x="650" y="50" width="260" height="86" rx="18"/>
+  <text class="node-text" x="780" y="93">趋势 or 区间</text>
+
+  <rect class="decision" x="305" y="248" width="240" height="86" rx="18"/>
+  <text class="node-text" x="425" y="291">窄 or 宽</text>
+
+  <rect class="decision" x="1000" y="248" width="270" height="86" rx="18"/>
+  <text class="node-text" x="1135" y="291">突破 or 通道</text>
+
+  <rect class="decision" x="740" y="457" width="220" height="86" rx="18"/>
+  <text class="node-text" x="850" y="500">强 or 弱</text>
+
+  <rect class="decision" x="1190" y="457" width="220" height="86" rx="18"/>
+  <text class="node-text" x="1300" y="500">窄 or 宽</text>
+
+  <!-- Outcome nodes -->
+  <rect class="leaf" x="82" y="615" width="216" height="96" rx="16"/>
+  <text class="leaf-text" x="190" y="663">等待突破</text>
+
+  <rect class="leaf" x="360" y="615" width="280" height="120" rx="16"/>
+  <text class="leaf-text" x="500" y="650"><tspan x="500" dy="0">在顶部1/3或</tspan><tspan x="500" dy="30">底部1/3等待</tspan><tspan x="500" dy="30">突破失败</tspan></text>
+
+  <rect class="leaf" x="655" y="700" width="200" height="96" rx="16"/>
+  <text class="leaf-text" x="755" y="748">市价入场</text>
+
+  <rect class="leaf" x="870" y="700" width="200" height="96" rx="16"/>
+  <text class="leaf-text" x="970" y="748">等待回调</text>
+
+  <rect class="leaf" x="1105" y="700" width="200" height="96" rx="16"/>
+  <text class="leaf-text" x="1205" y="736"><tspan x="1205" dy="0">只交易窄通道</tspan><tspan x="1205" dy="30">的方向</tspan></text>
+
+  <rect class="leaf" x="1330" y="700" width="200" height="96" rx="16"/>
+  <text class="leaf-text" x="1430" y="736"><tspan x="1430" dy="0">和宽区间一样</tspan><tspan x="1430" dy="30">的交易方式</tspan></text>
+</svg>
