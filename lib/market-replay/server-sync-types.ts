@@ -17,6 +17,7 @@ export type ReplayServerRequest = {
 };
 export type DisplayAdvanceResult = { completedDisplayBucketStart: string | null; reachedVisibleBucket: boolean };
 export type ReplayServerResult = {
+  /** Stop playback for account boundaries/results, not payout-day trading suspension. */
   propStopped?: boolean;
   requestedTargetSequence?: number;
   requestId: string;

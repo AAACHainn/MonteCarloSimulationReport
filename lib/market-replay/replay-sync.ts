@@ -29,7 +29,7 @@ import type { ReplayServerResponse, DisplayAdvanceResult } from "./server-sync-t
 
 import { marketVersionMatches } from "./history-version";
 import { loadPropAccount, persistPropAccount } from "@/lib/prop-practice/service";
-import { observeProp, preparePropDay, settlePropDay } from "@/lib/prop-practice/rules";
+import { observeProp, preparePropDay, settlePropDay, shouldStopPropReplay } from "@/lib/prop-practice/rules";
 import { propTradingDay } from "@/lib/prop-practice/trading-day";
 
 export type ReplaySyncInput = {
@@ -231,7 +231,7 @@ export async function syncReplayToTarget(
       historyVersion: dataset.historyVersion,
       ...(input.displayAdvance ? { displayAdvance: input.displayAdvance } : {}),
       currentSequence: actualSequence,
-      ...(prop ? { requestedTargetSequence: input.targetSequence, propStopped: stopped || prop.state.pause !== "NONE" || !!prop.state.result } : {}),
+      ...(prop ? { requestedTargetSequence: input.targetSequence, propStopped: stopped || shouldStopPropReplay(prop.state) } : {}),
       generation: progress.generation,
       syncVersion,
       dataVersion: dataset.dataVersion,

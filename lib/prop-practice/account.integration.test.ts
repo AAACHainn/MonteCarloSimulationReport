@@ -17,6 +17,7 @@ import { confirmPropPayout, confirmPropPromotion, deletePropTemplate, loadPropAc
 import { POST as accountPOST } from "@/app/api/market-datasets/[id]/paper-session/route";
 import { POST as orderPOST } from "@/app/api/market-datasets/[id]/paper-session/orders/route";
 import { POST as advancePOST } from "@/app/api/market-datasets/[id]/replay/advance/route";
+import { POST as syncPOST } from "@/app/api/market-datasets/[id]/replay/sync/route";
 import { sqliteWriteTransaction } from "@/lib/sqlite-write";
 import { tryFlatDisplayAdvance } from "@/lib/market-replay/flat-advance";
 import { defaultTrainingGate } from "@/lib/paper-trading/training-gate";
@@ -284,11 +285,51 @@ describe("prop orchestration versus original flow", () => {
     const after = await snapshot(s); expect(after!.session).toEqual(before!.session); expect(after!.stats).toEqual(before!.stats);
     expect(after!.propAccount!.state.totalRequested).toBe(5); expect(after!.propAccount!.state.totalReceived).toBe(4.5);
     await expect(scoped(s, () => confirmPropPayout({ ...input, requestId: randomUUID(), expectedVersion: (scope.version + 1) }))).rejects.toThrow();
-    await advance(s); // last candle of same payout day: no trading
-    await advance(s); // next actual day: leftovers available, no fresh profit
+    const sameDay = await advance(s); // last candle of same payout day: no trading
+    expect(sameDay.data.propStopped).toBe(false);
+    const nextDay = await advance(s); // next actual day: leftovers available, no fresh profit
+    expect(nextDay.data.propStopped).toBe(false);
     const next = await snapshot(s); expect(next!.propAccount!.state.pause).toBe("NONE");
     const second = await scoped(s, async () => confirmPropPayout({ expectedVersion: (await loadReplayScope(s.id)).version, requestId: randomUUID(), amount: 1 }));
     expect(second.received).toBe(0.9); expect((await snapshot(s))!.session).toMatchObject({ realizedPnl: before!.session.realizedPnl, totalFees: before!.session.totalFees });
+  });
+  it.each(["source", "display", "bulk"])("continues %s replay during payout-day trading suspension and resumes on the next source day", async mode => {
+    const s = await create(rules()); await advance(s); await order(s, "BUY"); await advance(s); await order(s, "SELL", 1, { executeAtCurrentClose: true });
+    await advance(s); await order(s, "BUY"); await advance(s); await order(s, "SELL", 1, { executeAtCurrentClose: true });
+    await scoped(s, async () => confirmPropPayout({ expectedVersion: (await loadReplayScope(s.id)).version, requestId: randomUUID(), amount: 5 }));
+    const paid = (await snapshot(s))!;
+    async function move(targetSequence: number) {
+      const progress = await prisma.replayProgress.findUniqueOrThrow({ where: { replaySessionId: s.id } });
+      const snap = (await snapshot(s))!;
+      const body = mode === "bulk" ? { batchMode: "BULK", requestId: randomUUID(), generation: progress.generation, confirmedSequence: progress.currentSequence,
+        syncVersion: progress.syncVersion, dataVersion: 1, historyVersion: 1, expectedPaperVersion: snap.session.version, targetSequence,
+        contextRuns: [{ fromSequence: progress.currentSequence + 1, toSequence: targetSequence, generation: progress.generation, context: null }] }
+        : { count: 1, requestId: randomUUID(), expectedVersion: snap.session.version, expectedCurrentSequence: progress.currentSequence,
+          ...(mode === "display" ? { displayIntervalSeconds: 300, displaySession: "ETH", abrLength: 14, displayUtcOffsetMinutes: 0 } : {}) };
+      const handler = mode === "bulk" ? syncPOST : advancePOST;
+      const response = await handler(request(s, "POST", body), ctx), data = await response.json();
+      expect(response.status, JSON.stringify(data)).toBe(200); expect(data.currentSequence).toBe(targetSequence);
+      return { handler, body, data };
+    }
+    const sameDay = await move(4);
+    expect(sameDay.data.propStopped).toBe(false);
+    if (mode === "display") expect(sameDay.data.reachedVisibleBucket).toBe(true);
+    const paused = (await snapshot(s))!;
+    expect(paused.propAccount!.state.pause).toBe("PAYOUT_DAY");
+    expect(paused.session).toMatchObject({ realizedPnl: paid.session.realizedPnl, totalFees: paid.session.totalFees, netQuantity: 0 });
+    const blocked = await orderPOST(request(s, "POST", { side: "BUY", quantity: 1, type: "MARKET", expectedVersion: paused.session.version }), ctx);
+    expect(blocked.status).toBe(409); expect((await blocked.json()).code).toBe("PROP_PAUSED");
+    const retry = await sameDay.handler(request(s, "POST", sameDay.body), ctx);
+    expect(retry.status).toBe(200); expect((await retry.json()).propStopped).toBe(false);
+    expect(await snapshot(s)).toEqual(paused);
+    const resumed = await move(5);
+    expect(resumed.data.propStopped).toBe(false);
+    const next = (await snapshot(s))!;
+    expect(next.propAccount!.state).toMatchObject({ pause: "NONE", pausedDay: null, payoutCount: 1, totalRequested: 5 });
+    expect(next.propAccount!.state.last).toMatchObject({ sequence: 5, day: "2026-10-03T00:00:00.000Z" });
+    expect(await prisma.propPracticeEvent.count({ where: { replaySessionId: s.id, type: "RESUMED" } })).toBe(2);
+    expect(await prisma.propPracticePayout.count({ where: { replaySessionId: s.id } })).toBe(1);
+    await order(s, "BUY"); // Trading is available again on the first new-day source candle.
   });
   it("enforces settled funded qualifying days server-side and resets once under concurrent payout retries", async () => {
     const r = rules(); r.funded.qualifyingDays = 1; r.funded.qualifyingProfit = 1;

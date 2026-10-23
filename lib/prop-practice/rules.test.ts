@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { applyPayout, currentStage, defaultPropRules, evaluationProgress, funds, initialPropState, observeProp, payoutPreview, payoutQualification, preparePropDay, promotePropManually, promotionPreview, propRulesSchema, settlePropDay, type Observation, type PropRules } from "./rules";
+import { applyPayout, currentStage, defaultPropRules, evaluationProgress, funds, initialPropState, observeProp, payoutPreview, payoutQualification, preparePropDay, promotePropManually, promotionPreview, propRulesSchema, settlePropDay, shouldStopPropReplay, type Observation, type PropRules } from "./rules";
 import { propTradingDay } from "./trading-day";
 import { propResultLabel } from "./result-label";
 import { formatMoney } from "@/lib/format";
@@ -12,6 +12,31 @@ function setAmount(r: PropRules, path: string, amount: number) {
   object[keys.at(-1)!] = amount;
 }
 describe("prop account pure ledger", () => {
+  it.each([
+    ["NONE", false], ["PAYOUT_DAY", false], ["STAGE_WAIT", true], ["BOUNDARY", true], ["DATA_END", true],
+  ] as const)("separates the %s account state from playback suspension", (pause, stop) => {
+    const state = { ...initialPropState(rules(), 0), pause };
+    expect(shouldStopPropReplay(state)).toBe(stop);
+    expect(shouldStopPropReplay({ ...state, result: "FAILED" })).toBe(true);
+    expect(shouldStopPropReplay({ ...state, result: "STOPPED" })).toBe(true);
+  });
+  it("resumes after a payout across a weekend gap without adding days or restoring qualifying counts", () => {
+    const r = rules(); r.evaluation.minTradingDays = null; r.evaluation.consistency = null;
+    r.funded.qualifyingDays = 1; r.funded.qualifyingProfit = 300;
+    const friday = "2026-09-25T00:00:00.000Z", sunday = "2026-09-27T00:00:00.000Z";
+    let s = settlePropDay(r, observeProp(r, initialPropState(r, 0), o(3000, { day: "2026-09-24T00:00:00.000Z" })));
+    s = settlePropDay(r, observeProp(r, preparePropDay(r, s, friday).state, o(13000, { day: friday, sequence: 2 })));
+    const paid = applyPayout(r, s, 500).state;
+    expect(shouldStopPropReplay(paid)).toBe(false);
+    expect(preparePropDay(r, paid, friday)).toMatchObject({ stop: false, state: { pause: "PAYOUT_DAY" } });
+    const prepared = preparePropDay(r, paid, sunday);
+    expect(prepared).toMatchObject({ stop: false, state: { pause: "NONE", pausedDay: null } });
+    const observed = observeProp(r, prepared.state, o(13000, { day: sunday, sequence: 3, hadFill: false }));
+    expect(currentStage(observed).days.map(day => day.day)).toEqual([friday, sunday]);
+    expect(payoutQualification(r, observed).qualifyingDays).toBe(0);
+    expect(funds(observed)).toEqual(funds(paid)); expect(observed.totalRequested).toBe(500);
+    expect(paid.pause).toBe("PAYOUT_DAY");
+  });
   it.each(monetaryPaths)("validates cents consistently for %s without rounding the saved configuration", path => {
     for (const amount of [0.001, 500.001]) {
       const r = rules(); setAmount(r, path, amount);

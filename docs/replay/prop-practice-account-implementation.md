@@ -118,6 +118,14 @@
 - 本次增加 2 项纯规则、4 项临时 SQLite 集成测试。`corepack pnpm test lib/prop-practice/rules.test.ts lib/prop-practice/account.integration.test.ts`：76 项通过（43 项纯规则、33 项集成）。覆盖盘中成交日与一致性、未实现利润不计、空仓/挂单/风险限制、同日分阶段盈亏与合格日、并发与重试、旧版本及归档拒绝、事务回滚、检查点保存和单步/批量一致；日终自动晋级及原交易和关卡对照继续通过。
 - `corepack pnpm lint`、`git diff --check` 通过。没有数据库表结构变更，不升级或写入开发数据库，无需新增业务库备份；原撮合、下单、费用、数量与关卡算法没有修改。按用户快速迭代要求，未运行完整 build 或浏览器视觉验收，实际桌面界面由用户验证；复用现有 Card、Button、ConfirmDialog 和 Alert，固定文案集中在 `copy.propPractice`。未提交、推送或部署。
 
+## 出金当日限制交易但允许行情持续推进（2026-10-24）
+
+- 已用临时库回归复现：出金当日正常完成推进后，`replay-sync.ts` 将任意非 NONE 的账户暂停都标为 `propStopped`，前端因此再次停止播放；按日期推进也直接检查 `pause !== NONE`，使空仓等待下一交易日容易中断。账户未实际跨过源交易日时，状态不会因现实时间经过一天而恢复。
+- `lib/prop-practice/rules.ts` 增加共用纯函数 `shouldStopPropReplay`，将出金当日交易限制与播放停止分开；服务端响应和前端按日期推进共同复用。PAYOUT_DAY 不再反复停止推进，当日原交易接口仍拒绝订单；首根新交易日源 K 复用原 `preparePropDay` 清除暂停并恢复。失败、边界、行情结束、考核自动晋级停止语义保留，不改原撮合和订单算法。
+- 新增 6 项纯规则、3 项 SQLite 集成回归，覆盖源 K / 5 分钟显示周期 / BULK 同日推进不停止、显示 K 完成标志、暂停期下单拒绝、推进回执重试、次日首根恢复、重复流水防护，以及跨周末无行情间隙不补造交易日、不恢复合格日计数。
+- `corepack pnpm test lib/prop-practice/rules.test.ts lib/prop-practice/account.integration.test.ts lib/market-replay/server-response.test.ts lib/market-replay/playback-lifecycle.test.ts`：4 个文件、99 项通过。`corepack pnpm lint` 与 `git diff --check` 通过，原交易及关卡对照继续通过。
+- 未变更数据库结构或开发账户数据，无需新增业务库备份或重建会话；旧出金记录保留，后续实际推进自然恢复状态。按用户快速迭代要求未运行完整 build 或浏览器验收，未提交、推送或部署。
+
 ## 明确限制与交接
 
 - 只观察原引擎完整结果，无法识别源 K 内触线后恢复的瞬间；无盘中强平或撤单。

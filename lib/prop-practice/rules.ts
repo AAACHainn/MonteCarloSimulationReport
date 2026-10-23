@@ -55,6 +55,10 @@ export type PropState = { stages: PropStage[]; phase: "EVALUATION" | "FUNDED"; p
   pausedDay: string | null; totalRequested: number; totalReceived: number; payoutCount: number;
   result: "FAILED" | "STOPPED" | null; failure: { sequence: number; equity: number; floor: number; phase: string } | null;
   last: Observation | null };
+/** A payout-day trading restriction must not repeatedly stop market playback. */
+export function shouldStopPropReplay(state: PropState) {
+  return !!state.result || !["NONE", "PAYOUT_DAY"].includes(state.pause);
+}
 // Closed days and finished stages are immutable; copy only the current writable tail.
 function copyState(before: PropState): PropState {
   const stages = [...before.stages], stage = stages[stages.length - 1], days = [...stage.days];
