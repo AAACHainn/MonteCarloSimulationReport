@@ -1,7 +1,8 @@
 import type { GateApprovalInput } from "./types";
 import type { MarketContext } from "./training-gate";
+import type { MarketContextDecisionStep } from "./market-context-decision";
 
-export type PlanEntryDraft = { context: MarketContext | null; plan: string };
+export type PlanEntryDraft = { context: MarketContext | null; plan: string; contextStep?: MarketContextDecisionStep };
 export type EntryCheckDraft = { draftId: string; approval: GateApprovalInput | null; planDraft?: PlanEntryDraft };
 
 /** Checks belong to a draft identity, even when another draft has identical prices. */

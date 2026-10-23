@@ -20,6 +20,9 @@ export const zhStart = {
       autoStatus: (enabled: boolean, threshold: number, streak: number) => enabled
         ? `自动开启：开 · 连亏 ${streak} / ${threshold}` : "自动开启：关",
       marketContext: "市场背景", marketContextHelp: "查看背景判断图", marketContextHint: "只判断这笔交易做单依据的当前显示周期。图中的交易方式仅供参考，不是当前订单信号。",
+      contextDecisionPrompts: { START: "先判断：趋势还是交易区间？", TREND: "趋势属于突破还是通道？", RANGE: "交易区间是窄还是宽？", BREAKOUT: "突破是强势还是弱势？", CHANNEL: "通道是窄还是宽？" },
+      contextBranches: { TREND: "趋势", RANGE: "交易区间", BREAKOUT: "突破", CHANNEL: "通道" },
+      contextBack: "上一步", contextChosen: (path: string) => `已选：${path}`,
       marketContexts: { STRONG_BREAKOUT: "强势突破", WEAK_BREAKOUT: "弱势突破", NARROW_CHANNEL: "窄通道", WIDE_CHANNEL: "宽通道", NARROW_RANGE: "窄交易区间 TTR", WIDE_RANGE: "宽交易区间" },
       marketContextPaths: { STRONG_BREAKOUT: "趋势 → 突破 → 强势突破", WEAK_BREAKOUT: "趋势 → 突破 → 弱势突破", NARROW_CHANNEL: "趋势 → 通道 → 窄通道", WIDE_CHANNEL: "趋势 → 通道 → 宽通道", NARROW_RANGE: "交易区间 → 窄交易区间 TTR", WIDE_RANGE: "交易区间 → 宽交易区间" },
       plan: "下单前交易计划", planHint: "写最关键的一段即可：价格在什么位置出现什么动作，预计怎样走；若判断失效，准备怎样处理。",
