@@ -82,7 +82,8 @@ export async function initializePropPracticeAccount(
     tx.propPracticeAccount.findUnique({ where: { replaySessionId: scope.id } }),
   ]);
   if (account || existingProp) throw new ReplaySessionError("ACCOUNT_EXISTS", 409, copy.propPractice.accountFixed);
-  if (!template || (!template.template.active && !restarting) || !accountConfig) throw new ReplaySessionError("INVALID_PROP", 400, copy.propPractice.invalidRules);
+  if (!template) throw new ReplaySessionError("TEMPLATE_CONFLICT", 409, copy.propPractice.templateConflict);
+  if ((!template.template.active && !restarting) || !accountConfig) throw new ReplaySessionError("INVALID_PROP", 400, copy.propPractice.invalidRules);
   let storedRules: unknown;
   try { storedRules = JSON.parse(template.rules); } catch { throw new ReplaySessionError("INVALID_PROP", 400, copy.propPractice.invalidRules); }
   const parsedRules = propRulesSchema.safeParse(storedRules);

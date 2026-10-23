@@ -9,18 +9,18 @@ vi.mock("@/lib/db", async () => {
   return { prisma: createDatabaseClient({ datasourceUrl: `file:${join(tmpdir(), `prop-account-${randomUUID()}.db`)}` }, { allowCreate: true }), replayDatabaseQueryCount: () => null };
 });
 import { prisma } from "@/lib/db";
-import { createReplaySession, archiveReplaySession, restartReplaySession } from "@/lib/replay-sessions/service";
+import { createReplaySession, archiveReplaySession, deleteReplaySession, restartReplaySession } from "@/lib/replay-sessions/service";
 import { loadReplayScope, runWithReplayScope } from "@/lib/replay-sessions/scope";
 import { getPaperSessionSnapshot } from "@/lib/paper-trading/serialize";
 import { defaultPropRules, payoutPreview, payoutQualification, type PropRules } from "./rules";
-import { confirmPropPayout, loadPropAccount, savePropTemplate } from "./service";
+import { confirmPropPayout, deletePropTemplate, loadPropAccount, savePropTemplate, listPropTemplates } from "./service";
 import { POST as accountPOST } from "@/app/api/market-datasets/[id]/paper-session/route";
 import { POST as orderPOST } from "@/app/api/market-datasets/[id]/paper-session/orders/route";
 import { POST as advancePOST } from "@/app/api/market-datasets/[id]/replay/advance/route";
 import { sqliteWriteTransaction } from "@/lib/sqlite-write";
 import { tryFlatDisplayAdvance } from "@/lib/market-replay/flat-advance";
 import { defaultTrainingGate } from "@/lib/paper-trading/training-gate";
-import { POST as templatePOST } from "@/app/api/prop-practice-templates/route";
+import { DELETE as templateDELETE, POST as templatePOST } from "@/app/api/prop-practice-templates/route";
 let file = "";
 const times = ["2026-10-01T23:58:00Z", "2026-10-01T23:59:00Z", "2026-10-02T00:00:00Z", "2026-10-02T00:01:00Z", "2026-10-02T23:59:00Z", "2026-10-03T00:00:00Z", "2026-10-03T23:59:00Z", "2026-10-04T00:00:00Z"];
 beforeAll(async () => {
@@ -59,10 +59,20 @@ async function order(s: Created, side: "BUY" | "SELL", quantity = 1, more = {}) 
   const response = await orderPOST(request(s, "POST", { side, quantity, type: "MARKET", expectedVersion: snap!.session.version, ...("executeAtCurrentClose" in more ? { reduceOnly: true } : {}), ...more }), ctx);
   expect(response.status, JSON.stringify(await response.clone().json())).toBe(201);
 }
-function normalized(value: unknown): unknown {
-  if (Array.isArray(value)) return value.map(normalized);
-  if (value && typeof value === "object") return Object.fromEntries(Object.entries(value).filter(([key]) => !["id", "datasetId", "orderId", "entryFillId", "lotId", "cycleKey", "activeCycleKey", "parentOrderId", "ocoGroupId", "createdAt", "updatedAt", "confirmedAt", "propAccount"].includes(key)).map(([key, item]) => [key, normalized(item)]));
+function normalized(value: unknown, field?: string): unknown {
+  if (Array.isArray(value)) {
+    const items = value.map(item => normalized(item));
+    // Protective siblings can share createdAt and use unrelated IDs to break display
+    // ties. Compare the complete order contents; retain execution order for fills.
+    return field === "recentOrders" ? items.sort((a, b) => JSON.stringify(a).localeCompare(JSON.stringify(b))) : items;
+  }
+  if (value && typeof value === "object") return Object.fromEntries(Object.entries(value).filter(([key]) => !["id", "datasetId", "orderId", "entryFillId", "lotId", "cycleKey", "activeCycleKey", "parentOrderId", "ocoGroupId", "createdAt", "updatedAt", "confirmedAt", "propAccount"].includes(key)).map(([key, item]) => [key, normalized(item, key)]));
   return value;
+}
+const templateRequest = (method: string, body: unknown) => new Request("http://localhost/api/prop-practice-templates", { method, headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) });
+async function removeSession(s: Created) {
+  const scope = await loadReplayScope(s.id);
+  return runWithReplayScope(scope, () => sqliteWriteTransaction(prisma, tx => deleteReplaySession(tx, scope.version)));
 }
 describe("prop orchestration versus original flow", () => {
   it("rejects a previously saved invalid version on account creation without rewriting the version", async () => {
@@ -312,12 +322,15 @@ describe("prop orchestration versus original flow", () => {
     expect(payoutQualification(r, (await snapshot(s))!.propAccount!.state).qualifyingDays).toBe(0);
     expect(await prisma.propPracticePayout.count({ where: { replaySessionId: s.id } })).toBe(2);
   });
-  it("versions and costs remain immutable; optional activation does not block promotion or restart", async () => {
+  it("used templates and cost snapshots stay fixed while copies can change; optional activation allows restart", async () => {
     const r = rules(); r.activationCost = undefined; r.purchaseCost = 0;
     const template = await savePropTemplate(r);
     const s = await createReplaySession("prop", { name: "Versioned", mode: "TRAINING", timestamp: times[0], playbackRate: 1, displayIntervalSeconds: 60, displaySession: "ETH" });
     expect((await accountPOST(request(s, "POST", { ...config, accountCategory: "PROP_PRACTICE", propTemplateVersionId: template.versions[0].id }), ctx)).status).toBe(201);
-    await savePropTemplate({ ...r, activationCost: 100, purchaseCost: 500 }, template.id, template.version, false);
+    await expect(savePropTemplate({ ...r, activationCost: 100, purchaseCost: 500 }, template.id, template.version, false)).rejects.toMatchObject({ code: "TEMPLATE_IN_USE" });
+    const copy = await savePropTemplate({ ...r, name: "Copy", activationCost: 100, purchaseCost: 500 });
+    expect(copy.id).not.toBe(template.id);
+    expect(JSON.parse(copy.versions[0].rules)).toMatchObject({ activationCost: 100, purchaseCost: 500 });
     const prop = await scoped(s, () => loadPropAccount()); expect(prop!.snapshot.rules.purchaseCost).toBe(0); expect(prop!.snapshot.rules.activationCost).toBeUndefined();
     const next = await scoped(s, () => restartReplaySession()); expect(next.accountCategory).toBe("PROP_PRACTICE"); expect((await loadReplayScope(s.id)).status).toBe("ARCHIVED");
     expect((await scoped(next, () => loadPropAccount()))!.snapshot.rules.activationCost).toBeUndefined();
@@ -340,5 +353,94 @@ describe("prop orchestration versus original flow", () => {
     try { await expect(scoped(s, async () => confirmPropPayout({ expectedVersion: (await loadReplayScope(s.id)).version, requestId: randomUUID(), amount: 1 }))).rejects.toThrow(); }
     finally { await prisma.$executeRawUnsafe("DROP TRIGGER reject_prop_event"); }
     expect(await snapshot(s)).toEqual(before); expect(await prisma.propPracticePayout.count({ where: { replaySessionId: s.id } })).toBe(0);
+  });
+});
+
+describe("template editing and deletion guards", () => {
+  it("replaces unused rules without accumulating history and rejects stale edits, deletes and account selections", async () => {
+    const r = rules(), original = await savePropTemplate(r);
+    const s = await createReplaySession("prop", { name: "Stale selection", mode: "TRAINING", timestamp: times[0], playbackRate: 1, displayIntervalSeconds: 60, displaySession: "ETH" });
+    const edited = await savePropTemplate({ ...r, name: "Edited" }, original.id, original.version);
+    expect(edited.id).toBe(original.id); expect(edited.versions).toHaveLength(1); expect(edited.versions[0].id).not.toBe(original.versions[0].id);
+    expect(await prisma.propPracticeTemplateVersion.count({ where: { templateId: original.id } })).toBe(1);
+    await expect(savePropTemplate(r, original.id, original.version)).rejects.toMatchObject({ code: "TEMPLATE_CONFLICT" });
+    const staleDelete = await templateDELETE(templateRequest("DELETE", { id: original.id, expectedVersion: original.version }));
+    expect(staleDelete.status).toBe(409);
+    const staleCreate = await accountPOST(request(s, "POST", { ...config, accountCategory: "PROP_PRACTICE", propTemplateVersionId: original.versions[0].id }), ctx);
+    expect(staleCreate.status).toBe(409); expect(await snapshot(s)).toBeNull();
+    const second = await savePropTemplate({ ...r, name: "Twice edited" }, edited.id, edited.version, false);
+    expect(await prisma.propPracticeTemplateVersion.count({ where: { templateId: original.id } })).toBe(1);
+    const row = (await listPropTemplates()).find(item => item.id === original.id)!;
+    expect(row).toMatchObject({ active: false, accountCount: 0 }); expect(row.versions[0].id).toBe(second.versions[0].id);
+    expect((await templateDELETE(templateRequest("DELETE", { id: second.id, expectedVersion: second.version }))).status).toBe(200);
+    expect(await prisma.propPracticeTemplate.findUnique({ where: { id: original.id } })).toBeNull();
+    expect(await prisma.propPracticeTemplateVersion.count({ where: { templateId: original.id } })).toBe(0);
+    expect((await templateDELETE(templateRequest("DELETE", { id: second.id, expectedVersion: second.version }))).status).toBe(404);
+  });
+  it("counts older-version and archived accounts, unlocking only after all referencing sessions are deleted", async () => {
+    const r = rules(), template = await savePropTemplate(r);
+    const sessions: Created[] = [];
+    for (let index = 0; index < 2; index++) {
+      const s = await createReplaySession("prop", { name: "Existing reference", mode: "TRAINING", timestamp: times[0], playbackRate: 1, displayIntervalSeconds: 60, displaySession: "ETH" });
+      expect((await accountPOST(request(s, "POST", { ...config, accountCategory: "PROP_PRACTICE", propTemplateVersionId: template.versions[0].id }), ctx)).status).toBe(201);
+      sessions.push(s);
+    }
+    // Reproduce legacy history: the newest rules are unused, but the older rules are referenced.
+    const latest = await prisma.propPracticeTemplate.update({ where: { id: template.id }, data: { version: 2, versions: { create: { version: 2, rules: JSON.stringify({ ...r, name: "Legacy latest" }) } } } });
+    await scoped(sessions[0], () => sqliteWriteTransaction(prisma, tx => archiveReplaySession(tx)));
+    expect((await listPropTemplates()).find(row => row.id === template.id)?.accountCount).toBe(2);
+    const update = { id: template.id, expectedVersion: latest.version, active: true, rules: r };
+    const identity = { id: template.id, expectedVersion: latest.version };
+    expect((await templatePOST(templateRequest("POST", update))).status).toBe(409);
+    expect((await templateDELETE(templateRequest("DELETE", identity))).status).toBe(409);
+    expect(await prisma.propPracticeTemplateVersion.count({ where: { templateId: template.id } })).toBe(2);
+    const before = await snapshot(sessions[0]);
+    const copied = await savePropTemplate({ ...r, name: "Independent" });
+    await savePropTemplate({ ...r, name: "Independent changed" }, copied.id, copied.version);
+    expect(await snapshot(sessions[0])).toEqual(before);
+    await removeSession(sessions[1]);
+    expect((await listPropTemplates()).find(row => row.id === template.id)?.accountCount).toBe(1);
+    expect((await templateDELETE(templateRequest("DELETE", identity))).status).toBe(409);
+    await removeSession(sessions[0]);
+    expect((await listPropTemplates()).find(row => row.id === template.id)?.accountCount).toBe(0);
+    const edited = await savePropTemplate({ ...r, name: "Unlocked" }, template.id, latest.version);
+    expect(await prisma.propPracticeTemplateVersion.count({ where: { templateId: template.id } })).toBe(1);
+    expect((await templateDELETE(templateRequest("DELETE", { id: template.id, expectedVersion: edited.version }))).status).toBe(200);
+    expect(await prisma.propPracticeTemplate.findUnique({ where: { id: copied.id } })).not.toBeNull();
+  });
+  it.each(["POST", "DELETE"])("requires a matching revision and identity for template %s", async method => {
+    const template = await savePropTemplate(rules());
+    for (const identity of [{ id: template.id }, { expectedVersion: template.version }, { id: template.id, expectedVersion: 0 }]) {
+      const handler = method === "POST" ? templatePOST : templateDELETE;
+      expect((await handler(templateRequest(method, { ...identity, ...(method === "POST" ? { active: true, rules: rules() } : {}) }))).status).toBe(400);
+    }
+    expect(await prisma.propPracticeTemplateVersion.count({ where: { templateId: template.id } })).toBe(1);
+  });
+  it.each(["edit", "delete"])("keeps concurrent account creation and template %s mutually safe", async action => {
+    const r = rules(), template = await savePropTemplate(r);
+    const s = await createReplaySession("prop", { name: "Concurrent template use", mode: "TRAINING", timestamp: times[0], playbackRate: 1, displayIntervalSeconds: 60, displaySession: "ETH" });
+    const [accountResponse, mutationResponse] = await Promise.all([
+      accountPOST(request(s, "POST", { ...config, accountCategory: "PROP_PRACTICE", propTemplateVersionId: template.versions[0].id }), ctx),
+      action === "edit" ? templatePOST(templateRequest("POST", { id: template.id, expectedVersion: template.version, active: true, rules: { ...r, name: "Changed" } }))
+        : templateDELETE(templateRequest("DELETE", { id: template.id, expectedVersion: template.version })),
+    ]);
+    if (accountResponse.status === 201) {
+      expect(mutationResponse.status).toBe(409);
+      expect((await snapshot(s))!.propAccount!.snapshot.rules.name).toBe(r.name);
+      expect(await prisma.propPracticeTemplateVersion.findUnique({ where: { id: template.versions[0].id } })).not.toBeNull();
+    } else {
+      expect(accountResponse.status).toBe(409); expect(mutationResponse.status).toBe(action === "edit" ? 201 : 200);
+      expect(await snapshot(s)).toBeNull(); expect((await loadReplayScope(s.id)).accountCategory).toBe("STANDARD");
+    }
+  });
+  it.each(["edit", "delete"])("rolls back rules deletion if template %s fails midway", async action => {
+    const template = await savePropTemplate(rules()), before = await prisma.propPracticeTemplate.findUnique({ where: { id: template.id }, include: { versions: true } });
+    const operation = action === "edit" ? "UPDATE" : "DELETE";
+    await prisma.$executeRawUnsafe(`CREATE TRIGGER reject_template_mutation BEFORE ${operation} ON PropPracticeTemplate WHEN OLD.id='${template.id}' BEGIN SELECT RAISE(ABORT, 'test template failure'); END`);
+    try {
+      if (action === "edit") await expect(savePropTemplate({ ...rules(), name: "Rejected" }, template.id, template.version)).rejects.toThrow();
+      else await expect(deletePropTemplate(template.id, template.version)).rejects.toThrow();
+    } finally { await prisma.$executeRawUnsafe("DROP TRIGGER reject_template_mutation"); }
+    expect(await prisma.propPracticeTemplate.findUnique({ where: { id: template.id }, include: { versions: true } })).toEqual(before);
   });
 });

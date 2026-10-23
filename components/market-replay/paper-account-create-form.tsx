@@ -8,7 +8,7 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { copy } from "@/lib/i18n";
-import { formatMoney, formatInteger } from "@/lib/format";
+import { formatMoney } from "@/lib/format";
 import type { CreatePaperAccountInput } from "@/lib/prop-practice/account-input";
 import type { PropRules } from "@/lib/prop-practice/rules";
 import { useReplaySession } from "./replay-session-context";
@@ -67,7 +67,7 @@ export function PaperAccountCreateForm({ busy, error, onCreate }: {
         <div className="flex flex-wrap items-center justify-between gap-2"><Label htmlFor={`${id}-template`}>{t.template}</Label><div className="flex items-center gap-1"><Button asChild variant="ghost" size="sm"><Link href="/prop-practice-templates" target="_blank" rel="noopener noreferrer">{t.manageTemplates}</Link></Button><Button type="button" variant="ghost" size="icon" aria-label={t.retryTemplates} disabled={busy || loading} onClick={() => setRetry(value => value + 1)}><RefreshCw className="h-4 w-4" aria-hidden="true" /></Button></div></div>
         <Select value={templateId} disabled={busy || loading} onValueChange={value => { setTemplateId(value); setDetailsOpen(false); }}>
           <SelectTrigger id={`${id}-template`}><SelectValue placeholder={loading ? copy.marketReplay.loading : t.selectTemplate} /></SelectTrigger>
-          <SelectContent>{templates.map(row => <SelectItem key={row.id} value={row.versions[0].id}>{JSON.parse(row.versions[0].rules).name} · {t.version} {formatInteger(row.versions[0].version)}</SelectItem>)}</SelectContent>
+          <SelectContent>{templates.map(row => <SelectItem key={row.id} value={row.versions[0].id}>{JSON.parse(row.versions[0].rules).name}</SelectItem>)}</SelectContent>
         </Select>
         {loadError ? <div className="space-y-2"><p role="alert" className="text-xs text-red-600">{loadError}</p><Button type="button" variant="outline" disabled={busy || loading} onClick={() => setRetry(value => value + 1)}>{t.retryTemplates}</Button></div> : !loading && !templates.length ? <p role="status" className="text-xs text-slate-500">{t.empty}</p> : null}
         {rules ? <div className="space-y-2">

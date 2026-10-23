@@ -102,15 +102,41 @@ export async function confirmPropPayout(input: { expectedVersion: number; reques
   });
 }
 export async function listPropTemplates() {
-  return prisma.propPracticeTemplate.findMany({ include: { versions: { orderBy: { version: "desc" }, take: 1 } }, orderBy: { updatedAt: "desc" } });
+  return prisma.$transaction(async tx => {
+    const [templates, versions] = await Promise.all([
+      tx.propPracticeTemplate.findMany({ include: { versions: { orderBy: { version: "desc" }, take: 1 } }, orderBy: { updatedAt: "desc" } }),
+      tx.propPracticeTemplateVersion.findMany({ select: { templateId: true, _count: { select: { accounts: true } } } }),
+    ]);
+    const counts = new Map<string, number>();
+    for (const version of versions) counts.set(version.templateId, (counts.get(version.templateId) ?? 0) + version._count.accounts);
+    return templates.map(template => ({ ...template, accountCount: counts.get(template.id) ?? 0 }));
+  });
+}
+async function assertPropTemplateMutable(tx: Prisma.TransactionClient, id: string, expectedVersion: number | undefined) {
+  const template = await tx.propPracticeTemplate.findUnique({ where: { id } });
+  if (!template) throw new ReplaySessionError("TEMPLATE_NOT_FOUND", 404, copy.propPractice.templateMissing);
+  if (template.version !== expectedVersion) throw new ReplaySessionError("TEMPLATE_CONFLICT", 409, copy.propPractice.templateConflict);
+  // Include archived sessions and every legacy version, not only the current rules.
+  const accounts = await tx.propPracticeAccount.count({ where: { templateVersion: { templateId: id } } });
+  if (accounts) throw new ReplaySessionError("TEMPLATE_IN_USE", 409, copy.propPractice.templateInUse);
+  return template;
 }
 export async function savePropTemplate(input: unknown, id?: string, expectedVersion?: number, active = true) {
   const rules = propRulesSchema.parse(input);
   return sqliteWriteTransaction(prisma, async tx => {
     if (!id) return tx.propPracticeTemplate.create({ data: { active, versions: { create: { version: 1, rules: JSON.stringify(rules) } } }, include: { versions: true } });
-    const previous = await tx.propPracticeTemplate.findUniqueOrThrow({ where: { id } });
-    if (expectedVersion !== previous.version) throw new ReplaySessionError("TEMPLATE_CONFLICT", 409, copy.replaySessions.conflict);
+    const previous = await assertPropTemplateMutable(tx, id, expectedVersion);
+    // Keep only current rules. Rotate their ID so stale account forms cannot silently
+    // create an account with rules different from the ones the user selected.
+    await tx.propPracticeTemplateVersion.deleteMany({ where: { templateId: id } });
     return tx.propPracticeTemplate.update({ where: { id }, data: { active, version: { increment: 1 },
       versions: { create: { version: previous.version + 1, rules: JSON.stringify(rules) } } }, include: { versions: { orderBy: { version: "desc" }, take: 1 } } });
+  });
+}
+export async function deletePropTemplate(id: string, expectedVersion: number) {
+  return sqliteWriteTransaction(prisma, async tx => {
+    await assertPropTemplateMutable(tx, id, expectedVersion);
+    await tx.propPracticeTemplateVersion.deleteMany({ where: { templateId: id } });
+    await tx.propPracticeTemplate.delete({ where: { id } });
   });
 }

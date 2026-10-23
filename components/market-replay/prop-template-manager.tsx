@@ -9,11 +9,12 @@ import { Card, CardHeader, CardTitle, CardDescription, CardContent } from "@/com
 import { Alert, AlertDescription } from "@/components/ui/alert";
 import { Select, SelectTrigger, SelectValue, SelectContent, SelectItem } from "@/components/ui/select";
 import { Badge } from "@/components/ui/badge";
+import { ConfirmDialog } from "@/components/ui/confirm-dialog";
 import { copy } from "@/lib/i18n";
 import { defaultPropRules, propRulesSchema, type PropRules } from "@/lib/prop-practice/rules";
-import { formatMoney, formatNumber } from "@/lib/format";
+import { formatMoney, formatInteger } from "@/lib/format";
 const t = copy.propPractice;
-export type PropTemplateRow = { id: string; active: boolean; version: number; versions: { id: string; version: number; rules: string }[] };
+export type PropTemplateRow = { id: string; active: boolean; version: number; accountCount: number; versions: { id: string; version: number; rules: string }[] };
 type NumericKey = "initialCapital" | "drawdown" | "capOffset" | "target" | "minTradingDays" | "qualifyingDays" | "qualifyingProfit" | "consistency" | "minimum" | "fraction" | "maximum" | "buffer" | "traderShare" | "permanentFloorOffset" | "purchaseCost" | "activationCost";
 function flatten(value: object, prefix = ""): Record<string, string> {
   return Object.fromEntries(Object.entries(value).flatMap(([key, v]) => v !== null && typeof v === "object" ? Object.entries(flatten(v, prefix + key + ".")) : [[prefix + key, v == null ? "" : String(v)]]));
@@ -33,17 +34,21 @@ export function PropTemplateManager() {
   const [rows, setRows] = useState<PropTemplateRow[]>([]), [loading, setLoading] = useState(true);
   const [editing, setEditing] = useState<PropTemplateRow | null>(null), [opened, setOpened] = useState(false);
   const [values, setValues] = useState(flatten(defaultPropRules)), [active, setActive] = useState(true);
-  const [busy, setBusy] = useState(false), [error, setError] = useState<string | null>(null), [saved, setSaved] = useState(false);
+  const [busy, setBusy] = useState(false), [error, setError] = useState<string | null>(null), [success, setSuccess] = useState<string | null>(null);
+  const [deleting, setDeleting] = useState<PropTemplateRow | null>(null), [deleteError, setDeleteError] = useState<string | null>(null);
   const [fieldErrors, setFieldErrors] = useState<Record<string, string>>({});
+  const editLocked = !!editing && (rows.find(row => row.id === editing.id)?.accountCount ?? 0) > 0;
   async function reload() {
     const response = await fetch("/api/prop-practice-templates", { cache: "no-store" });
     const data = await response.json(); if (!response.ok) throw new Error(data.error ?? t.requestFailed); setRows(data.templates);
   }
   useEffect(() => { void reload().catch(e => setError(e.message)).finally(() => setLoading(false)); }, []);
   function begin(row?: PropTemplateRow, duplicate = false) {
-    // Editing explicitly creates a current-schema version; never rewrite saved snapshots.
-    setEditing(duplicate ? null : row ?? null); setValues({ ...flatten(defaultPropRules), ...flatten(row ? JSON.parse(row.versions[0].rules) : defaultPropRules), schemaVersion: String(defaultPropRules.schemaVersion) });
-    setActive(duplicate ? true : row?.active ?? true); setOpened(true); setError(null); setFieldErrors({}); setSaved(false);
+    if (row && !duplicate && row.accountCount) return;
+    const initial: Record<string, string> = { ...flatten(defaultPropRules), ...flatten(row ? JSON.parse(row.versions[0].rules) : defaultPropRules), schemaVersion: String(defaultPropRules.schemaVersion) };
+    if (duplicate) initial.name = t.copyTemplateName(initial.name).slice(0, 100);
+    setEditing(duplicate ? null : row ?? null); setValues(initial);
+    setActive(duplicate ? true : row?.active ?? true); setOpened(true); setError(null); setFieldErrors({}); setSuccess(null);
   }
   function numberField(prefix: string, key: NumericKey, optional = false, signed = false) {
     const path = prefix + key, id = "prop-" + path.replaceAll(".", "-");
@@ -64,8 +69,8 @@ export function PropTemplateManager() {
     </>;
   }
   async function save() {
-    if (busy) return;
-    setError(null); setFieldErrors({}); setSaved(false);
+    if (busy || editLocked) return;
+    setError(null); setFieldErrors({}); setSuccess(null);
     const parsed = propRulesSchema.safeParse(hydrate(defaultPropRules, values));
     if (!parsed.success) {
       setFieldErrors(Object.fromEntries(parsed.error.issues.map(i => [i.path.join("."), i.code === "custom" && [t.invalidCap, t.invalidMinimum, t.invalidMoneyPrecision].some(message => message === i.message) ? i.message : t.invalidRules])));
@@ -74,14 +79,32 @@ export function PropTemplateManager() {
     setBusy(true);
     try {
       const response = await fetch("/api/prop-practice-templates", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ id: editing?.id, expectedVersion: editing?.version, active, rules: parsed.data }) });
-      const data = await response.json(); if (!response.ok) throw new Error(data.error ?? t.requestFailed);
-      await reload(); setOpened(false); setSaved(true);
+      const data = await response.json();
+      if (!response.ok) { await reload().catch(() => undefined); throw new Error(data.error ?? t.requestFailed); }
+      setOpened(false); await reload(); setSuccess(t.saved);
     } catch (e) { setError(e instanceof Error ? e.message : t.requestFailed); } finally { setBusy(false); }
   }
+  async function remove() {
+    if (!deleting || busy) return;
+    setBusy(true); setDeleteError(null); setSuccess(null);
+    try {
+      const response = await fetch("/api/prop-practice-templates", { method: "DELETE", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ id: deleting.id, expectedVersion: deleting.version }) });
+      const data = await response.json();
+      if (!response.ok) { await reload().catch(() => undefined); throw new Error(data.error ?? t.requestFailed); }
+      if (editing?.id === deleting.id) setOpened(false);
+      setDeleting(null); await reload(); setSuccess(t.templateDeleted); setError(null);
+    } catch (e) { const message = e instanceof Error ? e.message : t.requestFailed; setDeleteError(message); setError(message); } finally { setBusy(false); }
+  }
+  async function refresh() {
+    if (busy) return;
+    setBusy(true); setError(null);
+    try { await reload(); } catch (e) { setError(e instanceof Error ? e.message : t.requestFailed); } finally { setBusy(false); }
+  }
   return <div className="space-y-6" aria-busy={loading || busy}>
-    <div className="flex justify-end"><Button disabled={busy || loading} onClick={() => begin()}>{t.create}</Button></div>
+    <div className="flex justify-end gap-2"><Button variant="outline" disabled={busy || loading} onClick={() => void refresh()}>{t.retryTemplates}</Button><Button disabled={busy || loading} onClick={() => begin()}>{t.create}</Button></div>
     {error ? <Alert role="alert" className="border-red-200 bg-red-50"><AlertDescription id="prop-template-error">{error}</AlertDescription></Alert> : null}
-    {saved ? <Alert role="status" aria-live="polite" className="border-emerald-200 bg-emerald-50"><AlertDescription>{t.saved}</AlertDescription></Alert> : null}
+    {success ? <Alert role="status" aria-live="polite" className="border-emerald-200 bg-emerald-50"><AlertDescription>{success}</AlertDescription></Alert> : null}
+    {opened && editLocked ? <Alert className="border-amber-200 bg-amber-50"><AlertDescription>{t.templateInUse}</AlertDescription></Alert> : null}
     {opened ? <form className="space-y-4" aria-describedby={error ? "prop-template-error" : undefined} onSubmit={e => { e.preventDefault(); void save(); }}>
       <Card><CardHeader><CardTitle>{editing ? t.edit : t.create}</CardTitle><CardDescription>{t.templateHint}</CardDescription></CardHeader><CardContent className="space-y-4">
         <div className="space-y-2"><Label htmlFor="prop-name">{t.name}</Label><Input id="prop-name" required maxLength={100} disabled={busy} value={values.name} onChange={e => setValues(v => ({ ...v, name: e.target.value }))} /></div>
@@ -92,11 +115,13 @@ export function PropTemplateManager() {
       <Card><CardHeader><CardTitle>{t.evaluation}</CardTitle><CardDescription>{t.optionalHint} {t.consistencyHint}</CardDescription></CardHeader><CardContent className="grid gap-4 sm:grid-cols-2">{riskFields("evaluation")}{numberField("evaluation.", "target")}{numberField("evaluation.", "minTradingDays", true)}{numberField("evaluation.", "consistency", true)}</CardContent></Card>
       <Card><CardHeader><CardTitle>{t.funded}</CardTitle><CardDescription>{t.optionalHint} {t.qualifyingHint}</CardDescription></CardHeader><CardContent className="grid gap-4 sm:grid-cols-2">{riskFields("funded")}{numberField("funded.", "qualifyingDays", true)}{values["funded.qualifyingDays"] !== "" ? numberField("funded.", "qualifyingProfit") : null}{numberField("payout.", "minimum")}{numberField("payout.", "fraction")}{numberField("payout.", "maximum", true)}{numberField("payout.", "buffer", true)}{numberField("payout.", "traderShare")}{numberField("payout.", "permanentFloorOffset", true, true)}</CardContent></Card>
       <p className="text-xs text-slate-500">{t.amountHint}</p>
-      <div className="flex justify-end gap-2 border-t pt-4"><Button variant="outline" type="button" disabled={busy} onClick={() => setOpened(false)}>{copy.common.cancel}</Button><Button type="submit" disabled={busy}>{busy ? copy.marketReplay.loading : t.save}</Button></div>
+      <div className="flex justify-end gap-2 border-t pt-4"><Button variant="outline" type="button" disabled={busy} onClick={() => setOpened(false)}>{copy.common.cancel}</Button><Button type="submit" disabled={busy || editLocked}>{busy ? copy.marketReplay.loading : t.save}</Button></div>
     </form> : null}
     {loading ? <p role="status">{copy.marketReplay.loading}</p> : rows.length ? <div className="grid gap-4 md:grid-cols-2">{rows.map(row => {
       const rules: PropRules = JSON.parse(row.versions[0].rules);
-      return <Card key={row.id}><CardHeader><CardTitle>{rules.name} <Badge>{row.active ? t.active : t.inactive}</Badge></CardTitle><CardDescription>{t.version} {formatNumber(row.version)} · {rules.description}</CardDescription></CardHeader><CardContent className="space-y-4"><PropRuleSummary rules={rules} /><div className="flex flex-wrap justify-end gap-2"><Button variant="outline" size="sm" disabled={busy} onClick={() => begin(row)}>{t.edit}</Button><Button variant="outline" size="sm" disabled={busy} onClick={() => begin(row, true)}>{t.duplicate}</Button></div></CardContent></Card>;
+      const locked = row.accountCount > 0, usageId = "template-usage-" + row.id;
+      return <Card key={row.id}><CardHeader><CardTitle>{rules.name} <Badge>{row.active ? t.active : t.inactive}</Badge></CardTitle>{rules.description ? <CardDescription>{rules.description}</CardDescription> : null}</CardHeader><CardContent className="space-y-4"><PropRuleSummary rules={rules} /><p id={usageId} className="text-xs text-slate-500">{locked ? t.templateUsage(formatInteger(row.accountCount)) : t.templateUnused}</p><div className="flex flex-wrap justify-end gap-2"><Button variant="outline" size="sm" disabled={busy || locked} aria-describedby={usageId} onClick={() => begin(row)}>{t.edit}</Button><Button variant="outline" size="sm" disabled={busy} onClick={() => begin(row, true)}>{t.duplicate}</Button><Button variant="destructive" size="sm" disabled={busy || locked} aria-describedby={usageId} onClick={() => { setDeleting(row); setDeleteError(null); setSuccess(null); }}>{t.deleteTemplate}</Button></div></CardContent></Card>;
     })}</div> : <Card><CardContent className="p-6 text-sm text-slate-600">{t.empty}</CardContent></Card>}
+    <ConfirmDialog open={!!deleting} title={t.deleteTemplateTitle} description={deleting ? t.deleteTemplateHint(JSON.parse(deleting.versions[0].rules).name) : ""} confirmLabel={t.deleteTemplate} isLoading={busy} error={deleteError} onCancel={() => { if (!busy) setDeleting(null); }} onConfirm={() => void remove()} />
   </div>;
 }
