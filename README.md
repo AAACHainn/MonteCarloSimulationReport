@@ -9,7 +9,7 @@
 
 面向个人交易者的本地 Web 应用：导入历史行情，在隐藏未来数据的环境中练习交易；记录策略、执行与复盘；使用历史交易的 `R-multiple` 样本，分析不同资金管理方式下的收益、回撤和连续亏损分布。默认界面语言为简体中文，数据保存在本地 SQLite 中。
 
-[功能概览](#功能概览) · [快速开始](#快速开始) · [使用流程](#使用流程) · [功能说明](#功能说明) · [导入格式](#导入格式) · [数据与使用边界](#数据与使用边界) · [开发与验证](#开发与验证) · [文档导航](#文档导航)
+[功能概览](#功能概览) · [快速开始](#快速开始) · [已有安装升级](#已有安装升级) · [使用流程](#使用流程) · [功能说明](#功能说明) · [导入格式](#导入格式) · [数据与使用边界](#数据与使用边界) · [开发与验证](#开发与验证) · [文档导航](#文档导航)
 
 ## 功能概览
 
@@ -27,7 +27,7 @@
 
 ## 快速开始
 
-以下步骤用于全新安装。已有数据库的安装请先阅读 [升级指南](docs/operations/upgrade.md)，按原有数据库管理方式升级。
+以下步骤用于全新安装。已有数据库请使用下方的[已有安装升级](#已有安装升级)流程；迁移路径、备份和回退细节见[升级指南](docs/operations/upgrade.md)。
 
 ### 获取源码
 
@@ -118,6 +118,41 @@ corepack pnpm start
 仓库还提供 `Dockerfile.prod` 与 `compose.prod.yaml`。生产 Compose 引用预构建镜像，拉取源码不会自动更新该镜像；runner 已包含后台 worker 所需源码，仍须验证目标镜像的原生驱动、worker 与持久化。启用 WAL 时还需显式传入 SQLite 配置，并将迁移从服务启动命令分离，详见 [Docker 部署检查](docs/operations/upgrade.md#docker-部署的额外检查)。
 
 已有数据库的迁移、SQLite 驱动或 WAL 配置变更，请按[升级指南](docs/operations/upgrade.md)核对目标环境、备份并执行相应步骤。
+
+## 已有安装升级
+
+数据库升级阶段已整合为一条命令：`corepack pnpm run db:upgrade`。它复用原迁移或初始化逻辑，自动完成一致性备份、迁移方式识别、副本演练及重复执行检查、正式升级和数据核对；保留数据库原有 WAL / DELETE 模式。该命令可重复使用，但不包含更新代码、安装依赖、停止服务、构建或重启。
+
+本地 Node 安装按以下顺序操作，每条命令成功后再继续：
+
+1. 停止本项目服务及所有关联 worker，确认导入、同步和纠错任务已停止；更新到目标代码，保留原 `.env`、密钥和业务文件，不用示例配置覆盖。安装依赖、准备升级使用的 SQLite 维护驱动，并生成当前 Prisma Client：
+
+   ```bash
+   corepack pnpm install --frozen-lockfile
+   corepack pnpm run db:prepare-sqlite
+   corepack pnpm prisma generate
+   ```
+
+2. 执行统一数据库升级入口：
+
+   ```bash
+   corepack pnpm run db:upgrade
+   ```
+
+   交互时输入脚本显示的数据库绝对路径，并确认已停止全部写入。脚本按 `DATABASE_URL` 选择实际库，相对路径仍基于 `prisma/`；不会代替你停止服务，也不会为缺失的数据库新建空库。非交互运行的 `--expect-database`、`--stopped` 和备份目录参数见[完整命令说明](docs/operations/upgrade.md#推荐入口可重复执行的离线升级编排)。
+
+3. 升级成功后重新构建并启动生产服务，再刷新浏览器、核对页面和账户数据：
+
+   ```bash
+   corepack pnpm run build
+   corepack pnpm start
+   ```
+
+   开发模式使用 `corepack pnpm dev`，不要与生产服务同时运行。
+
+默认备份位于项目目录同级的 `<项目目录名>-db-upgrades/`，每次保留独立备份、副本、日志和报告。失败时保留数据库、WAL/SHM 和维护锁，不自动恢复覆盖或重置数据库；涉及改写旧数据的迁移可能在副本核对阶段停止，应先按[升级指南](docs/operations/upgrade.md)核实原因。不要靠反复切换迁移方式或删除锁文件跳过失败。
+
+Docker 部署须使用目标镜像及实际数据卷、环境配置执行离线升级；不能直接套用宿主机默认数据库路径，也不能将升级命令塞入每次服务启动流程。具体步骤见[Docker 部署检查](docs/operations/upgrade.md#docker-部署的额外检查)。
 
 ## 使用流程
 
@@ -266,7 +301,7 @@ lib/
   trade-journal/        交易记录、标签与备份
   i18n.ts               简体中文文案
 prisma/                 数据模型与迁移
-scripts/                数据库初始化、后台 worker 与专项验证
+scripts/                数据库初始化与升级、后台 worker 与专项验证
 public/templates/       CSV 模板
 docs/logs/              开发周报、近期日记录与完整 Git 提交索引
 docs/                   按主题分类的文档与目录索引
@@ -290,7 +325,7 @@ Windows 下若 Prisma query engine DLL 被占用，请先确认并停止本项�
 | --- | --- |
 | [分类文档目录](docs/README.md) | 按 AI、绘图、行情、回放、运维、UI、历史与审查查找专题说明 |
 | [开发日志](docs/logs/README.md) | main 分支开发历史：早期按周、近期按天及完整提交索引 |
-| [现有安装升级与跨机器部署](docs/operations/upgrade.md) | 备份、迁移路径、密钥保留、生产部署检查、验收与回退 |
+| [现有安装升级与跨机器部署](docs/operations/upgrade.md) | `db:upgrade`、备份、迁移路径、密钥保留、生产部署检查、验收与回退 |
 | [行情增量同步](docs/market-data/market-data-sync.md) | Databento 连接、自动计划、预算与冲突处理 |
 | [模拟训练交易关卡](docs/replay/training-gate.md) | 策略清单、连亏触发、计数与会话恢复 |
 | [回放交易 PDF 导出](docs/replay/replay-pdf-export.md) | 筛选、截图、明细字段与分卷下载 |
