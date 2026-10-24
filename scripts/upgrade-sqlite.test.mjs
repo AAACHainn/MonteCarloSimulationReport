@@ -1,7 +1,7 @@
 import { beforeAll, describe, expect, it } from "vitest";
 import Database from "better-sqlite3";
 import { execFileSync } from "node:child_process";
-import { copyFileSync, existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, writeFileSync } from "node:fs";
+import { copyFileSync, cpSync, existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { basename, join } from "node:path";
 import { randomUUID } from "node:crypto";
@@ -12,7 +12,7 @@ const base = join(directory, "base.db");
 const root = process.cwd();
 const childEnv = file => ({ ...process.env, DATABASE_URL: "file:" + file.replaceAll("\\", "/"), SQLITE_DRIVER: "native", SQLITE_JOURNAL_MODE: "delete", SQLITE_SYNCHRONOUS: "FULL", MARKET_DATA_SYNC_ENABLED: "0" });
 const options = file => ({ expectedDatabase: file, stopped: true, filesRoot: directory, backupDirectory: join(directory, "backups-" + basename(file)), env: childEnv(file) });
-const readReport = file => JSON.parse(readFileSync(join(readdirSync(options(file).backupDirectory).map(name => join(options(file).backupDirectory, name))[0], "report.json"), "utf8"));
+const readReport = file => JSON.parse(readFileSync(join(options(file).backupDirectory, readdirSync(options(file).backupDirectory).sort().at(-1), "report.json"), "utf8"));
 function command(args, env, logFile) {
   const output = execFileSync(process.execPath, args, { cwd: root, env, windowsHide: true, encoding: "utf8", stdio: "pipe" });
   writeFileSync(logFile, output);
@@ -112,6 +112,12 @@ describe("repeatable offline SQLite upgrade", () => {
     expect((await upgradeDatabase(options(file), execute)).status).toBe("SUCCESS");
     expect(inspect(file, db => fingerprint(db, before))).toEqual(before);
     expect(observed).toEqual(["rehearsal.log", "rehearsal-repeat.log", "apply.log", "rehearsal.log", "rehearsal-repeat.log", "apply.log"]);
+    // A complete migration history does not prove implicit relation tables exist.
+    inspect(file, db => db.exec('DROP TABLE "_TradeToTradeTag"'));
+    const damaged = inspect(file, fingerprint);
+    await expect(upgradeDatabase(options(file), execute)).rejects.toThrow(/关联表/);
+    expect(readReport(file)).toMatchObject({ status: "FAILED", phase: "rehearsal" });
+    expect(inspect(file, fingerprint)).toEqual(damaged);
   }, 60000);
 
   it("refuses wrong paths, missing files, relative confirmation paths and missing stop acknowledgement without opening a new DB", async () => {
@@ -212,4 +218,50 @@ describe("repeatable offline SQLite upgrade", () => {
     expect(() => execFileSync(process.execPath, ["scripts/upgrade-sqlite.mjs"], { cwd: root, env: childEnv(base), stdio: "pipe", windowsHide: true })).toThrow();
     expect(existsSync(base + ".upgrade.lock")).toBe(false);
   });
+
+  it.each(["scripts/init-sqlite.mjs", "lib/sqlite-client.mjs"])("rejects %s changed after rehearsal before it can modify the official database", async changedFile => {
+    const file = fixture(), isolatedRoot = mkdtempSync(join(root, "tmp/upgrade-code-fixture-"));
+    for (const name of ["scripts", "lib", "prisma"]) mkdirSync(join(isolatedRoot, name));
+    for (const name of ["scripts/init-sqlite.mjs", "scripts/upgrade-sqlite.mjs", "lib/sqlite-client.mjs", "prisma/schema.prisma", "package.json", "pnpm-lock.yaml"]) copyFileSync(join(root, name), join(isolatedRoot, name));
+    cpSync(join(root, "prisma/migrations"), join(isolatedRoot, "prisma/migrations"), { recursive: true });
+    let applied = false, failure;
+    try {
+      await upgradeDatabase({ ...options(file), root: isolatedRoot }, (args, env, log) => {
+        if (basename(log) === "apply.log") applied = true;
+        command(args, env, log);
+        if (basename(log) === "rehearsal-repeat.log") {
+          const script = join(isolatedRoot, changedFile);
+          const change = changedFile.startsWith("scripts/") ? '\nconst drift = createDatabaseClient(); try { await drift.$executeRawUnsafe("UPDATE MarketBar SET close=999"); } finally { await drift.$disconnect(); }\n' : '\n// Changed local dependency after successful rehearsal.\n';
+          writeFileSync(script, readFileSync(script, "utf8") + change);
+        }
+      });
+    } catch (error) { failure = error; }
+    expect({ applied, close: inspect(file, db => db.prepare("SELECT close FROM MarketBar").get().close) }).toEqual({ applied: false, close: 105 });
+    expect(failure?.message).toMatch(/升级执行代码/);
+    expect(existsSync(file + ".upgrade.lock")).toBe(true);
+    expect(existsSync(join(readReport(file).directory, "apply.log"))).toBe(false);
+  }, 30000);
+
+  it.each(["_TradeToTradeTag", "_ReplayJournalTradeReasons"])("repairs missing implicit relation %s via the original initialization script", async table => {
+    const file = fixture(); inspect(file, db => db.exec(`DROP TABLE "${table}"`));
+    const before = inspect(file, fingerprint);
+    const result = await upgradeDatabase(options(file));
+    expect(result.status).toBe("SUCCESS");
+    expect(inspect(file, db => fingerprint(db, before))).toEqual(before);
+    expect(inspect(file, db => db.prepare(`SELECT A,B FROM "${table}"`).all())).toEqual([]);
+  }, 30000);
+
+  it.each(["_TradeToTradeTag", "_ReplayJournalTradeReasons"])("rejects an incomplete implicit relation %s on the rehearsal before apply", async table => {
+    const file = fixture(); let applied = false;
+    await expect(upgradeDatabase(options(file), (args, env, log) => {
+      if (basename(log) === "apply.log") applied = true;
+      command(args, env, log);
+      if (basename(log) === "rehearsal.log") inspect(env.DATABASE_URL.slice(5), db => {
+        db.exec(`DROP TABLE "${table}"; CREATE TABLE "${table}" (A TEXT NOT NULL)`);
+      });
+    })).rejects.toThrow(/关联表/);
+    expect(applied).toBe(false);
+    expect(inspect(file, db => db.pragma(`table_info("${table}")`).map(column => column.name))).toEqual(["A", "B"]);
+    expect(readReport(file)).toMatchObject({ status: "FAILED", phase: "rehearsal" });
+  }, 30000);
 });
