@@ -178,6 +178,7 @@ export async function syncReplayToTarget(
             const day = propTradingDay(dbBar.timestamp, prop.snapshot.calendar)!;
             prop.state = observeProp(prop.snapshot.rules, prop.state, { sequence: bar.sequence, day: day.day,
               rawNet: state.realizedPnl - state.totalFees, unrealized: result.equityPoint.equity - result.equityPoint.balance,
+              realizedPnl: state.realizedPnl, totalFees: state.totalFees,
               flat: state.netQuantity === 0, pending: orders.length, hadFill: result.fills.length > 0 });
             if (day.eod && state.netQuantity === 0) prop.state = settlePropDay(prop.snapshot.rules, prop.state);
             if (prop.state.result || prop.state.pause === "STAGE_WAIT") stopped = true;
