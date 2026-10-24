@@ -66,9 +66,41 @@ corepack pnpm prisma generate
 
 若 Windows 环境无法解析 Prisma 命令，可使用项目中的 `node node_modules/prisma/build/index.js ...` 执行相同 Prisma 子命令。
 
-**已有 WAL 库先处理迁移连接。** 当前 Prisma CLI 没有配置应用适配器，不经过 `lib/sqlite-client.mjs`，也不受应用的 `SQLITE_DRIVER` 防护控制；不能认为设置新驱动就同时升级了迁移引擎。对已有 WAL 库执行 CLI 迁移前，按下方 [已有 WAL 库的迁移顺序](#已有-wal-库的迁移顺序) 停机转为 DELETE；完成迁移、关闭迁移连接后再启用 WAL。Prisma CLI 的适配器配置与应用 Client 独立，见 [Prisma v6 配置说明](https://www.prisma.io/docs/orm/v6/reference/prisma-config-reference#adapter-removed)。
+**已有 WAL 库保持原日志模式离线升级。** Prisma CLI 不经过应用的 `lib/sqlite-client.mjs`，设置 `SQLITE_DRIVER` 不会替换它的迁移引擎；初始化脚本则复用应用连接工厂，可明确使用已验证的新驱动。两条升级路径都不要求先转 DELETE，具体顺序见 [已有 WAL 库的迁移顺序](#已有-wal-库的迁移顺序)。CLI 只在所有应用及 worker 停写、完成备份副本验证的离线阶段使用，不据此放开旧 native 应用驱动访问 WAL 的保护。Prisma CLI 的配置与应用 Client 独立，见 [Prisma v6 配置说明](https://www.prisma.io/docs/orm/v6/reference/prisma-config-reference)。
 
-### 路径 A：Prisma 迁移历史完整
+### 推荐入口：可重复执行的离线升级编排
+
+已安装目标依赖并生成当前 Prisma Client 后，可以使用统一入口，替代手动串联下列步骤；它复用原迁移 SQL 或 `init-sqlite.mjs`，不另建迁移实现，也不自动构建或启动服务：
+
+```powershell
+corepack pnpm run db:upgrade
+```
+
+命令读取项目 `.env`，已有进程环境变量优先，按应用相同规则解析 `DATABASE_URL`（相对路径基于 `prisma/`）。交互模式要求输入实际数据库绝对路径，并确认本项目服务、同步、导入及所有 worker 已停写；命令不会自动停止进程。非交互部署需明确提供核对路径及停写声明，例如：
+
+```powershell
+corepack pnpm run db:upgrade --expect-database "D:/实际部署目录/prisma/dev.db" --stopped --backup-dir "D:/数据库升级备份"
+```
+
+该示例路径须替换为目标机器的实际路径。不存在的数据库、路径不匹配或未确认停写均直接拒绝，不代建空库。维护驱动使用项目锁定的 better-sqlite3，需先完成 `db:prepare-sqlite`；应用仍可沿用 native。
+
+流程如下：
+
+1. 独占创建 `<数据库路径>.upgrade.lock`，防止升级命令相互并发。它不是应用维护锁，不能代替实际停止服务和 worker。
+2. 核对完整性与外键，通过 SQLite backup API 创建包含已提交 WAL 页的一致性 `before.db`；保存逐表全量 SHA-256、行数和原字段基线，不采样。同步复制存在的 `.env`、`storage/`、`.market-imports/`，不改原环境或密钥。服务环境及 Docker 卷挂载不在这些路径内的文件仍须按第 2 节另备份。
+3. 识别原安装方式：没有迁移历史表的可识别业务库走原初始化脚本；有完整、校验和匹配的迁移前缀走 `prisma migrate deploy`。空历史、未完成/失败记录、分叉或校验和不符均停止，不自动换路径、重置或标记迁移完成。允许 LF/CRLF 换行差异，不允许 SQL 内容变化。
+4. 在独立 `rehearsal.db` 上执行原升级入口，关闭行情同步；再执行一次验证幂等性。检查目标模型表/字段、完整性、外键、原字段全量数据，以及重复执行结果。
+5. 复核正式库自备份后未变化、数据库文件未被替换、迁移文件及 schema 未变化；通过后对正式库执行同一路径。正式结果的表结构与全量数据须与演练一致，原字段数据还需与备份一致。
+6. 两条路径都保持源库原先的 WAL/DELETE 模式，不强制 checkpoint 或临时转 DELETE。演练副本在必要时设为源库模式，正式库模式若被外部改变则拒绝升级。初始化子进程使用 better-sqlite3；CLI 仍使用其自身引擎，不能视为继承了新适配器。写锁冲突直接停止，不删除 WAL/SHM。子进程维护连接临时使用 FULL，不改原 FULL/NORMAL 配置，应用重启后仍按原配置连接。
+7. 成功写出报告并释放维护锁；重复运行仍建立新的备份和演练目录，不覆盖上次现场。默认备份根位于项目检出目录的同级 `<项目目录名>-db-upgrades/`，也可用 `--backup-dir` 指定。
+
+每次目录包含 `before.db`、`rehearsal.db`、`baseline.json`、演练/正式数据摘要、各子进程日志和 `report.json`；报告包含路径、选择的迁移方式、原日志模式、迁移校验和、失败阶段或成功结果。备份含私有数据和可能的密钥，应限制目录访问，禁止加入 Git 或 Docker 构建上下文。
+
+**保守的数据保护限制：** 统一入口只自动放行不改变原有行与字段的升级，可添加表和列。旧版本升级涉及物理 ID 转换、旧结果清理、历史字段回填或删除旧派生摘要时，原脚本即使正常执行，也可能在演练的原数据核对处停止；这是保护门，不提供忽略校验的强制开关。应保留演练报告，按本文旧迁移说明确认具体转换，再采用经过单独核验的原路径处理，不能因失败直接改走另一迁移方式。
+
+**失败处理：** 正式库可能尚未修改，也可能停在部分升级状态，以报告阶段和实际结构为准；编排不为升级切换正式库日志模式。命令保留数据库、WAL/SHM、备份、副本、日志及 `.upgrade.lock`，不会用备份自动覆盖。保留现场并查明失败原因，确认原进程已退出、无其他升级任务后，才按明确路径单独移除该锁，再按已核实状态重新运行；不要批量清理或直接重启仍不兼容的旧服务。仅保留锁不代表仍有进程正在运行。
+
+### 路径 A：Prisma 迁移历史完整（手动流程）
 
 先将备份复制为隔离演练库，在独立进程中让 `DATABASE_URL` 指向副本，再检查和应用迁移；不要为了演练改写生产 `.env`。迁移后的应用试运行设置 `MARKET_DATA_SYNC_ENABLED=0`，防止副本自动调用行情提供商。
 
@@ -158,16 +190,14 @@ NORMAL 仅支持上述驱动与日志模式组合，不提供 OFF 配置。按�
 
 #### 已有 WAL 库的迁移顺序
 
-已经启用 WAL 的安装，后续需要 Prisma CLI 迁移时，仍先停止全部写入并建立当前备份。保留新驱动和现有数据库路径，使用新驱动离线转换为 DELETE：
+已经启用 WAL 的安装，后续结构升级保持 WAL，不临时转 DELETE。此前文档要求一律切换是针对旧迁移引擎的保守策略，不是 SQLite 修改结构的必要条件；现以本节替代。
 
-~~~powershell
-$env:SQLITE_DRIVER = "better-sqlite3"
-$env:SQLITE_JOURNAL_MODE = "delete"
-$env:SQLITE_SYNCHRONOUS = "FULL"
-corepack pnpm run db:runtime --integrity
-~~~
+1. 停止本项目服务及全部 worker，确认没有导入、同步、纠错或其他写入，保留实际数据库路径、新驱动和原 FULL/NORMAL 配置。
+2. 优先运行 `db:upgrade`，通过 SQLite backup API 获取包含已提交 WAL 页的一致性备份。在副本保持 WAL，按识别结果执行初始化或 `migrate deploy`，复跑验证，再升级正式库。
+3. 初始化路径使用 better-sqlite3 / SQLite 3.51.3；CLI 使用其独立引擎。即使 CLI 可以离线处理 WAL，也不能因此将应用改回 native，或允许 CLI 与业务服务并发写入。
+4. 核对升级后仍为 WAL、完整性/外键和原有数据正常；关闭迁移进程后再构建、启动和验收。目标 Linux/容器环境仍须先完成同样副本验证，本机结果不能代替目标平台验收。
 
-确认 `journalMode=delete`、完整性/外键正常后，再按路径 A 执行迁移，或按路径 B 处理已核实适用的旧库。迁移进程全部退出后，将正式配置恢复为 `better-sqlite3 / wal` 以及原先选定的同步级别，清除维护终端的临时覆盖，重新执行诊断并启动应用。演练库与正式库分别执行此流程；不能只设置环境变量而未确认库已转为 DELETE。若仅部署此前无结构变更的性能代码，不必为提速运行初始化脚本。
+不手工删除 WAL/SHM，不要求为了本次升级强制 checkpoint。若仅部署无结构变更的性能代码，不必为提速运行初始化脚本。只有明确回退为旧 native 应用驱动时，才按回退章节单独转换日志模式。
 
 ## 4. 本阶段的重要迁移
 
@@ -229,7 +259,7 @@ corepack pnpm start
 
 - `compose.yaml` 挂载源码并启动 `dev`，不是生产 start 部署。
 - `compose.prod.yaml` 当前引用 `sudongpojiaozi/monte-carlo-simulation-report:v0.1`，没有 `build` 配置；仅拉取仓库代码或执行 Compose 的 `up --build` 不会从最新源码生成该生产镜像。应构建并发布/指定包含目标提交的镜像，记录摘要，保留原数据卷。
-- `Dockerfile.prod` 默认启动命令每次都会先执行 `prisma migrate deploy`。创建新容器前必须完成备份和迁移路径检查；已有 WAL 库需先转 DELETE，迁移单独完成后，WAL 服务必须覆盖启动命令为仅启动 Next，避免重启再次经过旧迁移引擎。旧初始化方式的库也不能未经迁移基线处理就使用默认启动命令。
+- `Dockerfile.prod` 默认启动命令每次都会先执行 `prisma migrate deploy`。创建新容器前必须完成备份和迁移路径检查；迁移保持原模式并单独离线完成后，WAL 服务仍须覆盖启动命令为仅启动 Next，避免普通重启未经备份和演练就执行迁移。旧初始化方式的库也不能未经迁移基线处理就使用默认启动命令。
 - AI 版本的生产 runner 已补充 `scripts/`、`lib/`、`tsconfig.json`，供回退与 AI 分析 worker 运行。仍需发布包含当前代码的镜像，并实测子进程、环境变量与持久化；仅首页 healthcheck 成功不能证明 worker 可用，本次未发布或实机验证 Docker 镜像。
 - 当前生产 Compose 没有映射 `SQLITE_DRIVER` / `SQLITE_JOURNAL_MODE`；仅在宿主机 `.env` 添加这两项不会自动传进容器，须显式增加容器环境变量。
 - 镜像从目标提交的干净检出或只含受版本管理文件的构建目录生成。`.gitignore` 不控制 Docker 构建上下文，当前 `.dockerignore` 没有完整排除 `tmp/`、导入暂存和备份文件；不要从含业务数据、私有备份或额外环境文件的工作目录直接构建镜像。
@@ -249,7 +279,7 @@ services:
     command: ["./node_modules/.bin/next", "start", "--hostname", "0.0.0.0"]
 ~~~
 
-生产顺序为：准备/验证新镜像 → 停止旧服务及 worker → 备份 → 需要时离线转 DELETE 并单独完成迁移 → 用新镜像的一次性诊断进程在原数据卷启用/核对 WAL → 用覆盖配置启动服务。一次性进程应使用同一 Compose 项目、卷和环境，且覆盖 `command` 为 `node scripts/sqlite-runtime.mjs --integrity`；不启动第二个应用，不用空卷代替原生产卷。最终按第 6 节验证后再恢复使用。
+生产顺序为：准备/验证新镜像 → 停止旧服务及 worker → 备份 → 保持原日志模式完成副本演练及正式迁移 → 用新镜像的一次性诊断进程在原数据卷核对 WAL → 用覆盖配置启动服务。一次性进程应使用同一 Compose 项目、卷和环境，且覆盖 `command` 为 `node scripts/sqlite-runtime.mjs --integrity`；不启动第二个应用，不用空卷代替原生产卷。最终按第 6 节验证后再恢复使用。
 
 在干净源码构建目录可用 `docker build -f Dockerfile.prod -t <目标镜像标签> .` 生成镜像，并用 `docker run --rm --entrypoint node <目标镜像标签> scripts/setup-sqlite-driver.mjs` 检查镜像内原生模块。部署时同时指定 `-f compose.prod.yaml -f <覆盖文件路径>`，先运行 `docker compose ... config --quiet` 检查配置，再按上述顺序执行一次性命令及 `up -d`；镜像自检不挂正式数据卷。保留原项目名，覆盖文件、镜像配置和卷路径都纳入部署记录。
 
@@ -257,7 +287,7 @@ services:
 
 先在演练副本执行，再对正式实例进行只读核对：
 
-- SQLite `PRAGMA integrity_check` 为 `ok`，`PRAGMA foreign_key_check` 无记录；使用 Prisma 迁移的安装没有未完成或失败迁移。WAL 实例须核对应用实际连接的 SQLite `3.51.3`、`wal` 及所选同步级别（默认 FULL=2，显式 NORMAL=1）；迁移历史核对在前述 DELETE 维护阶段完成。
+- SQLite `PRAGMA integrity_check` 为 `ok`，`PRAGMA foreign_key_check` 无记录；使用 Prisma 迁移的安装没有未完成或失败迁移。WAL 实例须核对应用实际连接的 SQLite `3.51.3`、`wal` 及所选同步级别（默认 FULL=2，显式 NORMAL=1）；迁移历史核对在前述保持原日志模式的离线维护阶段完成。
 - 原行情根数、起止时间和已有源序号保留；自动同步关闭期间不能将额外追加误认为迁移结果。
 - 旧会话及已归档会话可查，账户权益、持仓、当前成交、交易理由、Setup 和复盘备注对应正确；一个独立会话只显示一份正确结果。
 - 浏览器刷新后，在副本或隔离验收会话验证播放、下一根、暂停立即平仓、跨非交易时段推进、秒线显示高周期、日期快进、手动平移不跳回、会话切换、图表标记与日志、Excel/PDF；实盘重演额外验证回退预览/取消/确认及 worker。不要在用户原交易上试验撤销或删除。
@@ -275,7 +305,7 @@ services:
 
 先区分日志模式回退与数据库结构回退：
 
-- **仅停用 WAL，保留本次新增交易：** 停止服务和 worker，备份当前数据，保留新驱动按“已有 WAL 库的迁移顺序”离线转为 DELETE，确认完整性和外键正常。随后将正式配置改为 `SQLITE_DRIVER=native`、`SQLITE_JOURNAL_MODE=delete`、`SQLITE_SYNCHRONOUS=FULL`，清除启动环境中的临时覆盖，再重启兼容当前表结构的代码。不能直接用 native 打开 WAL 库；应用会拒绝该组合。不要手动删除 WAL/SHM，也不要用升级前备份覆盖试用后新增交易。
+- **仅停用 WAL，保留本次新增交易：** 停止服务和 worker，备份当前数据；在独立维护进程显式设置 `SQLITE_DRIVER=better-sqlite3`、`SQLITE_JOURNAL_MODE=delete`、`SQLITE_SYNCHRONOUS=FULL`，运行 `db:runtime --integrity` 离线转为 DELETE，确认完整性和外键正常。随后将正式配置改为 `SQLITE_DRIVER=native`、`SQLITE_JOURNAL_MODE=delete`、`SQLITE_SYNCHRONOUS=FULL`，清除启动环境中的临时覆盖，再重启兼容当前表结构的代码。不能直接用 native 打开 WAL 库；应用会拒绝该组合。不要手动删除 WAL/SHM，也不要用升级前备份覆盖试用后新增交易。
 - **回退代码或结构迁移：** 停止新服务，保留失败日志与升级后的数据库副本；先核实旧代码与当前表结构是否兼容。需要恢复时，使用匹配的旧代码/镜像、升级前一致性数据库备份、环境变量、原密钥及必要文件，再启动旧服务。恢复的备份若仍为 WAL，也须使用可用的新驱动离线转为 DELETE 后才能交给旧 native 引擎。不能只退代码继续读取不兼容的新结构数据库。
 
 恢复升级前备份会舍弃升级之后的新写入，因此正式开放写入前先完成核对。回退涉及替换现有数据时，明确恢复点和受影响内容，不自动覆盖用户新增交易。
@@ -289,7 +319,7 @@ services:
 
 停止本项目写入并建立一致性数据库/文件/环境备份，在数据库副本上演练，识别 Prisma migrate deploy 与旧 db:init-sqlite 路径后再升级正式库；不要重置数据库、覆盖为开发库或将未执行迁移直接标记完成。保留原 MARKET_DATA_ENCRYPTION_KEY，副本及首次验收关闭行情同步，不触发付费下载。
 
-本次时间聚合重构有新增结构迁移，完成备份副本验证后按原安装路径升级；不转换旧块、不自动回填，在面板构建已有数据集聚合。普通推进、浏览器和特殊等待优化需重新构建、重启并刷新页面；WAL 提交优化需额外在目标环境验证锁定驱动并显式配置。已有 WAL 库执行 Prisma CLI 迁移前，使用新驱动离线转 DELETE，迁移后再切回 WAL；db:runtime 会应用日志模式，正式库运行前先停写和备份。
+本次时间聚合重构有新增结构迁移，完成备份副本验证后按原安装路径升级；不转换旧块、不自动回填，在面板构建已有数据集聚合。普通推进、浏览器和特殊等待优化需重新构建、重启并刷新页面；WAL 提交优化需额外在目标环境验证锁定驱动并显式配置。已有 WAL 库的初始化和 Prisma CLI 迁移均保持 WAL，在完全停写的离线阶段执行；db:runtime 会应用配置的日志模式，正式库运行前先备份并确认配置。
 
 完成依赖安装、适用迁移、生产构建、重启与文档中的验证；如用 Docker，确认镜像对应目标提交、原生模块可用、环境变量已传入、worker 与原数据卷正常。WAL 服务覆盖默认的自动迁移启动命令，迁移单独执行。保留原 Compose 项目名，构建上下文不包含私有数据/备份。不要使用 computer use，不批量删除文件。最终报告升级前后提交、备份位置、迁移结果、实际 SQLite 版本/模式、数据核对、服务状态和遗留问题。
 ```
