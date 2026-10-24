@@ -1,12 +1,15 @@
 import Database from "better-sqlite3";
 import { Prisma } from "@prisma/client";
 import { createHash, randomUUID } from "node:crypto";
-import { spawnSync } from "node:child_process";
-import { closeSync, constants, copyFileSync, cpSync, existsSync, mkdirSync, openSync, readFileSync, readdirSync, realpathSync, statSync, unlinkSync, writeFileSync } from "node:fs";
+import { spawn } from "node:child_process";
+import { closeSync, constants, copyFileSync, cpSync, existsSync, lstatSync, mkdirSync, openSync, readFileSync, readdirSync, realpathSync, statSync, unlinkSync, writeFileSync } from "node:fs";
 import { basename, dirname, isAbsolute, join, relative, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { createInterface } from "node:readline/promises";
+import { isMainThread } from "node:worker_threads";
+import { createRequire } from "node:module";
 import { resolveSqlitePath, SQLITE_DRIVER_VERSION } from "../lib/sqlite-client.mjs";
+import { createProgress, monitorUpgrade, printUpgradeStatus, readUpgradeStatus } from "./upgrade-sqlite-progress.mjs";
 
 const projectRoot = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 const quote = name => '"' + name.replaceAll('"', '""') + '"';
@@ -27,20 +30,26 @@ export function checkIntegrity(db) {
 }
 
 // Stream every value; no sampling, ORM result limits or floating-point conversion of Int64.
-export function fingerprint(db, selection) {
+export function fingerprint(db, selection, progress = () => {}, reference = []) {
   const tables = selection ?? db.prepare("SELECT name FROM sqlite_master WHERE type='table' AND name NOT LIKE 'sqlite_%' AND name != '_prisma_migrations' ORDER BY name").all().map(({ name }) => ({ name }));
   const result = [];
-  for (const table of tables) {
+  for (const [index, table] of tables.entries()) {
+    progress({ tableName: table.name, tableIndex: index + 1, tableTotal: tables.length, completedRows: 0, referenceRows: table.count ?? reference.find(item => item.name === table.name)?.count ?? null });
     const info = db.pragma(`table_info(${quote(table.name)})`);
     const columns = table.columns ?? info.map(column => column.name);
     if (!info.length || columns.some(column => !info.some(item => item.name === column))) throw new Error(`原表或原字段缺失：${table.name}`);
     const keys = info.filter(column => column.pk).sort((a, b) => a.pk - b.pk).map(column => column.name);
     const order = keys.length ? keys : columns;
-    const digest = createHash("sha256"); let count = 0;
+    const digest = createHash("sha256"); let count = 0, lastProgress = Date.now();
     for (const row of db.prepare(`SELECT ${columns.map(quote).join(",")} FROM ${quote(table.name)} ORDER BY ${order.map(quote).join(",")}`).safeIntegers().iterate()) {
       digest.update(json(row) + "\n"); count++;
+      if (count % 4096 === 0) {
+        progress({ cancellationOnly: true });
+        if (Date.now() - lastProgress >= 1000) { progress({ completedRows: count }); lastProgress = Date.now(); }
+      }
     }
     result.push({ name: table.name, columns, count, sha256: digest.digest("hex") });
+    progress({ completedRows: count, tableComplete: true });
   }
   return result;
 }
@@ -77,6 +86,16 @@ function checkTarget(db) {
     const columns = db.pragma(`table_info(${quote(model.dbName ?? model.name)})`).map(item => item.name);
     if (!columns.length || model.fields.some(field => field.kind !== "object" && !columns.includes(field.dbName ?? field.name))) throw new Error(`升级后结构不完整：${model.name}，请先确认 Prisma Client 已按当前 schema 生成`);
   }
+  // Prisma implicit many-to-many tables do not appear as explicit DMMF models.
+  for (const model of Prisma.dmmf.datamodel.models) {
+    for (const field of model.fields.filter(item => item.kind === "object" && item.isList && !item.relationFromFields?.length)) {
+      const opposite = Prisma.dmmf.datamodel.models.find(item => item.name === field.type)?.fields.find(item => item.relationName === field.relationName && item.isList);
+      if (!opposite) continue;
+      const name = "_" + field.relationName;
+      const columns = db.pragma(`table_info(${quote(name)})`).map(item => item.name);
+      if (!columns.includes("A") || !columns.includes("B")) throw new Error(`升级后隐式关联表不完整：${name}`);
+    }
+  }
   return checkIntegrity(db);
 }
 
@@ -97,15 +116,66 @@ function prepareJournal(file, mode, isolatedCopy) {
   } finally { db.close(); }
 }
 
-function runCommand(args, env, logFile, root) {
-  const result = spawnSync(process.execPath, args, { cwd: root, env, windowsHide: true, encoding: "utf8", maxBuffer: 16 * 1024 * 1024 });
-  writeFileSync(logFile, (result.stdout ?? "") + (result.stderr ?? "") + (result.error?.stack ?? ""), { mode: 0o600 });
-  if (result.error || result.status !== 0) throw new Error(`升级子进程失败，退出码 ${result.status}；日志：${logFile}`);
+export function runCommand(args, env, logFile, root) {
+  return new Promise((resolveCommand, reject) => {
+    const descriptor = openSync(logFile, "wx", 0o600);
+    let child;
+    // Separate the child's process group/console from Ctrl+C broadcasts. It is
+    // still managed here: no unref, no early completion, always await close.
+    try { child = spawn(process.execPath, args, { cwd: root, env, windowsHide: true, detached: true, stdio: ["ignore", descriptor, descriptor] }); }
+    catch (error) { closeSync(descriptor); reject(error); return; }
+    closeSync(descriptor);
+    let failure;
+    child.on("error", error => { failure = error; });
+    // close, unlike exit, also confirms inherited stdio handles have closed.
+    child.on("close", code => {
+      if (failure || code !== 0) reject(new Error(`升级子进程失败，退出码 ${code}；日志：${logFile}`, { cause: failure }));
+      else resolveCommand();
+    });
+  });
+}
+
+function implementationFingerprint(root) {
+  // Include the orchestrator, its worker/display boundary, init entry and its local
+  // driver dependency, as well as dependency resolution metadata and generated DMMF.
+  const names = ["scripts/upgrade-sqlite.mjs", "scripts/upgrade-sqlite-worker.mjs", "scripts/upgrade-sqlite-progress.mjs", "scripts/init-sqlite.mjs", "lib/sqlite-client.mjs", "package.json", "pnpm-lock.yaml", "pnpm-workspace.yaml"];
+  const require = createRequire(join(root, "package.json"));
+  const generated = dirname(require.resolve(".prisma/client/index", { paths: [dirname(require.resolve("@prisma/client"))] }));
+  return names.map(name => ({ name, checksum: hash(readFileSync(join(root, name))) }))
+    .concat(["index.js", "schema.prisma"].map(name => ({ name: "generated-client/" + name, checksum: hash(readFileSync(join(generated, name))) })))
+    .concat({ name: "Prisma.dmmf", checksum: hash(json(Prisma.dmmf)) });
+}
+
+/** Only these three explicit files belong to the disposable rehearsal copy. */
+export function cleanupRehearsal(directory, removeFile = unlinkSync, expectedIdentity) {
+  const root = resolve(directory), result = { status: "COMPLETE", removed: [], absent: [], remaining: [], errors: [] };
+  const removeKnown = name => {
+    const file = resolve(root, name);
+    try {
+      const current = statSync(directory);
+      if (realpathSync(directory) !== root || (expectedIdentity && (current.dev !== expectedIdentity.dev || current.ino !== expectedIdentity.ino))) throw new Error("备份目录已替换，保留演练文件");
+      if (dirname(file) !== root || !["rehearsal.db", "rehearsal.db-wal", "rehearsal.db-shm"].includes(basename(file))) throw new Error("演练清理路径越界");
+      let info;
+      try { info = lstatSync(file); } catch (error) { if (error.code === "ENOENT") { result.absent.push(name); return; } throw error; }
+      if (!info.isFile() || info.isSymbolicLink() || dirname(realpathSync(file)) !== root) throw new Error("拒绝清理非普通演练文件或链接");
+      removeFile(file); result.removed.push(name);
+    } catch (error) { result.remaining.push(name); result.errors.push({ file: name, message: error.message }); }
+  };
+  removeKnown("rehearsal.db-wal");
+  removeKnown("rehearsal.db-shm");
+  removeKnown("rehearsal.db");
+  if (result.remaining.length) result.status = result.removed.length ? "PARTIAL" : "FAILED";
+  return result;
 }
 
 /** No SQL migrations are reimplemented here. Both stages invoke the existing entry point. */
 export async function upgradeDatabase(options, execute = runCommand) {
   const root = options.root ?? projectRoot, filesRoot = options.filesRoot ?? root, env = options.env ?? process.env;
+  const implementation = implementationFingerprint(root);
+  const progress = createProgress(options.onProgress, options.cancelFlag);
+  const step = (phaseIndex, stepId, targetRole, detail) => progress.step(phaseIndex, stepId, targetRole, detail);
+  const scan = (db, selection, reference) => fingerprint(db, selection, event => progress.update(event), reference);
+  step(1, "environment", "source");
   if (!options.expectedDatabase || !isAbsolute(options.expectedDatabase)) throw new Error("需要明确的数据库绝对路径");
   const file = realpathSync(resolveSqlitePath(env.DATABASE_URL, root));
   const expected = realpathSync(resolve(options.expectedDatabase));
@@ -114,7 +184,7 @@ export async function upgradeDatabase(options, execute = runCommand) {
   const lockFile = file + ".upgrade.lock";
   // Exclusive creation prevents overlapping upgrade commands. Failures retain the lock.
   const lock = openSync(lockFile, "wx", 0o600); closeSync(lock);
-  let directory, report;
+  let directory, directoryIdentity, report;
   try {
     directory = join(resolve(options.backupDirectory ?? join(dirname(root), basename(root) + "-db-upgrades")), new Date().toISOString().replaceAll(/[:.]/g, "-") + "-" + randomUUID());
     // Avoid recursively copying the backup into itself via storage/import directories.
@@ -123,10 +193,13 @@ export async function upgradeDatabase(options, execute = runCommand) {
       if (nested === "" || (!nested.startsWith("..") && !isAbsolute(nested))) throw new Error("备份目录不能位于 storage 或导入目录内");
     }
     mkdirSync(directory, { recursive: true, mode: 0o700 });
-    save(lockFile, { pid: process.pid, database: file, directory });
+    directory = realpathSync(directory); directoryIdentity = statSync(directory);
+    const runId = randomUUID(), startedAt = new Date().toISOString();
+    save(lockFile, { pid: process.pid, database: file, directory, runId, startedAt, processStartedAt: new Date(Date.now() - process.uptime() * 1000).toISOString() });
     report = { status: "RUNNING", phase: "backup", database: file, directory, startedAt: new Date().toISOString(), node: process.version };
     save(join(directory, "report.json"), report);
-    console.log("数据库：", file, "\n备份和演练：", directory);
+    progress.update({ directory, database: file, runId });
+    step(2, "source-integrity", "source");
     const original = open(file);
     let baseline, plan, mode, sourceSchema;
     try {
@@ -135,14 +208,26 @@ export async function upgradeDatabase(options, execute = runCommand) {
       if (!["wal", "delete"].includes(mode)) throw new Error(`不支持自动处理的日志模式：${mode}`);
       checkIntegrity(original);
       // SQLite backup reads committed WAL frames; never copy only the live main file.
-      await original.backup(join(directory, "before.db"));
+      step(2, "backup", "backup");
+      let lastBackupProgress = 0;
+      await original.backup(join(directory, "before.db"), { progress: ({ totalPages, remainingPages }) => {
+        progress.checkCancellation();
+        if (Date.now() - lastBackupProgress >= 1000 || remainingPages === 0) {
+          progress.update({ totalPages, completedPages: totalPages - remainingPages }); lastBackupProgress = Date.now();
+        }
+        // Do not return a page batch size or change backup throughput.
+      } });
+      progress.update({ backupComplete: true });
     } finally { original.close(); }
+    step(3, "baseline-integrity", "backup");
     const backup = open(join(directory, "before.db"));
-    try { checkIntegrity(backup); baseline = fingerprint(backup); sourceSchema = schemaFingerprint(backup); plan = identifyMigration(backup, root); } finally { backup.close(); }
+    try { checkIntegrity(backup); step(3, "baseline", "backup"); baseline = scan(backup); sourceSchema = schemaFingerprint(backup); plan = identifyMigration(backup, root); } finally { backup.close(); }
     save(join(directory, "baseline.json"), baseline);
     report.method = plan.method; report.originalJournalMode = mode; report.pending = plan.pending; report.sourceSchema = sourceSchema;
     report.migrationChecksums = plan.migrations;
     report.schemaChecksum = hash(readFileSync(join(root, "prisma/schema.prisma")));
+    report.implementationChecksums = implementation;
+    step(3, "files-backup", "backup");
     for (const name of [".env", "storage", ".market-imports"]) {
       const source = join(filesRoot, name);
       if (!existsSync(source)) continue;
@@ -153,35 +238,42 @@ export async function upgradeDatabase(options, execute = runCommand) {
     // does not inherit this adapter; both paths run offline in the original mode.
     const childEnv = { ...env, DATABASE_URL: "", SQLITE_DRIVER: "better-sqlite3", SQLITE_JOURNAL_MODE: mode, SQLITE_SYNCHRONOUS: "FULL", MARKET_DATA_SYNC_ENABLED: "0" };
     report.migrationJournalMode = mode;
-    const migrate = (target, stage) => {
+    const migrate = async (target, stage, phaseIndex) => {
+      step(phaseIndex, stage + "-execute", target === file ? "source" : "rehearsal");
+      assertSame(implementationFingerprint(root), report.implementationChecksums, "升级实现代码");
       prepareJournal(target, mode, target !== file);
       const args = plan.method === "init" ? [join(root, "scripts/init-sqlite.mjs")] : [join(root, "node_modules/prisma/build/index.js"), "migrate", "deploy", "--schema", join(root, "prisma/schema.prisma")];
-      execute(args, { ...childEnv, DATABASE_URL: "file:" + target.replaceAll("\\", "/") }, join(directory, stage + ".log"), root);
+      await execute(args, { ...childEnv, DATABASE_URL: "file:" + target.replaceAll("\\", "/") }, join(directory, stage + ".log"), root);
+      step(phaseIndex, stage + "-integrity", target === file ? "source" : "rehearsal");
       const db = open(target);
       try {
         checkTarget(db);
         assertSame(db.pragma("journal_mode", { simple: true }), mode, "升级过程日志模式");
         const afterPlan = identifyMigration(db, root);
         if (afterPlan.method !== plan.method || (afterPlan.pending?.length ?? 0)) throw new Error("迁移路径发生变化或仍有待应用项");
-        return { data: fingerprint(db), schema: schemaFingerprint(db) };
+        step(phaseIndex, stage + "-fingerprint", target === file ? "source" : "rehearsal");
+        return { data: scan(db, undefined, baseline), schema: schemaFingerprint(db) };
       } finally { db.close(); }
     };
     const rehearsal = join(directory, "rehearsal.db");
+    step(4, "rehearsal-copy", "rehearsal");
     copyFileSync(join(directory, "before.db"), rehearsal, constants.COPYFILE_EXCL);
     report.phase = "rehearsal"; save(join(directory, "report.json"), report);
-    const rehearsed = migrate(rehearsal, "rehearsal");
+    const rehearsed = await migrate(rehearsal, "rehearsal", 4);
     save(join(directory, "rehearsal.json"), rehearsed);
     const rehearsedDb = open(rehearsal);
     try {
       // Conservative gate: do not silently approve legacy destructive conversions.
       // Additive columns/tables are fine; any original row/column change needs review.
-      assertSame(fingerprint(rehearsedDb, baseline), baseline, "演练前后原有数据");
+      step(4, "rehearsal-original", "rehearsal");
+      assertSame(scan(rehearsedDb, baseline), baseline, "演练前后原有数据");
     } finally { rehearsedDb.close(); }
     // Re-run the same upgrade on the copy before touching the source.
-    assertSame(migrate(rehearsal, "rehearsal-repeat"), rehearsed, "重复执行演练");
+    assertSame(await migrate(rehearsal, "rehearsal-repeat", 5), rehearsed, "重复执行演练");
+    step(6, "source-recheck", "source");
     const live = open(file);
     try {
-      assertSame(fingerprint(live), baseline, "备份后正式库数据");
+      assertSame(scan(live, undefined, baseline), baseline, "备份后正式库数据");
       assertSame(schemaFingerprint(live), sourceSchema, "备份后正式库结构");
       assertSame(identifyMigration(live, root), plan, "正式库迁移历史");
     } finally { live.close(); }
@@ -189,22 +281,39 @@ export async function upgradeDatabase(options, execute = runCommand) {
     if (currentIdentity.dev !== identity.dev || currentIdentity.ino !== identity.ino || realpathSync(resolveSqlitePath(env.DATABASE_URL, root)) !== file) throw new Error("数据库文件已被替换");
     assertSame(hash(readFileSync(join(root, "prisma/schema.prisma"))), report.schemaChecksum, "目标 schema");
     assertSame(identifyLocalMigrations(root), plan.migrations, "迁移文件");
+    assertSame(implementationFingerprint(root), report.implementationChecksums, "升级实现代码");
+    progress.checkCancellation();
+    report.formalWriteStarted = true;
     report.phase = "apply"; save(join(directory, "report.json"), report);
-    const actual = migrate(file, "apply");
+    const actual = await migrate(file, "apply", 7);
     save(join(directory, "actual.json"), actual);
     assertSame(actual, rehearsed, "正式升级与演练结果");
     const upgraded = open(file);
-    try { assertSame(fingerprint(upgraded, baseline), baseline, "正式库原有数据"); } finally { upgraded.close(); }
+    try { step(8, "final-original", "source"); assertSame(scan(upgraded, baseline), baseline, "正式库原有数据"); } finally { upgraded.close(); }
+    step(8, "final-integrity", "source");
     const final = open(file);
     try { checkTarget(final); assertSame(final.pragma("journal_mode", { simple: true }), mode, "保留日志模式"); } finally { final.close(); }
+    // All DB connections and all awaited child processes have closed here.
+    // Cancellation after this point must not turn a verified upgrade into a failure.
+    report.databaseStatus = "SUCCESS";
+    report.phase = "finalization";
+    report.cleanup = { status: "PENDING" };
+    save(join(directory, "report.json"), report);
+    progress.step(8, "cleanup", "rehearsal", undefined, false);
+    report.cleanup = cleanupRehearsal(directory, options.removeRehearsalFile ?? unlinkSync, directoryIdentity);
     report.status = "SUCCESS"; report.phase = "complete"; report.finishedAt = new Date().toISOString();
     save(join(directory, "report.json"), report);
     unlinkSync(lockFile);
-    console.log("升级及数据核对成功；原日志模式保持：", mode, "\n报告：", join(directory, "report.json"));
+    progress.finish("SUCCESS", { cleanup: report.cleanup, report: join(directory, "report.json") });
     return report;
   } catch (error) {
-    if (report) { report.status = "FAILED"; report.error = error.message; save(join(directory, "report.json"), report); }
-    console.error("升级已停止，保留数据库、WAL/SHM、备份、副本、日志及维护锁。未自动恢复或重置数据库。", directory ?? lockFile);
+    if (report) {
+      report.status = report.databaseStatus === "SUCCESS" ? "FINALIZATION_FAILED" : "FAILED";
+      report.error = error.message;
+      try { save(join(directory, "report.json"), report); } catch { /* Preserve the original failure even when report storage failed. */ }
+      error.report = report;
+    }
+    progress.finish(report?.status ?? "FAILED", { formalWriteStarted: report?.formalWriteStarted ?? false, error: error.message, report: directory ? join(directory, "report.json") : null });
     throw error;
   }
 }
@@ -219,10 +328,17 @@ async function main() {
   for (let index = 0; index < args.length; index++) {
     const arg = args[index];
     if (arg === "--stopped") options.stopped = true;
+    else if (arg === "--status") options.status = true;
+    else if (arg === "--report-dir" && args[index + 1] && !args[index + 1].startsWith("--")) options.reportDirectory = args[++index];
     else if (["--expect-database", "--backup-dir"].includes(arg) && args[index + 1] && !args[index + 1].startsWith("--")) options[arg === "--expect-database" ? "expectedDatabase" : "backupDirectory"] = args[++index];
-    else if (arg === "--help") { console.log("corepack pnpm run db:upgrade [--expect-database <existing absolute path>] [--stopped] [--backup-dir <directory>]\n无参数时交互核对路径与停写；非交互必须明确提供路径与 --stopped。失败保留维护锁，禁止自动重置。"); return; }
+    else if (arg === "--help") { console.log("corepack pnpm run db:upgrade [--expect-database <existing absolute path>] [--stopped] [--backup-dir <directory>]\ncorepack pnpm run db:upgrade --status [--report-dir <backup directory>]\n无参数时交互核对路径与停写；非交互必须明确提供路径与 --stopped。失败保留维护锁，禁止自动重置。成功后只清理演练 DB/WAL/SHM，保留升级前备份及报告。"); return; }
     else throw new Error("未知或缺少值的参数：" + arg);
   }
+  if (options.status) {
+    printUpgradeStatus(readUpgradeStatus({ database: options.reportDirectory ? undefined : resolveSqlitePath(process.env.DATABASE_URL, projectRoot), reportDirectory: options.reportDirectory }));
+    return;
+  }
+  if (options.reportDirectory) throw new Error("--report-dir 仅用于 --status");
   const file = realpathSync(resolveSqlitePath(process.env.DATABASE_URL, projectRoot));
   if ((!options.expectedDatabase || !options.stopped) && process.stdin.isTTY) {
     const terminal = createInterface({ input: process.stdin, output: process.stdout });
@@ -233,6 +349,11 @@ async function main() {
     } finally { terminal.close(); }
   }
   if (!options.expectedDatabase || !options.stopped) throw new Error("非交互运行需要 --expect-database <绝对路径> 和 --stopped；命令不会替你停止服务");
-  await upgradeDatabase(options);
+  const result = await monitorUpgrade(options);
+  console.log("升级及数据核对成功；原日志模式保持：", result.originalJournalMode, "\n报告：", join(result.directory, "report.json"));
+  if (result.cleanup.status !== "COMPLETE") console.error("警告：数据库升级已成功，但演练副本清理未完成；无需重跑升级。剩余文件：", result.cleanup.remaining.join("、"));
 }
-if (process.argv[1] && resolve(process.argv[1]) === fileURLToPath(import.meta.url)) main().catch(error => { console.error(error.message); process.exitCode = 1; });
+if (isMainThread && process.argv[1] && resolve(process.argv[1]) === fileURLToPath(import.meta.url)) main().catch(error => {
+  console.error(error.report?.databaseStatus === "SUCCESS" ? "数据库升级及核对已成功，但报告或维护锁收尾失败；请人工检查，无需重跑升级。" : `升级已停止；${!error.report ? "无法确认正式写入状态，须检查最后报告" : error.report.formalWriteStarted ? "正式写入已开始，须检查实际数据库状态" : "正式写入尚未开始"}；保留备份、副本、日志及维护锁。`);
+  console.error(error.message); process.exitCode = 1;
+});

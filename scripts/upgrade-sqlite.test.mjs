@@ -1,11 +1,11 @@
 import { beforeAll, describe, expect, it } from "vitest";
 import Database from "better-sqlite3";
 import { execFileSync } from "node:child_process";
-import { copyFileSync, existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, writeFileSync } from "node:fs";
+import { copyFileSync, cpSync, existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, symlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { basename, join } from "node:path";
 import { randomUUID } from "node:crypto";
-import { fingerprint, identifyMigration, upgradeDatabase } from "./upgrade-sqlite.mjs";
+import { cleanupRehearsal, fingerprint, identifyMigration, upgradeDatabase } from "./upgrade-sqlite.mjs";
 
 const directory = mkdtempSync(join(tmpdir(), "db-upgrade-tests-"));
 const base = join(directory, "base.db");
@@ -46,6 +46,10 @@ describe("repeatable offline SQLite upgrade", () => {
     expect(inspect(file, db => fingerprint(db, before))).toEqual(before);
     expect(inspect(file, db => db.prepare('SELECT accountCategory FROM ReplaySession').get().accountCategory)).toBe("STANDARD");
     expect(existsSync(join(first.directory, "before.db"))).toBe(true);
+    expect(first.cleanup.status).toBe("COMPLETE");
+    expect(existsSync(join(first.directory, "rehearsal.db"))).toBe(false);
+    expect(existsSync(join(first.directory, "rehearsal.db-wal"))).toBe(false);
+    expect(existsSync(join(first.directory, "rehearsal.db-shm"))).toBe(false);
     expect(existsSync(join(first.directory, "rehearsal-repeat.log"))).toBe(true);
     expect(existsSync(file + ".upgrade.lock")).toBe(false);
     const after = inspect(file, fingerprint);
@@ -211,5 +215,100 @@ describe("repeatable offline SQLite upgrade", () => {
     expect(output).toContain("--expect-database");
     expect(() => execFileSync(process.execPath, ["scripts/upgrade-sqlite.mjs"], { cwd: root, env: childEnv(base), stdio: "pipe", windowsHide: true })).toThrow();
     expect(existsSync(base + ".upgrade.lock")).toBe(false);
+  });
+
+  it("rejects a missing implicit relation table even with complete Prisma migration history", async () => {
+    const file = join(directory, "missing-implicit.db");
+    new Database(file).close();
+    command(["node_modules/prisma/build/index.js", "migrate", "deploy"], childEnv(file), join(directory, "missing-implicit-setup.log"));
+    inspect(file, db => db.exec('DROP TABLE "_TradeToTradeTag"'));
+    const before = inspect(file, fingerprint);
+    await expect(upgradeDatabase(options(file))).rejects.toThrow("隐式关联表");
+    expect(inspect(file, fingerprint)).toEqual(before);
+    const report = readReport(file);
+    expect(existsSync(join(report.directory, "apply.log"))).toBe(false);
+    expect(existsSync(join(report.directory, "rehearsal.db"))).toBe(true);
+  }, 30000);
+
+  it.each(["scripts/init-sqlite.mjs", "lib/sqlite-client.mjs"])("rejects changes to %s after rehearsal before formal writes", async changed => {
+    const code = mkdtempSync(join(directory, "code-"));
+    mkdirSync(join(code, "scripts")); mkdirSync(join(code, "lib")); mkdirSync(join(code, "prisma"));
+    for (const name of ["scripts/upgrade-sqlite.mjs", "scripts/upgrade-sqlite-worker.mjs", "scripts/upgrade-sqlite-progress.mjs", "scripts/init-sqlite.mjs", "lib/sqlite-client.mjs", "package.json", "pnpm-lock.yaml", "pnpm-workspace.yaml", "prisma/schema.prisma"]) copyFileSync(join(root, name), join(code, name));
+    cpSync(join(root, "prisma/migrations"), join(code, "prisma/migrations"), { recursive: true });
+    symlinkSync(join(root, "node_modules"), join(code, "node_modules"), "junction");
+    const file = fixture(), before = inspect(file, fingerprint);
+    await expect(upgradeDatabase({ ...options(file), root: code }, (args, env, log) => {
+      command(args, env, log);
+      if (basename(log) === "rehearsal-repeat.log") writeFileSync(join(code, changed), readFileSync(join(code, changed), "utf8") + "\n// changed after rehearsal\n");
+    })).rejects.toThrow("升级实现代码");
+    expect(inspect(file, fingerprint)).toEqual(before);
+    expect(existsSync(join(readReport(file).directory, "apply.log"))).toBe(false);
+  }, 30000);
+
+  it("keeps database success separate from cleanup failure and does not keep the upgrade lock", async () => {
+    const file = fixture();
+    const result = await upgradeDatabase({ ...options(file), removeRehearsalFile: () => { throw new Error("synthetic sharing violation"); } });
+    expect(result).toMatchObject({ status: "SUCCESS", databaseStatus: "SUCCESS", cleanup: { status: "FAILED", remaining: ["rehearsal.db"] } });
+    expect(existsSync(join(result.directory, "before.db"))).toBe(true);
+    expect(existsSync(join(result.directory, "rehearsal.db"))).toBe(true);
+    expect(existsSync(file + ".upgrade.lock")).toBe(false);
+  }, 30000);
+
+  it("stops before apply on cancellation and retains the rehearsal and lock", async () => {
+    const file = fixture(), flag = new Int32Array(new SharedArrayBuffer(4));
+    await expect(upgradeDatabase({ ...options(file), cancelFlag: flag, onProgress: event => { if (event.stepId === "source-recheck") Atomics.store(flag, 0, 1); } })).rejects.toThrow("取消");
+    const report = readReport(file);
+    expect(report.formalWriteStarted).not.toBe(true);
+    expect(existsSync(join(report.directory, "rehearsal.db"))).toBe(true);
+    expect(existsSync(join(report.directory, "apply.log"))).toBe(false);
+    expect(existsSync(file + ".upgrade.lock")).toBe(true);
+  }, 30000);
+
+  it("awaits a running apply child before observing cancellation and never cleans a cancelled upgrade", async () => {
+    const file = fixture(), flag = new Int32Array(new SharedArrayBuffer(4));
+    let applyFinished = false;
+    await expect(upgradeDatabase({ ...options(file), cancelFlag: flag }, async (args, env, log) => {
+      if (basename(log) === "apply.log") {
+        Atomics.store(flag, 0, 1);
+        await new Promise(resolve => setTimeout(resolve, 40));
+        expect(existsSync(file + ".upgrade.lock")).toBe(true);
+        expect(existsSync(join(readReport(file).directory, "rehearsal.db"))).toBe(true);
+        command(args, env, log); applyFinished = true;
+      } else command(args, env, log);
+    })).rejects.toThrow("取消");
+    expect(applyFinished).toBe(true);
+    expect(readReport(file)).toMatchObject({ formalWriteStarted: true, status: "FAILED" });
+    expect(existsSync(join(readReport(file).directory, "rehearsal.db"))).toBe(true);
+  }, 30000);
+
+  it("emits truthful row references and isolates display failures from upgrade assertions", async () => {
+    const file = fixture(), events = [];
+    const result = await upgradeDatabase({ ...options(file), onProgress: event => { events.push(event); if (event.stepId === "files-backup") throw new Error("synthetic display failure"); } });
+    expect(result.status).toBe("SUCCESS");
+    expect(events.find(event => event.stepId === "baseline" && event.tableName === "MarketBar").referenceRows).toBe(null);
+    expect(events.find(event => event.stepId === "final-original" && event.tableName === "MarketBar").referenceRows).toBe(1);
+    expect(events.at(-1).state).toBe("SUCCESS");
+    expect(events.every((event, index) => index === 0 || event.sequence > events[index - 1].sequence)).toBe(true);
+    expect(JSON.stringify(events)).not.toContain("保留原会话");
+  }, 30000);
+});
+
+describe("explicit successful rehearsal cleanup", () => {
+  it("removes only the three known files and preserves backups and unknown files", () => {
+    const folder = mkdtempSync(join(directory, "cleanup-"));
+    for (const name of ["before.db", "rehearsal.db", "rehearsal.db-wal", "rehearsal.db-shm", "unknown.db", "rehearsal.json"]) writeFileSync(join(folder, name), "synthetic");
+    expect(cleanupRehearsal(folder).removed).toEqual(["rehearsal.db-wal", "rehearsal.db-shm", "rehearsal.db"]);
+    expect(readdirSync(folder).sort()).toEqual(["before.db", "rehearsal.json", "unknown.db"]);
+  });
+  it("refuses replaced directories and file links instead of deleting their targets", () => {
+    const folder = mkdtempSync(join(directory, "cleanup-links-")), outside = join(directory, "outside.db");
+    // Junctions exercise link refusal without requiring Windows symlink privileges.
+    mkdirSync(outside); writeFileSync(join(outside, "keep.txt"), "keep"); symlinkSync(outside, join(folder, "rehearsal.db"), "junction");
+    expect(cleanupRehearsal(folder).status).toBe("FAILED");
+    expect(readFileSync(join(outside, "keep.txt"), "utf8")).toBe("keep");
+    const other = mkdtempSync(join(directory, "cleanup-replaced-")); writeFileSync(join(other, "rehearsal.db"), "keep");
+    expect(cleanupRehearsal(other, undefined, { dev: -1, ino: -1 }).status).toBe("FAILED");
+    expect(readFileSync(join(other, "rehearsal.db"), "utf8")).toBe("keep");
+    expect(cleanupRehearsal(join(other, "missing")).status).toBe("FAILED");
   });
 });
