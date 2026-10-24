@@ -14,6 +14,7 @@ import { Line, LineChart, ResponsiveContainer, Tooltip, XAxis, YAxis } from "rec
 import { PaperJournalTable } from "@/components/market-replay/paper-journal-table";
 import { copy } from "@/lib/i18n";
 import { formatNumber } from "@/lib/format";
+import type { StageMetrics } from "@/lib/prop-practice/stage-metrics";
 import { snapPriceToTick } from "@/lib/market-replay/price-ticks";
 import type { MarketBarData } from "@/lib/market-replay/types";
 import { isClosingOrder } from "@/lib/paper-trading/training-gate";
@@ -91,21 +92,22 @@ export function PaperAccountStrip({ snapshot, compact = false }: { snapshot: Pap
   return <Card><CardContent className="p-4"><PaperAccountMetrics snapshot={snapshot} compact={compact} /></CardContent></Card>;
 }
 
-export function PaperAccountMetrics({ snapshot, compact = false, includeBalances = true, extraItems = [] }: { snapshot: PaperSessionSnapshot | null; compact?: boolean; includeBalances?: boolean; extraItems?: [string, string][] }) {
+export function PaperAccountMetrics({ snapshot, compact = false, includeBalances = true, extraItems = [], metrics }: { snapshot: PaperSessionSnapshot | null; compact?: boolean; includeBalances?: boolean; extraItems?: [string, string][]; metrics?: Pick<StageMetrics, "realizedPnl" | "totalFees" | "maxDrawdown"> | null }) {
   if (!snapshot) return null;
   const { session, stats } = snapshot;
+  const display = metrics === undefined ? session : metrics;
   const position = session.netQuantity > 0 ? copy.paperTrading.long : session.netQuantity < 0 ? copy.paperTrading.short : copy.paperTrading.flat;
   const items = [
     ...(includeBalances ? [
       [copy.paperTrading.balance, `${number(stats.balance)} ${session.currency}`],
       [copy.paperTrading.equity, `${number(stats.equity)} ${session.currency}`],
     ] : []),
-    [copy.paperTrading.realizedPnl, number(session.realizedPnl)],
+    [copy.paperTrading.realizedPnl, display ? number(display.realizedPnl) : copy.common.dash],
     [copy.paperTrading.unrealizedPnl, number(stats.unrealizedPnl)],
     [copy.paperTrading.netPosition, `${position} ${number(Math.abs(session.netQuantity), 8)}`],
     [copy.paperTrading.averagePrice, session.averageEntryPrice == null ? "—" : number(session.averageEntryPrice, 8)],
-    [copy.paperTrading.fees, number(session.totalFees)],
-    [copy.paperTrading.maxDrawdown, `${number(session.maxDrawdown * 100)}%`],
+    [copy.paperTrading.fees, display ? number(display.totalFees) : copy.common.dash],
+    [copy.paperTrading.maxDrawdown, display ? `${number(display.maxDrawdown * 100)}%` : copy.common.dash],
     ...extraItems,
   ];
   return (

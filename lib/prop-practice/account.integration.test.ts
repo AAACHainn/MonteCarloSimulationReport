@@ -693,6 +693,8 @@ describe("manual intraday promotion", () => {
     const after = (await snapshot(s))!;
     expect(normalized(after)).toEqual(normalized(before));
     expect(after.propAccount!.state).toMatchObject({ phase: "FUNDED", pause: "NONE", stages: [{}, { anchor: before.session.realizedPnl - before.session.totalFees, initialCapital: r.funded.risk.initialCapital }] });
+    expect(after.propAccount!.state.stages[1].metrics).toMatchObject({ realizedPnl: 0, totalFees: 0, maxDrawdown: 0,
+      realizedAnchor: before.session.realizedPnl, feeAnchor: before.session.totalFees, peakEquity: r.funded.risk.initialCapital });
     expect(await prisma.replayProgress.findUnique({ where: { replaySessionId: s.id } })).toEqual(progress);
     expect(await prisma.propPracticeEvent.count({ where: { replaySessionId: s.id, type: "PROMOTED" } })).toBe(1);
     const checkpoint = await prisma.replayCheckpoint.findFirstOrThrow({ where: { projectionId: s.activeProjectionId }, orderBy: [{ sourceSequence: "desc" }, { commandOrdinal: "desc" }] });
@@ -700,12 +702,38 @@ describe("manual intraday promotion", () => {
     await expect(scoped(s, async () => confirmPropPromotion({ expectedVersion: (await loadReplayScope(s.id)).version, requestId: randomUUID() }))).rejects.toMatchObject({ code: "PROP_PROMOTION_INVALID" });
     await order(s, "BUY"); await advance(s); await order(s, "SELL", 1, { executeAtCurrentClose: true });
     const traded = (await snapshot(s))!;
+    expect(traded.propAccount!.state.stages[1].metrics!.realizedPnl).toBeCloseTo(traded.session.realizedPnl - before.session.realizedPnl);
+    expect(traded.propAccount!.state.stages[1].metrics!.totalFees).toBeCloseTo(traded.session.totalFees - before.session.totalFees);
     expect(traded.propAccount!.state.stages[0]).toEqual(after.propAccount!.state.stages[0]);
     expect(traded.propAccount!.state.stages[1].days[0].day).toBe(after.propAccount!.state.stages[0].days.at(-1)!.day);
     expect(payoutQualification(r, traded.propAccount!.state).qualifyingDays).toBe(1);
     expect(traded.propAccount!.state.stages[1].days[0].endRawNet - traded.propAccount!.state.stages[1].days[0].startRawNet).toBeCloseTo(traded.session.realizedPnl - traded.session.totalFees - (before.session.realizedPnl - before.session.totalFees));
     expect((await scoped(s, () => confirmPropPromotion(input))).id).toBe(receipts[0].promotion.id);
     expect((await snapshot(s))!.propAccount).toEqual(traded.propAccount);
+  });
+  it("reconstructs old funded statistics without rewriting history, then keeps tracking them normally", async () => {
+    const { s } = await qualifyingSession();
+    await scoped(s, async () => confirmPropPromotion({ expectedVersion: (await loadReplayScope(s.id)).version, requestId: randomUUID() }));
+    await order(s, "BUY"); await advance(s); await order(s, "SELL", 1, { executeAtCurrentClose: true });
+    const before = (await snapshot(s))!, expected = before.propAccount!.state.stages.at(-1)!.metrics!;
+    const oldState = structuredClone(before.propAccount!.state);
+    for (const stage of oldState.stages) delete stage.metrics;
+    if (oldState.last) { delete oldState.last.realizedPnl; delete oldState.last.totalFees; }
+    const stored = JSON.stringify(oldState);
+    await prisma.propPracticeAccount.update({ where: { replaySessionId: s.id }, data: { state: stored } });
+    await prisma.propPracticeRound.updateMany({ where: { projectionId: s.activeProjectionId }, data: { state: stored } });
+    const hydrated = (await snapshot(s))!.propAccount!.state.stages.at(-1)!.metrics!;
+    for (const key of ["realizedPnl", "totalFees", "peakEquity", "maxDrawdown", "feeAnchor", "realizedAnchor"] as const) expect(hydrated[key]).toBeCloseTo(expected[key], 7);
+    expect((await prisma.propPracticeAccount.findUniqueOrThrow({ where: { replaySessionId: s.id } })).state).toBe(stored);
+    expect((await snapshot(s))!.session).toEqual(before.session);
+    const response = await propAccountGET(new Request("http://localhost/api/prop-practice"), { params: Promise.resolve({ sessionId: s.id }) });
+    expect(response.status).toBe(200);
+    expect((await response.json()).account.state.stages.at(-1).metrics.realizedPnl).toBeCloseTo(expected.realizedPnl);
+    await advance(s);
+    const after = (await snapshot(s))!;
+    expect(after.propAccount!.state.stages.at(-1)!.metrics!.realizedPnl).toBeCloseTo(expected.realizedPnl);
+    expect(JSON.parse((await prisma.propPracticeAccount.findUniqueOrThrow({ where: { replaySessionId: s.id } })).state).stages.at(-1).metrics).toBeDefined();
+    expect(after.propAccount!.state.stages[0].days).toEqual(oldState.stages[0].days);
   });
   it("rejects unmet, stale, pending-order and archived requests without changing account state", async () => {
     const s = await create(rules()); await advance(s);

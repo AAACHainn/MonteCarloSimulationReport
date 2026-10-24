@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { initialStageMetrics, observeStageMetrics, type StageMetrics } from "./stage-metrics";
 import { copy } from "@/lib/i18n";
 import { paperSessionSchema } from "@/lib/validations";
 
@@ -46,11 +47,11 @@ export const defaultPropRules: PropRules = {
   payout: { minimum: 500, fraction: 0.5, maximum: 2000, buffer: 2100, traderShare: 0.9, permanentFloorOffset: null },
 };
 
-export type Observation = { sequence: number; day: string; rawNet: number; unrealized: number; flat: boolean; pending: number; hadFill: boolean };
+export type Observation = { sequence: number; day: string; rawNet: number; unrealized: number; flat: boolean; pending: number; hadFill: boolean; realizedPnl?: number; totalFees?: number };
 export type PropDay = { day: string; startRawNet: number; endRawNet: number; balance: number; traded: boolean; settled: boolean; stageEnded?: boolean };
 export type PropStage = { kind: "EVALUATION" | "FUNDED"; initialCapital: number; anchor: number; highWater: number;
   trailingFloor: number; permanentFloor: number | null; grossPayout: number; qualifyingAfterDay: string | null;
-  days: PropDay[]; startSequence: number; endSequence: number | null };
+  days: PropDay[]; startSequence: number; endSequence: number | null; metrics?: StageMetrics };
 export type PropState = { stages: PropStage[]; phase: "EVALUATION" | "FUNDED"; pause: "NONE" | "STAGE_WAIT" | "PAYOUT_DAY" | "BOUNDARY" | "DATA_END";
   pausedDay: string | null; totalRequested: number; totalReceived: number; payoutCount: number;
   result: "FAILED" | "STOPPED" | null; failure: { sequence: number; equity: number; floor: number; phase: string } | null;
@@ -80,9 +81,10 @@ function copyState(before: PropState): PropState {
 }
 export function currentStage(s: PropState) { return s.stages[s.stages.length - 1]; }
 export function stageRules(r: PropRules, s: PropState) { return s.phase === "EVALUATION" ? r.evaluation.risk : r.funded.risk; }
-function newStage(kind: PropStage["kind"], r: RiskRules, anchor: number, sequence: number): PropStage {
+function newStage(kind: PropStage["kind"], r: RiskRules, anchor: number, sequence: number, observation?: Observation): PropStage {
   return { kind, initialCapital: r.initialCapital, anchor, highWater: r.initialCapital, trailingFloor: r.initialCapital - r.drawdown,
-    permanentFloor: null, grossPayout: 0, qualifyingAfterDay: null, days: [], startSequence: sequence, endSequence: null };
+    permanentFloor: null, grossPayout: 0, qualifyingAfterDay: null, days: [], startSequence: sequence, endSequence: null,
+    metrics: initialStageMetrics(r.initialCapital, observation?.realizedPnl ?? anchor + (observation?.totalFees ?? 0), observation?.totalFees ?? 0) };
 }
 export function initialPropState(r: PropRules, sequence: number): PropState {
   return { stages: [newStage("EVALUATION", r.evaluation.risk, 0, sequence)], phase: "EVALUATION", pause: "NONE", pausedDay: null,
@@ -132,7 +134,7 @@ export function promotePropManually(r: PropRules, before: PropState): PropState 
   if (day) day.stageEnded = true;
   st.endSequence = o.sequence;
   s.phase = "FUNDED"; s.pausedDay = null;
-  s.stages.push(newStage("FUNDED", r.funded.risk, o.rawNet, o.sequence + 1));
+  s.stages.push(newStage("FUNDED", r.funded.risk, o.rawNet, o.sequence + 1, o));
   return s;
 }
 
@@ -151,6 +153,9 @@ export function observeProp(r: PropRules, before: PropState, observation: Observ
   if (s.result) return s;
   s.last = { ...observation };
   const st = currentStage(s);
+  if (st.metrics) st.metrics = observeStageMetrics(st.metrics,
+    observation.realizedPnl ?? observation.rawNet + (observation.totalFees ?? 0), observation.totalFees ?? 0,
+    st.initialCapital + observation.rawNet - st.anchor + observation.unrealized);
   let day = st.days.at(-1);
   if (!day || day.day !== observation.day) {
     day = { day: observation.day, startRawNet: day?.endRawNet ?? st.anchor, endRawNet: observation.rawNet,
@@ -180,7 +185,7 @@ export function settlePropDay(r: PropRules, before: PropState): PropState {
   if (!s.result && s.phase === "EVALUATION" && o.flat && o.pending === 0 && evaluationProgress(r, s).passed) {
     st.endSequence = o.sequence;
     s.phase = "FUNDED"; s.pause = "STAGE_WAIT"; s.pausedDay = o.day;
-    s.stages.push(newStage("FUNDED", r.funded.risk, o.rawNet, o.sequence + 1));
+    s.stages.push(newStage("FUNDED", r.funded.risk, o.rawNet, o.sequence + 1, o));
   }
   return s;
 }

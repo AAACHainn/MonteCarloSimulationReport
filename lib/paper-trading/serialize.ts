@@ -18,6 +18,7 @@ import type {
   PaperTradingStats,
 } from "./types";
 import { summarizeClosedTrades, type IncrementalTradeStats } from "./trade-stats";
+import { hydrateStageMetrics } from "@/lib/prop-practice/stage-metrics-read";
 
 export type SessionRecord = {
   id: string; datasetId: string; journalSessionId: string | null; initialCapital: number; currency: string;
@@ -211,10 +212,10 @@ export async function getPaperSessionSnapshot(datasetId: string, db: Prisma.Tran
     ...(scope?.accountCategory === "PROP_PRACTICE" ? { propAccount: await (async () => {
       if (scope.propRoundNumber && scope.propRoundNumber > 0) {
         const round = await db.propPracticeRound.findUniqueOrThrow({ where: { replaySessionId_number: { replaySessionId: scope.id, number: scope.propRoundNumber } } });
-        return { snapshot: JSON.parse(round.snapshot), state: JSON.parse(round.state), roundNumber: round.number };
+        return { snapshot: JSON.parse(round.snapshot), state: await hydrateStageMetrics(db, session.id, datasetId, JSON.parse(round.state)), roundNumber: round.number };
       }
       const prop = await db.propPracticeAccount.findUniqueOrThrow({ where: { replaySessionId: scope.id } });
-      return { snapshot: JSON.parse(prop.snapshot), state: JSON.parse(prop.state), roundNumber: prop.roundNumber };
+      return { snapshot: JSON.parse(prop.snapshot), state: await hydrateStageMetrics(db, session.id, datasetId, JSON.parse(prop.state)), roundNumber: prop.roundNumber };
     })() } : {}),
     activeOrders: activeOrders.map(serializePaperOrder),
     ...(includeHistory ? {

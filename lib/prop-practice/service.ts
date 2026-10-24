@@ -7,6 +7,7 @@ import { recordReplayCommand } from "@/lib/replay-sessions/service";
 import { getPaperSessionSnapshot } from "@/lib/paper-trading/serialize";
 import { applyPayout, payoutPreview, promotePropManually, promotionPreview, propRulesSchema, propTradingBlockReason, observeProp, settlePropDay, type PropState, type PropRules } from "./rules";
 import { propTradingDay, type PropCalendar } from "./trading-day";
+import { hydrateStageMetrics } from "./stage-metrics-read";
 
 export type PropSnapshot = { rules: PropRules; calendar: PropCalendar; currency: string; accountConfig: import("@/lib/paper-trading/types").PaperAccountConfig };
 export type PropRuntime = { snapshot: PropSnapshot; state: PropState; roundNumber?: number };
@@ -15,10 +16,14 @@ export async function loadPropAccount(tx: Prisma.TransactionClient = prisma): Pr
   if (!scope || scope.accountCategory !== "PROP_PRACTICE") return null;
   if (scope.propRoundNumber && scope.propRoundNumber > 0) {
     const round = await tx.propPracticeRound.findUniqueOrThrow({ where: { replaySessionId_number: { replaySessionId: scope.id, number: scope.propRoundNumber } } });
-    return { snapshot: JSON.parse(round.snapshot), state: JSON.parse(round.state), roundNumber: round.number };
+    const account = await tx.paperTradingSession.findUniqueOrThrow({ where: { projectionId: round.projectionId } });
+    return { snapshot: JSON.parse(round.snapshot), state: await hydrateStageMetrics(tx, account.id, scope.datasetId, JSON.parse(round.state)), roundNumber: round.number };
   }
   const row = await tx.propPracticeAccount.findUniqueOrThrow({ where: { replaySessionId: scope.id } });
-  return { snapshot: JSON.parse(row.snapshot), state: JSON.parse(row.state), roundNumber: row.roundNumber };
+  const state: PropState = JSON.parse(row.state);
+  if (state.stages.at(-1)?.metrics) return { snapshot: JSON.parse(row.snapshot), state, roundNumber: row.roundNumber };
+  const account = await tx.paperTradingSession.findUniqueOrThrow({ where: { projectionId: scope.projectionId } });
+  return { snapshot: JSON.parse(row.snapshot), state: await hydrateStageMetrics(tx, account.id, scope.datasetId, state), roundNumber: row.roundNumber };
 }
 export async function persistPropAccount(tx: Prisma.TransactionClient, runtime: PropRuntime, previous: PropState) {
   const scope = getReplayScope()!;
@@ -56,6 +61,7 @@ export async function observePropOperation(tx: Prisma.TransactionClient, hadFill
     const snapshot = await getPaperSessionSnapshot(scope.datasetId, tx);
     prop.state = observeProp(prop.snapshot.rules, before, { sequence: bar.sequence, day: day.day,
       rawNet: account.realizedPnl - account.totalFees, unrealized: snapshot!.stats.unrealizedPnl,
+      realizedPnl: account.realizedPnl, totalFees: account.totalFees,
       flat: account.netQuantity === 0, pending: snapshot!.activeOrders.length, hadFill });
     if (day.eod && account.netQuantity === 0) prop.state = settlePropDay(prop.snapshot.rules, prop.state);
   }

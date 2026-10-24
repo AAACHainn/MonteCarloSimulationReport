@@ -1,7 +1,7 @@
 export const enUS = {
     nav: {
       home: "Home",
-      brand: "Trading System Analytics Workbench",
+      brand: "Trading Practice Workbench",
       datasets: "Datasets",
       tradeJournals: "Trade Journals",
       masterData: "Master Data",
@@ -10,13 +10,13 @@ export const enUS = {
       history: "History",
     },
     home: {
-      eyebrow: "Trading System Risk Lab",
-      title: "Trading System Analytics Workbench",
+      eyebrow: "Replay Practice · Trade Review · Risk Analysis",
+      title: "Improve your trading through replay and review",
       description:
-        "Upload historical trades, transform them into R-multiples, and stress-test the system with bootstrap simulations.",
+        "Practice trading with future market data hidden, record your plans and execution, review trades with AI assistance, and assess money management risk through Monte Carlo simulations.",
       start: "Start with a Dataset",
       history: "View History",
-      startReplay: "Start Market Replay",
+      startReplay: "Start Replay Practice",
       openTradeJournal: "Open Trade Journal",
       manageMarketReplay: "Market Replay",
       manageMarketReplayBody: "Import historical candles and reveal them one bar at a time.",

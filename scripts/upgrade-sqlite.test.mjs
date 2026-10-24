@@ -12,7 +12,7 @@ const base = join(directory, "base.db");
 const root = process.cwd();
 const childEnv = file => ({ ...process.env, DATABASE_URL: "file:" + file.replaceAll("\\", "/"), SQLITE_DRIVER: "native", SQLITE_JOURNAL_MODE: "delete", SQLITE_SYNCHRONOUS: "FULL", MARKET_DATA_SYNC_ENABLED: "0" });
 const options = file => ({ expectedDatabase: file, stopped: true, filesRoot: directory, backupDirectory: join(directory, "backups-" + basename(file)), env: childEnv(file) });
-const readReport = file => JSON.parse(readFileSync(join(readdirSync(options(file).backupDirectory).map(name => join(options(file).backupDirectory, name))[0], "report.json"), "utf8"));
+const readReport = file => JSON.parse(readFileSync(join(options(file).backupDirectory, readdirSync(options(file).backupDirectory).sort().at(-1), "report.json"), "utf8"));
 function command(args, env, logFile) {
   const output = execFileSync(process.execPath, args, { cwd: root, env, windowsHide: true, encoding: "utf8", stdio: "pipe" });
   writeFileSync(logFile, output);
@@ -116,6 +116,12 @@ describe("repeatable offline SQLite upgrade", () => {
     expect((await upgradeDatabase(options(file), execute)).status).toBe("SUCCESS");
     expect(inspect(file, db => fingerprint(db, before))).toEqual(before);
     expect(observed).toEqual(["rehearsal.log", "rehearsal-repeat.log", "apply.log", "rehearsal.log", "rehearsal-repeat.log", "apply.log"]);
+    // A complete migration history does not prove implicit relation tables exist.
+    inspect(file, db => db.exec('DROP TABLE "_TradeToTradeTag"'));
+    const damaged = inspect(file, fingerprint);
+    await expect(upgradeDatabase(options(file), execute)).rejects.toThrow(/关联表/);
+    expect(readReport(file)).toMatchObject({ status: "FAILED", phase: "rehearsal" });
+    expect(inspect(file, fingerprint)).toEqual(damaged);
   }, 60000);
 
   it("refuses wrong paths, missing files, relative confirmation paths and missing stop acknowledgement without opening a new DB", async () => {
@@ -230,18 +236,30 @@ describe("repeatable offline SQLite upgrade", () => {
     expect(existsSync(join(report.directory, "rehearsal.db"))).toBe(true);
   }, 30000);
 
-  it.each(["scripts/init-sqlite.mjs", "lib/sqlite-client.mjs"])("rejects changes to %s after rehearsal before formal writes", async changed => {
+  it.each([
+    ["scripts/init-sqlite.mjs", "rehearsal.log"],
+    ["scripts/init-sqlite.mjs", "rehearsal-repeat.log"],
+    ["lib/sqlite-client.mjs", "rehearsal.log"],
+    ["lib/sqlite-client.mjs", "rehearsal-repeat.log"],
+  ])("rejects changes to %s after %s before formal writes", async (changed, stage) => {
     const code = mkdtempSync(join(directory, "code-"));
     mkdirSync(join(code, "scripts")); mkdirSync(join(code, "lib")); mkdirSync(join(code, "prisma"));
     for (const name of ["scripts/upgrade-sqlite.mjs", "scripts/upgrade-sqlite-worker.mjs", "scripts/upgrade-sqlite-progress.mjs", "scripts/init-sqlite.mjs", "lib/sqlite-client.mjs", "package.json", "pnpm-lock.yaml", "pnpm-workspace.yaml", "prisma/schema.prisma"]) copyFileSync(join(root, name), join(code, name));
     cpSync(join(root, "prisma/migrations"), join(code, "prisma/migrations"), { recursive: true });
     symlinkSync(join(root, "node_modules"), join(code, "node_modules"), "junction");
     const file = fixture(), before = inspect(file, fingerprint);
+    let applied = false;
     await expect(upgradeDatabase({ ...options(file), root: code }, (args, env, log) => {
+      if (basename(log) === "apply.log") applied = true;
       command(args, env, log);
-      if (basename(log) === "rehearsal-repeat.log") writeFileSync(join(code, changed), readFileSync(join(code, changed), "utf8") + "\n// changed after rehearsal\n");
+      if (basename(log) === stage) {
+        const change = changed.startsWith("scripts/") ? '\nconst drift = createDatabaseClient(); try { await drift.$executeRawUnsafe("UPDATE MarketBar SET close=999"); } finally { await drift.$disconnect(); }\n' : '\n// Changed local dependency after successful rehearsal.\n';
+        writeFileSync(join(code, changed), readFileSync(join(code, changed), "utf8") + change);
+      }
     })).rejects.toThrow("升级实现代码");
+    expect(applied).toBe(false);
     expect(inspect(file, fingerprint)).toEqual(before);
+    expect(existsSync(file + ".upgrade.lock")).toBe(true);
     expect(existsSync(join(readReport(file).directory, "apply.log"))).toBe(false);
   }, 30000);
 
@@ -290,6 +308,28 @@ describe("repeatable offline SQLite upgrade", () => {
     expect(events.at(-1).state).toBe("SUCCESS");
     expect(events.every((event, index) => index === 0 || event.sequence > events[index - 1].sequence)).toBe(true);
     expect(JSON.stringify(events)).not.toContain("保留原会话");
+  }, 30000);
+  it.each(["_TradeToTradeTag", "_ReplayJournalTradeReasons"])("repairs missing implicit relation %s via the original initialization script", async table => {
+    const file = fixture(); inspect(file, db => db.exec(`DROP TABLE "${table}"`));
+    const before = inspect(file, fingerprint);
+    const result = await upgradeDatabase(options(file));
+    expect(result.status).toBe("SUCCESS");
+    expect(inspect(file, db => fingerprint(db, before))).toEqual(before);
+    expect(inspect(file, db => db.prepare(`SELECT A,B FROM "${table}"`).all())).toEqual([]);
+  }, 30000);
+
+  it.each(["_TradeToTradeTag", "_ReplayJournalTradeReasons"])("rejects an incomplete implicit relation %s on the rehearsal before apply", async table => {
+    const file = fixture(); let applied = false;
+    await expect(upgradeDatabase(options(file), (args, env, log) => {
+      if (basename(log) === "apply.log") applied = true;
+      command(args, env, log);
+      if (basename(log) === "rehearsal.log") inspect(env.DATABASE_URL.slice(5), db => {
+        db.exec(`DROP TABLE "${table}"; CREATE TABLE "${table}" (A TEXT NOT NULL)`);
+      });
+    })).rejects.toThrow(/关联表/);
+    expect(applied).toBe(false);
+    expect(inspect(file, db => db.pragma(`table_info("${table}")`).map(column => column.name))).toEqual(["A", "B"]);
+    expect(readReport(file)).toMatchObject({ status: "FAILED", phase: "rehearsal" });
   }, 30000);
 });
 

@@ -82,21 +82,37 @@ export function identifyMigration(db, root = projectRoot) {
 }
 
 function checkTarget(db) {
-  for (const model of Prisma.dmmf.datamodel.models) {
+  const models = Prisma.dmmf.datamodel.models;
+  const relations = new Set();
+  for (const model of models) {
     const columns = db.pragma(`table_info(${quote(model.dbName ?? model.name)})`).map(item => item.name);
     if (!columns.length || model.fields.some(field => field.kind !== "object" && !columns.includes(field.dbName ?? field.name))) throw new Error(`升级后结构不完整：${model.name}，请先确认 Prisma Client 已按当前 schema 生成`);
-  }
-  // Prisma implicit many-to-many tables do not appear as explicit DMMF models.
-  for (const model of Prisma.dmmf.datamodel.models) {
-    for (const field of model.fields.filter(item => item.kind === "object" && item.isList && !item.relationFromFields?.length)) {
-      const opposite = Prisma.dmmf.datamodel.models.find(item => item.name === field.type)?.fields.find(item => item.relationName === field.relationName && item.isList);
-      if (!opposite) continue;
-      const name = "_" + field.relationName;
-      const columns = db.pragma(`table_info(${quote(name)})`).map(item => item.name);
-      if (!columns.includes("A") || !columns.includes("B")) throw new Error(`升级后隐式关联表不完整：${name}`);
+    // Prisma's implicit many-to-many tables are not DMMF models. Detect both
+    // list ends of the relation, including explicitly named implicit relations.
+    for (const field of model.fields) {
+      if (field.kind !== "object" || !field.isList || !field.relationName || field.relationFromFields?.length) continue;
+      const opposite = models.find(item => item.name === field.type);
+      if (opposite?.fields.some(item => item !== field && item.kind === "object" && item.isList && item.type === model.name && item.relationName === field.relationName && !item.relationFromFields?.length)) relations.add("_" + field.relationName);
     }
   }
+  for (const table of relations) {
+    const columns = db.pragma(`table_info(${quote(table)})`).map(item => item.name);
+    if (!["A", "B"].every(name => columns.includes(name))) throw new Error(`升级后隐式关联表缺失或字段不完整：${table}`);
+  }
   return checkIntegrity(db);
+}
+
+function executionManifest(root, method) {
+  const files = ["scripts/upgrade-sqlite.mjs", "lib/sqlite-client.mjs", "package.json", "pnpm-lock.yaml",
+    method === "init" ? "scripts/init-sqlite.mjs" : "node_modules/prisma/build/index.js"];
+  return files.map(name => ({ name, sha256: hash(readFileSync(join(root, name))) }));
+}
+
+function assertExecutionUnchanged(root, manifest) {
+  for (const item of manifest) {
+    const file = join(root, item.name);
+    if (!existsSync(file) || hash(readFileSync(file)) !== item.sha256) throw new Error(`升级执行代码已变化：${item.name}；停止后续阶段，请固定代码版本重新演练`);
+  }
 }
 
 function schemaFingerprint(db) {
@@ -227,6 +243,12 @@ export async function upgradeDatabase(options, execute = runCommand) {
     report.migrationChecksums = plan.migrations;
     report.schemaChecksum = hash(readFileSync(join(root, "prisma/schema.prisma")));
     report.implementationChecksums = implementation;
+    const execution = executionManifest(root, plan.method);
+    report.executionCode = execution;
+    const checkExecution = () => {
+      assertSame(implementationFingerprint(root), report.implementationChecksums, "升级实现代码");
+      assertExecutionUnchanged(root, execution);
+    };
     step(3, "files-backup", "backup");
     for (const name of [".env", "storage", ".market-imports"]) {
       const source = join(filesRoot, name);
@@ -240,10 +262,12 @@ export async function upgradeDatabase(options, execute = runCommand) {
     report.migrationJournalMode = mode;
     const migrate = async (target, stage, phaseIndex) => {
       step(phaseIndex, stage + "-execute", target === file ? "source" : "rehearsal");
-      assertSame(implementationFingerprint(root), report.implementationChecksums, "升级实现代码");
+      checkExecution();
       prepareJournal(target, mode, target !== file);
       const args = plan.method === "init" ? [join(root, "scripts/init-sqlite.mjs")] : [join(root, "node_modules/prisma/build/index.js"), "migrate", "deploy", "--schema", join(root, "prisma/schema.prisma")];
+      checkExecution();
       await execute(args, { ...childEnv, DATABASE_URL: "file:" + target.replaceAll("\\", "/") }, join(directory, stage + ".log"), root);
+      checkExecution();
       step(phaseIndex, stage + "-integrity", target === file ? "source" : "rehearsal");
       const db = open(target);
       try {
@@ -281,7 +305,7 @@ export async function upgradeDatabase(options, execute = runCommand) {
     if (currentIdentity.dev !== identity.dev || currentIdentity.ino !== identity.ino || realpathSync(resolveSqlitePath(env.DATABASE_URL, root)) !== file) throw new Error("数据库文件已被替换");
     assertSame(hash(readFileSync(join(root, "prisma/schema.prisma"))), report.schemaChecksum, "目标 schema");
     assertSame(identifyLocalMigrations(root), plan.migrations, "迁移文件");
-    assertSame(implementationFingerprint(root), report.implementationChecksums, "升级实现代码");
+    checkExecution();
     progress.checkCancellation();
     report.formalWriteStarted = true;
     report.phase = "apply"; save(join(directory, "report.json"), report);

@@ -11,7 +11,7 @@ export async function GET(_request: Request, context: Context) {
   if (!await prisma.marketDataset.findUnique({ where: { id }, select: { id: true } })) {
     return NextResponse.json({ error: copy.marketReplay.datasetNotFound }, { status: 404 });
   }
-  return NextResponse.json({ sessions: await listReplaySessions(id) });
+  return NextResponse.json({ sessions: await listReplaySessions(id) }, { headers: { "Cache-Control": "no-store" } });
 }
 export async function POST(request: Request, context: Context) {
   try {

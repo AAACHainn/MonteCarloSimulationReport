@@ -13,7 +13,7 @@ import { Table, TableHeader, TableHead, TableRow, TableBody, TableCell } from "@
 import { copy } from "@/lib/i18n";
 import { formatMoney, formatNumber, formatInteger } from "@/lib/format";
 import { createUuid } from "@/lib/uuid";
-import { funds, payoutPreview, promotionPreview } from "@/lib/prop-practice/rules";
+import { currentStage, funds, payoutPreview, promotionPreview } from "@/lib/prop-practice/rules";
 import { propResultLabel } from "@/lib/prop-practice/result-label";
 import type { PropRuntime, readPropAccount } from "@/lib/prop-practice/service";
 import type { PaperSessionSnapshot } from "@/lib/paper-trading/types";
@@ -145,7 +145,7 @@ export function PropAccountPanel({ sessionId, runtime, tradingSnapshot, busy: ex
         <div className="grid grid-cols-4 gap-4 text-sm tabular-nums">
           {[[t.balance, f.balance], [t.equity, f.equity], [t.floor, f.floor], [t.remainingRisk, f.equity - f.floor]].map(([label, value]) => <div key={label}><p className="text-xs text-slate-500">{label}</p><p className="mt-1 font-medium text-slate-950">{money(Number(value))}</p></div>)}
         </div>
-        {tradingSnapshot ? <div className="border-t pt-3"><PaperAccountMetrics snapshot={tradingSnapshot} compact includeBalances={false} extraItems={summaryItems} /></div> : <div className="grid grid-cols-4 gap-4 border-t pt-3 text-sm tabular-nums">{summaryItems.map(([label, value]) => <div key={label}><p className="text-xs text-slate-500">{label}</p><p className="font-medium">{value}</p></div>)}</div>}
+        {tradingSnapshot ? <div className="border-t pt-3"><PaperAccountMetrics snapshot={tradingSnapshot} compact includeBalances={false} metrics={currentStage(state).metrics ?? null} extraItems={summaryItems} /></div> : <div className="grid grid-cols-4 gap-4 border-t pt-3 text-sm tabular-nums">{summaryItems.map(([label, value]) => <div key={label}><p className="text-xs text-slate-500">{label}</p><p className="font-medium">{value}</p></div>)}</div>}
         <p className={!state.result && state.pause === "NONE" ? "text-xs text-slate-500" : "text-xs text-amber-800"}>{t.pause}: {state.result === "FAILED" ? t.roundFailed : state.result ? t.roundStopped : t[state.pause]}</p>
         {state.result ? <p className="text-xs text-amber-800">{t.roundFinishedHint}</p> : null}
         {state.failure ? <p className="text-xs text-red-700">{t.failure}: {state.failure.sequence} / {money(state.failure.equity)} / {money(state.failure.floor)} · {state.failure.phase === "EVALUATION" ? t.evaluation : t.funded}</p> : null}

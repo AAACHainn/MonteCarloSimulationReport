@@ -1,10 +1,11 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useState } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { Archive, Loader2, Pencil, Plus, Trash2 } from "lucide-react";
 import { ReplayStartDialog } from "./replay-start-dialog";
+import { useReplaySessionsList } from "./use-replay-sessions-list";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -25,12 +26,12 @@ import type { ReplaySessionSummary, ReplaySessionMode } from "@/lib/replay-sessi
 const t = copy.replaySessions;
 export function ReplaySessionsDashboard({ dataset, initialSessions, initialCreateOpen = false }: { dataset: MarketDatasetSummary; initialSessions: ReplaySessionSummary[]; initialCreateOpen?: boolean }) {
   const router = useRouter();
-  const [sessions, setSessions] = useState(initialSessions);
   const [createOpen, setCreateOpen] = useState(initialCreateOpen);
   const [name, setName] = useState(t.training as string);
   const [mode, setMode] = useState<ReplaySessionMode>("TRAINING");
   const [start, setStart] = useState(() => dateTimeLocalValue(dataset.startTime, dataset.timezone));
   const [busy, setBusy] = useState(false);
+  const { sessions, setSessions, error: refreshError } = useReplaySessionsList(dataset.id, initialSessions, busy);
   const [error, setError] = useState<string | null>(null);
   const [archiveTarget, setArchiveTarget] = useState<ReplaySessionSummary | null>(null);
   const [deleteTarget, setDeleteTarget] = useState<ReplaySessionSummary | null>(null);
@@ -39,7 +40,6 @@ export function ReplaySessionsDashboard({ dataset, initialSessions, initialCreat
   const [renameDraft, setRenameDraft] = useState("");
   const [renameError, setRenameError] = useState<string | null>(null);
   const [status, setStatus] = useState<string | null>(null);
-  useEffect(() => setSessions(initialSessions), [initialSessions]);
 
   function beginRename(session: ReplaySessionSummary) {
     setRenameTarget(session); setRenameDraft(session.name); setRenameError(null); setStatus(null); setError(null);
@@ -127,7 +127,7 @@ export function ReplaySessionsDashboard({ dataset, initialSessions, initialCreat
       <p className="text-sm text-slate-600">{t.source}</p>
       <div className="flex flex-wrap gap-2"><Button asChild variant="outline"><Link href="/prop-practice-templates">{copy.propPractice.templates}</Link></Button><Button onClick={() => { setError(null); setStatus(null); setCreateOpen(true); }} disabled={busy || !dataset.sourceIntervalSeconds}><Plus className="h-4 w-4" />{t.create}</Button></div>
     </div>
-    {error && !createOpen ? <Alert className="border-red-200 bg-red-50" role="alert"><AlertDescription>{error}</AlertDescription></Alert> : null}
+    {(error ?? refreshError) && !createOpen ? <Alert className="border-red-200 bg-red-50" role="alert"><AlertDescription>{error ?? refreshError}</AlertDescription></Alert> : null}
     {status ? <Alert className="border-emerald-200 bg-emerald-50" role="status" aria-live="polite"><AlertDescription>{status}</AlertDescription></Alert> : null}
     <Card><CardHeader><CardTitle>{t.title}</CardTitle></CardHeader><CardContent>
       {sessions.length ? <Table><TableHeader><TableRow>
