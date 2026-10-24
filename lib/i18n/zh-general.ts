@@ -118,7 +118,7 @@ export const zhStart = {
     },
     nav: {
       home: "首页",
-      brand: "交易系统分析台",
+      brand: "交易训练工作台",
       datasets: "数据集",
       tradeJournals: "交易日志",
       masterData: "基础数据",
@@ -127,13 +127,13 @@ export const zhStart = {
       history: "历史记录",
     },
     home: {
-      eyebrow: "交易系统风险实验室",
-      title: "交易系统分析台",
+      eyebrow: "回放训练 · 交易复盘 · 风险分析",
+      title: "在回放与复盘中，持续改进交易",
       description:
-        "上传历史成交记录，将交易转换为 R 倍数，并通过 Bootstrap 抽样模拟系统风险、回撤、爆仓概率和权益分位数曲线。",
+        "在隐藏未来行情的环境中练习交易，记录计划与执行，结合 AI 辅助复盘，并通过蒙特卡洛模拟评估资金管理风险。",
       start: "从数据集开始",
       history: "查看历史",
-      startReplay: "开始 K 线回放",
+      startReplay: "开始回放训练",
       openTradeJournal: "打开交易日志",
       manageMarketReplay: "K 线回放",
       manageMarketReplayBody: "导入历史行情，隐藏未来数据并按自己的节奏逐根复盘。",

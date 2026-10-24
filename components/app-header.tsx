@@ -1,6 +1,7 @@
 "use client";
 
 import Link from "next/link";
+import Image from "next/image";
 import { usePathname } from "next/navigation";
 import { copy } from "@/lib/i18n";
 
@@ -20,8 +21,9 @@ export function AppHeader() {
   return (
     <header className="border-b bg-white">
       <div className="mx-auto flex max-w-7xl items-center justify-between px-6 py-4">
-        <Link href="/" className="font-mono text-sm font-semibold uppercase tracking-wide text-slate-900">
-          {copy.nav.brand}
+        <Link href="/" className="inline-flex shrink-0 items-center gap-2 whitespace-nowrap font-mono text-sm font-semibold uppercase tracking-wide text-slate-900">
+          <Image src="/icon.svg" alt="" aria-hidden="true" width={28} height={28} unoptimized className="h-7 w-7 shrink-0" />
+          <span>{copy.nav.brand}</span>
         </Link>
         <nav className="flex items-center gap-2">
           {navItems.map((item) => (

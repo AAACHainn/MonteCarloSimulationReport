@@ -1,6 +1,6 @@
 ﻿# AGENTS.md
 
-交易系统分析台：单用户本地 Web 应用，包含行情回放、模拟交易、交易日志和蒙特卡洛分析。技术栈为 Next.js App Router、TypeScript、Tailwind、Prisma + SQLite、Lightweight Charts / Recharts、Zod、Vitest。功能与启动步骤见 [README.md](README.md)。
+交易训练工作台：单用户本地 Web 应用，包含行情回放、模拟交易、交易日志和蒙特卡洛分析。技术栈为 Next.js App Router、TypeScript、Tailwind、Prisma + SQLite、Lightweight Charts / Recharts、Zod、Vitest。功能与启动步骤见 [README.md](README.md)。
 
 ## 安全与数据保护
 

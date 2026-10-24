@@ -1,6 +1,6 @@
-# 交易系统分析台
+# 交易训练工作台
 
-**Monte Carlo Simulation Report** · K 线回放训练、交易日志与蒙特卡洛风险分析
+**Trading Practice Workbench** · 回放训练 · 交易复盘 · 风险分析
 
 ![Next.js 15](https://img.shields.io/badge/Next.js-15-000000?logo=nextdotjs)
 ![React 19](https://img.shields.io/badge/React-19-149ECA?logo=react)

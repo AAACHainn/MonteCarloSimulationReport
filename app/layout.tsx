@@ -7,7 +7,7 @@ import { copy, defaultLocale } from "@/lib/i18n";
 import "./globals.css";
 
 export const metadata: Metadata = {
-  title: copy.home.title,
+  title: copy.nav.brand,
   description: copy.home.description,
 };
 
