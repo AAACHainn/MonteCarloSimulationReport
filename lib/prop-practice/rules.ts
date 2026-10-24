@@ -88,6 +88,12 @@ export function initialPropState(r: PropRules, sequence: number): PropState {
   return { stages: [newStage("EVALUATION", r.evaluation.risk, 0, sequence)], phase: "EVALUATION", pause: "NONE", pausedDay: null,
     totalRequested: 0, totalReceived: 0, payoutCount: 0, result: null, failure: null, last: null };
 }
+/** A failed funded round also restarts at evaluation; prior history is never mutated. */
+export function resetPropState(rules: PropRules, previous: PropState, nextSequence: number) {
+  if (previous.result !== "FAILED" || !Number.isSafeInteger(nextSequence) || nextSequence < 0
+    || nextSequence <= (previous.last?.sequence ?? -1)) throw new Error(copy.propPractice.resetUnavailable);
+  return initialPropState(rules, nextSequence);
+}
 export function funds(s: PropState, o = s.last) {
   const st = currentStage(s), profit = (o?.rawNet ?? st.anchor) - st.anchor;
   const balance = st.initialCapital + profit - st.grossPayout;

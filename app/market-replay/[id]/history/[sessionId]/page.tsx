@@ -13,6 +13,7 @@ import { formatInterval, type DisplaySession } from "@/lib/market-replay/types";
 import { listReplaySessions } from "@/lib/replay-sessions/read";
 import { ReplaySessionProvider } from "@/components/market-replay/replay-session-context";
 import { replayJournalLinkTarget } from "@/lib/paper-trading/journal-links";
+import { withReplayJournalDisplayNumbers } from "@/lib/paper-trading/journal-numbering";
 
 export const dynamic = "force-dynamic";
 
@@ -45,16 +46,25 @@ export default async function HistoricalReplayPage({
   const requestedTarget = replayJournalLinkTarget(query);
   const requested = query.trade !== undefined || query.journalNo !== undefined;
   if (requested && !requestedTarget) notFound();
+  const selectedEntry = requestedTarget ? await prisma.replayJournalEntry.findFirst({
+    where: { journalSessionId: session.id, ...requestedTarget,
+      projection: { OR: [{ id: replaySession.activeProjectionId }, { propRound: { isNot: null } }] } },
+    select: { projectionId: true },
+  }) : null;
+  if (requested && !selectedEntry) notFound();
+  const projectionId = selectedEntry?.projectionId ?? replaySession.activeProjectionId;
+  const round = await prisma.propPracticeRound.findUnique({ where: { projectionId } });
   const [bounds, requestedEntry, firstEntry] = await Promise.all([
     prisma.replayJournalEntry.aggregate({
-      where: { journalSessionId: session.id, projectionId: replaySession.activeProjectionId },
+      where: { journalSessionId: session.id, projectionId },
       _min: { openedSequence: true },
       _max: { closedSequence: true },
     }),
     requestedTarget
       ? prisma.replayJournalEntry.findFirst({
-          where: { journalSessionId: session.id, ...requestedTarget, projectionId: replaySession.activeProjectionId },
+          where: { journalSessionId: session.id, ...requestedTarget, projectionId },
           select: {
+            id: true,
             accountNo: true,
             openedSequence: true,
             displayIntervalSeconds: true,
@@ -63,9 +73,10 @@ export default async function HistoricalReplayPage({
         })
       : null,
     prisma.replayJournalEntry.findFirst({
-      where: { journalSessionId: session.id, projectionId: replaySession.activeProjectionId },
+      where: { journalSessionId: session.id, projectionId },
       orderBy: { accountNo: "asc" },
       select: {
+        id: true,
         accountNo: true,
         openedSequence: true,
         displayIntervalSeconds: true,
@@ -74,7 +85,8 @@ export default async function HistoricalReplayPage({
     }),
   ]);
   if (requested && !requestedEntry) notFound();
-  const entry = requestedEntry ?? firstEntry;
+  const rawEntry = requestedEntry ?? firstEntry;
+  const entry = rawEntry ? (await withReplayJournalDisplayNumbers([rawEntry], projectionId))[0] : null;
   const startSequence = bounds._min.openedSequence;
   const endSequence = bounds._max.closedSequence;
   if (!entry || startSequence === null || endSequence === null) notFound();
@@ -83,10 +95,10 @@ export default async function HistoricalReplayPage({
   const displaySession: DisplaySession = resolveDisplaySession(dataset, requestedDisplaySession)
     ? requestedDisplaySession
     : "ETH";
-  const historyHref = `/market-replay/${id}/trade-history?sessionId=${encodeURIComponent(replaySession.id)}`;
+  const historyHref = `/market-replay/${id}/trade-history?sessionId=${encodeURIComponent(replaySession.id)}${round ? `&propRound=${round.number}` : ""}`;
   const title = session.name || copy.paperTrading.historicalReplayTitle(session.replayGeneration);
 
-  return <ReplaySessionProvider session={{ ...replaySession, status: "ARCHIVED" }}><div className="relative left-1/2 flex h-[calc(100dvh-4.3125rem)] w-[calc(100vw-2rem)] max-w-none -translate-x-1/2 flex-col gap-3 overflow-hidden sm:w-[calc(100vw-3rem)]">
+  return <ReplaySessionProvider session={{ ...replaySession, activeProjectionId: projectionId, propRoundNumber: round?.number, status: "ARCHIVED" }}><div className="relative left-1/2 flex h-[calc(100dvh-4.3125rem)] w-[calc(100vw-2rem)] max-w-none -translate-x-1/2 flex-col gap-3 overflow-hidden sm:w-[calc(100vw-3rem)]">
     <div className="shrink-0 space-y-2">
       <Breadcrumbs items={[
         { label: copy.marketReplay.title, href: "/market-replay" },

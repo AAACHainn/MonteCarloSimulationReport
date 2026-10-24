@@ -71,7 +71,7 @@ describe("replay journal Setup API", () => {
     expect(response.status).toBe(200);
     expect(mocks.entryFindFirst).toHaveBeenCalledWith({
       where: { id: "entry-1", journalSession: { datasetId: "dataset-1" } },
-      select: { id: true, logicalKey: true, review: true },
+      select: { id: true, logicalKey: true, review: true, projectionId: true },
     });
     expect(mocks.optionFindFirst).toHaveBeenCalledWith({
       where: { id: "setup-1", type: "STRATEGY", active: true },

@@ -45,7 +45,7 @@ export function parseJournalVisibleColumns(stored: string | null, legacy = false
 }
 
 export function journalFieldValue(entry: ReplayJournalEntryData, id: JournalColumnId): string {
-  if (id === "no") return String(entry.no);
+  if (id === "no") return entry.propRoundNumber ? `${entry.no} · ${copy.propPractice.roundLabel(entry.propRoundNumber)}` : String(entry.no);
   if (id === "date") { const p = utcDateParts(entry.openedAt, entry.displayUtcOffsetMinutes); return `${p.year}/${p.month}/${p.day}`; }
   if (id === "direction") return entry.direction === "LONG" ? copy.paperTrading.long : copy.paperTrading.short;
   if (id === "setup") return entry.setupOption?.name ?? copy.common.dash;

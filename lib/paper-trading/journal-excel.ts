@@ -69,16 +69,18 @@ function excelDate(entry: ReplayJournalEntryData) {
 }
 
 function worksheetXml(entries: ReplayJournalEntryData[], caption?: string) {
+  const exportColumns: ExportColumn[] = entries.some(entry => entry.propRoundNumber !== undefined)
+    ? [columns[0], { header: copy.propPractice.round, width: 14, style: "integer", value: entry => entry.propRoundNumber ?? null }, ...columns.slice(1)] : columns;
   const headerRow = caption ? 2 : 1;
   const lastRow = entries.length + headerRow;
-  const lastColumn = columnName(columns.length);
-  const columnDefinitions = columns.map((column, index) => (
+  const lastColumn = columnName(exportColumns.length);
+  const columnDefinitions = exportColumns.map((column, index) => (
     `<col min="${index + 1}" max="${index + 1}" width="${column.width}" customWidth="1"/>`
   )).join("");
-  const header = columns.map((column, index) => stringCell(columnName(index + 1), headerRow, column.header, 1)).join("");
+  const header = exportColumns.map((column, index) => stringCell(columnName(index + 1), headerRow, column.header, 1)).join("");
   const rows = entries.map((entry, rowIndex) => {
     const row = rowIndex + headerRow + 1;
-    const cells = columns.map((column, columnIndex) => {
+    const cells = exportColumns.map((column, columnIndex) => {
       const reference = columnName(columnIndex + 1);
       const value = column.value(entry);
       return typeof value === "number"

@@ -10,7 +10,18 @@ vi.mock("@/lib/db", async () => {
 });
 import { prisma } from "@/lib/db";
 import { createReplaySession, archiveReplaySession, deleteReplaySession, restartReplaySession } from "@/lib/replay-sessions/service";
-import { loadReplayScope, runWithReplayScope } from "@/lib/replay-sessions/scope";
+import { loadReplayScope, loadPropRoundScope, runWithReplayScope } from "@/lib/replay-sessions/scope";
+import { resetPropAccount, listPropRounds } from "./rounds";
+import { GET as journalGET } from "@/app/api/market-datasets/[id]/paper-journal/route";
+import { POST as resetPOST } from "@/app/api/replay-sessions/[sessionId]/prop-practice/reset/route";
+import { pruneReplayResults } from "@/lib/replay-sessions/prune-results";
+import { PATCH as entryPATCH } from "@/app/api/market-datasets/[id]/paper-journal/entries/[entryId]/route";
+import { GET as exportDataGET } from "@/app/api/market-datasets/[id]/paper-journal/sessions/[sessionId]/export-data/route";
+import { PATCH as journalSessionPATCH } from "@/app/api/market-datasets/[id]/paper-journal/sessions/[sessionId]/route";
+import { POST as drawingPOST } from "@/app/api/market-datasets/[id]/drawings/route";
+import { PATCH as drawingPATCH, DELETE as drawingDELETE } from "@/app/api/market-datasets/[id]/drawings/[drawingId]/route";
+import { GET as propAccountGET } from "@/app/api/replay-sessions/[sessionId]/prop-practice/route";
+import { DEFAULT_TREND_LINE_STYLE } from "@/lib/market-replay/chart-drawings";
 import { getPaperSessionSnapshot } from "@/lib/paper-trading/serialize";
 import { defaultPropRules, payoutPreview, payoutQualification, promotionPreview, type PropRules } from "./rules";
 import { confirmPropPayout, confirmPropPromotion, deletePropTemplate, loadPropAccount, savePropTemplate, listPropTemplates } from "./service";
@@ -260,7 +271,7 @@ describe("prop orchestration versus original flow", () => {
     const retry = await advancePOST(request(s, "POST", stopped.body), ctx); expect((await retry.json()).currentSequence).toBe(1);
     await advance(s); expect((await snapshot(s))!.session.lastProcessedSequence).toBe(2);
   });
-  it("archives risk failure after the entire source result, retaining position and protection with retry receipt", async () => {
+  it("pauses a failed round after the entire source result without archiving the session, retaining position and protection with retry receipt", async () => {
     const r = rules(); r.evaluation.risk.drawdown = 0.01;
     const standard = await create(), s = await create(r);
     for (const item of [standard, s]) { await advance(item); await order(item, "BUY", 1, { stopLoss: 50, takeProfit: 300 }); }
@@ -268,10 +279,184 @@ describe("prop orchestration versus original flow", () => {
     // Intrabar win here; make next complete close lose enough through original price model.
     await prisma.marketBar.update({ where: { datasetId_sequence: { datasetId: "prop", sequence: 1 } }, data: { close: 109 } });
     const failed = await advance(s, 5);
-    expect(failed.data.currentSequence).toBe(1); expect((await loadReplayScope(s.id)).status).toBe("ARCHIVED");
+    expect(failed.data.currentSequence).toBe(1); expect((await loadReplayScope(s.id)).status).toBe("ACTIVE");
     const snap = await snapshot(s); expect(snap!.session.netQuantity).toBe(1); expect(snap!.activeOrders).toHaveLength(2); expect(snap!.recentFills).toHaveLength(1);
     const retry = await advancePOST(request(s, "POST", failed.body), ctx); expect(retry.status).toBe(200); expect((await retry.json()).currentSequence).toBe(1);
     await prisma.marketBar.update({ where: { datasetId_sequence: { datasetId: "prop", sequence: 1 } }, data: { close: 120 } });
+  });
+  it.each(["source", "sync", "display"])("restarts a failed funded round at evaluation after %s advancement, preserving history, receipts, gate and original execution", async mode => {
+    const r = rules(); r.funded.risk.drawdown = 1;
+    const s = await create(r);
+    await advance(s, 3); await order(s, "BUY"); await advance(s); await order(s, "SELL", 1, { executeAtCurrentClose: true });
+    await scoped(s, async () => confirmPropPromotion({ expectedVersion: (await loadReplayScope(s.id)).version, requestId: randomUUID() }));
+    await order(s, "BUY"); await advance(s); await order(s, "SELL", 1, { executeAtCurrentClose: true });
+    await scoped(s, async () => confirmPropPayout({ expectedVersion: (await loadReplayScope(s.id)).version, requestId: randomUUID(), amount: 5 }));
+    await advance(s); await order(s, "SELL", 1, { stopLoss: 300, takeProfit: 50 });
+    const progress = await prisma.replayProgress.findUniqueOrThrow({ where: { replaySessionId: s.id } });
+    const before = (await snapshot(s))!;
+    const body = mode === "sync" ? { requestId: randomUUID(), generation: progress.generation, confirmedSequence: progress.currentSequence,
+      syncVersion: progress.syncVersion, dataVersion: 1, historyVersion: 1, expectedPaperVersion: before.session.version, targetSequence: 7,
+      contextRuns: [{ fromSequence: 6, toSequence: 7, generation: progress.generation, context: null }] }
+      : { requestId: randomUUID(), count: mode === "source" ? 2 : 1, expectedVersion: before.session.version, expectedCurrentSequence: 5,
+        ...(mode === "display" ? { displayIntervalSeconds: 300, displaySession: "ETH", abrLength: 14, displayUtcOffsetMinutes: 0 } : {}) };
+    const handler = mode === "sync" ? syncPOST : advancePOST;
+    const response = await handler(request(s, "POST", body), ctx), receipt = await response.json();
+    expect(response.status, JSON.stringify(receipt)).toBe(200); expect(receipt).toMatchObject({ currentSequence: 6, propStopped: true });
+    const failed = (await snapshot(s))!;
+    expect(failed.propAccount!.state).toMatchObject({ phase: "FUNDED", result: "FAILED", payoutCount: 1, totalReceived: 4.5 });
+    expect(failed.session.netQuantity).toBe(-1); expect(failed.activeOrders).toHaveLength(2); expect(failed.openLots).toHaveLength(1);
+    const retry = await handler(request(s, "POST", body), ctx); expect(retry.status).toBe(200); expect(await retry.json()).toEqual(receipt);
+    const gate = { ...defaultTrainingGate(), autoEnabled: false, lossStreak: 1, completedCount: 3 };
+    await prisma.replaySession.update({ where: { id: s.id }, data: { trainingGate: JSON.stringify(gate), riskPreferences: JSON.stringify({ riskMode: "FIXED", riskAmount: 123, targetR: 2 }) } });
+    const oldAccount = await prisma.paperTradingSession.findUniqueOrThrow({ where: { projectionId: s.activeProjectionId } });
+    const owner = await loadReplayScope(s.id);
+    const input = { expectedVersion: owner.version, expectedProjectionId: owner.projectionId, requestId: randomUUID() };
+    const results = await Promise.all([scoped(s, () => resetPropAccount(input)), scoped(s, () => resetPropAccount(input))]);
+    expect(results[0]).toEqual(results[1]); expect(results[0].number).toBe(2);
+    const current = await loadReplayScope(s.id), next = (await snapshot(s))!;
+    expect(current).toMatchObject({ status: "ACTIVE", trainingGate: gate }); expect(current.projectionId).not.toBe(s.activeProjectionId);
+    expect(next.propAccount).toMatchObject({ roundNumber: 2, snapshot: failed.propAccount!.snapshot, state: { phase: "EVALUATION", result: null, totalReceived: 0, payoutCount: 0, last: null } });
+    expect(next.session).toMatchObject({ lastProcessedSequence: 6, netQuantity: 0, realizedPnl: 0, totalFees: 0, trainingGate: gate });
+    expect(next.activeOrders).toEqual([]); expect(next.recentFills).toEqual([]);
+    expect(await prisma.paperTradingSession.findUnique({ where: { id: oldAccount.id } })).toEqual(oldAccount);
+    expect((await prisma.replaySession.findUniqueOrThrow({ where: { id: s.id } })).riskPreferences).toContain('123');
+    const stale = await handler(request(s, "POST", body), ctx); expect(stale.status).toBe(409);
+    const oldScope = await loadPropRoundScope(current, 1);
+    expect((await runWithReplayScope(oldScope, () => getPaperSessionSnapshot("prop")))!.propAccount).toEqual(failed.propAccount);
+    const history = await journalGET(new Request(`http://localhost/api/test?replaySessionId=${s.id}&propRound=0&scope=history`), ctx);
+    expect(history.status).toBe(200); const historyData = await history.json(); expect(historyData.items).toHaveLength(2);
+    const entry = historyData.items[0]; expect(entry.propRoundNumber).toBe(1);
+    for (const number of [0, 1]) {
+      const updatedEntry = await entryPATCH(new Request(`http://localhost/api/test?replaySessionId=${s.id}&propRound=${number}`, { method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ review: `round ${number}` }) }), { params: Promise.resolve({ id: "prop", entryId: entry.id }) });
+      expect(updatedEntry.status, JSON.stringify(await updatedEntry.clone().json())).toBe(200);
+    }
+    const exported = await exportDataGET(new Request(`http://localhost/api/test?replaySessionId=${s.id}&propRound=1`), { params: Promise.resolve({ id: "prop", sessionId: entry.journalSessionId }) });
+    expect(exported.status).toBe(200); const exportedData = await exported.json(); expect(exportedData.entries).toHaveLength(2); expect(exportedData.endSequence).toBe(6);
+    await expect(scoped(s, () => resetPropAccount({ ...input, expectedVersion: input.expectedVersion + 1 }))).rejects.toMatchObject({ code: "SESSION_CONFLICT" });
+    await scoped(s, () => sqliteWriteTransaction(prisma, tx => pruneReplayResults(tx, s.id)));
+    expect(await prisma.paperTradingSession.findUnique({ where: { id: oldAccount.id } })).not.toBeNull();
+    const rounds = await scoped(s, listPropRounds); expect(rounds).toHaveLength(2); expect(rounds[1]).toMatchObject({ totalReceived: 4.5, result: "FAILED" });
+    const fresh = await createReplaySession("prop", { name: "fresh", mode: "TRAINING", timestamp: times[7], playbackRate: 1, displayIntervalSeconds: 60, displaySession: "ETH" });
+    expect((await accountPOST(request(fresh, "POST", config), ctx)).status).toBe(201);
+    await prisma.replaySession.update({ where: { id: fresh.id }, data: { trainingGate: JSON.stringify(gate) } });
+    const updated = { ...s, activeProjectionId: current.projectionId };
+    for (const item of [updated, fresh]) { await order(item, "BUY"); await advance(item); }
+    expect(normalized(await snapshot(s))).toEqual(normalized(await snapshot(fresh)));
+    expect(await scoped(s, () => resetPropAccount(input))).toEqual(results[0]);
+    await removeSession(updated);
+    expect(await prisma.propPracticeRound.count({ where: { replaySessionId: s.id } })).toBe(0);
+    expect(await prisma.paperTradingSession.findUnique({ where: { id: oldAccount.id } })).toBeNull();
+  });
+  it("retains three consecutive failed rounds, supports an archived legacy failure, and never resumes old pending orders", async () => {
+    const id = "prop-multiple-rounds", timestamps = Array.from({ length: 6 }, (_, index) => new Date(Date.UTC(2026, 9, 1, 12, index)).toISOString());
+    await prisma.marketDataset.create({ data: { id, name: id, symbol: "TEST", timeframe: "1m", timezone: "UTC", sourceIntervalSeconds: 60, barCount: 6, startTime: new Date(timestamps[0]), endTime: new Date(timestamps[5]) } });
+    await prisma.marketBar.createMany({ data: timestamps.map((timestamp, sequence) => ({ datasetId: id, sequence, timestamp: new Date(timestamp), open: 100, high: 101, low: 98, close: 99 })) });
+    const r = rules(); r.evaluation.risk.drawdown = 1;
+    const template = await savePropTemplate(r);
+    let s = await createReplaySession(id, { name: id, mode: "TRAINING", timestamp: timestamps[0], playbackRate: 1, displayIntervalSeconds: 60, displaySession: "ETH" });
+    const context = { params: Promise.resolve({ id }) }, read = () => scoped(s, () => getPaperSessionSnapshot(id));
+    expect((await accountPOST(request(s, "POST", { ...config, accountCategory: "PROP_PRACTICE", propTemplateVersionId: template.versions[0].id }), context)).status).toBe(201);
+    let snap = (await read())!;
+    expect((await advancePOST(request(s, "POST", { count: 1, expectedVersion: snap.session.version, expectedCurrentSequence: -1 }), context)).status).toBe(200);
+    const projections: string[] = [];
+    for (let number = 1; number <= 3; number++) {
+      snap = (await read())!;
+      expect((await orderPOST(request(s, "POST", { side: "BUY", type: "MARKET", quantity: 1, stopLoss: 50, takeProfit: 300, expectedVersion: snap.session.version }), context)).status).toBe(201);
+      snap = (await read())!;
+      expect((await advancePOST(request(s, "POST", { count: 1, expectedVersion: snap.session.version, expectedCurrentSequence: number - 1, requestId: randomUUID() }), context)).status).toBe(200);
+      snap = (await read())!; expect(snap.propAccount!.state.result).toBe("FAILED"); projections.push(s.activeProjectionId);
+      if (number === 3) break;
+      if (number === 1) await scoped(s, () => sqliteWriteTransaction(prisma, tx => archiveReplaySession(tx)));
+      const scope = await loadReplayScope(s.id);
+      const next = await scoped(s, () => resetPropAccount({ expectedVersion: scope.version, expectedProjectionId: scope.projectionId, requestId: randomUUID() }));
+      s = { ...s, activeProjectionId: next.projectionId };
+    }
+    const counts = await Promise.all(projections.map(projectionId => prisma.paperTradingSession.findUniqueOrThrow({ where: { projectionId }, include: { orders: { where: { status: "PENDING" } }, fills: true } })));
+    expect(counts.map(account => account.fills.length)).toEqual([1, 1, 1]); expect(counts.map(account => account.orders.length)).toEqual([2, 2, 2]);
+    expect((await scoped(s, listPropRounds)).map(round => round.result)).toEqual(["FAILED", "FAILED", "FAILED"]);
+  });
+  it("rejects reset without failure and rolls back every round write on persistence failure", async () => {
+    const s = await create(rules()), scope = await loadReplayScope(s.id);
+    const input = { expectedVersion: scope.version, expectedProjectionId: scope.projectionId, requestId: randomUUID() };
+    const blocked = await resetPOST(request(s, "POST", input), { params: Promise.resolve({ sessionId: s.id }) }); expect(blocked.status).toBe(409);
+    await advance(s);
+    const snap = (await snapshot(s))!, state = { ...snap.propAccount!.state, result: "FAILED" as const };
+    await prisma.propPracticeAccount.update({ where: { replaySessionId: s.id }, data: { state: JSON.stringify(state) } });
+    await prisma.$executeRawUnsafe(`CREATE TRIGGER reject_round_reset BEFORE INSERT ON PropPracticeEvent WHEN NEW.type='RESET' BEGIN SELECT RAISE(ABORT, 'reset failure'); END`);
+    const before = (await snapshot(s))!, progress = await prisma.replayProgress.findUniqueOrThrow({ where: { replaySessionId: s.id } });
+    try { await expect(scoped(s, async () => resetPropAccount({ ...input, expectedVersion: (await loadReplayScope(s.id)).version }))).rejects.toThrow(); }
+    finally { await prisma.$executeRawUnsafe('DROP TRIGGER reject_round_reset'); }
+    expect(await snapshot(s)).toEqual(before); expect(await prisma.replayProgress.findUnique({ where: { replaySessionId: s.id } })).toEqual(progress);
+    expect(await prisma.propPracticeRound.count({ where: { replaySessionId: s.id } })).toBe(1);
+  });
+  it.each(["ACTIVE", "ARCHIVED"])("keeps session drawings and metadata writable from old/current rounds of a %s session while rejecting trading writes", async status => {
+    const r = rules(); r.evaluation.risk.drawdown = 1;
+    const s = await create(r);
+    const geometry = { start: { timestamp: times[0], sourceSequence: 0, price: 100 }, end: { timestamp: times[1], sourceSequence: 1, price: 110 } };
+    const payload = { type: "TREND_LINE", geometry, style: DEFAULT_TREND_LINE_STYLE };
+    const roundRequest = (number: number, projectionId: string, method: string, body: unknown) => new Request(`http://localhost/api/test?replaySessionId=${s.id}&propRound=${number}`, {
+      method, headers: { "Content-Type": "application/json", "X-Replay-Projection": projectionId }, body: JSON.stringify(body),
+    });
+    // The current first round's historical chart must be editable before any reset.
+    const initialDrawing = await drawingPOST(roundRequest(1, s.activeProjectionId, "POST", payload), ctx);
+    expect(initialDrawing.status).toBe(201);
+    await advance(s); await order(s, "SELL"); await advance(s);
+    expect((await snapshot(s))!.propAccount!.state.result).toBe("FAILED");
+    const scope = await loadReplayScope(s.id);
+    const next = await scoped(s, () => resetPropAccount({ expectedVersion: scope.version, expectedProjectionId: scope.projectionId, requestId: randomUUID() }));
+    if (status === "ARCHIVED") await scoped(s, () => sqliteWriteTransaction(prisma, tx => archiveReplaySession(tx)));
+    const before = await snapshot(s);
+    const oldAccount = await prisma.paperTradingSession.findUniqueOrThrow({ where: { projectionId: s.activeProjectionId } });
+    const currentAccount = await prisma.paperTradingSession.findUniqueOrThrow({ where: { projectionId: next.projectionId } });
+    const journalContext = { params: Promise.resolve({ id: "prop", sessionId: currentAccount.journalSessionId! }) };
+    for (const number of [0, 1, 2]) {
+      const projectionId = number === 1 ? s.activeProjectionId : next.projectionId;
+      const response = await drawingPOST(roundRequest(number, projectionId, "POST", payload), ctx);
+      expect(response.status, JSON.stringify(await response.clone().json())).toBe(201);
+      const { drawing } = await response.json(), drawingContext = { params: Promise.resolve({ id: "prop", drawingId: drawing.id }) };
+      expect((await drawingPATCH(roundRequest(number, projectionId, "PATCH", { geometry: { ...geometry, end: { ...geometry.end, price: 111 } } }), drawingContext)).status).toBe(200);
+      expect((await drawingDELETE(roundRequest(number, projectionId, "DELETE", {}), drawingContext)).status).toBe(200);
+      const renamed = await journalSessionPATCH(roundRequest(number, projectionId, "PATCH", { name: `Round view ${number}` }), journalContext);
+      expect(renamed.status, JSON.stringify(await renamed.clone().json())).toBe(200);
+      const owner = await prisma.replaySession.findUniqueOrThrow({ where: { id: s.id } });
+      expect(owner).toMatchObject({ name: `Round view ${number}`, status });
+      expect((await prisma.replayJournalSession.findUniqueOrThrow({ where: { id: currentAccount.journalSessionId! } })).name).toBe(owner.name);
+      const trade = await orderPOST(roundRequest(number, projectionId, "POST", { side: "BUY", type: "MARKET", quantity: 1, expectedVersion: currentAccount.version }), ctx);
+      expect(trade.status).toBe(409); expect((await trade.json()).code).toBe("PROP_ROUND_READONLY");
+    }
+    expect(await prisma.paperTradingSession.findUnique({ where: { id: oldAccount.id } })).toEqual(oldAccount);
+    expect(await prisma.paperTradingSession.findUnique({ where: { id: currentAccount.id } })).toEqual(currentAccount);
+    expect((await snapshot(s))!.propAccount).toEqual(before!.propAccount);
+    expect((await drawingPOST(roundRequest(999, next.projectionId, "POST", payload), ctx)).status).toBe(404);
+    expect((await drawingPOST(roundRequest(1, next.projectionId, "POST", payload), ctx)).status).toBe(409);
+    expect((await drawingPOST(request(s, "POST", payload), ctx)).status).toBe(409);
+    await prisma.replaySession.update({ where: { id: s.id }, data: { pendingCorrectionId: "test-lock" } });
+    try {
+      const drawing = await drawingPOST(roundRequest(1, s.activeProjectionId, "POST", payload), ctx);
+      expect(drawing.status).toBe(409); expect((await drawing.json()).code).toBe("CORRECTION_PENDING");
+      const rename = await journalSessionPATCH(roundRequest(0, next.projectionId, "PATCH", { name: "Blocked" }), journalContext);
+      expect(rename.status).toBe(409); expect((await rename.json()).code).toBe("CORRECTION_PENDING");
+    } finally { await prisma.replaySession.update({ where: { id: s.id }, data: { pendingCorrectionId: null } }); }
+  });
+  it("attributes manual archive evidence and ledger downloads to the second round only", async () => {
+    const r = rules(); r.evaluation.risk.drawdown = 1;
+    const s = await create(r);
+    await advance(s); await order(s, "SELL"); await advance(s);
+    const scope = await loadReplayScope(s.id);
+    await scoped(s, () => resetPropAccount({ expectedVersion: scope.version, expectedProjectionId: scope.projectionId, requestId: randomUUID() }));
+    const first = await prisma.propPracticeRound.findUniqueOrThrow({ where: { replaySessionId_number: { replaySessionId: s.id, number: 1 } } });
+    await scoped(s, () => sqliteWriteTransaction(prisma, tx => archiveReplaySession(tx)));
+    expect(await prisma.propPracticeEvent.findMany({ where: { replaySessionId: s.id, type: "STOPPED" } })).toMatchObject([{ roundNumber: 2 }]);
+    for (const number of [1, 2]) {
+      const response = await propAccountGET(new Request(`http://localhost/api/prop-practice?round=${number}&download=1`), { params: Promise.resolve({ sessionId: s.id }) });
+      expect(response.status).toBe(200); expect(response.headers.get("Content-Disposition")).toContain("attachment");
+      const { account } = await response.json();
+      expect(account.roundNumber).toBe(number);
+      expect(account.state.result).toBe(number === 1 ? "FAILED" : "STOPPED");
+      expect(account.events.filter((event: { type: string }) => event.type === "STOPPED")).toHaveLength(number === 1 ? 0 : 1);
+      expect(account.events.every((event: { roundNumber: number }) => event.roundNumber === number)).toBe(true);
+    }
+    expect(await prisma.propPracticeRound.findUnique({ where: { id: first.id } })).toEqual(first);
   });
   it("atomic payout retry and concurrent requests deduct once, keep raw results and allow next-day leftovers", async () => {
     const s = await create(rules()); await advance(s); await order(s, "BUY"); await advance(s); await order(s, "SELL", 1, { executeAtCurrentClose: true });

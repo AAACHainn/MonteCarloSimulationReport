@@ -23,7 +23,7 @@ async function handlePATCH(request: Request, context: RouteContext) {
 
   const entry = await prisma.replayJournalEntry.findFirst({
     where: { id: entryId, ...entryProjectionWhere(), journalSession: { datasetId: id, ...journalScopeWhere() } },
-    select: { id: true, logicalKey: true, review: true },
+    select: { id: true, logicalKey: true, review: true, projectionId: true },
   });
   if (!entry) {
     return NextResponse.json({ error: copy.paperTrading.journalNotFound }, { status: 404 });
@@ -77,19 +77,20 @@ async function handlePATCH(request: Request, context: RouteContext) {
   try {
     updated = await sqliteWriteTransaction(prisma, async (tx) => {
       const session = await tx.replaySession.findUnique({ where: { id: scope.id } });
-      if (!session || session.activeProjectionId !== scope.projectionId) throw new AiError("CONFLICT", copy.ai.conflict, 409);
+      const round = scope.accountCategory === "PROP_PRACTICE" && entry.projectionId ? await tx.propPracticeRound.findUnique({ where: { projectionId: entry.projectionId } }) : null;
+      if (!session || (session.activeProjectionId !== scope.projectionId && round?.replaySessionId !== scope.id)) throw new AiError("CONFLICT", copy.ai.conflict, 409);
       if (aiBaseline) {
         const current = await tx.replayJournalEntry.findUnique({ where: { id: entry.id }, include: { setupOption: { select: { name: true } }, tradeReasons: { select: { id: true, name: true } } } });
         if (!current || reviewFactsHash(current) !== reviewFactsHash(aiBaseline.entries[0])) throw new AiError("CONFLICT", copy.ai.conflict, 409);
       }
       if (parsed.data.review !== undefined) {
         const changed = await tx.replayJournalEntry.updateMany({
-          where: { id: entry.id, projectionId: scope.projectionId, review: parsed.data.expectedReview ?? entry.review },
+          where: { id: entry.id, projectionId: entry.projectionId, review: parsed.data.expectedReview ?? entry.review },
           data: { review: parsed.data.review },
         });
         if (!changed.count) throw new AiError("CONFLICT", copy.ai.conflict, 409);
         if (parsed.data.review !== entry.review) await tx.aiReviewRevision.create({ data: {
-          replaySessionId: scope.id, projectionId: scope.projectionId, logicalKey: entry.logicalKey ?? logicalId(entry.id),
+          replaySessionId: scope.id, projectionId: entry.projectionId!, logicalKey: entry.logicalKey ?? logicalId(entry.id),
           content: parsed.data.review, sourceRunId: parsed.data.aiSourceRunId,
         } });
       }

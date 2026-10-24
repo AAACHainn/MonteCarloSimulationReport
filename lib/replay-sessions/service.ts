@@ -10,7 +10,7 @@ import { propTradingDay } from "@/lib/prop-practice/trading-day";
 import { datasetSession, datasetSourceInterval } from "@/lib/market-replay/dataset";
 import { resolveDisplaySession } from "@/lib/market-replay/chart-sessions";
 import { isValidDisplayInterval } from "@/lib/market-replay/types";
-import { ReplaySessionError, getReplayScope, assertReplayWritable, markReplayMutation, runWithReplayScope } from "./scope";
+import { ReplaySessionError, getReplayScope, assertReplayWritable, assertSessionMetadataWritable, markReplayMutation, runWithReplayScope } from "./scope";
 import { projectionRecordId } from "./identity";
 import { saveReplayCheckpoint } from "./checkpoint";
 
@@ -99,6 +99,9 @@ export async function initializePropPracticeAccount(
   await tx.replaySession.update({ where: { id: scope.id }, data: { accountCategory: "PROP_PRACTICE" } });
   await tx.propPracticeAccount.create({ data: { replaySessionId: scope.id, templateVersionId: template.id,
     snapshot: JSON.stringify(snapshot), state: JSON.stringify(initialPropState(rules, progress.currentSequence + 1)) } });
+  await tx.propPracticeRound.create({ data: { replaySessionId: scope.id, number: 1, projectionId: scope.projectionId,
+    snapshot: JSON.stringify(snapshot), state: JSON.stringify(initialPropState(rules, progress.currentSequence + 1)),
+    trainingGate: owner.trainingGate, startSequence: progress.currentSequence + 1 } });
   const journal = await tx.replayJournalSession.create({ data: { datasetId: scope.datasetId, replaySessionId: scope.id, name: owner.name, replayGeneration: progress.generation, ...config } });
   const equitySampleStride = Math.max(1, Math.ceil(dataset.barCount / 20000));
   await tx.paperTradingSession.create({ data: { id: projectionRecordId(scope.projectionId, `account_${scope.id}`),
@@ -119,24 +122,13 @@ export async function archiveReplaySession(tx: Prisma.TransactionClient) {
       state.result = "STOPPED";
       state.stages[state.stages.length - 1].endSequence = state.last?.sequence ?? null;
       await tx.propPracticeAccount.update({ where: { replaySessionId: scope.id }, data: { state: JSON.stringify(state) } });
-      await tx.propPracticeEvent.create({ data: { replaySessionId: scope.id, type: "STOPPED", evidence: JSON.stringify(state) } });
+      const owner = await tx.replaySession.findUniqueOrThrow({ where: { id: scope.id } });
+      await tx.propPracticeRound.updateMany({ where: { projectionId: scope.projectionId }, data: { state: JSON.stringify(state), trainingGate: owner.trainingGate, endSequence: state.last?.sequence, endedAt: new Date() } });
+      await tx.propPracticeEvent.create({ data: { replaySessionId: scope.id, roundNumber: row.roundNumber, type: "STOPPED", evidence: JSON.stringify(state) } });
     }
   }
   await tx.replaySession.update({ where: { id: scope.id }, data: { status: "ARCHIVED", version: { increment: 1 } } });
   await tx.replayJournalSession.updateMany({ where: { replaySessionId: scope.id }, data: { archivedAt: new Date() } });
-}
-
-// Metadata management permits archives and revised market data while retaining
-// the same concurrency and correction lock as other session mutations.
-async function assertSessionMetadataWritable(tx: Prisma.TransactionClient) {
-  const scope = getReplayScope();
-  if (!scope) throw new ReplaySessionError("SESSION_REQUIRED", 409, copy.replaySessions.required);
-  const session = await tx.replaySession.findUnique({ where: { id: scope.id } });
-  if (!session || session.activeProjectionId !== scope.projectionId || session.version !== scope.version) {
-    throw new ReplaySessionError("SESSION_CONFLICT", 409, copy.replaySessions.conflict);
-  }
-  if (session.pendingCorrectionId) throw new ReplaySessionError("CORRECTION_PENDING", 409, copy.replaySessions.busy);
-  return scope;
 }
 
 export async function renameReplaySession(tx: Prisma.TransactionClient, name: string) {

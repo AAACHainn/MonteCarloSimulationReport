@@ -127,6 +127,7 @@ export type ReplayJournalEntryDraft = PaperJournalContext & {
 };
 
 export type ReplayJournalEntryData = ReplayJournalEntryDraft & {
+  propRoundNumber?: number;
   /** Consecutive ordinal in the current session result; presentation only. */
   no: number;
   /** Unrecycled stored identity used by trade links and focused annotation requests. */

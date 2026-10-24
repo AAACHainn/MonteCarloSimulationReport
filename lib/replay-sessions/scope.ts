@@ -16,6 +16,8 @@ export type ReplayScope = {
   version: number;
   trainingGate?: TrainingGateState | null;
   accountCategory?: string;
+  propRoundNumber?: number;
+  journalProjectionIds?: string[];
 };
 
 export class ReplaySessionError extends Error {
@@ -37,7 +39,19 @@ export function accountWhere(datasetId: string) {
 }
 export function entryProjectionWhere() {
   const scope = getReplayScope();
-  return scope ? { projectionId: scope.projectionId } : {};
+  return scope ? { projectionId: scope.journalProjectionIds ? { in: scope.journalProjectionIds } : scope.projectionId } : {};
+}
+
+/** Round selection changes only the read/annotation scope, never active trading identity. */
+export async function loadPropRoundScope(scope: ReplayScope, number: number): Promise<ReplayScope> {
+  if (scope.accountCategory !== "PROP_PRACTICE" || !Number.isSafeInteger(number) || number < 0) throw new ReplaySessionError("PROP_ROUND_INVALID", 404, copy.propPractice.roundMissing);
+  if (number === 0) {
+    const rounds = await prisma.propPracticeRound.findMany({ where: { replaySessionId: scope.id }, select: { projectionId: true } });
+    return { ...scope, propRoundNumber: 0, journalProjectionIds: rounds.map(round => round.projectionId) };
+  }
+  const round = await prisma.propPracticeRound.findUnique({ where: { replaySessionId_number: { replaySessionId: scope.id, number } } });
+  if (!round) throw new ReplaySessionError("PROP_ROUND_INVALID", 404, copy.propPractice.roundMissing);
+  return { ...scope, projectionId: round.projectionId, propRoundNumber: number, trainingGate: parseTrainingGate(round.trainingGate), status: "ARCHIVED" };
 }
 export function drawingScopeWhere() {
   return { replaySessionId: getReplayScope()?.id ?? null };
@@ -84,6 +98,18 @@ export async function assertReplayDrawingWritable(tx: Prisma.TransactionClient) 
   if (session.pendingCorrectionId) throw new ReplaySessionError("CORRECTION_PENDING", 409, copy.replaySessions.busy);
 }
 
+/** Session metadata is shared by all rounds, including archived results. */
+export async function assertSessionMetadataWritable(tx: Prisma.TransactionClient) {
+  const scope = getReplayScope();
+  if (!scope) throw new ReplaySessionError("SESSION_REQUIRED", 409, copy.replaySessions.required);
+  const session = await tx.replaySession.findUnique({ where: { id: scope.id } });
+  if (!session || session.activeProjectionId !== scope.projectionId || session.version !== scope.version) {
+    throw new ReplaySessionError("SESSION_CONFLICT", 409, copy.replaySessions.conflict);
+  }
+  if (session.pendingCorrectionId) throw new ReplaySessionError("CORRECTION_PENDING", 409, copy.replaySessions.busy);
+  return scope;
+}
+
 export async function markReplayMutation(tx: Prisma.TransactionClient, currentSequence?: number) {
   const scope = getReplayScope();
   if (!scope) return;
@@ -102,7 +128,7 @@ export function replayErrorResponse(error: unknown) {
 
 export function withReplaySessionRoute<P extends { id: string }>(
   handler: (request: Request, context: { params: Promise<P> }) => Promise<Response>,
-  options: { write?: boolean; annotation?: boolean; allowHistoryChange?: boolean; drawing?: boolean; diagnostics?: boolean; receipt?: boolean } = {},
+  options: { write?: boolean; annotation?: boolean; allowHistoryChange?: boolean; drawing?: boolean; sessionMetadata?: boolean; diagnostics?: boolean; receipt?: boolean } = {},
 ) {
   return async (request: Request, context: { params: Promise<P> }) => {
     const startedAt = performance.now();
@@ -112,7 +138,18 @@ export function withReplaySessionRoute<P extends { id: string }>(
       const sessionId = url.searchParams.get("replaySessionId");
       const inherited = getReplayScope();
       if (!sessionId && !inherited) throw new ReplaySessionError("SESSION_REQUIRED", 409, copy.replaySessions.required);
-      const scope = inherited ?? await loadReplayScope(sessionId!, datasetId);
+      let scope = inherited ?? await loadReplayScope(sessionId!, datasetId);
+      let requestProjectionId = scope.projectionId;
+      const round = url.searchParams.get("propRound");
+      if (round !== null) {
+        if (options.write && !options.annotation && !options.drawing && !options.sessionMetadata) throw new ReplaySessionError("PROP_ROUND_READONLY", 409, copy.replaySessions.readOnly);
+        const selected = await loadPropRoundScope(scope, Number(round));
+        requestProjectionId = selected.projectionId;
+        // Historical charts send their selected projection, but drawings and
+        // metadata belong to the session. Keep the current scope for their
+        // transaction guards rather than pretending the session is archived.
+        if (!options.drawing && !options.sessionMetadata) scope = selected;
+      }
       if (scope.datasetId !== datasetId || (sessionId && scope.id !== sessionId)) {
         throw new ReplaySessionError("SESSION_NOT_FOUND", 404, copy.replaySessions.missing);
       }
@@ -120,7 +157,7 @@ export function withReplaySessionRoute<P extends { id: string }>(
       return await runWithReplayScope(scope, async () => {
         const guardStartedAt = performance.now();
         if (options.write && !options.annotation) {
-          if (request.headers.get("X-Replay-Projection") !== scope.projectionId) {
+          if (request.headers.get("X-Replay-Projection") !== requestProjectionId) {
             throw new ReplaySessionError("SESSION_CONFLICT", 409, copy.replaySessions.conflict);
           }
           let retry = false;
@@ -133,6 +170,7 @@ export function withReplaySessionRoute<P extends { id: string }>(
           }
           if (!retry) {
             if (options.drawing) await assertReplayDrawingWritable(prisma);
+            else if (options.sessionMetadata) await assertSessionMetadataWritable(prisma);
             else await assertReplayWritable(prisma, !options.allowHistoryChange);
           }
         }

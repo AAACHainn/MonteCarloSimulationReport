@@ -166,6 +166,7 @@ export function closeLotsFifo(
 }
 
 export function serializeReplayJournalEntry(entry: {
+  propRoundNumber?: number;
   id: string; no: number; accountNo: number; journalSessionId: string; direction: string; quantity: number;
   cycleKey?: string | null;
   openedSequence: number; openedAt: Date; closedSequence: number; closedAt: Date;
@@ -184,6 +185,7 @@ export function serializeReplayJournalEntry(entry: {
   const result = replayJournalResult(entry.gainLoss, entry.priceTickSize);
   return {
     id: entry.id, no: entry.accountNo, globalNo: entry.no, journalSessionId: entry.journalSessionId,
+    ...(entry.propRoundNumber ? { propRoundNumber: entry.propRoundNumber } : {}),
     cycleKey: entry.cycleKey ?? null,
     discipline: parseEntryDiscipline(entry.discipline),
     setupOptionId: entry.setupOptionId ?? null,

@@ -1,6 +1,7 @@
 "use client";
 import { useState } from "react";
 import Link from "next/link";
+import { useRouter } from "next/navigation";
 import { Button } from "@/components/ui/button";
 import { Dialog } from "@/components/ui/dialog";
 import { ConfirmDialog } from "@/components/ui/confirm-dialog";
@@ -58,9 +59,11 @@ function RuleSnapshotCards({ snapshot }: { snapshot: PropRuntime["snapshot"] }) 
   </div>;
 }
 
-export function PropAccountPanel({ sessionId, runtime, tradingSnapshot, busy: externalBusy, onBeforeOpen, onChanged }: {
-  sessionId: string; runtime: PropRuntime; tradingSnapshot?: PaperSessionSnapshot | null; busy?: boolean; onBeforeOpen?: () => Promise<void>; onChanged?: () => Promise<unknown>;
+export function PropAccountPanel({ sessionId, runtime, tradingSnapshot, busy: externalBusy, onBeforeOpen, onChanged, readOnly = false }: {
+  sessionId: string; runtime: PropRuntime; tradingSnapshot?: PaperSessionSnapshot | null; busy?: boolean; onBeforeOpen?: () => Promise<void>; onChanged?: () => Promise<unknown>; readOnly?: boolean;
 }) {
+  const router = useRouter();
+  const [resetConfirmation, setResetConfirmation] = useState<{ expectedVersion: number; expectedProjectionId: string; requestId: string } | null>(null);
   const [open, setOpen] = useState(false), [data, setData] = useState<AccountData | null>(null);
   const [view, setView] = useState<AccountView>("rules");
   const [version, setVersion] = useState(0), [busy, setBusy] = useState(false), [error, setError] = useState<string | null>(null);
@@ -72,10 +75,27 @@ export function PropAccountPanel({ sessionId, runtime, tradingSnapshot, busy: ex
   const f = funds(state), preview = payoutPreview(snapshot.rules, state), progress = promotionPreview(snapshot.rules, state);
   const money = (value: number) => formatMoney(value, currency);
   async function reload() {
-    const response = await fetch(`/api/replay-sessions/${encodeURIComponent(sessionId)}/prop-practice`, { cache: "no-store" });
+    const response = await fetch(`/api/replay-sessions/${encodeURIComponent(sessionId)}/prop-practice${readOnly ? `?round=${runtime.roundNumber ?? 1}` : ""}`, { cache: "no-store" });
     const result = await response.json(); if (!response.ok || !result.account) throw new Error(result.error ?? t.requestFailed);
     setData(result.account); setVersion(result.version); setSessionStatus(result.status);
-    return { account: result.account as AccountData, version: result.version as number, status: result.status as string };
+    return { account: result.account as AccountData, version: result.version as number, status: result.status as string, projectionId: result.projectionId as string };
+  }
+  async function beginReset() {
+    setBusy(true); setError(null);
+    try {
+      await onBeforeOpen?.(); const result = await reload();
+      if (readOnly || result.account.state.result !== "FAILED") throw new Error(t.resetUnavailable);
+      setResetConfirmation({ expectedVersion: result.version, expectedProjectionId: result.projectionId, requestId: createUuid() });
+    } catch (e) { setError(e instanceof Error ? e.message : t.requestFailed); } finally { setBusy(false); }
+  }
+  async function reset() {
+    if (!resetConfirmation || busy) return;
+    setBusy(true); setError(null);
+    try {
+      const response = await fetch(`/api/replay-sessions/${encodeURIComponent(sessionId)}/prop-practice/reset`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(resetConfirmation) });
+      const result = await response.json(); if (!response.ok) throw new Error(result.error ?? t.requestFailed);
+      setResetConfirmation(null); router.refresh();
+    } catch (e) { setError(e instanceof Error ? e.message : t.requestFailed); } finally { setBusy(false); }
   }
   async function begin(nextView: AccountView) {
     setView(nextView); setBusy(true); setError(null); setSuccess(false); setOpen(true);
@@ -117,7 +137,7 @@ export function PropAccountPanel({ sessionId, runtime, tradingSnapshot, busy: ex
   return <>
     <Card>
       <CardHeader className="flex-row items-center justify-between gap-3 space-y-0 pb-3">
-        <CardTitle>{snapshot.rules.name} · {propResultLabel(state, currency, formatMoney)}</CardTitle>
+        <CardTitle>{snapshot.rules.name} · {t.roundLabel(current.roundNumber ?? 1)} · {propResultLabel(state, currency, formatMoney)}</CardTitle>
       </CardHeader>
       <CardContent className="space-y-3">
         {!open && !promotionConfirmation && error ? <Alert role="alert" className="border-red-200 bg-red-50"><AlertDescription>{error}</AlertDescription></Alert> : null}
@@ -126,8 +146,8 @@ export function PropAccountPanel({ sessionId, runtime, tradingSnapshot, busy: ex
           {[[t.balance, f.balance], [t.equity, f.equity], [t.floor, f.floor], [t.remainingRisk, f.equity - f.floor]].map(([label, value]) => <div key={label}><p className="text-xs text-slate-500">{label}</p><p className="mt-1 font-medium text-slate-950">{money(Number(value))}</p></div>)}
         </div>
         {tradingSnapshot ? <div className="border-t pt-3"><PaperAccountMetrics snapshot={tradingSnapshot} compact includeBalances={false} extraItems={summaryItems} /></div> : <div className="grid grid-cols-4 gap-4 border-t pt-3 text-sm tabular-nums">{summaryItems.map(([label, value]) => <div key={label}><p className="text-xs text-slate-500">{label}</p><p className="font-medium">{value}</p></div>)}</div>}
-        <p className={state.pause === "NONE" ? "text-xs text-slate-500" : "text-xs text-amber-800"}>{t.pause}: {t[state.pause]}</p>
-        {state.result ? <p className="text-xs text-amber-800">{t.terminalHint}</p> : null}
+        <p className={!state.result && state.pause === "NONE" ? "text-xs text-slate-500" : "text-xs text-amber-800"}>{t.pause}: {state.result === "FAILED" ? t.roundFailed : state.result ? t.roundStopped : t[state.pause]}</p>
+        {state.result ? <p className="text-xs text-amber-800">{t.roundFinishedHint}</p> : null}
         {state.failure ? <p className="text-xs text-red-700">{t.failure}: {state.failure.sequence} / {money(state.failure.equity)} / {money(state.failure.floor)} · {state.failure.phase === "EVALUATION" ? t.evaluation : t.funded}</p> : null}
         {state.phase === "EVALUATION" ? <div className="grid grid-cols-2 gap-4 border-t pt-3 text-sm tabular-nums">
           <div><p className="text-xs text-slate-500">{t.requiredProfit}</p><p className="mt-1 font-medium">{money(progress.requiredProfit)}</p></div>
@@ -141,10 +161,11 @@ export function PropAccountPanel({ sessionId, runtime, tradingSnapshot, busy: ex
           </div><p className="mt-2 text-xs text-slate-500">{t.qualifyingHint}</p>
         </div> : null}
         <div className="flex flex-wrap justify-end gap-2 border-t pt-4">
+          {tradingSnapshot ? <Button asChild variant="outline"><Link href={`/market-replay/${tradingSnapshot.session.datasetId}/trade-history?sessionId=${encodeURIComponent(sessionId)}&propRound=0`}>{t.rounds}</Link></Button> : null}
           <Button variant="outline" disabled={busy || externalBusy} onClick={() => void begin("rules")}>{t.rules}</Button>
           <Button variant="outline" disabled={busy || externalBusy} onClick={() => void begin("history")}>{t.dailyLedger}</Button>
           <Button variant="outline" disabled={busy || externalBusy} onClick={() => void begin("events")}>{t.events}</Button>
-          {state.phase === "EVALUATION" && !state.result ? <Button disabled={busy || externalBusy || !progress.eligible} aria-describedby="prop-promotion-hint" onClick={() => void beginPromotion()}>{t.promote}</Button> : <Button disabled={busy || externalBusy} onClick={() => void begin("payout")}>{t.payout}</Button>}
+          {!readOnly && state.result === "FAILED" ? <Button disabled={busy || externalBusy} onClick={() => void beginReset()}>{t.reset}</Button> : state.phase === "EVALUATION" && !state.result ? <Button disabled={readOnly || busy || externalBusy || !progress.eligible} aria-describedby="prop-promotion-hint" onClick={() => void beginPromotion()}>{t.promote}</Button> : <Button disabled={readOnly || busy || externalBusy || !!state.result} onClick={() => void begin("payout")}>{t.payout}</Button>}
         </div>
       </CardContent>
     </Card>
@@ -168,5 +189,6 @@ export function PropAccountPanel({ sessionId, runtime, tradingSnapshot, busy: ex
     </Dialog>
     <ConfirmDialog open={!!confirmation} title={t.payoutTitle} description={confirmationDescription} confirmLabel={t.payout} confirmVariant="default" isLoading={busy} error={error} onCancel={() => setConfirmation(null)} onConfirm={() => void payout()} />
     <ConfirmDialog open={!!promotionConfirmation} title={t.promotionTitle} description={promotionConfirmation ? t.promotionConfirm(promotionConfirmation.capital) : ""} confirmLabel={t.promote} confirmVariant="default" isLoading={busy} error={error} onCancel={() => { setPromotionConfirmation(null); setError(null); }} onConfirm={() => void promote()} />
+    <ConfirmDialog open={!!resetConfirmation} title={t.resetTitle} description={t.resetDescription} confirmLabel={t.reset} confirmVariant="default" isLoading={busy} error={error} onCancel={() => setResetConfirmation(null)} onConfirm={() => void reset()} />
   </>;
 }

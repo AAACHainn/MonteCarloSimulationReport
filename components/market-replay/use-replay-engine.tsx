@@ -114,7 +114,7 @@ export function useReplayEngine(core: ReturnType<typeof useReplayCore>, drawingW
     url: string, body: { requestId: string; [key: string]: unknown }, accept: (data: ServerAdvancePayload) => void | Promise<void>,
   ) => {
     const signal = serverLifetimeRef.current?.signal;
-    if (!signal || signal.aborted || historyConflictRef.current || recoveryRequiredRef.current) return false;
+    if (!signal || signal.aborted || historyConflictRef.current || recoveryRequiredRef.current || confirmedPaperSnapshotRef.current?.propAccount?.state.result) return false;
     let suspension: ReplaySuspension | null = null;
     setSaveStatus("saving");
     try {
@@ -164,6 +164,11 @@ export function useReplayEngine(core: ReturnType<typeof useReplayCore>, drawingW
     await advanceCompletionRef.current;
     return !historyConflictRef.current && !recoveryRequiredRef.current;
   }, [advanceCompletionRef, historyConflictRef, recoveryRequiredRef]);
+
+  const propResult = paperSnapshot?.propAccount?.state.result;
+  useEffect(() => {
+    if (propResult) { pausePlayback(); manualStepsRef.current.cancel(); }
+  }, [propResult, pausePlayback, manualStepsRef]);
 
   useEffect(() => {
     if (isLoading) return;
@@ -622,6 +627,7 @@ export function useReplayEngine(core: ReturnType<typeof useReplayCore>, drawingW
   }, [latestReplayRef, loadWindow, indicatorWarmupCountRef, setChartFocusSequence, setJournalReview, setPaperError, setReviewReturning, viewChangingRef]);
 
   const togglePlayback = useCallback(async () => {
+    if (confirmedPaperSnapshotRef.current?.propAccount?.state.result) return;
     if (requestRetryingRef.current) {
       if (wantsPlayback()) pausePlayback(); else playPlayback();
       return;
@@ -645,9 +651,10 @@ export function useReplayEngine(core: ReturnType<typeof useReplayCore>, drawingW
     if (recoveryRequiredRef.current) return;
     playPlayback(); playbackClockRef.current = performance.now();
   }, [checkingOrder, flushVisible, journalReview, latestReplayRef, pausePlayback, playPlayback, queueSave,
-    returnToLiveWindow, wantsPlayback, correctionPending, dateDialogOpen, dateDialogOpening, dateForwarding, advanceCompletionRef, chartWindowDetachedRef, manualStepsRef, playbackClockRef, playbackEpochRef, preparingEntryCheckRef, recoveryRequiredRef, requestRetryingRef, viewChangingRef]);
+    returnToLiveWindow, wantsPlayback, correctionPending, dateDialogOpen, dateDialogOpening, dateForwarding, advanceCompletionRef, chartWindowDetachedRef, manualStepsRef, playbackClockRef, playbackEpochRef, preparingEntryCheckRef, recoveryRequiredRef, requestRetryingRef, viewChangingRef, confirmedPaperSnapshotRef]);
 
   const revealNextBar = useCallback(async (canStart: () => boolean = () => true) => {
+    if (confirmedPaperSnapshotRef.current?.propAccount?.state.result) return;
     if (!canStart() || checkingOrder || preparingEntryCheckRef.current || requestRetryingRef.current || correctionPending || dateForwarding || dateDialogOpen || dateDialogOpening || viewChangingRef.current) return;
     if ((journalReview || chartWindowDetachedRef.current) && !await returnToLiveWindow()) return;
     const current = latestReplayRef.current;

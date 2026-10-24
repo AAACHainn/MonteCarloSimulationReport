@@ -21,6 +21,10 @@ export function formatNumber(value: number) {
   }).format(value);
 }
 
+export function formatQuantity(value: number) {
+  return new Intl.NumberFormat(defaultLocale, { maximumFractionDigits: 8 }).format(value);
+}
+
 export function formatPercent(value: number) {
   return `${formatNumber(value)}%`;
 }

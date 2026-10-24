@@ -175,6 +175,7 @@ export function MarketReplayClient({ dataset: initialDataset, initialJournalFocu
           : "flex min-h-0 flex-1 flex-col overflow-hidden rounded-lg border bg-white shadow-sm"}
       >
         {webFullscreen ? gateNoticeBlock : null}
+        {paperSnapshot?.propAccount?.state.result === "FAILED" ? <Alert role="alert" className="flex shrink-0 items-center justify-between gap-3 rounded-none border-x-0 border-t-0 border-amber-200 bg-amber-50 py-2 text-amber-800"><AlertDescription>{copy.propPractice.roundFailed}</AlertDescription><Button size="sm" variant="outline" onClick={() => setSettingsDialog("paper")}>{copy.propPractice.reset}</Button></Alert> : null}
         {replaySession?.mode === "LIVE_REPLAY" ? <ReplayCorrectionDialog target={correctionTarget} displayUtcOffsetMinutes={displayUtcOffsetMinutes} beforeCreate={prepareSessionSwitch} onClose={() => setCorrectionTarget(null)} onPendingChange={setCorrectionPending} /> : null}
         <div className="flex h-12 shrink-0 items-center gap-2 overflow-x-auto border-b px-3 [&>*]:shrink-0">
           {webFullscreen ? gateButton : null}
@@ -449,7 +450,7 @@ export function MarketReplayClient({ dataset: initialDataset, initialJournalFocu
           dateForwarding={dateForwarding}
           dateForwardStatus={forwardProgress ? copy.replaySessions.forwardProgress(forwardProgress.current, forwardProgress.target) : copy.replaySessions.forwarding}
           onStopDateForward={() => { cancelForwardRef.current = true; }}
-          correctionPending={correctionPending || dateForwarding || dateDialogOpen || dateDialogOpening || reviewReturning || Boolean(checkingOrder)}
+          correctionPending={correctionPending || dateForwarding || dateDialogOpen || dateDialogOpening || reviewReturning || Boolean(checkingOrder) || !!paperSnapshot?.propAccount?.state.result}
           replay={replay}
           sourceIntervalSeconds={dataset.sourceIntervalSeconds}
           paperSnapshot={paperSnapshot}

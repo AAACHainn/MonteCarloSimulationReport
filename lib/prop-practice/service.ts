@@ -3,30 +3,38 @@ import { prisma } from "@/lib/db";
 import { copy } from "@/lib/i18n";
 import { sqliteWriteTransaction } from "@/lib/sqlite-write";
 import { getReplayScope, assertReplayWritable, markReplayMutation, ReplaySessionError, accountWhere, progressWhere } from "@/lib/replay-sessions/scope";
-import { archiveReplaySession, recordReplayCommand } from "@/lib/replay-sessions/service";
+import { recordReplayCommand } from "@/lib/replay-sessions/service";
 import { getPaperSessionSnapshot } from "@/lib/paper-trading/serialize";
 import { applyPayout, payoutPreview, promotePropManually, promotionPreview, propRulesSchema, propTradingBlockReason, observeProp, settlePropDay, type PropState, type PropRules } from "./rules";
 import { propTradingDay, type PropCalendar } from "./trading-day";
 
 export type PropSnapshot = { rules: PropRules; calendar: PropCalendar; currency: string; accountConfig: import("@/lib/paper-trading/types").PaperAccountConfig };
-export type PropRuntime = { snapshot: PropSnapshot; state: PropState };
+export type PropRuntime = { snapshot: PropSnapshot; state: PropState; roundNumber?: number };
 export async function loadPropAccount(tx: Prisma.TransactionClient = prisma): Promise<PropRuntime | null> {
   const scope = getReplayScope();
   if (!scope || scope.accountCategory !== "PROP_PRACTICE") return null;
+  if (scope.propRoundNumber && scope.propRoundNumber > 0) {
+    const round = await tx.propPracticeRound.findUniqueOrThrow({ where: { replaySessionId_number: { replaySessionId: scope.id, number: scope.propRoundNumber } } });
+    return { snapshot: JSON.parse(round.snapshot), state: JSON.parse(round.state), roundNumber: round.number };
+  }
   const row = await tx.propPracticeAccount.findUniqueOrThrow({ where: { replaySessionId: scope.id } });
-  return { snapshot: JSON.parse(row.snapshot), state: JSON.parse(row.state) };
+  return { snapshot: JSON.parse(row.snapshot), state: JSON.parse(row.state), roundNumber: row.roundNumber };
 }
 export async function persistPropAccount(tx: Prisma.TransactionClient, runtime: PropRuntime, previous: PropState) {
   const scope = getReplayScope()!;
   if (JSON.stringify(previous) === JSON.stringify(runtime.state)) return;
   await tx.propPracticeAccount.update({ where: { replaySessionId: scope.id }, data: { state: JSON.stringify(runtime.state) } });
+  const owner = await tx.replaySession.findUniqueOrThrow({ where: { id: scope.id } });
+  await tx.propPracticeRound.updateMany({ where: { projectionId: scope.projectionId }, data: {
+    state: JSON.stringify(runtime.state), trainingGate: owner.trainingGate,
+    ...(runtime.state.result ? { endedAt: new Date(), endSequence: runtime.state.last?.sequence } : {}),
+  } });
   const type = !previous.result && runtime.state.result ? "FAILED" : previous.phase !== runtime.state.phase ? "PROMOTED"
     : previous.pause !== runtime.state.pause ? runtime.state.pause === "NONE" ? "RESUMED" : "PAUSED" : null;
   if (type) {
-    await tx.propPracticeEvent.create({ data: { replaySessionId: scope.id, type, evidence: JSON.stringify(runtime.state) } });
+    await tx.propPracticeEvent.create({ data: { replaySessionId: scope.id, roundNumber: runtime.roundNumber ?? 1, type, evidence: JSON.stringify(runtime.state) } });
     await recordReplayCommand(tx, runtime.state.last?.sequence ?? -1, `PROP_${type}`, runtime.state);
   }
-  if (!previous.result && runtime.state.result === "FAILED") await archiveReplaySession(tx);
 }
 export async function assertPropTradingAvailable(tx: Prisma.TransactionClient) {
   const prop = await loadPropAccount(tx);
@@ -66,8 +74,8 @@ export async function readPropAccount() {
   if (!prop) return null;
   const scope = getReplayScope()!;
   const [payouts, events] = await Promise.all([
-    prisma.propPracticePayout.findMany({ where: { replaySessionId: scope.id }, orderBy: { createdAt: "asc" } }),
-    prisma.propPracticeEvent.findMany({ where: { replaySessionId: scope.id }, orderBy: { createdAt: "asc" } }),
+    prisma.propPracticePayout.findMany({ where: { replaySessionId: scope.id, roundNumber: prop.roundNumber ?? 1 }, orderBy: { createdAt: "asc" } }),
+    prisma.propPracticeEvent.findMany({ where: { replaySessionId: scope.id, roundNumber: prop.roundNumber ?? 1 }, orderBy: { createdAt: "asc" } }),
   ]);
   return { ...prop, preview: payoutPreview(prop.snapshot.rules, prop.state), payouts, events };
 }
@@ -92,11 +100,12 @@ export async function confirmPropPayout(input: { expectedVersion: number; reques
     let result: ReturnType<typeof applyPayout>;
     try { result = applyPayout(updated.snapshot.rules, updated.state, input.amount); }
     catch { throw new ReplaySessionError("PROP_PAYOUT_INVALID", 409, copy.propPractice.payoutInvalid); }
-    const payout = await tx.propPracticePayout.create({ data: { replaySessionId: scope.id, requestId: input.requestId,
+    const payout = await tx.propPracticePayout.create({ data: { replaySessionId: scope.id, roundNumber: updated.roundNumber ?? 1, requestId: input.requestId,
       amount: input.amount, received: result.received, share: result.share, evidence: JSON.stringify(result.evidence) } });
     updated.state = result.state;
     await tx.propPracticeAccount.update({ where: { replaySessionId: scope.id }, data: { state: JSON.stringify(result.state) } });
-    await tx.propPracticeEvent.create({ data: { replaySessionId: scope.id, type: "PAYOUT", evidence: JSON.stringify({ ...result.evidence, payoutId: payout.id }) } });
+    await tx.propPracticeRound.updateMany({ where: { projectionId: scope.projectionId }, data: { state: JSON.stringify(result.state) } });
+    await tx.propPracticeEvent.create({ data: { replaySessionId: scope.id, roundNumber: updated.roundNumber ?? 1, type: "PAYOUT", evidence: JSON.stringify({ ...result.evidence, payoutId: payout.id }) } });
     await recordReplayCommand(tx, result.state.last!.sequence, "PROP_PAYOUT", { ...result.evidence, payoutId: payout.id, amount: input.amount, received: result.received });
     await markReplayMutation(tx);
     return payout;
@@ -122,7 +131,8 @@ export async function confirmPropPromotion(input: { expectedVersion: number; req
     const evidence = { requestId: input.requestId, manual: true, sequence: state.last!.sequence, day: state.last!.day,
       progress: promotionPreview(updated.snapshot.rules, updated.state), state };
     await tx.propPracticeAccount.update({ where: { replaySessionId: scope.id }, data: { state: JSON.stringify(state) } });
-    const receipt = await tx.propPracticeEvent.create({ data: { id: receiptId, replaySessionId: scope.id, type: "PROMOTED", evidence: JSON.stringify(evidence) } });
+    await tx.propPracticeRound.updateMany({ where: { projectionId: scope.projectionId }, data: { state: JSON.stringify(state) } });
+    const receipt = await tx.propPracticeEvent.create({ data: { id: receiptId, replaySessionId: scope.id, roundNumber: updated.roundNumber ?? 1, type: "PROMOTED", evidence: JSON.stringify(evidence) } });
     await recordReplayCommand(tx, state.last!.sequence, "PROP_PROMOTED", evidence);
     await markReplayMutation(tx);
     return receipt;

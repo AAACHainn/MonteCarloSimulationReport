@@ -1,18 +1,20 @@
 import { replayRouteBusinessScope } from "@/test-utils/replay-route-business-scope";
 vi.mock("@/lib/replay-sessions/scope", async (importOriginal) => ({
-  ...await importOriginal<typeof import("@/lib/replay-sessions/scope")>(), ...replayRouteBusinessScope, getReplayScope: () => ({ id: "replay-root" }),
+  ...await importOriginal<typeof import("@/lib/replay-sessions/scope")>(), ...replayRouteBusinessScope,
+  getReplayScope: () => ({ id: "replay-root" }), assertSessionMetadataWritable: async () => ({ id: "replay-root" }),
 }));
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 const mocks = vi.hoisted(() => ({
   findFirst: vi.fn(),
   update: vi.fn(),
+  updateMany: vi.fn(),
   delete: vi.fn(),
 }));
 
 vi.mock("@/lib/db", () => ({
   prisma: {
-    $transaction: async (callback: (tx: unknown) => unknown) => callback({ replayJournalSession: { update: mocks.update }, replaySession: { update: mocks.update } }),
+    $transaction: async (callback: (tx: unknown) => unknown) => callback({ replayJournalSession: { updateMany: mocks.updateMany }, replaySession: { update: mocks.update } }),
     replayJournalSession: {
       findFirst: mocks.findFirst,
       update: mocks.update,
@@ -45,9 +47,10 @@ describe("replay journal session API", () => {
       select: { id: true },
     });
     expect(mocks.update).toHaveBeenCalledWith(expect.objectContaining({
-      where: { id: "session-1" },
+      where: { id: "replay-root" },
       data: { name: "上午突破练习" },
     }));
+    expect(mocks.updateMany).toHaveBeenCalledWith({ where: { replaySessionId: "replay-root" }, data: { name: "上午突破练习" } });
   });
 
   it("rejects an empty session name", async () => {

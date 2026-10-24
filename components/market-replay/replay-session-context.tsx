@@ -15,20 +15,21 @@ export function ReplaySessionProvider({ session, children, includeCurrentChart =
 }
 export const useReplaySession = () => useContext(Context);
 
-export function replaySessionUrl(url: string, replaySessionId?: string) {
+export function replaySessionUrl(url: string, replaySessionId?: string, propRoundNumber?: number) {
   if (!replaySessionId || !/^\/api\/market-datasets\/[^/]+\/(progress|paper-session|paper-journal|replay|drawings)(\/|\?|$)/.test(url)) return url;
   const parsed = new URL(url, "http://localhost");
   parsed.searchParams.set("replaySessionId", replaySessionId);
+  if (propRoundNumber !== undefined) parsed.searchParams.set("propRound", String(propRoundNumber));
   return parsed.pathname + parsed.search;
 }
 export function useReplaySessionUrl() {
   const session = useReplaySession();
-  return useCallback((url: string) => replaySessionUrl(url, session?.id), [session]);
+  return useCallback((url: string) => replaySessionUrl(url, session?.id, session?.propRoundNumber), [session]);
 }
 export function useReplayFetch(): typeof fetch {
   const session = useReplaySession();
   return useCallback((input: RequestInfo | URL, init?: RequestInit) => {
-    const url = typeof input === "string" ? replaySessionUrl(input, session?.id) : input;
+    const url = typeof input === "string" ? replaySessionUrl(input, session?.id, session?.propRoundNumber) : input;
     const headers = new Headers(init?.headers);
     if (session && typeof url === "string" && url.includes("replaySessionId=")) {
       headers.set("X-Replay-Projection", session.activeProjectionId);

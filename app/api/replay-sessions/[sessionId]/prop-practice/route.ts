@@ -1,13 +1,15 @@
 import { NextResponse } from "next/server";
 import { z } from "zod";
-import { loadReplayScope, runWithReplayScope, replayErrorResponse } from "@/lib/replay-sessions/scope";
+import { loadReplayScope, loadPropRoundScope, runWithReplayScope, replayErrorResponse } from "@/lib/replay-sessions/scope";
 import { readPropAccount, confirmPropPayout } from "@/lib/prop-practice/service";
 import { copy } from "@/lib/i18n";
 type Context = { params: Promise<{ sessionId: string }> };
 export async function GET(request: Request, context: Context) {
   try {
-    const scope = await loadReplayScope((await context.params).sessionId);
-    return await runWithReplayScope(scope, async () => NextResponse.json({ account: await readPropAccount(), version: scope.version, status: scope.status },
+    let scope = await loadReplayScope((await context.params).sessionId);
+    const round = new URL(request.url).searchParams.get("round");
+    if (round !== null) scope = await loadPropRoundScope(scope, Number(round));
+    return await runWithReplayScope(scope, async () => NextResponse.json({ account: await readPropAccount(), version: scope.version, status: scope.status, projectionId: scope.projectionId },
       new URL(request.url).searchParams.get("download") === "1" ? { headers: { "Content-Disposition": `attachment; filename="prop-ledger-${scope.id}.json"` } } : undefined));
   } catch (error) { return replayErrorResponse(error); }
 }

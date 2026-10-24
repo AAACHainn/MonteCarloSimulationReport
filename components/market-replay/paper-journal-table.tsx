@@ -385,7 +385,7 @@ export function PaperJournalTable({
               href={replayJournalTradeHref(datasetId, entry.journalSessionId, entry.globalNo)}
               className="font-medium text-blue-700 underline-offset-2 hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-600"
               aria-label={copy.paperTrading.openHistoricalReplay(entry.no)}
-            >{entry.no}</Link>}</td> : null}
+            >{entry.no}</Link>}{entry.propRoundNumber ? <span className="ml-2 whitespace-nowrap text-xs text-slate-500">{copy.propPractice.roundLabel(entry.propRoundNumber)}</span> : null}</td> : null}
             {visibleColumnSet.has("date") ? <td className="border-r px-3 py-2 last:border-r-0">{date(entry)}</td> : null}
             {visibleColumnSet.has("direction") ? <td className="border-r px-3 py-2 last:border-r-0">{entry.direction === "LONG" ? copy.paperTrading.long : copy.paperTrading.short}</td> : null}
             {visibleColumnSet.has("setup") ? <td className="border-r p-1 text-left last:border-r-0">

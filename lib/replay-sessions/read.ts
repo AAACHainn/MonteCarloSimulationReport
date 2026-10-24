@@ -7,7 +7,7 @@ export async function listReplaySessions(datasetId: string): Promise<ReplaySessi
     where: { datasetId }, orderBy: [{ createdAt: "desc" }, { id: "desc" }],
     include: {
       progress: true,
-      propAccount: true,
+      propAccount: { include: { rounds: { select: { projection: { select: { _count: { select: { entries: true } } } } } } } },
       activeProjection: { select: { _count: { select: { entries: true } } } },
     },
   });
@@ -17,8 +17,8 @@ export async function listReplaySessions(datasetId: string): Promise<ReplaySessi
     version: session.version, activeProjectionId: session.activeProjectionId!, pendingCorrectionId: session.pendingCorrectionId,
     legacy: session.legacy, riskPreferences: JSON.parse(session.riskPreferences),
     accountCategory: session.accountCategory,
-    propAccount: session.propAccount ? { snapshot: JSON.parse(session.propAccount.snapshot), state: JSON.parse(session.propAccount.state) } : null,
-    entryCount: session.activeProjection?._count.entries ?? 0,
+    propAccount: session.propAccount ? { snapshot: JSON.parse(session.propAccount.snapshot), state: JSON.parse(session.propAccount.state), roundNumber: session.propAccount.roundNumber } : null,
+    entryCount: session.propAccount ? session.propAccount.rounds.reduce((sum, round) => sum + round.projection._count.entries, 0) : session.activeProjection?._count.entries ?? 0,
     createdAt: session.createdAt.toISOString(), updatedAt: session.updatedAt.toISOString(),
     progress: session.progress ? {
       startSequence: session.progress.startSequence, currentSequence: session.progress.currentSequence,

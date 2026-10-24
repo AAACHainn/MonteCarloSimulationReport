@@ -662,6 +662,11 @@ try {
     }
     await prisma.$executeRawUnsafe(statement.replace(/^CREATE TABLE /, "CREATE TABLE IF NOT EXISTS ").replace(/^CREATE UNIQUE INDEX /, "CREATE UNIQUE INDEX IF NOT EXISTS ").replace(/^CREATE INDEX /, "CREATE INDEX IF NOT EXISTS "));
   }
+  const roundColumns = await prisma.$queryRawUnsafe('PRAGMA table_info("PropPracticeAccount")');
+  if (!roundColumns.some(c => c.name === "roundNumber")) {
+    const rounds = readFileSync(new URL("../prisma/migrations/20261024090000_prop_practice_rounds/migration.sql", import.meta.url), "utf8");
+    await prisma.$transaction(rounds.split(";").map(s => s.trim()).filter(Boolean).map(s => prisma.$executeRawUnsafe(s)), { timeout: 120_000 });
+  }
 } finally {
   await prisma.$disconnect();
 }

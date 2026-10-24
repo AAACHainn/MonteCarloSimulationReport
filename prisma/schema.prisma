@@ -718,6 +718,8 @@ model PropPracticeAccount {
   templateVersion PropPracticeTemplateVersion @relation(fields: [templateVersionId], references: [id], onDelete: Restrict)
   snapshot String
   state String
+  roundNumber Int @default(1)
+  rounds PropPracticeRound[]
   payouts PropPracticePayout[]
   events PropPracticeEvent[]
 }
@@ -727,6 +729,7 @@ model PropPracticePayout {
   replaySessionId String
   account PropPracticeAccount @relation(fields: [replaySessionId], references: [replaySessionId], onDelete: Cascade)
   requestId String
+  roundNumber Int @default(1)
   amount Float
   received Float
   share Float
@@ -740,6 +743,7 @@ model PropPracticeEvent {
   replaySessionId String
   account PropPracticeAccount @relation(fields: [replaySessionId], references: [replaySessionId], onDelete: Cascade)
   type String
+  roundNumber Int @default(1)
   evidence String
   createdAt DateTime @default(now())
   @@index([replaySessionId, createdAt])
@@ -754,6 +758,7 @@ model ReplayProjection {
   historyVersion  Int
   currentSequence Int
   account         PaperTradingSession?
+  propRound       PropPracticeRound?
   entries         ReplayJournalEntry[]
   commands        ReplayProjectionCommand[]
   contexts        ReplayContextRun[]
@@ -761,6 +766,26 @@ model ReplayProjection {
   createdAt       DateTime @default(now())
 
   @@unique([replaySessionId, status])
+}
+
+// A business attempt, distinct from correction result versions. Only one round is current.
+model PropPracticeRound {
+  id String @id @default(cuid())
+  replaySessionId String
+  account PropPracticeAccount @relation(fields: [replaySessionId], references: [replaySessionId], onDelete: Cascade)
+  number Int
+  projectionId String @unique
+  projection ReplayProjection @relation(fields: [projectionId], references: [id], onDelete: Cascade)
+  snapshot String
+  state String
+  trainingGate String @default("{}")
+  startSequence Int
+  endSequence Int?
+  resetRequestId String?
+  createdAt DateTime @default(now())
+  endedAt DateTime?
+  @@unique([replaySessionId, number])
+  @@unique([replaySessionId, resetRequestId])
 }
 
 model ReplayCommand {

@@ -145,7 +145,7 @@ export async function getPaperSessionSnapshot(datasetId: string, db: Prisma.Tran
   const scope = getReplayScope();
   if (scope?.mode === "TRAINING") {
     if (prepared && "trainingGate" in prepared) scope.trainingGate = prepared.trainingGate;
-    else {
+    else if (!scope.propRoundNumber) {
       const owner = await db.replaySession.findUniqueOrThrow({ where: { id: scope.id }, select: { trainingGate: true } });
       scope.trainingGate = parseTrainingGate(owner.trainingGate);
     }
@@ -153,7 +153,7 @@ export async function getPaperSessionSnapshot(datasetId: string, db: Prisma.Tran
   const storedSession = prepared ? prepared.session : await db.paperTradingSession.findFirst({ where: accountWhere(datasetId) });
   if (!storedSession) return null;
   const session = await ensurePaperTradeStats(storedSession as SessionRecord, db);
-  if (scope?.mode === "TRAINING" && !prepared?.trainingLotsHydrated) await hydrateTrainingLots(db, session.id);
+  if (scope?.mode === "TRAINING" && !scope.propRoundNumber && !prepared?.trainingLotsHydrated) await hydrateTrainingLots(db, session.id);
   const includeHistory = prepared?.includeHistory !== false;
   const [activeOrders, recentOrders, recentFills, recentTrades, openLots, currentBar, journalEntryCount] = await Promise.all([
     db.paperOrder.findMany({ where: { sessionId: session.id, status: "PENDING" }, orderBy: [{ createdSequence: "asc" }, { createdAt: "asc" }] }),
@@ -209,8 +209,12 @@ export async function getPaperSessionSnapshot(datasetId: string, db: Prisma.Tran
   return {
     session: serializePaperSession(session),
     ...(scope?.accountCategory === "PROP_PRACTICE" ? { propAccount: await (async () => {
+      if (scope.propRoundNumber && scope.propRoundNumber > 0) {
+        const round = await db.propPracticeRound.findUniqueOrThrow({ where: { replaySessionId_number: { replaySessionId: scope.id, number: scope.propRoundNumber } } });
+        return { snapshot: JSON.parse(round.snapshot), state: JSON.parse(round.state), roundNumber: round.number };
+      }
       const prop = await db.propPracticeAccount.findUniqueOrThrow({ where: { replaySessionId: scope.id } });
-      return { snapshot: JSON.parse(prop.snapshot), state: JSON.parse(prop.state) };
+      return { snapshot: JSON.parse(prop.snapshot), state: JSON.parse(prop.state), roundNumber: prop.roundNumber };
     })() } : {}),
     activeOrders: activeOrders.map(serializePaperOrder),
     ...(includeHistory ? {

@@ -1,6 +1,6 @@
 import { sqliteWriteTransaction } from "@/lib/sqlite-write";
-import { withReplaySessionRoute, journalScopeWhere, getReplayScope, assertReplayWritable, markReplayMutation } from '@/lib/replay-sessions/scope';
-import { deleteReplaySession, deleteReplaySessionSchema } from '@/lib/replay-sessions/service';
+import { withReplaySessionRoute, journalScopeWhere } from '@/lib/replay-sessions/scope';
+import { deleteReplaySession, deleteReplaySessionSchema, renameReplaySession } from '@/lib/replay-sessions/service';
 import { NextResponse } from "next/server";
 import { prisma } from "@/lib/db";
 import { copy } from "@/lib/i18n";
@@ -20,13 +20,8 @@ async function handlePATCH(request: Request, context: RouteContext) {
   });
   if (!session) return NextResponse.json({ error: copy.paperTrading.journalNotFound }, { status: 404 });
   const updated = await sqliteWriteTransaction(prisma, async (tx) => {
-    await assertReplayWritable(tx);
-    const updated = await tx.replayJournalSession.update({
-      where: { id: sessionId }, data: { name: parsed.data.name }, select: { id: true, name: true },
-    });
-    await tx.replaySession.update({ where: { id: getReplayScope()!.id }, data: { name: parsed.data.name } });
-    await markReplayMutation(tx);
-    return updated;
+    await renameReplaySession(tx, parsed.data.name);
+    return { id: sessionId, name: parsed.data.name };
   });
   return NextResponse.json(updated);
 }
@@ -41,6 +36,6 @@ async function handleDELETE(request: Request, context: RouteContext) {
   return NextResponse.json({ ok: true });
 }
 
-export const PATCH = withReplaySessionRoute(handlePATCH, { write: true, annotation: false });
+export const PATCH = withReplaySessionRoute(handlePATCH, { write: true, sessionMetadata: true });
 
-export const DELETE = withReplaySessionRoute(handleDELETE, { write: true, annotation: true });
+export const DELETE = withReplaySessionRoute(handleDELETE, { write: true, annotation: true, sessionMetadata: true });

@@ -17,7 +17,8 @@ export type ReplaySessionSummary = {
   createdAt: string;
   updatedAt: string;
   accountCategory?: string;
-  propAccount?: { snapshot: import("@/lib/prop-practice/service").PropSnapshot; state: import("@/lib/prop-practice/rules").PropState } | null;
+  propRoundNumber?: number;
+  propAccount?: import("@/lib/prop-practice/service").PropRuntime | null;
 };
 
 export type CorrectionMetrics = { currency: string; balance: number; netQuantity: number; realizedPnl: number; totalFees: number; totalSlippage: number; peakEquity: number; maxDrawdown: number; tradeCount: number };

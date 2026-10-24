@@ -13,6 +13,7 @@ import { Badge } from "@/components/ui/badge";
 import { listReplaySessions } from "@/lib/replay-sessions/read";
 import { PaperAccountStrip } from "@/components/market-replay/paper-trading-panel";
 import { PropAccountPanel } from "@/components/market-replay/prop-account-panel";
+import { PropRoundTradingRecords } from "@/components/market-replay/prop-round-history";
 import { getPaperSessionSnapshot } from "@/lib/paper-trading/serialize";
 import { runWithReplayScope } from "@/lib/replay-sessions/scope";
 import { withReplayJournalDisplayNumbers } from "@/lib/paper-trading/journal-numbering";
@@ -55,6 +56,7 @@ export default async function MarketReplayDetailPage({ params, searchParams }: {
         <Button asChild variant="outline"><Link href={`/market-replay/${id}`}>{copy.replaySessions.allSessions}</Link></Button>
       </section>
       {selected.propAccount ? <PropAccountPanel sessionId={selected.id} runtime={selected.propAccount} tradingSnapshot={snapshot} /> : <PaperAccountStrip snapshot={snapshot} />}
+      {snapshot?.propAccount?.state.result ? <PropRoundTradingRecords snapshot={snapshot} /> : null}
       <PaperJournalTable datasetId={id} scope="history" replaySessions={sessions} />
     </div></ReplaySessionProvider>;
   }

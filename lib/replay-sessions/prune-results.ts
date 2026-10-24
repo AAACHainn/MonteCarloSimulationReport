@@ -10,7 +10,8 @@ export async function pruneReplayResults(tx: Prisma.TransactionClient, replaySes
     where: { id: session.pendingCorrectionId, replaySessionId, status: { in: ["QUEUED", "RUNNING", "READY"] } },
     select: { targetProjectionId: true },
   }) : null;
-  const kept = [session.activeProjectionId, pending?.targetProjectionId].filter((id): id is string => Boolean(id));
+  const rounds = await tx.propPracticeRound.findMany({ where: { replaySessionId }, select: { projectionId: true } });
+  const kept = [session.activeProjectionId, pending?.targetProjectionId, ...rounds.map(round => round.projectionId)].filter((id): id is string => Boolean(id));
   await tx.replayProjection.deleteMany({ where: { replaySessionId, id: { notIn: kept } } });
   await tx.replayCommand.deleteMany({ where: { replaySessionId, projections: { none: {} } } });
   await tx.replayCorrectionJob.updateMany({

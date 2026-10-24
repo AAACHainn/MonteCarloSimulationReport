@@ -336,13 +336,13 @@ export function PaperTradingDetails({ snapshot, onFocusJournalEntry }: { snapsho
   );
 }
 
-function OrderHistory({ snapshot }: { snapshot: PaperSessionSnapshot }) {
+export function OrderHistory({ snapshot }: { snapshot: PaperSessionSnapshot }) {
   const orders = [...snapshot.activeOrders, ...snapshot.recentOrders];
   if (!orders.length) return <p className="text-sm text-slate-500">{copy.paperTrading.noOrders}</p>;
   return <div className="overflow-x-auto"><table className="w-full text-left text-sm"><thead><tr className="border-b text-xs text-slate-500"><th className="p-2">{copy.paperTrading.side}</th><th className="p-2">{copy.paperTrading.orderType}</th><th className="p-2">{copy.paperTrading.quantity}</th><th className="p-2">{copy.paperTrading.price}</th><th className="p-2">{copy.paperTrading.status}</th></tr></thead><tbody>{orders.map((order) => <tr key={order.id} className="border-b"><td className="p-2">{order.side === "BUY" ? copy.paperTrading.buy : copy.paperTrading.sell}</td><td className="p-2">{orderTypeLabel(order.type)}</td><td className="p-2">{number(order.quantity, 8)}</td><td className="p-2">{order.filledPrice ?? order.price ?? "—"}</td><td className="p-2">{orderStatusLabel(order.status)}</td></tr>)}</tbody></table></div>;
 }
 
-function FillHistory({ snapshot }: { snapshot: PaperSessionSnapshot }) {
+export function FillHistory({ snapshot }: { snapshot: PaperSessionSnapshot }) {
   if (!snapshot.recentFills.length) return <p className="text-sm text-slate-500">{copy.paperTrading.noFills}</p>;
   return <div className="overflow-x-auto"><table className="w-full text-left text-sm"><thead><tr className="border-b text-xs text-slate-500"><th className="p-2">{copy.paperTrading.time}</th><th className="p-2">{copy.paperTrading.side}</th><th className="p-2">{copy.paperTrading.quantity}</th><th className="p-2">{copy.paperTrading.price}</th><th className="p-2">{copy.paperTrading.reason}</th><th className="p-2">{copy.paperTrading.pnl}</th></tr></thead><tbody>{snapshot.recentFills.map((fill) => <tr key={fill.id} className="border-b"><td className="p-2">{new Date(fill.timestamp).toLocaleString("zh-CN")}</td><td className="p-2">{fill.side === "BUY" ? copy.paperTrading.buy : copy.paperTrading.sell}</td><td className="p-2">{number(fill.quantity, 8)}</td><td className="p-2">{number(fill.price, 8)}</td><td className="p-2">{fillReasonLabel(fill.reason)}</td><td className="p-2">{number(fill.realizedPnl)}</td></tr>)}</tbody></table></div>;
 }
