@@ -89,12 +89,12 @@ export function PaperJournalTable({
     status, renameOpen, setRenameOpen, renameDraft, setRenameDraft, renameError,
     renaming, setupOptions, setupOptionsLoading, setupError, savingSetupIds, tradeReasonOptions,
     tradeReasonsLoading, tradeReasonsError, savingTradeReasonIds, reviewDrafts, setReviewDrafts, savingReviewIds,
-    reviewError, reviewDialogEntryId, setReviewDialogEntryId, reviewDialogDraft, setReviewDialogDraft, reviewDialogInitialValue,
+    reviewError, reviewDialogEntryId, reviewDialogDraft, setReviewDialogDraft, reviewDialogInitialValue,
     visibleColumnsOpen, setVisibleColumnsOpen, draftVisibleColumnIds, setDraftVisibleColumnIds, columnWidths, setTableViewportElement,
     tableViewportWidth, tableMinimumLeftOffset, resizingTarget, disciplineEntry, setDisciplineEntry, summary,
     filterDrafts, appliedFilters, openFilter, setOpenFilter, cancelledInlineReviewIdsRef, load,
     changeExpressionFilter, changeOptionFilter, clearAllExpressionFilters, selectedSession, beginRename, renameSession,
-    updateSetup, updateTradeReasons, openReviewDialog, saveReviewDialog, finishInlineReview, openVisibleColumns,
+    updateSetup, updateTradeReasons, openReviewDialog, closeReviewDialog, saveReviewDialog, finishInlineReview, openVisibleColumns,
     toggleDraftColumn, applyVisibleColumns, startResize, startTableResize, continueResize, finishResize,
     resizeWithKeyboard, resizeTableEdgeWithKeyboard, startRow, endRow, scopedJournalColumns, visibleColumns,
     visibleColumnSet, correctionColumnWidth, baseTableWidth, visibleTableWidth, visibleTableLeftOffset, distributedTableExtraWidth,
@@ -541,7 +541,7 @@ export function PaperJournalTable({
       initialValue={reviewDialogInitialValue}
       onChange={setReviewDialogDraft}
       onSave={() => void saveReviewDialog()}
-      onClose={() => setReviewDialogEntryId(null)}
+      onClose={closeReviewDialog}
       saving={reviewDialogEntryId ? savingReviewIds.has(reviewDialogEntryId) : false}
       error={reviewError}
       aiOpen={ai?.open}

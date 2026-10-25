@@ -1,5 +1,6 @@
 "use client";
 
+import { useReplaySessionEntry } from "./replay-session-entry-guard";
 import { useCurrentUser } from "@/components/user-growth/user-context";
 import { useEffect, useState, useTransition } from "react";
 import Link from "next/link";
@@ -13,6 +14,7 @@ import type { ReplaySessionSummary } from "@/lib/replay-sessions/types";
 export function ReplaySessionEntry({ datasetId }: { datasetId: string }) {
   const router = useRouter();
   const currentUser = useCurrentUser();
+  const entry = useReplaySessionEntry();
   const [open, setOpen] = useState(false);
   const [sessions, setSessions] = useState<ReplaySessionSummary[]>([]);
   const [loading, setLoading] = useState(false);
@@ -34,8 +36,9 @@ export function ReplaySessionEntry({ datasetId }: { datasetId: string }) {
   }, [datasetId, open, currentUser.selectedId, currentUser.hydrated]);
 
   return <>
-    <Select open={open} onOpenChange={(value) => { setOpen(value); if (value) { setLoading(true); setError(null); } }} value="" disabled={pending} onValueChange={(id) => {
-      startTransition(() => router.push(`/market-replay/${encodeURIComponent(datasetId)}?${id === "__new__" ? "create=1" : `sessionId=${encodeURIComponent(id)}`}`));
+    <Select open={open} onOpenChange={(value) => { setOpen(value); if (value) { setLoading(true); setError(null); } }} value="" disabled={pending || entry.busy} onValueChange={(id) => {
+      if (id === "__new__") startTransition(() => router.push(`/market-replay/${encodeURIComponent(datasetId)}?create=1`));
+      else void entry.open({ sessionId: id });
     }}>
       <SelectTrigger variant="primary" aria-label={copy.replaySessions.openSession} className="w-auto gap-2">
         {pending ? <Loader2 className="h-4 w-4 animate-spin" aria-hidden="true" /> : <Play className="h-4 w-4" aria-hidden="true" />}
@@ -51,6 +54,7 @@ export function ReplaySessionEntry({ datasetId }: { datasetId: string }) {
         <SelectItem value="__new__" disabled={loading} className="mt-1 border-t pt-2"><span className="flex items-center gap-2 text-blue-700"><Plus className="h-4 w-4" aria-hidden="true" />{copy.replaySessions.create}</span></SelectItem>
       </SelectContent>
     </Select>
+    {entry.ui}
     <Button asChild variant="outline" size="sm"><Link href={`/market-replay/${encodeURIComponent(datasetId)}`}><List className="h-4 w-4" aria-hidden="true" />{copy.replaySessions.allSessions}</Link></Button>
   </>;
 }

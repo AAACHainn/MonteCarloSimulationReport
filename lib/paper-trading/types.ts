@@ -205,6 +205,7 @@ export type PaperTradingStats = {
 };
 
 export type PaperSessionSnapshot = {
+  growth?: import("@/lib/user-growth/presentation").SessionGrowthView | null;
   propAccount?: import("@/lib/prop-practice/service").PropRuntime | null;
   session: PaperSessionState;
   activeOrders: PaperOrderData[];

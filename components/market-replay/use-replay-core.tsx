@@ -105,7 +105,7 @@ export function useReplayCore({ dataset: initialDataset, initialJournalFocus = n
     paperMutationActiveRef,
     paperMutationChainRef,
     pendingPaperMutationsRef,
-    commitConfirmedPaperSnapshot,
+    commitConfirmedPaperSnapshot, growthNotice,
   } = useReplayAccountRuntime(paperSnapshot, setPaperSnapshot);
   const [tradeAnnotations, setTradeAnnotations] = useState<ReplayTradeAnnotationData[]>([]);
   const [tradeAnnotationsTruncated, setTradeAnnotationsTruncated] = useState(false);
@@ -317,7 +317,7 @@ export function useReplayCore({ dataset: initialDataset, initialJournalFocus = n
     setSaveStatus, confirmAction, setConfirmAction, settingsDialog, setSettingsDialog, candlestickStyleDraft,
     setCandlestickStyleDraft, emaError, setEmaError, abrError, setAbrError, barCountError,
     setBarCountError, repairInterval, setRepairInterval, paperSnapshot, paperSnapshotRef, confirmedPaperSnapshotRef,
-    paperSessionLoadedRef, paperSessionLoadRef, paperMutationActiveRef, paperMutationChainRef, pendingPaperMutationsRef, commitConfirmedPaperSnapshot,
+    paperSessionLoadedRef, paperSessionLoadRef, paperMutationActiveRef, paperMutationChainRef, pendingPaperMutationsRef, commitConfirmedPaperSnapshot, growthNotice,
     tradeAnnotations, setTradeAnnotations, tradeAnnotationsTruncated, setTradeAnnotationsTruncated, paperBusy, setPaperBusy,
     paperError, setPaperError, journalReview, setJournalReview, chartFocusSequence, setChartFocusSequence,
     chartWindowDetachedRef, reviewReturning, setReviewReturning, buffering, recoveryNotice, setRecoveryNotice,

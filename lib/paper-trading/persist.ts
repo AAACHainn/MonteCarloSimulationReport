@@ -1,3 +1,4 @@
+import { settleClosedCycle } from "@/lib/user-growth/settlement";
 import type { Prisma } from "@prisma/client";
 import { storageId, getReplayScope } from "@/lib/replay-sessions/scope";
 import type { PaperOrderData, PaperFillData } from "./types";
@@ -51,6 +52,7 @@ export async function persistTrades(
         data: { status: "CLOSED", grossPnl: { increment: fill.realizedPnl }, fees: { increment: fill.fee }, closedSequence: fill.sequence, closedAt: new Date(fill.timestamp) },
       });
       stats = recordClosedTrade(stats, closed.grossPnl - closed.fees);
+      await settleClosedCycle(tx, closed);
       activeTrade = null;
     } else if (transition.kind === "REVERSE") {
       const closingFee = transition.closingFee;
@@ -60,6 +62,7 @@ export async function persistTrades(
           data: { status: "CLOSED", grossPnl: { increment: fill.realizedPnl }, fees: { increment: closingFee }, closedSequence: fill.sequence, closedAt: new Date(fill.timestamp) },
         });
         stats = recordClosedTrade(stats, closed.grossPnl - closed.fees);
+        await settleClosedCycle(tx, closed);
       }
       activeTrade = await tx.paperTrade.create({
         data: { ...(getReplayScope() ? { id: storageId(`speculative_${fill.id}`) } : {}), sessionId, side: fill.netQuantityAfter > 0 ? "LONG" : "SHORT", openedSequence: fill.sequence, openedAt: new Date(fill.timestamp), fees: fill.fee - closingFee, plannedRisk: transition.plannedRisk },

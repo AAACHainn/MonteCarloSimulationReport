@@ -1,3 +1,4 @@
+import { readSessionGrowth } from "@/lib/user-growth/read";
 import { parseEntryDiscipline, parseTrainingGate } from "./training-gate";
 import { accountWhere, entryProjectionWhere, getReplayScope } from '@/lib/replay-sessions/scope';
 import type { Prisma } from "@prisma/client";
@@ -209,6 +210,7 @@ export async function getPaperSessionSnapshot(datasetId: string, db: Prisma.Tran
   };
   return {
     session: serializePaperSession(session),
+    ...(scope ? { growth: await readSessionGrowth(db, scope.id) } : {}),
     ...(scope?.accountCategory === "PROP_PRACTICE" ? { propAccount: await (async () => {
       if (scope.propRoundNumber && scope.propRoundNumber > 0) {
         const round = await db.propPracticeRound.findUniqueOrThrow({ where: { replaySessionId_number: { replaySessionId: scope.id, number: scope.propRoundNumber } } });

@@ -5,18 +5,21 @@ import { prisma } from "@/lib/db";
 import { copy } from "@/lib/i18n";
 import { sqliteWriteTransaction } from "@/lib/sqlite-write";
 import { ReplaySessionError, replayErrorResponse } from "@/lib/replay-sessions/scope";
+import { growthRealm } from "./rules";
+import { realmLabel } from "./presentation";
 import { assertUserExists } from "./ownership";
 import type { ProfileSession, UserIdentity } from "./types";
 
 export const profileInput = z.object({ nickname: z.string().trim().refine(value => Array.from(value).length >= 1 && Array.from(value).length <= 24) }).strict();
 export const assignmentInput = z.object({ sessionIds: z.array(z.string().min(1).max(128)).min(1).max(200).refine(ids => new Set(ids).size === ids.length) }).strict();
-export function userIdentity(user: { id: string; nickname: string }): UserIdentity {
-  return { id: user.id, nickname: user.nickname, avatar: { preset: 0, zoom: 1, x: 50, y: 50 }, realmLabel: copy.userGrowth.mortal };
+export function userIdentity(user: { id: string; nickname: string; growth?: { totalXp: number; realm: string } | null }): UserIdentity {
+  const current = growthRealm(user.growth?.totalXp ?? 0, user.growth?.realm === "FOUNDATION");
+  return { id: user.id, nickname: user.nickname, avatar: { preset: 0, zoom: 1, x: 50, y: 50 }, realmLabel: realmLabel(current.realm, current.layer) };
 }
 export async function saveProfile(input: z.infer<typeof profileInput>, id?: string) {
   return sqliteWriteTransaction(prisma, async tx => {
     if (id) await assertUserExists(tx, id);
-    const row = id ? await tx.userProfile.update({ where: { id }, data: input }) : await tx.userProfile.create({ data: { ...input, growth: { create: {} } } });
+    const row = id ? await tx.userProfile.update({ where: { id }, data: input, include: { growth: true } }) : await tx.userProfile.create({ data: { ...input, growth: { create: {} } }, include: { growth: true } });
     return userIdentity(row);
   });
 }
@@ -61,7 +64,7 @@ export function userErrorResponse(error: unknown) {
   return replayErrorResponse(error);
 }
 export async function requireProfile(id: string) {
-  const user = await prisma.userProfile.findUnique({ where: { id } });
+  const user = await prisma.userProfile.findUnique({ where: { id }, include: { growth: true } });
   if (!user) throw new ReplaySessionError("USER_NOT_FOUND", 404, copy.userGrowth.userMissing);
   return userIdentity(user);
 }

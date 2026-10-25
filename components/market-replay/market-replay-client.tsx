@@ -1,7 +1,7 @@
 "use client";
 
-import { UserEntry } from "@/components/user-growth/user-entry";
-import { OwnershipContext, eligibilityLabel } from "@/components/user-growth/ownership-context";
+import { UserContextHeader } from "@/components/user-growth/user-context-header";
+import { eligibilityLabel } from "@/components/user-growth/ownership-context";
 import { dateTimeLocalValue } from "@/lib/market-replay/start-time";
 import { ReplayDateDialog } from "./replay-date-dialog";
 import { ReplaySessionSwitch } from "./replay-session-switch";
@@ -69,7 +69,7 @@ export function MarketReplayClient({ dataset: initialDataset, initialJournalFocu
     startDialogBusy, confirmationSuspensionRef, startError, confirmAction, setConfirmAction, settingsDialog,
     setSettingsDialog, candlestickStyleDraft, setCandlestickStyleDraft, emaError, abrError, barCountError,
     repairInterval, setRepairInterval, paperSnapshot, tradeAnnotations, tradeAnnotationsTruncated, paperBusy,
-    paperError, journalReview, chartFocusSequence, setChartFocusSequence, reviewReturning, draftActive,
+    paperError, growthNotice, journalReview, chartFocusSequence, setChartFocusSequence, reviewReturning, draftActive,
     setDraftActive, gateDialogOpen, setGateDialogOpen, gateBusy, gateError, checkingOrder,
     entryCheckDraft, setEntryCheckDraft, measurementArmed, setMeasurementArmed, drawingToolOpen, setDrawingToolOpen,
     drawingTool, setDrawingTool, drawings, setDrawings, clearingDrawings, drawingError,
@@ -100,15 +100,15 @@ export function MarketReplayClient({ dataset: initialDataset, initialJournalFocu
   } = actions;
   function wrapWorkspace(content: ReactNode) {
     return <div className="flex h-full min-h-0 flex-col gap-2">
-      {!webFullscreen ? <header className="shrink-0" data-replay-workspace-header>
-        <Breadcrumbs items={[{ label: copy.marketReplay.title, href: "/market-replay" }, { label: dataset.name }]} />
-        <div className="mt-1 flex flex-wrap items-center gap-4">
+      <header className="shrink-0" data-replay-workspace-header>
+        <UserContextHeader session={replaySession ?? undefined}>{!webFullscreen && <Breadcrumbs items={[{ label: copy.marketReplay.title, href: "/market-replay" }, { label: dataset.name }]} />}</UserContextHeader>
+        {!webFullscreen && <div className="mt-1 flex flex-wrap items-center gap-4">
           <h1 className="shrink-0 text-xl font-semibold tracking-tight text-slate-950">{copy.marketReplay.replayTitle(dataset.symbol, dataset.timeframe)}</h1>
           <p className="min-w-0 truncate text-xs text-slate-500">{dataset.name} · {dataset.timezone}</p>
           <div className="ml-auto flex min-w-0 flex-wrap items-center gap-2">{gateButton}<ReplaySessionSwitch beforeSwitch={prepareSessionSwitch} disabled={isLoading || Boolean(loadError) || !replay || Boolean(checkingOrder)} /></div>
-        </div>
-      </header> : null}
-      <div className="flex shrink-0 flex-wrap items-center justify-between gap-3">{replaySession && <OwnershipContext session={replaySession} />}<UserEntry /></div>
+        </div>}
+      </header>
+      {growthNotice && <p role="status" aria-live="polite" className="shrink-0 text-xs text-emerald-700">{growthNotice}</p>}
       {!webFullscreen ? gateNoticeBlock : null}
       {gateDialogOpen ? <TrainingGateConfigDialog gate={currentGate} busy={gateBusy} error={gateError} onClose={() => setGateDialogOpen(false)} onSave={saveGateConfig} /> : null}
       {checkingOrder ? <EntryCheckDialog order={checkingOrder.order} mode={currentGate.activeMode ?? "CHECKLIST"} displayIntervalSeconds={replay?.displayIntervalSeconds ?? dataset.sourceIntervalSeconds ?? 60}

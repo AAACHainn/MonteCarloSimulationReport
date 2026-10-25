@@ -1,5 +1,6 @@
 "use client";
 
+import { useReplaySessionEntry } from "./replay-session-entry-guard";
 import { useCurrentUser } from "@/components/user-growth/user-context";
 import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
@@ -15,6 +16,7 @@ export function ReplaySessionSwitch({ beforeSwitch, disabled = false }: { before
   const current = useReplaySession();
   const selectedUser = useCurrentUser();
   const router = useRouter();
+  const entry = useReplaySessionEntry();
   const [sessions, setSessions] = useState<ReplaySessionSummary[]>(current ? [current] : []);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -30,7 +32,8 @@ export function ReplaySessionSwitch({ beforeSwitch, disabled = false }: { before
   }, [current, selectedUser.selectedId]);
   if (!current) return null;
   async function navigate(id?: string) {
-    if (!current || busy || id === current.id) return;
+    if (!current || busy || entry.busy || id === current.id) return;
+    if (id) { await entry.open({ sessionId: id, beforeEnter: beforeSwitch }); return; }
     setBusy(true); setError(null);
     try {
       if (!await beforeSwitch()) throw new Error(copy.replaySessions.switchFailed);
@@ -40,12 +43,13 @@ export function ReplaySessionSwitch({ beforeSwitch, disabled = false }: { before
   const visibleSessions = [current, ...sessions.filter(session => session.id !== current.id && (!selectedUser.selectedId || session.userId === selectedUser.selectedId))];
   return <div className="flex min-w-0 flex-wrap items-center gap-2" aria-busy={busy}>
     <Badge>{current.mode === "TRAINING" ? copy.replaySessions.training : copy.replaySessions.liveReplay}</Badge>
-    <Select value={current.id} disabled={busy || disabled} onValueChange={(id) => void navigate(id)}>
+    <Select value={current.id} disabled={busy || entry.busy || disabled} onValueChange={(id) => void navigate(id)}>
       <SelectTrigger aria-label={copy.replaySessions.switch} className="h-8 w-56 [&>span]:truncate [&>span]:whitespace-nowrap"><SelectValue /></SelectTrigger>
       <SelectContent>{visibleSessions.map((session) => <SelectItem key={session.id} value={session.id}>{session.name} · {session.mode === "TRAINING" ? copy.replaySessions.training : copy.replaySessions.liveReplay}</SelectItem>)}</SelectContent>
     </Select>
-    <Button size="sm" variant="ghost" onClick={() => void navigate()} disabled={busy || disabled}><List className="h-4 w-4" aria-hidden="true" />{copy.replaySessions.allSessions}</Button>
+    <Button size="sm" variant="ghost" onClick={() => void navigate()} disabled={busy || entry.busy || disabled}><List className="h-4 w-4" aria-hidden="true" />{copy.replaySessions.allSessions}</Button>
     <span className="whitespace-nowrap text-xs text-slate-500">{busy ? copy.replaySessions.switching : copy.replaySessions.source}</span>
+    {entry.ui}
     {error ? <span role="alert" className="max-w-lg text-xs text-red-600">{error}</span> : null}
   </div>;
 }

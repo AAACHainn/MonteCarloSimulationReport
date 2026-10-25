@@ -24,7 +24,7 @@ export function GrowthRecordList({ records, onSource }: { records: GrowthRecord[
       </div>
       <div className="flex flex-wrap items-center justify-between gap-2 pl-4 sm:flex-col sm:items-end sm:justify-start sm:pl-0">
         <time className="font-mono text-xs tabular-nums text-slate-600">{record.settledAt}</time>
-        {record.deleted ? <p className="text-sm text-slate-600">{t.deleted}</p> : <Button variant="ghost" className="text-blue-700" onClick={() => onSource(record)}>{t.source}<ArrowUpRight className="h-4 w-4" aria-hidden="true" /></Button>}
+        {record.deleted && <p className="text-sm text-slate-600">{t.deleted}</p>}<Button variant="ghost" className="text-blue-700" onClick={() => onSource(record)}>{record.deleted ? t.sourceDetails : t.source}<ArrowUpRight className="h-4 w-4" aria-hidden="true" /></Button>
       </div>
     </li>)}
   </ol>;

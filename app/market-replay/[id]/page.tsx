@@ -1,5 +1,5 @@
-import { OwnershipContext } from "@/components/user-growth/ownership-context";
-import { UserEntry } from "@/components/user-growth/user-entry";
+import { ReplaySessionGate } from "@/components/market-replay/replay-session-entry-guard";
+import { UserContextHeader } from "@/components/user-growth/user-context-header";
 import { notFound, redirect } from "next/navigation";
 import Link from "next/link";
 import { Breadcrumbs } from "@/components/breadcrumbs";
@@ -44,29 +44,28 @@ export default async function MarketReplayDetailPage({ params, searchParams }: {
   const serialized = serializeMarketDataset({ ...dataset, progress: selected
     ? dataset.progress.find((progress) => progress.replaySessionId === selected.id) ?? null : null });
   if (!selected) return <div className="space-y-6">
-    <Breadcrumbs items={[{ label: copy.marketReplay.title, href: "/market-replay" }, { label: dataset.name }]} />
+    <UserContextHeader><Breadcrumbs items={[{ label: copy.marketReplay.title, href: "/market-replay" }, { label: dataset.name }]} /></UserContextHeader>
     <section className="border-b pb-6"><h1 className="text-3xl font-semibold tracking-tight text-slate-950">{dataset.name} · {copy.replaySessions.title}</h1></section>
     <ReplaySessionsDashboard dataset={serialized} initialSessions={sessions} initialCreateOpen={query.create === "1"} />
   </div>;
   if (selected.status === "ARCHIVED") {
     const snapshot = await runWithReplayScope({ id: selected.id, datasetId: id, projectionId: selected.activeProjectionId,
       mode: selected.mode, status: "ARCHIVED", version: selected.version, accountCategory: selected.accountCategory }, () => getPaperSessionSnapshot(id));
-    return <ReplaySessionProvider session={selected}><div className="space-y-6">
-      <Breadcrumbs items={[{ label: copy.marketReplay.title, href: "/market-replay" }, { label: dataset.name, href: `/market-replay/${id}` }, { label: selected.name }]} />
+    return <ReplaySessionGate key={`${selected.id}:${selected.activeProjectionId}:${selected.status}`} session={selected}><ReplaySessionProvider session={selected}><div className="space-y-6">
+      <UserContextHeader session={selected}><Breadcrumbs items={[{ label: copy.marketReplay.title, href: "/market-replay" }, { label: dataset.name, href: `/market-replay/${id}` }, { label: selected.name }]} /></UserContextHeader>
       <section className="flex items-center justify-between gap-4 border-b pb-6">
         <div><h1 className="text-3xl font-semibold tracking-tight text-slate-950">{selected.name}</h1><div className="mt-2 flex gap-2"><Badge>{copy.replaySessions.archived}</Badge><Badge>{selected.mode === "TRAINING" ? copy.replaySessions.training : copy.replaySessions.liveReplay}</Badge></div><p className="mt-2 text-sm text-slate-600">{copy.replaySessions.readOnly} · {copy.replaySessions.source}</p></div>
         <Button asChild variant="outline"><Link href={`/market-replay/${id}`}>{copy.replaySessions.allSessions}</Link></Button>
       </section>
-      <div className="flex flex-wrap items-center justify-between gap-3"><OwnershipContext session={selected} /><UserEntry /></div>
       {selected.propAccount ? <PropAccountPanel sessionId={selected.id} runtime={selected.propAccount} tradingSnapshot={snapshot} /> : <PaperAccountStrip snapshot={snapshot} />}
       {snapshot?.propAccount?.state.result ? <PropRoundTradingRecords snapshot={snapshot} /> : null}
       <PaperJournalTable datasetId={id} scope="history" replaySessions={sessions} />
-    </div></ReplaySessionProvider>;
+    </div></ReplaySessionProvider></ReplaySessionGate>;
   }
   const focusedEntry = journalEntry ? (await withReplayJournalDisplayNumbers([journalEntry], selected.activeProjectionId))[0] : null;
   return (
     <div className="market-replay-page relative left-1/2 flex h-[calc(100dvh-4.3125rem-var(--app-notice-height,0px))] w-[calc(100vw-2rem)] max-w-none -translate-x-1/2 flex-col gap-2 overflow-hidden sm:w-[calc(100vw-3rem)]">
-      <div className="min-h-0 flex-1"><ReplaySessionProvider session={selected} includeCurrentChart><MarketReplayClient key={`${serialized.id}:${selected.id}:${selected.activeProjectionId}`} dataset={serialized} initialJournalFocus={focusedEntry ? { sequence: focusedEntry.openedSequence, no: focusedEntry.accountNo, globalNo: focusedEntry.no } : null} /></ReplaySessionProvider></div>
+      <div className="min-h-0 flex-1"><ReplaySessionGate key={`${selected.id}:${selected.activeProjectionId}:${selected.status}`} session={selected}><ReplaySessionProvider session={selected} includeCurrentChart><MarketReplayClient key={`${serialized.id}:${selected.id}:${selected.activeProjectionId}`} dataset={serialized} initialJournalFocus={focusedEntry ? { sequence: focusedEntry.openedSequence, no: focusedEntry.accountNo, globalNo: focusedEntry.no } : null} /></ReplaySessionProvider></ReplaySessionGate></div>
     </div>
   );
 }

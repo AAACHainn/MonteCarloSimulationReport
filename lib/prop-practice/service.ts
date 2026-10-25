@@ -1,3 +1,4 @@
+import { settleGrowth } from "@/lib/user-growth/settlement";
 import type { Prisma } from "@prisma/client";
 import { prisma } from "@/lib/db";
 import { copy } from "@/lib/i18n";
@@ -39,6 +40,10 @@ export async function persistPropAccount(tx: Prisma.TransactionClient, runtime: 
   if (type) {
     await tx.propPracticeEvent.create({ data: { replaySessionId: scope.id, roundNumber: runtime.roundNumber ?? 1, type, evidence: JSON.stringify(runtime.state) } });
     await recordReplayCommand(tx, runtime.state.last?.sequence ?? -1, `PROP_${type}`, runtime.state);
+    if (type === "PROMOTED") {
+      const bar = runtime.state.last ? await tx.marketBar.findUnique({ where: { datasetId_sequence: { datasetId: scope.datasetId, sequence: runtime.state.last.sequence } } }) : null;
+      await settleGrowth(tx, { type: "EVALUATION", sourceId: "promotion", roundNumber: runtime.roundNumber ?? 1, occurredAt: bar?.timestamp ?? new Date(), source: { sequence: runtime.state.last?.sequence } });
+    }
   }
 }
 export async function assertPropTradingAvailable(tx: Prisma.TransactionClient) {
@@ -113,6 +118,9 @@ export async function confirmPropPayout(input: { expectedVersion: number; reques
     await tx.propPracticeRound.updateMany({ where: { projectionId: scope.projectionId }, data: { state: JSON.stringify(result.state) } });
     await tx.propPracticeEvent.create({ data: { replaySessionId: scope.id, roundNumber: updated.roundNumber ?? 1, type: "PAYOUT", evidence: JSON.stringify({ ...result.evidence, payoutId: payout.id }) } });
     await recordReplayCommand(tx, result.state.last!.sequence, "PROP_PAYOUT", { ...result.evidence, payoutId: payout.id, amount: input.amount, received: result.received });
+    await settleGrowth(tx, { type: "PAYOUT", sourceId: payout.id, roundNumber: payout.roundNumber, occurredAt: (await tx.marketBar.findUnique({ where: { datasetId_sequence: { datasetId: scope.datasetId, sequence: result.state.last!.sequence } } }))?.timestamp ?? payout.createdAt,
+      source: { sequence: result.state.last?.sequence, currency: updated.snapshot.currency },
+      payout: { received: payout.received, currency: updated.snapshot.currency, firstInRound: await tx.propPracticePayout.count({ where: { replaySessionId: scope.id, roundNumber: payout.roundNumber } }) === 1 } });
     await markReplayMutation(tx);
     return payout;
   });
@@ -140,6 +148,8 @@ export async function confirmPropPromotion(input: { expectedVersion: number; req
     await tx.propPracticeRound.updateMany({ where: { projectionId: scope.projectionId }, data: { state: JSON.stringify(state) } });
     const receipt = await tx.propPracticeEvent.create({ data: { id: receiptId, replaySessionId: scope.id, roundNumber: updated.roundNumber ?? 1, type: "PROMOTED", evidence: JSON.stringify(evidence) } });
     await recordReplayCommand(tx, state.last!.sequence, "PROP_PROMOTED", evidence);
+    const bar = await tx.marketBar.findUnique({ where: { datasetId_sequence: { datasetId: scope.datasetId, sequence: state.last!.sequence } } });
+    await settleGrowth(tx, { type: "EVALUATION", sourceId: "promotion", roundNumber: updated.roundNumber ?? 1, occurredAt: bar?.timestamp ?? receipt.createdAt, source: { sequence: state.last!.sequence } });
     await markReplayMutation(tx);
     return receipt;
   });

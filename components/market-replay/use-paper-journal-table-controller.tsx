@@ -527,7 +527,7 @@ export function usePaperJournalTableController({ datasetId, scope }: {
       setReviewError(copy.paperTrading.reviewTooLong);
       return false;
     }
-    if (review === entry.review) return true;
+    if (review === entry.review && !reviewAiSourcesRef.current[entry.id]) return true;
     const previousReview = entry.review;
 
     setReviewError(null);
@@ -539,10 +539,12 @@ export function usePaperJournalTableController({ datasetId, scope }: {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ review, expectedReview: previousReview, expectedProjectionId: replaySession?.activeProjectionId, aiSourceRunId: reviewAiSourcesRef.current[entry.id] }),
       });
-      const data = await response.json() as ReplayJournalEntryData & { error?: string };
+      const data = await response.json() as ReplayJournalEntryData & { error?: string; growth?: { nickname: string; xp: number; awarded: boolean } };
       if (!response.ok) throw new Error(data.error ?? copy.paperTrading.reviewUpdateFailed);
       setItems((current) => current.map((item) => item.id === entry.id ? { ...item, review: data.review } : item));
-      if (announce) setStatus(copy.paperTrading.reviewSaved);
+      delete reviewAiSourcesRef.current[entry.id];
+      if (data.growth?.awarded) setStatus(copy.userGrowth.reviewSavedGrowth(data.growth.nickname, data.growth.xp));
+      else if (announce) setStatus(copy.paperTrading.reviewSaved);
       return true;
     } catch (cause) {
       setItems((current) => current.map((item) => item.id === entry.id ? { ...item, review: previousReview } : item));
@@ -563,6 +565,11 @@ export function usePaperJournalTableController({ datasetId, scope }: {
     setReviewDialogDraft(initialValue);
     setReviewDialogInitialValue(initialValue);
     setReviewError(null);
+  }
+
+  function closeReviewDialog() {
+    if (reviewDialogEntryId) delete reviewAiSourcesRef.current[reviewDialogEntryId];
+    setReviewDialogEntryId(null);
   }
 
   async function saveReviewDialog() {
@@ -798,7 +805,7 @@ export function usePaperJournalTableController({ datasetId, scope }: {
     tableViewportWidth, tableMinimumLeftOffset, resizingTarget, disciplineEntry, setDisciplineEntry, summary,
     filterDrafts, appliedFilters, openFilter, setOpenFilter, cancelledInlineReviewIdsRef, load,
     changeExpressionFilter, changeOptionFilter, clearAllExpressionFilters, selectedSession, beginRename, renameSession,
-    updateSetup, updateTradeReasons, openReviewDialog, saveReviewDialog, finishInlineReview, openVisibleColumns,
+    updateSetup, updateTradeReasons, openReviewDialog, closeReviewDialog, saveReviewDialog, finishInlineReview, openVisibleColumns,
     toggleDraftColumn, applyVisibleColumns, startResize, startTableResize, continueResize, finishResize,
     resizeWithKeyboard, resizeTableEdgeWithKeyboard, startRow, endRow, scopedJournalColumns, visibleColumns,
     visibleColumnSet, correctionColumnWidth, baseTableWidth, visibleTableWidth, visibleTableLeftOffset, distributedTableExtraWidth,

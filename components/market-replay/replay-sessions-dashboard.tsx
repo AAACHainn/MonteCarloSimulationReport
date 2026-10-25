@@ -2,8 +2,8 @@
 
 import { useCurrentUser } from "@/components/user-growth/user-context";
 import { NewSessionOwner, eligibilityLabel } from "@/components/user-growth/ownership-context";
-import { UserEntry } from "@/components/user-growth/user-entry";
 import { useState } from "react";
+import { useReplaySessionEntry } from "./replay-session-entry-guard";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { Archive, Loader2, Pencil, Plus, Trash2 } from "lucide-react";
@@ -30,6 +30,7 @@ const t = copy.replaySessions;
 export function ReplaySessionsDashboard({ dataset, initialSessions, initialCreateOpen = false }: { dataset: MarketDatasetSummary; initialSessions: ReplaySessionSummary[]; initialCreateOpen?: boolean }) {
   const router = useRouter();
   const currentUser = useCurrentUser();
+  const entry = useReplaySessionEntry();
   const [submittedOwner, setSubmittedOwner] = useState<string | undefined>();
   const [createOpen, setCreateOpen] = useState(initialCreateOpen);
   const [name, setName] = useState(t.training as string);
@@ -131,7 +132,6 @@ export function ReplaySessionsDashboard({ dataset, initialSessions, initialCreat
   }
   const visibleSessions = sessions.filter(session => !currentUser.selectedId || session.userId === currentUser.selectedId);
   return <div className="space-y-6">
-    <div className="flex flex-wrap items-center justify-between gap-3"><p className="text-sm text-slate-600">{copy.userGrowth.filteredScope(currentUser.selected?.nickname ?? copy.userGrowth.all)}</p><UserEntry /></div>
     <div className="flex items-center justify-between gap-4">
       <p className="text-sm text-slate-600">{t.source}</p>
       <div className="flex flex-wrap gap-2"><Button asChild variant="outline"><Link href="/prop-practice-templates">{copy.propPractice.templates}</Link></Button><Button onClick={() => { setError(null); setStatus(null); setCreateOpen(true); }} disabled={busy || !dataset.sourceIntervalSeconds}><Plus className="h-4 w-4" />{t.create}</Button></div>
@@ -155,13 +155,14 @@ export function ReplaySessionsDashboard({ dataset, initialSessions, initialCreat
         <TableCell className="tabular-nums">{session.progress ? formatNumber(Math.max(0, session.progress.currentSequence - session.progress.startSequence + 1)) : copy.common.dash}</TableCell>
         <TableCell className="text-right tabular-nums">{formatNumber(session.entryCount)}</TableCell>
         <TableCell><div className="flex justify-end gap-2">
-          <Button asChild variant="outline" size="sm"><Link href={`/market-replay/${dataset.id}?sessionId=${encodeURIComponent(session.id)}`}>{session.status === "ACTIVE" ? t.continue : t.view}</Link></Button>
+          <Button asChild variant="outline" size="sm" disabled={entry.busy}><Link href={`/market-replay/${dataset.id}?sessionId=${encodeURIComponent(session.id)}`} onClick={event => { if (event.defaultPrevented || event.button !== 0 || event.metaKey || event.ctrlKey || event.shiftKey || event.altKey) return; event.preventDefault(); void entry.open({ sessionId: session.id }); }}>{session.status === "ACTIVE" ? t.continue : t.view}</Link></Button>
           {session.status === "ACTIVE" ? <Button variant="ghost" size="sm" onClick={() => { setStatus(null); setArchiveTarget(session); }} disabled={busy || Boolean(session.pendingCorrectionId)}><Archive className="h-4 w-4" />{t.archive}</Button> : null}
           <Button type="button" variant="destructive" size="sm" aria-label={t.deleteLabel(session.name)} disabled={busy || Boolean(session.pendingCorrectionId)}
             onClick={() => { setStatus(null); setError(null); setDeleteError(null); setDeleteTarget(session); }}><Trash2 className="h-4 w-4" aria-hidden="true" />{t.delete}</Button>
         </div></TableCell>
       </TableRow>)}</TableBody></Table> : <div className="rounded-md border border-dashed p-6 text-sm text-slate-600">{copy.userGrowth.emptyScope}</div>}
     </CardContent></Card>
+    {entry.ui}
     <ReplayStartDialog open={createOpen} title={t.create} description={t.createDescription} confirmLabel={t.create} value={start}
       minimum={dateTimeLocalValue(dataset.startTime, dataset.timezone)} maximum={dateTimeLocalValue(dataset.endTime, dataset.timezone)}
       timezone={dataset.timezone} busy={busy} error={error} onChange={setStart} onCancel={() => setCreateOpen(false)} onConfirm={(value) => void create(value)}>
