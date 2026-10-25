@@ -1,5 +1,6 @@
 "use client";
 
+import { useReplayPreferenceSave } from "./use-replay-preference-save";
 import { advancedDisplayBars, manualAdvanceBatchSize, mergeDisplayAdvanceWindow } from "@/lib/market-replay/advance-display";
 import { createUuid } from "@/lib/uuid";
 import { selectedTimeToTimestamp } from "@/lib/market-replay/start-time";
@@ -13,7 +14,7 @@ import { replayDatasetUpdate, replayDisplayMetadataKey, startDisplayMetadataRefr
 import { canAdvanceFlatAccount } from "@/lib/paper-trading/flat-advance";
 import { calculateLatestAbr } from "@/lib/market-replay/abr";
 import { tradingDayForTimestamp } from "@/lib/market-replay/chunks";
-import { MAX_REPLAY_BULK_SOURCE_BARS, REPLAY_HISTORY_BAR_LIMIT, REPLAY_HISTORY_COMPACT_TO, type MarketDatasetSummary, type ReplayState } from "@/lib/market-replay/types";
+import { MAX_REPLAY_BULK_SOURCE_BARS, REPLAY_HISTORY_BAR_LIMIT, REPLAY_HISTORY_COMPACT_TO, type MarketDatasetSummary } from "@/lib/market-replay/types";
 import type { PaperSessionSnapshot } from "@/lib/paper-trading/types";
 import type { ReplayServerRequest } from "@/lib/market-replay/server-sync-types";
 import { requestReplayAdvance, retryReplayOperation, assertForwardReplayResult, ReplayRequestError } from "@/lib/market-replay/server-request";
@@ -41,8 +42,8 @@ export function useReplayEngine(core: ReturnType<typeof useReplayCore>, drawingW
     preparingEntryCheckRef, gateSeenRef, rectangleStyleId, styleDrawingId, abrLength, displayUtcOffsetMinutes,
     textDrawing, indicatorWarmupCountRef, manualStepsRef, stepShortcutRef, marketSession, displayMarketSession,
     marketCache, getDisplayCache, barsRef, warmupBarsRef, currentSourceBarRef, recoveryRequiredRef,
-    viewChangingRef, windowRequestRef, windowAbortRef, historyAbortRef, historyEpochRef, pendingSaveRef,
-    saveTimerRef, lastSaveAtRef, saveChainRef, advancingRef, advanceCompletionRef, playbackAccumulatorRef,
+    viewChangingRef, windowRequestRef, windowAbortRef, historyAbortRef, historyEpochRef, saveTimerRef,
+    advancingRef, advanceCompletionRef, playbackAccumulatorRef,
     playbackClockRef, playbackEpochRef, initialJournalFocusAppliedRef, beginBuffering, endBuffering, initialJournalFocus,
   } = core;
   const {
@@ -58,41 +59,7 @@ export function useReplayEngine(core: ReturnType<typeof useReplayCore>, drawingW
     return data.snapshot as PaperSessionSnapshot | null;
   }, [commitConfirmedPaperSnapshot, dataset.id, paperSessionLoadedRef, fetch, pausePlayback, replaySession?.activeProjectionId, historyConflictRef]);
 
-  const flushSave = useCallback(() => {
-    if (saveTimerRef.current) clearTimeout(saveTimerRef.current);
-    saveTimerRef.current = null;
-    const next = pendingSaveRef.current;
-    if (!next) return;
-    pendingSaveRef.current = null;
-    lastSaveAtRef.current = Date.now();
-    setSaveStatus("saving");
-    saveChainRef.current = saveChainRef.current.catch(() => undefined).then(async () => {
-      const response = await fetch(`/api/market-datasets/${dataset.id}/progress`, {
-        method: "PUT",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          startSequence: next.startSequence,
-          currentSequence: next.currentSequence,
-          playbackRate: next.playbackRate,
-          displayIntervalSeconds: next.displayIntervalSeconds,
-          displaySession: next.displaySession,
-        }),
-      });
-      if (!response.ok) throw new Error(copy.marketReplay.saveError);
-      setSaveStatus("saved");
-    }).catch(() => setSaveStatus("error"));
-  }, [dataset.id, fetch, lastSaveAtRef, pendingSaveRef, saveChainRef, saveTimerRef, setSaveStatus]);
-
-  const queueSave = useCallback((next: ReplayState, immediate: boolean) => {
-    pendingSaveRef.current = next;
-    if (immediate) {
-      flushSave();
-      return;
-    }
-    if (saveTimerRef.current) return;
-    const delay = Math.max(0, 1_000 - (Date.now() - lastSaveAtRef.current));
-    saveTimerRef.current = setTimeout(flushSave, delay);
-  }, [flushSave, lastSaveAtRef, pendingSaveRef, saveTimerRef]);
+  const { queueSave, flushPreferences } = useReplayPreferenceSave(dataset.id, core);
 
   const readReplayData = useCallback(async <T,>(read: () => Promise<T>) => {
     const signal = serverLifetimeRef.current!.signal;
@@ -539,6 +506,7 @@ export function useReplayEngine(core: ReturnType<typeof useReplayCore>, drawingW
 
   useEffect(() => {
     const manualSteps = manualStepsRef.current;
+    const saveTimer = saveTimerRef;
     const persistLatest = () => {
       const current = latestReplayRef.current;
       if (!current) return;
@@ -552,7 +520,7 @@ export function useReplayEngine(core: ReturnType<typeof useReplayCore>, drawingW
     window.addEventListener("pagehide", persistLatest);
     return () => {
       window.removeEventListener("pagehide", persistLatest);
-      if (saveTimerRef.current) clearTimeout(saveTimerRef.current);
+      if (saveTimer.current) clearTimeout(saveTimer.current);
       manualSteps.cancel();
       windowRequestRef.current += 1;
       persistLatest();
@@ -809,7 +777,7 @@ export function useReplayEngine(core: ReturnType<typeof useReplayCore>, drawingW
   }, [armDrawing, rectangleStyleId, textDrawing.editor, confirmAction, gateDialogOpen, checkingOrder, settingsDialog, startDialogOpen, styleDrawingId]);
 
   return {
-    reloadPaper, queueSave, flushVisible, processServerBars, replayStatus, startReplayAt,
+    reloadPaper, queueSave, flushPreferences, flushVisible, processServerBars, replayStatus, startReplayAt,
     beginReplay, returnToLiveWindow, togglePlayback, revealNextBar, enterJournalReview,
   };
 }

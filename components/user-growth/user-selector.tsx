@@ -2,7 +2,7 @@
 
 import { useId, useRef, useState } from "react";
 import * as Popover from "@radix-ui/react-popover";
-import { Check, ChevronDown, Users } from "lucide-react";
+import { Check, Users } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -12,8 +12,9 @@ import type { QueryState, UserIdentity } from "@/lib/user-growth/types";
 import { UserAvatar } from "./user-avatar";
 
 const t = copy.userGrowth;
-export function UserSelector({ users, selected, onSelect, onCreate, onProfiles, state = "normal", onRetry }: {
+export function UserSelector({ users, selected, onSelect, onCreate, onProfiles, state = "normal", onRetry, notice = "" }: {
   users: UserIdentity[]; selected?: UserIdentity; onSelect: (id: string | null) => void; onCreate: () => void; onProfiles: () => void; state?: QueryState; onRetry: () => void;
+  notice?: string;
 }) {
   const [open, setOpen] = useState(false);
   const [search, setSearch] = useState("");
@@ -22,12 +23,12 @@ export function UserSelector({ users, selected, onSelect, onCreate, onProfiles, 
   const [portalContainer, setPortalContainer] = useState<HTMLElement | null>(null);
   const choose = (id: string | null) => { onSelect(id); setOpen(false); setSearch(""); };
   return <Popover.Root open={open} onOpenChange={(value) => { if (value) setPortalContainer(triggerRef.current?.closest<HTMLElement>('[role="dialog"]') ?? null); setOpen(value); }}>
-    <Popover.Trigger asChild><Button ref={triggerRef} variant="outline" className="max-w-full gap-2" title={`${t.selection}：${selected?.nickname ?? t.all}`} aria-label={`${t.selection}：${selected?.nickname ?? t.all}`}>
-      {selected ? <UserAvatar avatar={selected.avatar} size="entry" /> : <Users className="h-5 w-5 shrink-0" aria-hidden="true" />}
-      <span className="max-w-32 truncate">{selected?.nickname ?? t.all}</span><span className="hidden text-xs text-slate-600 xl:inline">{selected?.realmLabel}</span><ChevronDown className="h-4 w-4 shrink-0" aria-hidden="true" />
+    <Popover.Trigger asChild><Button ref={triggerRef} variant="ghost" size="icon" className="shrink-0 rounded-full p-0" title={`${t.selection}：${selected?.nickname ?? t.all}`} aria-label={`${t.selection}：${selected?.nickname ?? t.all}`}>
+      {selected ? <UserAvatar avatar={selected.avatar} size="control" /> : <span className="flex h-10 w-10 items-center justify-center rounded-full border border-slate-300 bg-slate-50 text-slate-600"><Users className="h-5 w-5" aria-hidden="true" /></span>}
     </Button></Popover.Trigger>
     <Popover.Portal container={portalContainer ?? undefined}><OptionPopoverContent align="end" className="w-80 p-3" aria-label={t.scope}>
       <p className="px-2 py-2 text-xs text-slate-600">{t.scope}</p>
+      {notice && <p role="status" className="px-2 pb-2 text-sm text-slate-600">{notice}</p>}
       <Button variant="ghost" className="h-auto min-h-10 w-full justify-between whitespace-normal text-left" onClick={() => choose(null)}><span><span className="block">{t.all}</span><span className="text-xs font-normal text-slate-600">{t.global}</span></span>{!selected && <Check className="h-4 w-4" aria-label={t.selected} />}</Button>
       <div className="my-3 border-t" />
       <Label htmlFor={searchId} className="mb-2">{t.search}</Label><Input id={searchId} value={search} onChange={(e) => setSearch(e.target.value)} placeholder={t.searchPlaceholder} />

@@ -1,4 +1,6 @@
 "use client";
+import { useReplaySession } from "./replay-session-context";
+import { eligibilityLabel } from "@/components/user-growth/ownership-context";
 import { useState } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
@@ -63,6 +65,8 @@ export function PropAccountPanel({ sessionId, runtime, tradingSnapshot, busy: ex
   sessionId: string; runtime: PropRuntime; tradingSnapshot?: PaperSessionSnapshot | null; busy?: boolean; onBeforeOpen?: () => Promise<void>; onChanged?: () => Promise<unknown>; readOnly?: boolean;
 }) {
   const router = useRouter();
+  const replaySession = useReplaySession();
+  const [resetConflict, setResetConflict] = useState(false);
   const [resetConfirmation, setResetConfirmation] = useState<{ expectedVersion: number; expectedProjectionId: string; requestId: string } | null>(null);
   const [open, setOpen] = useState(false), [data, setData] = useState<AccountData | null>(null);
   const [view, setView] = useState<AccountView>("rules");
@@ -81,7 +85,7 @@ export function PropAccountPanel({ sessionId, runtime, tradingSnapshot, busy: ex
     return { account: result.account as AccountData, version: result.version as number, status: result.status as string, projectionId: result.projectionId as string };
   }
   async function beginReset() {
-    setBusy(true); setError(null);
+    setBusy(true); setError(null); setResetConflict(false);
     try {
       await onBeforeOpen?.(); const result = await reload();
       if (readOnly || result.account.state.result !== "FAILED") throw new Error(t.resetUnavailable);
@@ -93,7 +97,8 @@ export function PropAccountPanel({ sessionId, runtime, tradingSnapshot, busy: ex
     setBusy(true); setError(null);
     try {
       const response = await fetch(`/api/replay-sessions/${encodeURIComponent(sessionId)}/prop-practice/reset`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(resetConfirmation) });
-      const result = await response.json(); if (!response.ok) throw new Error(result.error ?? t.requestFailed);
+      const result = await response.json();
+      if (!response.ok) { setResetConflict(result.code === "SESSION_CONFLICT"); throw new Error(result.error ?? t.requestFailed); }
       setResetConfirmation(null); router.refresh();
     } catch (e) { setError(e instanceof Error ? e.message : t.requestFailed); } finally { setBusy(false); }
   }
@@ -189,6 +194,6 @@ export function PropAccountPanel({ sessionId, runtime, tradingSnapshot, busy: ex
     </Dialog>
     <ConfirmDialog open={!!confirmation} title={t.payoutTitle} description={confirmationDescription} confirmLabel={t.payout} confirmVariant="default" isLoading={busy} error={error} onCancel={() => setConfirmation(null)} onConfirm={() => void payout()} />
     <ConfirmDialog open={!!promotionConfirmation} title={t.promotionTitle} description={promotionConfirmation ? t.promotionConfirm(promotionConfirmation.capital) : ""} confirmLabel={t.promote} confirmVariant="default" isLoading={busy} error={error} onCancel={() => { setPromotionConfirmation(null); setError(null); }} onConfirm={() => void promote()} />
-    <ConfirmDialog open={!!resetConfirmation} title={t.resetTitle} description={t.resetDescription} confirmLabel={t.reset} confirmVariant="default" isLoading={busy} error={error} onCancel={() => setResetConfirmation(null)} onConfirm={() => void reset()} />
+    <ConfirmDialog open={!!resetConfirmation} title={t.resetTitle} description={`${t.resetDescription} ${replaySession ? copy.userGrowth.reexamOwnership(replaySession.owner?.nickname ?? copy.userGrowth.unowned, eligibilityLabel(replaySession)) : ""}`} confirmLabel={t.reset} confirmVariant="default" isLoading={busy} error={error} secondaryAction={resetConflict ? { label: t.resetReload, onClick: () => void beginReset() } : undefined} onCancel={() => { setResetConfirmation(null); setError(null); }} onConfirm={() => void reset()} />
   </>;
 }

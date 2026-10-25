@@ -1,5 +1,6 @@
 "use client";
 
+import { useCurrentUser } from "@/components/user-growth/user-context";
 import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 import { List } from "lucide-react";
@@ -12,6 +13,7 @@ import type { ReplaySessionSummary } from "@/lib/replay-sessions/types";
 
 export function ReplaySessionSwitch({ beforeSwitch, disabled = false }: { beforeSwitch: () => Promise<boolean>; disabled?: boolean }) {
   const current = useReplaySession();
+  const selectedUser = useCurrentUser();
   const router = useRouter();
   const [sessions, setSessions] = useState<ReplaySessionSummary[]>(current ? [current] : []);
   const [busy, setBusy] = useState(false);
@@ -19,13 +21,13 @@ export function ReplaySessionSwitch({ beforeSwitch, disabled = false }: { before
   useEffect(() => {
     if (!current) return;
     const controller = new AbortController();
-    void fetch(`/api/market-datasets/${current.datasetId}/replay-sessions`, { signal: controller.signal }).then(async (response) => {
+    void fetch(`/api/market-datasets/${current.datasetId}/replay-sessions${selectedUser.selectedId ? `?userId=${encodeURIComponent(selectedUser.selectedId)}` : ""}`, { signal: controller.signal }).then(async (response) => {
       const data = await response.json();
       if (!response.ok) throw new Error(data.error ?? copy.replaySessions.requestFailed);
-      setSessions(data.sessions);
+      if (!controller.signal.aborted) setSessions(data.sessions);
     }).catch((error) => { if (!controller.signal.aborted) setError(error instanceof Error ? error.message : copy.replaySessions.requestFailed); });
     return () => controller.abort();
-  }, [current]);
+  }, [current, selectedUser.selectedId]);
   if (!current) return null;
   async function navigate(id?: string) {
     if (!current || busy || id === current.id) return;
@@ -35,11 +37,12 @@ export function ReplaySessionSwitch({ beforeSwitch, disabled = false }: { before
       router.push(`/market-replay/${current.datasetId}${id ? `?sessionId=${encodeURIComponent(id)}` : ""}`);
     } catch (error) { setError(error instanceof Error ? error.message : copy.replaySessions.switchFailed); setBusy(false); }
   }
+  const visibleSessions = [current, ...sessions.filter(session => session.id !== current.id && (!selectedUser.selectedId || session.userId === selectedUser.selectedId))];
   return <div className="flex min-w-0 flex-wrap items-center gap-2" aria-busy={busy}>
     <Badge>{current.mode === "TRAINING" ? copy.replaySessions.training : copy.replaySessions.liveReplay}</Badge>
     <Select value={current.id} disabled={busy || disabled} onValueChange={(id) => void navigate(id)}>
-      <SelectTrigger aria-label={copy.replaySessions.switch} className="h-8 w-56"><SelectValue /></SelectTrigger>
-      <SelectContent>{sessions.map((session) => <SelectItem key={session.id} value={session.id}>{session.name} · {session.mode === "TRAINING" ? copy.replaySessions.training : copy.replaySessions.liveReplay}</SelectItem>)}</SelectContent>
+      <SelectTrigger aria-label={copy.replaySessions.switch} className="h-8 w-56 [&>span]:truncate [&>span]:whitespace-nowrap"><SelectValue /></SelectTrigger>
+      <SelectContent>{visibleSessions.map((session) => <SelectItem key={session.id} value={session.id}>{session.name} · {session.mode === "TRAINING" ? copy.replaySessions.training : copy.replaySessions.liveReplay}</SelectItem>)}</SelectContent>
     </Select>
     <Button size="sm" variant="ghost" onClick={() => void navigate()} disabled={busy || disabled}><List className="h-4 w-4" aria-hidden="true" />{copy.replaySessions.allSessions}</Button>
     <span className="whitespace-nowrap text-xs text-slate-500">{busy ? copy.replaySessions.switching : copy.replaySessions.source}</span>

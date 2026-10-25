@@ -1,5 +1,8 @@
 "use client";
 
+import { useCurrentUser } from "@/components/user-growth/user-context";
+import { NewSessionOwner, eligibilityLabel } from "@/components/user-growth/ownership-context";
+import { UserEntry } from "@/components/user-growth/user-entry";
 import { useState } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
@@ -26,12 +29,14 @@ import type { ReplaySessionSummary, ReplaySessionMode } from "@/lib/replay-sessi
 const t = copy.replaySessions;
 export function ReplaySessionsDashboard({ dataset, initialSessions, initialCreateOpen = false }: { dataset: MarketDatasetSummary; initialSessions: ReplaySessionSummary[]; initialCreateOpen?: boolean }) {
   const router = useRouter();
+  const currentUser = useCurrentUser();
+  const [submittedOwner, setSubmittedOwner] = useState<string | undefined>();
   const [createOpen, setCreateOpen] = useState(initialCreateOpen);
   const [name, setName] = useState(t.training as string);
   const [mode, setMode] = useState<ReplaySessionMode>("TRAINING");
   const [start, setStart] = useState(() => dateTimeLocalValue(dataset.startTime, dataset.timezone));
   const [busy, setBusy] = useState(false);
-  const { sessions, setSessions, error: refreshError } = useReplaySessionsList(dataset.id, initialSessions, busy);
+  const { sessions, setSessions, error: refreshError, loading: sessionsLoading } = useReplaySessionsList(dataset.id, initialSessions, busy, currentUser.selectedId);
   const [error, setError] = useState<string | null>(null);
   const [archiveTarget, setArchiveTarget] = useState<ReplaySessionSummary | null>(null);
   const [deleteTarget, setDeleteTarget] = useState<ReplaySessionSummary | null>(null);
@@ -67,21 +72,23 @@ export function ReplaySessionsDashboard({ dataset, initialSessions, initialCreat
   }
 
   async function create(value: string) {
-    if (busy) return;
+    if (busy || !currentUser.hydrated) return;
+    const userId = currentUser.selectedId;
+    setSubmittedOwner(currentUser.selected?.nickname ?? copy.userGrowth.unowned);
     setBusy(true); setError(null);
     try {
       const timestamp = selectedTimeToTimestamp(value, dataset.timezone);
       if (!Number.isFinite(timestamp)) throw new Error(t.invalid);
       const response = await fetch(`/api/market-datasets/${dataset.id}/replay-sessions`, {
         method: "POST", headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ name, mode, timestamp: new Date(timestamp).toISOString(), playbackRate: 1,
+        body: JSON.stringify({ name, mode, userId, timestamp: new Date(timestamp).toISOString(), playbackRate: 1,
           displayIntervalSeconds: dataset.sourceIntervalSeconds, displaySession: "ETH" }),
       });
       const data = await response.json();
       if (!response.ok) throw new Error(data.error ?? t.requestFailed);
       router.push(`/market-replay/${dataset.id}?sessionId=${encodeURIComponent(data.session.id)}`);
     } catch (error) { setError(error instanceof Error ? error.message : t.requestFailed); }
-    finally { setBusy(false); }
+    finally { setBusy(false); setSubmittedOwner(undefined); }
   }
   async function archive() {
     if (!archiveTarget || busy) return;
@@ -122,22 +129,25 @@ export function ReplaySessionsDashboard({ dataset, initialSessions, initialCreat
     } catch (error) { setDeleteError(error instanceof Error ? error.message : t.deleteFailed); }
     finally { setBusy(false); }
   }
+  const visibleSessions = sessions.filter(session => !currentUser.selectedId || session.userId === currentUser.selectedId);
   return <div className="space-y-6">
+    <div className="flex flex-wrap items-center justify-between gap-3"><p className="text-sm text-slate-600">{copy.userGrowth.filteredScope(currentUser.selected?.nickname ?? copy.userGrowth.all)}</p><UserEntry /></div>
     <div className="flex items-center justify-between gap-4">
       <p className="text-sm text-slate-600">{t.source}</p>
       <div className="flex flex-wrap gap-2"><Button asChild variant="outline"><Link href="/prop-practice-templates">{copy.propPractice.templates}</Link></Button><Button onClick={() => { setError(null); setStatus(null); setCreateOpen(true); }} disabled={busy || !dataset.sourceIntervalSeconds}><Plus className="h-4 w-4" />{t.create}</Button></div>
     </div>
+    {sessionsLoading && <p role="status" className="text-sm text-slate-600">{t.loadingSessions}</p>}
     {(error ?? refreshError) && !createOpen ? <Alert className="border-red-200 bg-red-50" role="alert"><AlertDescription>{error ?? refreshError}</AlertDescription></Alert> : null}
     {status ? <Alert className="border-emerald-200 bg-emerald-50" role="status" aria-live="polite"><AlertDescription>{status}</AlertDescription></Alert> : null}
     <Card><CardHeader><CardTitle>{t.title}</CardTitle></CardHeader><CardContent>
-      {sessions.length ? <Table><TableHeader><TableRow>
+      {visibleSessions.length ? <Table><TableHeader><TableRow>
         <TableHead>{t.name}</TableHead><TableHead>{t.mode}</TableHead><TableHead>{t.progress}</TableHead>
         <TableHead className="text-right">{t.entries}</TableHead><TableHead />
-      </TableRow></TableHeader><TableBody>{sessions.map((session) => <TableRow key={session.id}>
+      </TableRow></TableHeader><TableBody>{visibleSessions.map((session) => <TableRow key={session.id}>
         <TableCell><div className="flex items-center gap-2"><span className="font-medium">{session.name}</span>
           <Button type="button" variant="ghost" size="icon" disabled={busy || Boolean(session.pendingCorrectionId)} aria-label={t.renameLabel(session.name)} title={t.rename}
             onClick={() => beginRename(session)}><Pencil className="h-4 w-4" aria-hidden="true" /></Button>
-        </div><Badge className="mt-1">{session.status === "ACTIVE" ? t.active : t.archived}</Badge>
+        </div><p className="mt-1 text-xs text-slate-600">{copy.userGrowth.owner}：{session.owner?.nickname ?? copy.userGrowth.unowned} · {eligibilityLabel(session)}</p><Badge className="mt-1">{session.status === "ACTIVE" ? t.active : t.archived}</Badge>
           {session.propAccount ? <div className="mt-1 space-y-1 text-xs text-slate-600"><p>{copy.propPractice.title} · {propResultLabel(session.propAccount.state, session.propAccount.snapshot.currency, formatMoney)}</p><p>{copy.propPractice.totalReceived}: {formatMoney(session.propAccount.state.totalReceived, session.propAccount.snapshot.currency)}</p></div> : null}
           {session.pendingCorrectionId ? <p className="mt-1 text-xs text-slate-600">{t.deleteCorrectionPending}</p> : null}
         </TableCell>
@@ -150,7 +160,7 @@ export function ReplaySessionsDashboard({ dataset, initialSessions, initialCreat
           <Button type="button" variant="destructive" size="sm" aria-label={t.deleteLabel(session.name)} disabled={busy || Boolean(session.pendingCorrectionId)}
             onClick={() => { setStatus(null); setError(null); setDeleteError(null); setDeleteTarget(session); }}><Trash2 className="h-4 w-4" aria-hidden="true" />{t.delete}</Button>
         </div></TableCell>
-      </TableRow>)}</TableBody></Table> : <div className="rounded-md border border-dashed p-6 text-sm text-slate-600">{t.empty}</div>}
+      </TableRow>)}</TableBody></Table> : <div className="rounded-md border border-dashed p-6 text-sm text-slate-600">{copy.userGrowth.emptyScope}</div>}
     </CardContent></Card>
     <ReplayStartDialog open={createOpen} title={t.create} description={t.createDescription} confirmLabel={t.create} value={start}
       minimum={dateTimeLocalValue(dataset.startTime, dataset.timezone)} maximum={dateTimeLocalValue(dataset.endTime, dataset.timezone)}
@@ -159,6 +169,7 @@ export function ReplaySessionsDashboard({ dataset, initialSessions, initialCreat
       <div className="space-y-2"><Label htmlFor="replay-session-mode">{t.mode}</Label><Select value={mode} disabled={busy} onValueChange={(value) => setMode(value as ReplaySessionMode)}>
         <SelectTrigger id="replay-session-mode"><SelectValue /></SelectTrigger><SelectContent><SelectItem value="TRAINING">{t.training}</SelectItem><SelectItem value="LIVE_REPLAY">{t.liveReplay}</SelectItem></SelectContent>
       </Select></div>
+      <NewSessionOwner submittedName={submittedOwner} />
       {busy ? <Loader2 className="h-4 w-4 animate-spin" aria-hidden="true" /> : null}
     </ReplayStartDialog>
     <ConfirmDialog open={Boolean(archiveTarget)} title={t.archiveTitle} description={`${archiveTarget?.name ?? ""}：${t.archiveDescription}`}

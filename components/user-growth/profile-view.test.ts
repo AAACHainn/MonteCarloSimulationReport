@@ -15,6 +15,18 @@ function render(scenario: number, state: "normal" | "error" = "normal") {
   }));
 }
 describe("growth profile presentation contract", () => {
+  it("reuses identity and session views while hiding disconnected growth controls", () => {
+    const profile = { ...makePreviewProfile(previewUsers[0], 0), growthPending: true, conditions: [] };
+    const html = renderToStaticMarkup(createElement(ProfileView, {
+      profile, state: "normal", onRetry: vi.fn(), onSwitch: vi.fn(), onEdit: vi.fn(), onBreakthrough: async () => false,
+      breaking: false, actionError: "", onAssign: vi.fn(), onOpenSession: vi.fn(), onSource: vi.fn(), onAllRecords: vi.fn(),
+    }));
+    expect(html).toContain(copy.userGrowth.growthPending);
+    expect(html).toContain(copy.userGrowth.assign);
+    expect(html).not.toContain('role="progressbar"');
+    expect(html).not.toContain(copy.userGrowth.showConditions);
+    expect(html).not.toContain(copy.userGrowth.records + "</h3>");
+  });
   it("keeps lifetime experience separate from the current segment", () => {
     const html = render(3);
     expect(html).toContain("16,500");

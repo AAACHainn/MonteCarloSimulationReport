@@ -1,5 +1,6 @@
 "use client";
 
+import { useCurrentUser } from "@/components/user-growth/user-context";
 import { useEffect, useState, useTransition } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
@@ -11,25 +12,26 @@ import type { ReplaySessionSummary } from "@/lib/replay-sessions/types";
 
 export function ReplaySessionEntry({ datasetId }: { datasetId: string }) {
   const router = useRouter();
+  const currentUser = useCurrentUser();
   const [open, setOpen] = useState(false);
   const [sessions, setSessions] = useState<ReplaySessionSummary[]>([]);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [pending, startTransition] = useTransition();
   useEffect(() => {
-    if (!open) return;
+    if (!open || !currentUser.hydrated) return;
     const controller = new AbortController();
     setLoading(true); setError(null);
-    void fetch(`/api/market-datasets/${encodeURIComponent(datasetId)}/replay-sessions`, { signal: controller.signal, cache: "no-store" })
+    void fetch(`/api/market-datasets/${encodeURIComponent(datasetId)}/replay-sessions${currentUser.selectedId ? `?userId=${encodeURIComponent(currentUser.selectedId)}` : ""}`, { signal: controller.signal, cache: "no-store" })
       .then(async (response) => {
         const data = await response.json();
         if (!response.ok) throw new Error(data.error ?? copy.replaySessions.requestFailed);
-        setSessions(data.sessions);
+        if (!controller.signal.aborted) setSessions(data.sessions);
       })
       .catch((error) => { if (!controller.signal.aborted) setError(error instanceof Error ? error.message : copy.replaySessions.requestFailed); })
       .finally(() => { if (!controller.signal.aborted) setLoading(false); });
     return () => controller.abort();
-  }, [datasetId, open]);
+  }, [datasetId, open, currentUser.selectedId, currentUser.hydrated]);
 
   return <>
     <Select open={open} onOpenChange={(value) => { setOpen(value); if (value) { setLoading(true); setError(null); } }} value="" disabled={pending} onValueChange={(id) => {

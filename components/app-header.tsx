@@ -3,6 +3,7 @@
 import Link from "next/link";
 import Image from "next/image";
 import { usePathname } from "next/navigation";
+import { UserEntry } from "@/components/user-growth/user-entry";
 import { copy } from "@/lib/i18n";
 
 const navItems = [
@@ -20,7 +21,7 @@ export function AppHeader() {
 
   return (
     <header className="border-b bg-white">
-      <div className="mx-auto flex max-w-7xl items-center justify-between px-6 py-4">
+      <div className="mx-auto flex max-w-7xl flex-wrap items-center justify-between gap-3 px-6 py-4">
         <Link href="/" className="inline-flex shrink-0 items-center gap-2 whitespace-nowrap font-mono text-sm font-semibold uppercase tracking-wide text-slate-900">
           <Image src="/icon.svg" alt="" aria-hidden="true" width={28} height={28} unoptimized className="h-7 w-7 shrink-0" />
           <span>{copy.nav.brand}</span>
@@ -36,6 +37,7 @@ export function AppHeader() {
             </Link>
           ))}
         </nav>
+        {pathname !== "/preview/user-growth" && <UserEntry />}
       </div>
     </header>
   );

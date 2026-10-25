@@ -13,3 +13,13 @@ it("does not start business runtimes in the isolated growth preview", async () =
   expect(businessRuntime.sync).not.toHaveBeenCalled();
   expect(businessRuntime.aggregation).not.toHaveBeenCalled();
 });
+it("does not start sync or aggregation workers in the isolated database acceptance instance", async () => {
+  vi.stubEnv("USER_GROWTH_PREVIEW", "");
+  vi.stubEnv("USER_GROWTH_ACCEPTANCE", "1");
+  vi.stubEnv("NEXT_RUNTIME", "nodejs");
+  vi.stubEnv("VITEST", "");
+  const { register } = await import("./instrumentation");
+  await register();
+  expect(businessRuntime.sync).not.toHaveBeenCalled();
+  expect(businessRuntime.aggregation).not.toHaveBeenCalled();
+});

@@ -5,6 +5,7 @@
   "packageManager": "pnpm@11.4.0",
   "scripts": {
     "dev": "next dev",
+    "acceptance:user-growth": "node scripts/acceptance-user-growth.mjs",
     "preview:user-growth": "node scripts/preview-user-growth.mjs",
     "build": "prisma generate && next build",
     "start": "next start",

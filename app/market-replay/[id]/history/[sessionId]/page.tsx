@@ -1,4 +1,6 @@
 import Link from "next/link";
+import { OwnershipContext } from "@/components/user-growth/ownership-context";
+import { UserEntry } from "@/components/user-growth/user-entry";
 import { notFound } from "next/navigation";
 import { ArrowLeft } from "lucide-react";
 import { Breadcrumbs } from "@/components/breadcrumbs";
@@ -98,8 +100,9 @@ export default async function HistoricalReplayPage({
   const historyHref = `/market-replay/${id}/trade-history?sessionId=${encodeURIComponent(replaySession.id)}${round ? `&propRound=${round.number}` : ""}`;
   const title = session.name || copy.paperTrading.historicalReplayTitle(session.replayGeneration);
 
-  return <ReplaySessionProvider session={{ ...replaySession, activeProjectionId: projectionId, propRoundNumber: round?.number, status: "ARCHIVED" }}><div className="relative left-1/2 flex h-[calc(100dvh-4.3125rem)] w-[calc(100vw-2rem)] max-w-none -translate-x-1/2 flex-col gap-3 overflow-hidden sm:w-[calc(100vw-3rem)]">
+  return <ReplaySessionProvider session={{ ...replaySession, activeProjectionId: projectionId, propRoundNumber: round?.number, status: "ARCHIVED" }}><div className="relative left-1/2 flex h-[calc(100dvh-4.3125rem-var(--app-notice-height,0px))] w-[calc(100vw-2rem)] max-w-none -translate-x-1/2 flex-col gap-3 overflow-hidden sm:w-[calc(100vw-3rem)]">
     <div className="shrink-0 space-y-2">
+      <div className="flex flex-wrap items-center justify-between gap-3"><OwnershipContext session={replaySession} /><UserEntry /></div>
       <Breadcrumbs items={[
         { label: copy.marketReplay.title, href: "/market-replay" },
         { label: dataset.name, href: `/market-replay/${id}` },

@@ -667,6 +667,15 @@ try {
     const rounds = readFileSync(new URL("../prisma/migrations/20261024090000_prop_practice_rounds/migration.sql", import.meta.url), "utf8");
     await prisma.$transaction(rounds.split(";").map(s => s.trim()).filter(Boolean).map(s => prisma.$executeRawUnsafe(s)), { timeout: 120_000 });
   }
+  const usersMigration = readFileSync(new URL("../prisma/migrations/20261025120000_user_profiles/migration.sql", import.meta.url), "utf8");
+  for (const statement of usersMigration.split(";").map(s => s.trim()).filter(Boolean)) {
+    const column = statement.match(/^ALTER TABLE "ReplaySession" ADD COLUMN "([^"]+)"/);
+    if (column) {
+      const columns = await prisma.$queryRawUnsafe('PRAGMA table_info("ReplaySession")');
+      if (columns.some(c => c.name === column[1])) continue;
+    }
+    await prisma.$executeRawUnsafe(statement.replace(/^CREATE TABLE /, "CREATE TABLE IF NOT EXISTS ").replace(/^CREATE UNIQUE INDEX /, "CREATE UNIQUE INDEX IF NOT EXISTS ").replace(/^CREATE INDEX /, "CREATE INDEX IF NOT EXISTS "));
+  }
 } finally {
   await prisma.$disconnect();
 }

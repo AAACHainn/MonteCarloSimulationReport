@@ -1,5 +1,5 @@
 export const propPractice = {
-    reset: "重新考核", resetTitle: "确认开始新一轮考核",
+    reset: "重新考核", resetReload: "重新加载并确认", resetTitle: "确认开始新一轮考核",
     resetDescription: "保留本轮全部成交、持仓、挂单、复盘和出金历史，按原规则开启空仓的新一轮考核。行情不回退，从下一根源 K 继续；交易关卡和风险金额偏好保留。",
     resetUnavailable: "仅失败的自营账户可重新考核；请刷新状态后重试。",
     roundMissing: "账户轮次不存在，请刷新页面。",

@@ -2,10 +2,11 @@ import { prisma } from "@/lib/db";
 import type { ReplaySessionSummary } from "./types";
 import type { DisplaySession } from "@/lib/market-replay/types";
 
-export async function listReplaySessions(datasetId: string): Promise<ReplaySessionSummary[]> {
+export async function listReplaySessions(datasetId: string, userId?: string | null): Promise<ReplaySessionSummary[]> {
   const sessions = await prisma.replaySession.findMany({
-    where: { datasetId }, orderBy: [{ createdAt: "desc" }, { id: "desc" }],
+    where: { datasetId, ...(userId ? { userId } : {}) }, orderBy: [{ createdAt: "desc" }, { id: "desc" }],
     include: {
+      user: { select: { id: true, nickname: true } },
       progress: true,
       propAccount: { include: { rounds: { select: { projection: { select: { _count: { select: { entries: true } } } } } } } },
       activeProjection: { select: { _count: { select: { entries: true } } } },
@@ -13,6 +14,7 @@ export async function listReplaySessions(datasetId: string): Promise<ReplaySessi
   });
   return sessions.map((session) => ({
     id: session.id, datasetId, name: session.name,
+    userId: session.userId, owner: session.user, ownershipSource: session.ownershipSource, growthEligible: session.growthEligible,
     mode: session.mode as ReplaySessionSummary["mode"], status: session.status as ReplaySessionSummary["status"],
     version: session.version, activeProjectionId: session.activeProjectionId!, pendingCorrectionId: session.pendingCorrectionId,
     legacy: session.legacy, riskPreferences: JSON.parse(session.riskPreferences),

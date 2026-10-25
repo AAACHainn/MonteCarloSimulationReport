@@ -1,5 +1,7 @@
 "use client";
 
+import { UserEntry } from "@/components/user-growth/user-entry";
+import { OwnershipContext, eligibilityLabel } from "@/components/user-growth/ownership-context";
 import { dateTimeLocalValue } from "@/lib/market-replay/start-time";
 import { ReplayDateDialog } from "./replay-date-dialog";
 import { ReplaySessionSwitch } from "./replay-session-switch";
@@ -106,6 +108,7 @@ export function MarketReplayClient({ dataset: initialDataset, initialJournalFocu
           <div className="ml-auto flex min-w-0 flex-wrap items-center gap-2">{gateButton}<ReplaySessionSwitch beforeSwitch={prepareSessionSwitch} disabled={isLoading || Boolean(loadError) || !replay || Boolean(checkingOrder)} /></div>
         </div>
       </header> : null}
+      <div className="flex shrink-0 flex-wrap items-center justify-between gap-3">{replaySession && <OwnershipContext session={replaySession} />}<UserEntry /></div>
       {!webFullscreen ? gateNoticeBlock : null}
       {gateDialogOpen ? <TrainingGateConfigDialog gate={currentGate} busy={gateBusy} error={gateError} onClose={() => setGateDialogOpen(false)} onSave={saveGateConfig} /> : null}
       {checkingOrder ? <EntryCheckDialog order={checkingOrder.order} mode={currentGate.activeMode ?? "CHECKLIST"} displayIntervalSeconds={replay?.displayIntervalSeconds ?? dataset.sourceIntervalSeconds ?? 60}
@@ -601,7 +604,7 @@ export function MarketReplayClient({ dataset: initialDataset, initialJournalFocu
       <Dialog open={settingsDialog === "paper" && !checkingOrder} keepMounted={settingsDialog === "paper"} title={paperSnapshot ? copy.marketReplay.accountSettings : copy.propPractice.createAccountTitle} description={paperSnapshot ? copy.marketReplay.accountSettingsDescription : copy.propPractice.createAccountHint} className={paperSnapshot ? "max-w-4xl" : "max-w-2xl"} onClose={() => setSettingsDialog(null)}>
         <div className="space-y-4">
           {replaySession && (paperSnapshot?.propAccount ?? replaySession.propAccount) ? <PropAccountPanel sessionId={replaySession.id} runtime={(paperSnapshot?.propAccount ?? replaySession.propAccount)!} tradingSnapshot={paperSnapshot} busy={paperBusy || dateForwarding || isLoading}
-            onBeforeOpen={async () => { core.pausePlayback(); await core.advanceCompletionRef.current; await core.paperMutationChainRef.current; await engine.reloadPaper(); }} onChanged={engine.reloadPaper} /> : <PaperAccountStrip snapshot={paperSnapshot} compact />}
+            onBeforeOpen={async () => { core.pausePlayback(); await core.advanceCompletionRef.current; await core.paperMutationChainRef.current; await engine.flushPreferences(); await engine.reloadPaper(); }} onChanged={engine.reloadPaper} /> : <PaperAccountStrip snapshot={paperSnapshot} compact />}
           {!paperSnapshot && !journalReview ? <PaperAccountCreateForm busy={paperBusy || correctionPending || dateForwarding} error={paperError} onCreate={createPaperAccount} /> : null}
           {paperSnapshot && !journalReview ? <div className="flex justify-end border-t pt-4"><Button type="button" variant="ghost" className="text-red-600" onClick={() => requestConfirmation("paper-clear")}><Trash2 className="h-4 w-4" />{copy.paperTrading.resetAccount}</Button></div> : null}
         </div>
@@ -631,7 +634,7 @@ export function MarketReplayClient({ dataset: initialDataset, initialJournalFocu
       <ConfirmDialog
         open={Boolean(confirmAction)}
         title={confirmAction === "paper-clear" ? copy.replaySessions.archiveTitle : copy.replaySessions.restartTitle}
-        description={confirmAction === "paper-clear" ? copy.replaySessions.archiveDescription : copy.replaySessions.restartDescription}
+        description={confirmAction === "paper-clear" ? copy.replaySessions.archiveDescription : `${copy.replaySessions.restartDescription} ${replaySession ? copy.userGrowth.restartOwnership(replaySession.owner?.nickname ?? copy.userGrowth.unowned, eligibilityLabel(replaySession)) : ""}`}
         onCancel={() => {
           const suspension = confirmationSuspensionRef.current;
           confirmationSuspensionRef.current = null;
@@ -652,7 +655,7 @@ export function MarketReplayClient({ dataset: initialDataset, initialJournalFocu
         onChange={setStartDialogValue}
         onCancel={closeStartDialog}
         onConfirm={(value) => void applyNewReplayStart(value)}
-      />
+      >{replaySession && <p className="text-sm text-slate-700">{copy.userGrowth.restartOwnership(replaySession.owner?.nickname ?? copy.userGrowth.unowned, eligibilityLabel(replaySession))}</p>}</ReplayStartDialog>
     </>)}
     </ReplayCorrectionProvider>
   );

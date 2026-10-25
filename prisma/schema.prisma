@@ -678,6 +678,11 @@ model ReplaySession {
   riskPreferences    String @default("{}")
   trainingGate       String @default("{}")
   accountCategory    String @default("STANDARD")
+  userId             String?
+  user               UserProfile? @relation(fields: [userId], references: [id], onDelete: Restrict)
+  ownershipSource    String @default("UNASSIGNED")
+  growthEligible     Boolean @default(false)
+  assignedAt         DateTime?
   propAccount        PropPracticeAccount?
   progress           ReplayProgress?
   journal            ReplayJournalSession?
@@ -689,6 +694,71 @@ model ReplaySession {
   updatedAt          DateTime @updatedAt
 
   @@index([datasetId, status, createdAt])
+  @@index([userId, createdAt])
+}
+
+model UserProfile {
+  id String @id @default(cuid())
+  nickname String @unique
+  avatar String @default("DEFAULT")
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+  sessions ReplaySession[]
+  growth UserGrowth?
+  facts UserGrowthFact[]
+  breakthroughs UserRealmRecord[]
+}
+
+// Projection only. Rebuilt from settled deltas, never from surviving sessions.
+model UserGrowth {
+  userId String @id
+  user UserProfile @relation(fields: [userId], references: [id], onDelete: Restrict)
+  totalXp Int @default(0)
+  completedCycles Int @default(0)
+  completedReviews Int @default(0)
+  passedEvaluations Int @default(0)
+  successfulPayouts Int @default(0)
+  receivedUsdtMinor BigInt @default(0)
+  realm String @default("MORTAL")
+  layer Int @default(0)
+  version Int @default(1)
+  updatedAt DateTime @updatedAt
+}
+
+// Source identifiers are plain strings: deleting source data cannot delete evidence.
+model UserGrowthFact {
+  id String @id @default(cuid())
+  userId String
+  user UserProfile @relation(fields: [userId], references: [id], onDelete: Restrict)
+  type String
+  sourceKey String @unique
+  firstPayoutKey String? @unique
+  sessionId String
+  roundNumber Int?
+  sourceSummary String
+  occurredAt DateTime
+  settledAt DateTime @default(now())
+  xpDelta Int @default(0)
+  cyclesDelta Int @default(0)
+  reviewsDelta Int @default(0)
+  evaluationsDelta Int @default(0)
+  payoutsDelta Int @default(0)
+  receivedUsdtMinorDelta BigInt @default(0)
+  ruleVersion String
+  @@index([userId, settledAt, id])
+}
+
+model UserRealmRecord {
+  id String @id @default(cuid())
+  userId String
+  user UserProfile @relation(fields: [userId], references: [id], onDelete: Restrict)
+  fromRealm String
+  toRealm String
+  metricsSnapshot String
+  ruleVersion String
+  idempotencyKey String @unique
+  attainedAt DateTime @default(now())
+  @@unique([userId, toRealm])
 }
 
 model PropPracticeTemplate {

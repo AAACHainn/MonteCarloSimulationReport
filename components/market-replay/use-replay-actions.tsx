@@ -245,6 +245,8 @@ export function useReplayActions(core: ReturnType<typeof useReplayCore>, drawing
       saveTimerRef.current = null;
       pendingSaveRef.current = null;
       await saveChainRef.current.catch(() => undefined);
+      // A failed in-flight save may have restored its draft while we waited.
+      pendingSaveRef.current = null;
       if (await startReplayAt(value)) {
         setStartDialogOpen(false);
         setSaveStatus("idle");
@@ -297,6 +299,8 @@ export function useReplayActions(core: ReturnType<typeof useReplayCore>, drawing
       saveTimerRef.current = null;
       pendingSaveRef.current = null;
       await saveChainRef.current.catch(() => undefined);
+      // A failed in-flight save may have restored its draft while we waited.
+      pendingSaveRef.current = null;
       const response = await fetch(`/api/market-datasets/${dataset.id}/replay/reset`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },

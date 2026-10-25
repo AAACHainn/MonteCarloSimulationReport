@@ -1,3 +1,5 @@
+import { OwnershipContext } from "@/components/user-growth/ownership-context";
+import { UserEntry } from "@/components/user-growth/user-entry";
 import { notFound, redirect } from "next/navigation";
 import Link from "next/link";
 import { Breadcrumbs } from "@/components/breadcrumbs";
@@ -55,6 +57,7 @@ export default async function MarketReplayDetailPage({ params, searchParams }: {
         <div><h1 className="text-3xl font-semibold tracking-tight text-slate-950">{selected.name}</h1><div className="mt-2 flex gap-2"><Badge>{copy.replaySessions.archived}</Badge><Badge>{selected.mode === "TRAINING" ? copy.replaySessions.training : copy.replaySessions.liveReplay}</Badge></div><p className="mt-2 text-sm text-slate-600">{copy.replaySessions.readOnly} · {copy.replaySessions.source}</p></div>
         <Button asChild variant="outline"><Link href={`/market-replay/${id}`}>{copy.replaySessions.allSessions}</Link></Button>
       </section>
+      <div className="flex flex-wrap items-center justify-between gap-3"><OwnershipContext session={selected} /><UserEntry /></div>
       {selected.propAccount ? <PropAccountPanel sessionId={selected.id} runtime={selected.propAccount} tradingSnapshot={snapshot} /> : <PaperAccountStrip snapshot={snapshot} />}
       {snapshot?.propAccount?.state.result ? <PropRoundTradingRecords snapshot={snapshot} /> : null}
       <PaperJournalTable datasetId={id} scope="history" replaySessions={sessions} />
@@ -62,7 +65,7 @@ export default async function MarketReplayDetailPage({ params, searchParams }: {
   }
   const focusedEntry = journalEntry ? (await withReplayJournalDisplayNumbers([journalEntry], selected.activeProjectionId))[0] : null;
   return (
-    <div className="market-replay-page relative left-1/2 flex h-[calc(100dvh-4.3125rem)] w-[calc(100vw-2rem)] max-w-none -translate-x-1/2 flex-col gap-2 overflow-hidden sm:w-[calc(100vw-3rem)]">
+    <div className="market-replay-page relative left-1/2 flex h-[calc(100dvh-4.3125rem-var(--app-notice-height,0px))] w-[calc(100vw-2rem)] max-w-none -translate-x-1/2 flex-col gap-2 overflow-hidden sm:w-[calc(100vw-3rem)]">
       <div className="min-h-0 flex-1"><ReplaySessionProvider session={selected} includeCurrentChart><MarketReplayClient key={`${serialized.id}:${selected.id}:${selected.activeProjectionId}`} dataset={serialized} initialJournalFocus={focusedEntry ? { sequence: focusedEntry.openedSequence, no: focusedEntry.accountNo, globalNo: focusedEntry.no } : null} /></ReplaySessionProvider></div>
     </div>
   );

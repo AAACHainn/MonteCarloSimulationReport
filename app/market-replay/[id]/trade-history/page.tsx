@@ -1,3 +1,5 @@
+import { OwnershipContext } from "@/components/user-growth/ownership-context";
+import { UserEntry } from "@/components/user-growth/user-entry";
 import { notFound, redirect } from "next/navigation";
 import { Breadcrumbs } from "@/components/breadcrumbs";
 import { PaperJournalTable } from "@/components/market-replay/paper-journal-table";
@@ -42,6 +44,7 @@ export default async function ReplayTradeHistoryPage({ params, searchParams }: {
       <h1 className="text-3xl font-semibold tracking-tight text-slate-950">{copy.paperTrading.journalHistory}</h1>
       <p className="mt-2 text-sm text-slate-600">{copy.paperTrading.journalHistoryDescription}</p>
     </section>
+    <div className="flex flex-wrap items-center justify-between gap-3"><OwnershipContext session={session} /><UserEntry /></div>
     {isProp ? <PropRoundHistory datasetId={id} sessionId={session.id} rounds={rounds} selected={number!} /> : null}
     {snapshot?.propAccount ? <PropAccountPanel sessionId={session.id} runtime={snapshot.propAccount} tradingSnapshot={snapshot} readOnly /> : null}
     {snapshot?.propAccount?.state.result ? <PropRoundTradingRecords snapshot={snapshot} /> : null}

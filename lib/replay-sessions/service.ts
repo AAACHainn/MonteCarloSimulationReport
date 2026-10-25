@@ -13,6 +13,7 @@ import { isValidDisplayInterval } from "@/lib/market-replay/types";
 import { ReplaySessionError, getReplayScope, assertReplayWritable, assertSessionMetadataWritable, markReplayMutation, runWithReplayScope } from "./scope";
 import { projectionRecordId } from "./identity";
 import { saveReplayCheckpoint } from "./checkpoint";
+import { assertUserExists, inheritSessionOwnership, newSessionOwnership, type SessionOwnershipData } from "@/lib/user-growth/ownership";
 
 export const createReplaySessionSchema = replayStartSchema.extend({
   name: z.string().trim().min(1).max(100),
@@ -20,6 +21,7 @@ export const createReplaySessionSchema = replayStartSchema.extend({
   accountCategory: z.enum(["STANDARD", "PROP_PRACTICE"]).optional(),
   propTemplateVersionId: z.string().min(1).optional(),
   propAccountConfig: paperSessionSchema.omit({ initialCapital: true }).optional(),
+  userId: z.string().min(1).max(128).nullable().optional(),
 });
 export type CreateReplaySessionInput = z.infer<typeof createReplaySessionSchema>;
 
@@ -29,7 +31,7 @@ export async function createReplaySession(datasetId: string, input: CreateReplay
   return sqliteWriteTransaction(prisma, async (tx) => createSessionInTransaction(tx, datasetId, input));
 }
 
-export async function createSessionInTransaction(tx: Prisma.TransactionClient, datasetId: string, input: CreateReplaySessionInput, restarting = false) {
+export async function createSessionInTransaction(tx: Prisma.TransactionClient, datasetId: string, input: CreateReplaySessionInput, restarting = false, inheritedOwnership?: SessionOwnershipData) {
   const dataset = await tx.marketDataset.findUnique({ where: { id: datasetId } });
   if (!dataset || dataset.status !== "READY") throw new ReplaySessionError("DATASET_NOT_FOUND", 404, copy.marketReplay.datasetNotFound);
   const sourceSeconds = datasetSourceInterval(dataset);
@@ -44,7 +46,9 @@ export async function createSessionInTransaction(tx: Prisma.TransactionClient, d
   });
   if (!first) throw new ReplaySessionError("INVALID_START", 400, copy.marketReplay.invalidStart);
   const isProp = input.accountCategory === "PROP_PRACTICE";
-  const session = await tx.replaySession.create({ data: { datasetId, name: input.name, mode: input.mode, accountCategory: isProp ? "PROP_PRACTICE" : "STANDARD" } });
+  const ownership = inheritedOwnership ?? newSessionOwnership(input.userId, input.mode);
+  await assertUserExists(tx, ownership.userId);
+  const session = await tx.replaySession.create({ data: { datasetId, name: input.name, mode: input.mode, accountCategory: isProp ? "PROP_PRACTICE" : "STANDARD", ...ownership } });
   const projection = await tx.replayProjection.create({ data: {
     replaySessionId: session.id, status: "CURRENT", historyVersion: dataset.historyVersion,
     currentSequence: first.sequence - 1,
@@ -166,7 +170,7 @@ export async function restartReplaySession(input?: CreateReplaySessionInput) {
     const next = await createSessionInTransaction(tx, scope.datasetId, { ...nextInput,
       ...(previousProp && previousAccount ? { mode: "TRAINING" as const, accountCategory: "PROP_PRACTICE" as const, propTemplateVersionId: previousProp.templateVersionId,
         propAccountConfig: { currency: previousAccount.currency, commissionBps: previousAccount.commissionBps, slippageBps: previousAccount.slippageBps } } : {}),
-    }, true);
+    }, true, inheritSessionOwnership(existing, existing.mode === "LIVE_REPLAY" || nextInput.mode === "LIVE_REPLAY" ? "LIVE_REPLAY" : "TRAINING"));
     const account = await tx.paperTradingSession.findUnique({ where: { projectionId: scope.projectionId } });
     if (account && next.accountCategory !== "PROP_PRACTICE") {
       const config = { initialCapital: account.initialCapital, currency: account.currency,

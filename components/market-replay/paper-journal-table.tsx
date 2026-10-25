@@ -1,4 +1,5 @@
 "use client";
+import { useCurrentUser } from "@/components/user-growth/user-context";
 import { usePaperJournalTableController } from "./use-paper-journal-table-controller";
 
 
@@ -78,8 +79,9 @@ export function PaperJournalTable({
   datasetId: string;
   scope: "current" | "history";
   onFocus?: (entry: ReplayJournalEntryData) => void;
-  replaySessions?: Pick<ReplaySessionSummary, "id" | "name" | "mode" | "status" | "createdAt">[];
+  replaySessions?: Pick<ReplaySessionSummary, "id" | "name" | "mode" | "status" | "createdAt" | "userId">[];
 }) {
+  const currentUser = useCurrentUser();
   const {
     replaySession, ai, router, switchingSession, startSessionNavigation, correction,
     canDeleteCycle, scopedUrl, items, sessions, page, setPage,
@@ -113,7 +115,7 @@ export function PaperJournalTable({
         <SelectValue placeholder={copy.paperTrading.journalSessionSelectPlaceholder} />
       </SelectTrigger>
       <SelectContent className="max-w-[min(40rem,calc(100vw-2rem))]">
-        {replaySessions.map((session) => <SelectItem key={session.id} value={session.id}>
+        {replaySessions.filter(session => session.id === replaySession.id || !currentUser.selectedId || session.userId === currentUser.selectedId).map((session) => <SelectItem key={session.id} value={session.id}>
           {session.id === replaySession.id ? selectedSession?.name ?? session.name : session.name} · {session.mode === "TRAINING" ? copy.replaySessions.training : copy.replaySessions.liveReplay} · {session.status === "ACTIVE" ? copy.replaySessions.active : copy.replaySessions.archived} · {new Date(session.createdAt).toLocaleString("zh-CN")}
         </SelectItem>)}
       </SelectContent>
