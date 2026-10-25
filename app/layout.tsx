@@ -1,8 +1,6 @@
 import type { Metadata } from "next";
-import { PdfExportProvider } from "@/components/market-replay/pdf-export-provider";
 import { AppHeader } from "@/components/app-header";
-import { AiAssistantProvider } from "@/components/ai/assistant-provider";
-import { AiPageScopeProvider } from "@/components/ai/page-context";
+import { AppProviders } from "@/components/app-providers";
 import { copy, defaultLocale } from "@/lib/i18n";
 import "./globals.css";
 
@@ -15,10 +13,10 @@ export default function RootLayout({ children }: Readonly<{ children: React.Reac
   return (
     <html lang={defaultLocale} suppressHydrationWarning>
       <body>
-        <AiPageScopeProvider><AiAssistantProvider><PdfExportProvider><div className="min-h-screen">
+        <AppProviders><div className="min-h-screen">
           <AppHeader />
           <main className="mx-auto max-w-7xl px-6 py-8">{children}</main>
-        </div></PdfExportProvider></AiAssistantProvider></AiPageScopeProvider>
+        </div></AppProviders>
       </body>
     </html>
   );
