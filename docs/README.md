@@ -4,6 +4,7 @@
 
 | 类别 | 文档 |
 | --- | --- |
+| 用户档案与成长 | [用户档案与修仙成长设计（未实施，含建议参数）](account/user-growth-design.md)、[分阶段开发计划](account/user-growth-implementation-plan.md) |
 | AI 机器人 | [使用与配置](ai/ai-assistant.md)、[图表图片](ai/ai-chart-images.md)、[自动交互历史](ai/ai-assistant-interaction.md)、[Function Calling 设计摘要](ai/ai-function-calling-design.md)、[实施记录](ai/ai-function-calling-implementation.md)、[复盘规划历史](ai/ai-review-version-plan.md) |
 | 图表绘图 | [矩形绘图](charting/rectangle-drawing.md)、[会话绘图持久化](charting/archived-drawings.md)、[趋势线性能结果](charting/trend-line-performance-results.md) |
 | 行情数据 | [行情同步](market-data/market-data-sync.md)、[时间聚合与查询](market-data/time-aggregation.md) |
