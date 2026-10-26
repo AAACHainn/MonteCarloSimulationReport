@@ -35,6 +35,7 @@ export function useReplayChartEma({
   bars,
   warmupBars,
   timelineBars = bars,
+  onBeforeTimelineReset,
   enabled,
   indicators,
   chartKey,
@@ -43,6 +44,7 @@ export function useReplayChartEma({
   bars: AggregatedMarketBarData[];
   warmupBars: AggregatedMarketBarData[];
   timelineBars?: AggregatedMarketBarData[];
+  onBeforeTimelineReset?: () => void;
   enabled: boolean;
   indicators: EmaIndicatorConfig[];
   chartKey: string | number;
@@ -57,17 +59,20 @@ export function useReplayChartEma({
   useLayoutEffect(() => {
     if (ownerChartRef.current !== chartRef.current) return;
     const timelineStart = timelineBars[0]?.timestamp ?? null;
+    let resetting = false;
     for (const [id, series] of seriesRef.current) {
       const previous = stateRef.current.get(id);
       const replacingData = previous && previous.bars !== bars && !canUpdateReplayTail(previous.bars, bars, "", "");
       const movingPlaceholder = !previous && lastTimelineStartRef.current !== timelineStart;
       if (replacingData || movingPlaceholder) {
+        if (!resetting) onBeforeTimelineReset?.();
+        resetting = true;
         series.setData(emptyEmaData(timelineBars));
         stateRef.current.delete(id);
       }
     }
     lastTimelineStartRef.current = timelineStart;
-  }, [bars, chartRef, timelineBars]);
+  }, [bars, chartRef, onBeforeTimelineReset, timelineBars]);
 
   useEffect(() => {
     const chart = chartRef.current;

@@ -68,6 +68,19 @@ describe("EMA visibility without chart movement", () => {
     expect(line.update).not.toHaveBeenCalled();
   });
 
+  it("captures the viewport once before resetting any EMA timeline", () => {
+    const c = chart();
+    const props = { chartRef: c.ref, bars: [bar(10), bar(11)], warmupBars: [bar(8), bar(9)], enabled: true,
+      indicators: [indicator, { ...indicator, id: "ema-2" }], chartKey: 1, onBeforeTimelineReset: vi.fn() };
+    RenderHook(props);
+    props.onBeforeTimelineReset.mockImplementation(() => {
+      expect(c.lines[0].setData).toHaveBeenCalledOnce();
+      expect(c.lines[1].setData).toHaveBeenCalledOnce();
+    });
+    RenderHook({ ...props, bars: [bar(2), bar(3)], warmupBars: [bar(0), bar(1)] });
+    expect(props.onBeforeTimelineReset).toHaveBeenCalledOnce();
+  });
+
   it("updates the forming tail and new bars with the original EMA formula", () => {
     const c = chart();
     const props = { chartRef: c.ref, bars: [bar(2), bar(3)], warmupBars: [bar(0), bar(1)], enabled: true, indicators: [indicator], chartKey: 1 };

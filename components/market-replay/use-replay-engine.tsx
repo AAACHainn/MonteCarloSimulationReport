@@ -591,15 +591,21 @@ export function useReplayEngine(core: ReturnType<typeof useReplayCore>, drawingW
   }
 
   const returnToLiveWindow = useCallback(async () => {
-    const current = latestReplayRef.current;
-    if (!current || viewChangingRef.current) return false;
+    const expectedGeneration = latestReplayRef.current?.generation;
+    if (expectedGeneration === undefined || viewChangingRef.current) return false;
     viewChangingRef.current = true;
     setReviewReturning(true);
     try {
+      // Fence new advances, settle the in-flight one, then load its confirmed tail.
+      await advanceCompletionRef.current;
+      await paperMutationChainRef.current;
+      if (!await flushVisible()) return false;
+      const current = latestReplayRef.current;
+      if (!current || current.generation !== expectedGeneration) return false;
       if (!await loadWindow(current.currentSequence, current.displayIntervalSeconds, current.displaySession, indicatorWarmupCountRef.current)) return false;
-      chartViewportRef.current?.followLatest();
       const latest = latestReplayRef.current;
       if (!latest || latest.generation !== current.generation || latest.currentSequence !== current.currentSequence) return false;
+      chartViewportRef.current?.followLatest();
       setJournalReview(null);
       setChartFocusSequence(null);
       return true;
@@ -610,7 +616,7 @@ export function useReplayEngine(core: ReturnType<typeof useReplayCore>, drawingW
       viewChangingRef.current = false;
       setReviewReturning(false);
     }
-  }, [latestReplayRef, loadWindow, indicatorWarmupCountRef, setChartFocusSequence, setJournalReview, setPaperError, setReviewReturning, viewChangingRef, chartViewportRef]);
+  }, [latestReplayRef, loadWindow, indicatorWarmupCountRef, setChartFocusSequence, setJournalReview, setPaperError, setReviewReturning, viewChangingRef, chartViewportRef, advanceCompletionRef, paperMutationChainRef, flushVisible]);
 
   const togglePlayback = useCallback(async () => {
     if (confirmedPaperSnapshotRef.current?.propAccount?.state.result) return;
@@ -619,12 +625,12 @@ export function useReplayEngine(core: ReturnType<typeof useReplayCore>, drawingW
       return;
     }
     if (checkingOrder || preparingEntryCheckRef.current || correctionPending || dateForwarding || dateDialogOpen || dateDialogOpening || viewChangingRef.current) return;
-    if ((journalReview || chartWindowDetachedRef.current) && !await returnToLiveWindow()) return;
     const current = latestReplayRef.current;
     if (!current || current.status === "finished") return;
-    manualStepsRef.current.cancel();
-    playbackEpochRef.current += 1;
     if (current.status === "playing") {
+      // Pausing must succeed even when returning from a historical window cannot.
+      manualStepsRef.current.cancel();
+      playbackEpochRef.current += 1;
       pausePlayback();
       const next = latestReplayRef.current ?? current;
       void advanceCompletionRef.current.then(async () => {
@@ -634,7 +640,10 @@ export function useReplayEngine(core: ReturnType<typeof useReplayCore>, drawingW
       return;
     }
 
-    if (recoveryRequiredRef.current) return;
+    if ((journalReview || chartWindowDetachedRef.current) && !await returnToLiveWindow()) return;
+    if (!latestReplayRef.current || latestReplayRef.current.status === "finished" || recoveryRequiredRef.current) return;
+    manualStepsRef.current.cancel();
+    playbackEpochRef.current += 1;
     playPlayback(); playbackClockRef.current = performance.now();
   }, [checkingOrder, flushVisible, journalReview, latestReplayRef, pausePlayback, playPlayback, queueSave,
     returnToLiveWindow, wantsPlayback, correctionPending, dateDialogOpen, dateDialogOpening, dateForwarding, advanceCompletionRef, chartWindowDetachedRef, manualStepsRef, playbackClockRef, playbackEpochRef, preparingEntryCheckRef, recoveryRequiredRef, requestRetryingRef, viewChangingRef, confirmedPaperSnapshotRef]);

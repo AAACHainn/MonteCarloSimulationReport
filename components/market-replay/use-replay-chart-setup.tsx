@@ -2,10 +2,10 @@
 
 import { syncPriceLine } from "@/lib/market-replay/price-lines";
 import { canUpdateReplayTail, formatChartTick, chartCandleData as candle, chartVolumeData as volume } from "@/lib/market-replay/chart-data";
-import { useCallback, useEffect, useMemo } from "react";
-import { CandlestickSeries, ColorType, createChart, CrosshairMode, HistogramSeries, type Time, TickMarkType } from "lightweight-charts";
+import { useCallback, useEffect, useMemo, useRef } from "react";
+import { CandlestickSeries, ColorType, createChart, CrosshairMode, HistogramSeries, type IChartApi, type Time, TickMarkType } from "lightweight-charts";
 import { copy } from "@/lib/i18n";
-import { defaultReplayLogicalRange, captureReplayViewport, isReplayRangeFollowing, rangeForReplayViewport, rangeAfterNewReplayBar, rangeAfterWindowReplacement, rangeForReplayFocus } from "@/lib/market-replay/chart-range";
+import { defaultReplayLogicalRange, captureReplayViewport, isReplayRangeFollowing, rangeForReplayViewport, rangeAfterNewReplayBar, rangeAfterWindowReplacement, rangeForReplayFocus, type ReplayLogicalRange } from "@/lib/market-replay/chart-range";
 import { candlestickSeriesStyleOptions } from "@/lib/market-replay/candlestick-style";
 import { RectanglePrimitive } from "@/lib/market-replay/rectangle-primitive";
 import { TrendLinePrimitive } from "@/lib/market-replay/trend-line-primitive";
@@ -40,6 +40,17 @@ export function useReplayChartSetup(core: ReturnType<typeof useReplayChartCore>)
     barCountConfig, paperSnapshot, tradeAnnotations, focusSequence, tradeAnnotationsVisible, candleCountdownEnabled,
     playbackActive, currentSourceTimestamp, sourceIntervalSeconds, readOnly,
   } = core;
+  const viewportBeforeEmaResetRef = useRef<{ chart: IChartApi; range: ReplayLogicalRange | null } | null>(null);
+  const captureViewportBeforeEmaReset = useCallback(() => {
+    const chart = chartRef.current;
+    if (!chart) return;
+    // EMA placeholders can insert/remove a time point before the candle data effect.
+    // Preserve the range in the old candle coordinates, once for all EMA lines.
+    if (viewportBeforeEmaResetRef.current?.chart !== chart) {
+      viewportBeforeEmaResetRef.current = { chart, range: chart.timeScale().getVisibleLogicalRange() };
+    }
+    viewportUpdatingRef.current = true;
+  }, [chartRef, viewportUpdatingRef]);
   useEffect(() => {
     const container = containerRef.current;
     if (!container) return;
@@ -219,6 +230,9 @@ export function useReplayChartSetup(core: ReturnType<typeof useReplayChartCore>)
   useEffect(() => {
     const chart = chartRef.current; const series = candleRef.current;
     if (!chart || !series) return;
+    const beforeReset = viewportBeforeEmaResetRef.current;
+    viewportBeforeEmaResetRef.current = null;
+    const previousRange = beforeReset?.chart === chart ? beforeReset.range : chart.timeScale().getVisibleLogicalRange();
     const nextDisplayIntervalSeconds = requestedDisplayIntervalSecondsRef.current;
     const nextDisplaySession = displaySessionRef.current;
     const previous = lastDataRef.current;
@@ -226,14 +240,14 @@ export function useReplayChartSetup(core: ReturnType<typeof useReplayChartCore>)
     const timelineChanged = lastDataIntervalRef.current !== nextDisplayIntervalSeconds
       || lastDataSessionRef.current !== nextDisplaySession;
     const transitionViewport = timelineChanged ? viewportSnapshot ?? captureReplayViewport({
-      visibleRange: chart.timeScale().getVisibleLogicalRange(), bars: previous,
+      visibleRange: previousRange, bars: previous,
       sourceSequence: currentSourceSequenceRef.current ?? previous.at(-1)?.lastSequence ?? -1,
       liveWindow: liveWindowRef.current, mode: readOnly ? "history" : viewportModeRef.current,
       chartWidth: chart.timeScale().width(), barSpacing: chart.timeScale().options().barSpacing,
     }) : null;
     viewportUpdatingRef.current = true;
     const following = viewportModeRef.current === "following" || (viewportModeRef.current === null
-      && isReplayRangeFollowing(chart.timeScale().getVisibleLogicalRange() ?? { from: 0, to: 0 }, previous.length - 1));
+      && isReplayRangeFollowing(previousRange ?? { from: 0, to: 0 }, previous.length - 1));
     barsRef.current = visibleBars;
     timelineBarsRef.current = next;
     projectionBarsRef.current = projectionBars;
@@ -245,7 +259,7 @@ export function useReplayChartSetup(core: ReturnType<typeof useReplayChartCore>)
     const volumeWasAutoScaled = volumeSeries?.priceScale().options().autoScale ?? true;
     const samePrefix = canUpdateReplayTail(previous, next, lastDataRevisionRef.current, dataRevision);
     if (samePrefix && !timelineChanged && !hiddenAfter && !lastHiddenAfterRef.current) {
-      const range = chart.timeScale().getVisibleLogicalRange();
+      const range = previousRange;
       const previousLastIndex = previous.length - 1;
       for (const bar of next.slice(Math.max(0, previous.length - 1))) {
         series.update(candle(bar)); if (bar.volume !== null) volumeSeries?.update(volume(bar));
@@ -254,7 +268,7 @@ export function useReplayChartSetup(core: ReturnType<typeof useReplayChartCore>)
         chart.timeScale().setVisibleLogicalRange(rangeAfterNewReplayBar(range, previousLastIndex, next.length - previous.length, following && liveWindowRef.current));
       }
     } else {
-      const range = chart.timeScale().getVisibleLogicalRange();
+      const range = previousRange;
       const previousLastIndex = previous.length - 1;
       const previousLastInNext = next.findIndex((bar) => bar.timestamp === previous.at(-1)?.timestamp);
       const mappedTimelineRange = transitionViewport
@@ -358,6 +372,7 @@ export function useReplayChartSetup(core: ReturnType<typeof useReplayChartCore>)
     bars: visibleBars,
     warmupBars: visibleWarmupBars,
     timelineBars: bars,
+    onBeforeTimelineReset: captureViewportBeforeEmaReset,
     enabled: emaEnabled,
     indicators: emaIndicators,
     chartKey: priceTickSize,

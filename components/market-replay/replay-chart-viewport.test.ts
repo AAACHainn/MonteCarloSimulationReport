@@ -3,11 +3,17 @@ import { useReplayChartSetup } from "./use-replay-chart-setup";
 import type { AggregatedMarketBarData } from "@/lib/market-replay/types";
 import type { ReplayViewportSnapshot } from "@/lib/market-replay/chart-range";
 
-const harness = vi.hoisted(() => ({ revision: "viewport-window-fixture" }));
+const harness = vi.hoisted(() => ({ revision: "viewport-window-fixture", effects: [] as Array<() => void>,
+  layouts: [] as Array<() => void>, resetTimeline: null as (() => void) | null }));
+vi.mock("./use-replay-chart-ema", () => ({
+  useReplayChartEma: ({ onBeforeTimelineReset }: { onBeforeTimelineReset?: () => void }) => {
+    if (harness.resetTimeline) harness.layouts.push(() => { onBeforeTimelineReset?.(); harness.resetTimeline?.(); });
+  },
+}));
 vi.mock("react", () => ({ useCallback: (fn: unknown) => fn, useMemo: (fn: () => unknown) => fn(),
   useRef: (current: unknown) => ({ current }), useLayoutEffect: () => {},
   // Execute the data effect only; DOM creation and unrelated overlays have separate tests.
-  useEffect: (work: () => void, deps: unknown[]) => { if (deps.includes(harness.revision)) work(); },
+  useEffect: (work: () => void, deps: unknown[]) => { if (deps.includes(harness.revision)) harness.effects.push(work); },
 }));
 const bars = (count: number, minutes = 1) => Array.from({ length: count }, (_, index) => ({
   timestamp: new Date(index * minutes * 60_000).toISOString(), firstSequence: index * minutes,
@@ -37,8 +43,15 @@ function setup(previous = bars(300)) {
   const render = () => RenderHook(core as unknown as Parameters<typeof useReplayChartSetup>[0]);
   return { core, render, line, scale, time };
 }
-function RenderHook(core: Parameters<typeof useReplayChartSetup>[0]) { useReplayChartSetup(core); }
-beforeEach(() => vi.stubGlobal("requestAnimationFrame", vi.fn(() => 1)));
+function RenderHook(core: Parameters<typeof useReplayChartSetup>[0]) {
+  useReplayChartSetup(core);
+  harness.layouts.splice(0).forEach(work => work());
+  harness.effects.splice(0).forEach(work => work());
+}
+beforeEach(() => {
+  harness.effects = []; harness.layouts = []; harness.resetTimeline = null;
+  vi.stubGlobal("requestAnimationFrame", vi.fn(() => 1));
+});
 afterEach(() => vi.unstubAllGlobals());
 
 describe("applying chart viewport transitions", () => {
@@ -67,6 +80,24 @@ describe("applying chart viewport transitions", () => {
     expect(s.line.setData).toHaveBeenCalledOnce();
     expect(s.line.update).not.toHaveBeenCalled();
     expect(s.scale.applyOptions).toHaveBeenLastCalledWith({ autoScale: true });
+  });
+
+  it("maps prepended history from the viewport before EMA adds a new time point", () => {
+    const s = setup(bars(800).slice(500));
+    s.core.viewportModeRef.current = "history";
+    s.time.setVisibleLogicalRange({ from: 20, to: 219 });
+    const next = bars(800);
+    s.core.bars = next; s.core.visibleBars = next; s.core.projectionBars = next;
+    // Real Lightweight Charts shifts old candle indices when the EMA placeholder
+    // introduces an earlier timestamp, before the candle data effect runs.
+    harness.resetTimeline = () => {
+      const range = s.time.getVisibleLogicalRange();
+      s.time.setVisibleLogicalRange({ from: range.from + 1, to: range.to + 1 });
+    };
+    s.render();
+    expect(s.time.getVisibleLogicalRange()).toEqual({ from: 520, to: 719 });
+    expect(s.core.viewportUpdatingRef.current).toBe(true);
+    expect(s.scale.options().autoScale).toBe(false);
   });
 
   it("keeps a manually inspected viewport and manual vertical scaling through ordinary advancement", () => {
