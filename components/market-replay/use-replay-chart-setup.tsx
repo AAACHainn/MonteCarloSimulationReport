@@ -357,6 +357,7 @@ export function useReplayChartSetup(core: ReturnType<typeof useReplayChartCore>)
     chartRef,
     bars: visibleBars,
     warmupBars: visibleWarmupBars,
+    timelineBars: bars,
     enabled: emaEnabled,
     indicators: emaIndicators,
     chartKey: priceTickSize,

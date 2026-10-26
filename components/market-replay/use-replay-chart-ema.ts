@@ -22,10 +22,19 @@ function chartTime(timestamp: string) {
   return Math.floor(new Date(timestamp).getTime() / 1_000) as UTCTimestamp;
 }
 
+// Keep the series registered in the chart's time-point mapping even without values.
+// In Lightweight Charts 5.2, clearing the last indicator before replacing candles
+// with identical timestamps can leave stale mappings in its single-series fast path.
+function emptyEmaData(timelineBars: AggregatedMarketBarData[]) {
+  const first = timelineBars[0];
+  return first ? [{ time: chartTime(first.timestamp) }] : [];
+}
+
 export function useReplayChartEma({
   chartRef,
   bars,
   warmupBars,
+  timelineBars = bars,
   enabled,
   indicators,
   chartKey,
@@ -33,6 +42,7 @@ export function useReplayChartEma({
   chartRef: RefObject<IChartApi | null>;
   bars: AggregatedMarketBarData[];
   warmupBars: AggregatedMarketBarData[];
+  timelineBars?: AggregatedMarketBarData[];
   enabled: boolean;
   indicators: EmaIndicatorConfig[];
   chartKey: string | number;
@@ -40,18 +50,24 @@ export function useReplayChartEma({
   const seriesRef = useRef(new Map<string, ISeriesApi<"Line">>());
   const stateRef = useRef(new Map<string, EmaRenderState>());
   const ownerChartRef = useRef<IChartApi | null>(null);
+  const lastTimelineStartRef = useRef<string | null>(null);
 
   // Remove old timeline points before the candle effect maps the next window's range.
   // In particular, retained hidden lines must not pin a discarded history/timeframe.
   useLayoutEffect(() => {
     if (ownerChartRef.current !== chartRef.current) return;
-    for (const [id, previous] of stateRef.current) {
-      if (previous.bars !== bars && !canUpdateReplayTail(previous.bars, bars, "", "")) {
-        seriesRef.current.get(id)?.setData([]);
+    const timelineStart = timelineBars[0]?.timestamp ?? null;
+    for (const [id, series] of seriesRef.current) {
+      const previous = stateRef.current.get(id);
+      const replacingData = previous && previous.bars !== bars && !canUpdateReplayTail(previous.bars, bars, "", "");
+      const movingPlaceholder = !previous && lastTimelineStartRef.current !== timelineStart;
+      if (replacingData || movingPlaceholder) {
+        series.setData(emptyEmaData(timelineBars));
         stateRef.current.delete(id);
       }
     }
-  }, [bars, chartRef]);
+    lastTimelineStartRef.current = timelineStart;
+  }, [bars, chartRef, timelineBars]);
 
   useEffect(() => {
     const chart = chartRef.current;
@@ -69,6 +85,7 @@ export function useReplayChartEma({
         stateRef.current.delete(id);
       }
     }
+    const timelineStart = timelineBars[0]?.timestamp ?? null;
     const all = [...warmupBars, ...bars];
     for (const indicator of indicators) {
       const visible = enabled && indicator.visible;
@@ -76,9 +93,10 @@ export function useReplayChartEma({
       const previous = stateRef.current.get(indicator.id);
       if (!visible) {
         series?.applyOptions({ visible: false });
-        // A hidden series must not keep timestamps from an old window/timeframe.
-        if (series && previous && (previous.bars !== bars || previous.warmupBars !== warmupBars)) {
-          series.setData([]);
+        // Move even an already-cleared placeholder when the window/timeframe changes.
+        const staleData = previous && (previous.bars !== bars || previous.warmupBars !== warmupBars);
+        if (series && (staleData || (!previous && lastTimelineStartRef.current !== timelineStart))) {
+          series.setData(emptyEmaData(timelineBars));
           stateRef.current.delete(indicator.id);
         }
         continue;
@@ -113,8 +131,9 @@ export function useReplayChartEma({
         const result = calculateEmaSeries(all, indicator.length, all.length - 1, 0);
         const values: Array<number | null> = Array(all.length).fill(null);
         for (const point of result.points) values[point.sequence] = point.value;
-        series.setData(result.points.filter((point) => point.sequence >= warmupBars.length)
-          .map((point) => ({ time: chartTime(all[point.sequence].timestamp), value: point.value })));
+        const data = result.points.filter((point) => point.sequence >= warmupBars.length)
+          .map((point) => ({ time: chartTime(all[point.sequence].timestamp), value: point.value }));
+        series.setData(data.length ? data : emptyEmaData(timelineBars));
         stateRef.current.set(indicator.id, {
           bars, warmupBars,
           length: indicator.length,
@@ -151,5 +170,6 @@ export function useReplayChartEma({
       });
       series.applyOptions(renderOptions);
     }
-  }, [bars, chartKey, chartRef, enabled, indicators, warmupBars]);
+    lastTimelineStartRef.current = timelineStart;
+  }, [bars, chartKey, chartRef, enabled, indicators, timelineBars, warmupBars]);
 }
