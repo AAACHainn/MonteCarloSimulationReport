@@ -2,6 +2,7 @@
 import type { CreatePaperAccountInput } from "@/lib/prop-practice/account-input";
 import { shouldStopPropReplay } from "@/lib/prop-practice/rules";
 
+import { changeReplayDisplayInterval } from "./change-replay-display";
 import { createUuid } from "@/lib/uuid";
 import { type CorrectionTarget } from "./replay-correction-dialog";
 import { isClosingOrder, type TrainingGateMode } from "@/lib/paper-trading/training-gate";
@@ -12,7 +13,7 @@ import { Loader2, X } from "lucide-react";
 import { DEFAULT_REPLAY_MAX_VISIBLE_BARS } from "@/lib/market-replay/chart-range";
 import { Button } from "@/components/ui/button";
 import { copy } from "@/lib/i18n";
-import { setDisplayInterval, setDisplaySession, setPlaybackRate } from "@/lib/market-replay/engine";
+import { setDisplaySession, setPlaybackRate } from "@/lib/market-replay/engine";
 import { isValidBarCountInterval, isValidBarCountRecentTradingDays } from "@/lib/market-replay/bar-count";
 import { DEFAULT_EMA_LINE_STYLE, DEFAULT_EMA_LINE_WIDTH } from "@/lib/market-replay/ema-style";
 import { ABR_LENGTH_MAX, ABR_LENGTH_MIN, BAR_COUNT_INTERVAL_MAX, BAR_COUNT_INTERVAL_MIN, BAR_COUNT_RECENT_TRADING_DAYS_MAX, BAR_COUNT_RECENT_TRADING_DAYS_MIN, EMA_LENGTH_MAX, EMA_LENGTH_MIN, MAX_EMA_INDICATORS, MAX_REPLAY_BULK_SOURCE_BARS, REPLAY_HISTORY_BAR_LIMIT, isValidDisplayInterval, type DisplaySession, type ReplayState } from "@/lib/market-replay/types";
@@ -65,34 +66,7 @@ export function useReplayActions(core: ReturnType<typeof useReplayCore>, drawing
     if (!latestReplayRef.current || !dataset.sourceIntervalSeconds || !isValidDisplayInterval(dataset.sourceIntervalSeconds, value)) {
       setEmaError(copy.marketReplay.invalidDisplayInterval); return false;
     }
-    if (viewChangingRef.current) return false;
-    viewChangingRef.current = true;
-    const suspension = suspendPlayback();
-    manualStepsRef.current.cancel();
-    let previous: ReplayState | null = null;
-    try {
-      await advanceCompletionRef.current;
-      if (!(await flushVisible())) return false;
-      const current = latestReplayRef.current;
-      if (!current) return false;
-      previous = current;
-      playbackAccumulatorRef.current = 0;
-      playbackClockRef.current = performance.now();
-      const next = setDisplayInterval(current, value);
-      setReplay(next); setEmaError(null); queueSave(next, true);
-      await loadWindow(next.currentSequence, value, next.displaySession, indicatorWarmupCountRef.current);
-      return true;
-    } catch (error) {
-      if (previous) {
-        setReplay(previous);
-        queueSave(previous, true);
-      }
-      setPaperError(error instanceof Error ? error.message : copy.marketReplay.loadError);
-      return false;
-    } finally {
-      viewChangingRef.current = false;
-      restorePlayback(suspension);
-    }
+    return changeReplayDisplayInterval(core, { loadWindow, flushVisible, queueSave }, value);
   }
 
   async function changeChartSession(value: DisplaySession) {

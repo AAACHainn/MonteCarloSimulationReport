@@ -9,6 +9,8 @@ import { type CorrectionTarget } from "./replay-correction-dialog";
 import { defaultTrainingGate, type TrainingGateState } from "@/lib/paper-trading/training-gate";
 import type { PaperOrderInput, OrderSubmitResult } from "@/lib/paper-trading/types";
 import { type EntryCheckDraft } from "@/lib/paper-trading/entry-check-draft";
+import type { ReplayViewportApi } from "@/lib/market-replay/chart-range";
+import type { ReplayChartDisplay } from "./replay-client-shared";
 import { useCallback, useEffect, useMemo, useRef, useState, useId } from "react";
 import type { CandlestickStyle } from "@/lib/market-replay/candlestick-style";
 import { useReplayShortcuts } from "@/components/market-replay/use-replay-shortcuts";
@@ -62,6 +64,8 @@ export function useReplayCore({ dataset: initialDataset, initialJournalFocus = n
   const [webFullscreen, setWebFullscreen] = useState(false);
   const [bars, setBars] = useState<AggregatedMarketBarData[]>([]);
   const [chartDataRevision, setChartDataRevision] = useState(replayDisplayMetadataKey(initialDataset));
+  const [chartDisplay, setChartDisplay] = useState<ReplayChartDisplay | null>(null);
+  const chartViewportRef = useRef<ReplayViewportApi | null>(null);
   const [warmupBars, setWarmupBars] = useState<AggregatedMarketBarData[]>([]);
   const [currentSourceBar, setCurrentSourceBar] = useState<MarketBarData | null>(null);
   const [isLoading, setIsLoading] = useState(true);
@@ -237,9 +241,13 @@ export function useReplayCore({ dataset: initialDataset, initialJournalFocus = n
   const displayMarketSession = useMemo(() => (
     resolveDisplaySession(dataset, replay?.displaySession ?? "ETH") ?? marketSession
   ), [dataset, marketSession, replay?.displaySession]);
+  const appliedChartSession = chartDisplay?.displaySession ?? replay?.displaySession ?? "ETH";
+  const chartMarketSession = useMemo(() => resolveDisplaySession(dataset, appliedChartSession) ?? marketSession,
+    [dataset, appliedChartSession, marketSession]);
   const { marketCache, getDisplayCache, windowCache } = useReplayWindowCaches<WindowPayload>(dataset);
   const barsRef = useRef<AggregatedMarketBarData[]>([]);
   const warmupBarsRef = useRef<AggregatedMarketBarData[]>([]);
+  const playbackDisplayRef = useRef<{ bars: AggregatedMarketBarData[]; warmupBars: AggregatedMarketBarData[] } | null>(null);
   const currentSourceBarRef = useRef<MarketBarData | null>(null);
   const recoveryRequiredRef = useRef(false);
   const viewChangingRef = useRef(false);
@@ -307,7 +315,7 @@ export function useReplayCore({ dataset: initialDataset, initialJournalFocus = n
     setDateForwarding, forwardProgress, setForwardProgress, cancelForwardRef, correctionTarget, setCorrectionTarget,
     correctionPending, setCorrectionPending, dataset, setLiveDataset, displayedMetadataRef, initializedDatasetRef,
     historyConflictRef, requestRetryingRef, retrying, setRetrying, serverLifetimeRef, shortcuts,
-    webFullscreen, setWebFullscreen, bars, setBars, chartDataRevision, setChartDataRevision,
+    webFullscreen, setWebFullscreen, bars, setBars, chartDataRevision, setChartDataRevision, chartDisplay, setChartDisplay, chartViewportRef,
     warmupBars, setWarmupBars, currentSourceBar, setCurrentSourceBar, isLoading, setIsLoading,
     loadError, setLoadError, replay, setReplay, latestReplayRef, pauseReason,
     autoPauseEvent, playPlayback, pausePlayback, autoPausePlayback, suspendPlayback, restorePlayback,
@@ -337,8 +345,8 @@ export function useReplayCore({ dataset: initialDataset, initialJournalFocus = n
     defaultFibonacciStyle, setDefaultFibonacciStyle, fibonacciTemplates, setFibonacciTemplates, displayUtcOffsetMinutes, setDisplayUtcOffsetMinutes,
     textDrawing, openTextDrawing, finishText, discardText, requestTextSettings, drawingWriteScope,
     drawingScopeGuard, drawingsLive, visibleBarCountConfig, emaWarmupCount, indicatorWarmupCount, indicatorWarmupCountRef,
-    previousIndicatorWarmupCountRef, skipNextIndicatorReloadRef, manualStepsRef, stepShortcutRef, marketSession, displayMarketSession,
-    marketCache, getDisplayCache, windowCache, barsRef, warmupBarsRef, currentSourceBarRef,
+    previousIndicatorWarmupCountRef, skipNextIndicatorReloadRef, manualStepsRef, stepShortcutRef, marketSession, displayMarketSession, chartMarketSession,
+    marketCache, getDisplayCache, windowCache, barsRef, warmupBarsRef, playbackDisplayRef, currentSourceBarRef,
     recoveryRequiredRef, viewChangingRef, windowRequestRef, windowAbortRef, windowPrefetchAbortRef, annotationAbortRef,
     annotationRequestRef, annotationCoverageRef, annotationTimerRef, historyAbortRef, historyLoadingRef, historyHasEarlierRef,
     historyLaterExhaustedThroughRef, historyLastBarsBeforeRef, historyEpochRef, pendingSaveRef, saveTimerRef, lastSaveAtRef,

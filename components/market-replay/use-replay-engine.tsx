@@ -1,5 +1,6 @@
 "use client";
 
+import { replayCalculationWindow, retainReplayCalculationWindow } from "@/lib/market-replay/playback-window";
 import { useReplayPreferenceSave } from "./use-replay-preference-save";
 import { advancedDisplayBars, manualAdvanceBatchSize, mergeDisplayAdvanceWindow } from "@/lib/market-replay/advance-display";
 import { createUuid } from "@/lib/uuid";
@@ -38,10 +39,10 @@ export function useReplayEngine(core: ReturnType<typeof useReplayCore>, drawingW
     startDialogOpen, startDialogSuspensionRef, setStartError, setSaveStatus, confirmAction,
     settingsDialog, paperSnapshot, confirmedPaperSnapshotRef, paperSessionLoadedRef, paperSessionLoadRef, paperMutationActiveRef,
     paperMutationChainRef, commitConfirmedPaperSnapshot, setPaperError, journalReview, setJournalReview, setChartFocusSequence,
-    chartWindowDetachedRef, setReviewReturning, setRecoveryNotice, gateDialogOpen, setGateNotice, checkingOrder,
+    chartWindowDetachedRef, chartViewportRef, setReviewReturning, setRecoveryNotice, gateDialogOpen, setGateNotice, checkingOrder,
     preparingEntryCheckRef, gateSeenRef, rectangleStyleId, styleDrawingId, abrLength, displayUtcOffsetMinutes,
     textDrawing, indicatorWarmupCountRef, manualStepsRef, stepShortcutRef, marketSession, displayMarketSession,
-    marketCache, getDisplayCache, barsRef, warmupBarsRef, currentSourceBarRef, recoveryRequiredRef,
+    marketCache, getDisplayCache, barsRef, warmupBarsRef, playbackDisplayRef, currentSourceBarRef, recoveryRequiredRef,
     viewChangingRef, windowRequestRef, windowAbortRef, historyAbortRef, historyEpochRef, saveTimerRef,
     advancingRef, advanceCompletionRef, playbackAccumulatorRef,
     playbackClockRef, playbackEpochRef, initialJournalFocusAppliedRef, beginBuffering, endBuffering, initialJournalFocus,
@@ -60,6 +61,21 @@ export function useReplayEngine(core: ReturnType<typeof useReplayCore>, drawingW
   }, [commitConfirmedPaperSnapshot, dataset.id, paperSessionLoadedRef, fetch, pausePlayback, replaySession?.activeProjectionId, historyConflictRef]);
 
   const { queueSave, flushPreferences } = useReplayPreferenceSave(dataset.id, core);
+
+  const playbackWindow = useCallback(() => replayCalculationWindow({ bars: barsRef.current, warmupBars: warmupBarsRef.current },
+    chartWindowDetachedRef.current, playbackDisplayRef.current),
+  [chartWindowDetachedRef, playbackDisplayRef, barsRef, warmupBarsRef]);
+  const applyPlaybackWindow = useCallback((window: { bars: typeof barsRef.current; warmupBars: typeof warmupBarsRef.current }) => {
+    if (chartWindowDetachedRef.current && playbackDisplayRef.current) playbackDisplayRef.current = retainReplayCalculationWindow(window, indicatorWarmupCountRef.current);
+    else {
+      // Paging may have reattached the historical chart while this advance was in flight.
+      const next = playbackDisplayRef.current
+        ? mergeDisplayAdvanceWindow(barsRef.current, warmupBarsRef.current, window.bars, indicatorWarmupCountRef.current, false) : window;
+      playbackDisplayRef.current = null;
+      barsRef.current = next.bars; warmupBarsRef.current = next.warmupBars;
+      setBars(next.bars); setWarmupBars(next.warmupBars);
+    }
+  }, [chartWindowDetachedRef, playbackDisplayRef, barsRef, warmupBarsRef, setBars, setWarmupBars, indicatorWarmupCountRef]);
 
   const readReplayData = useCallback(async <T,>(read: () => Promise<T>) => {
     const signal = serverLifetimeRef.current!.signal;
@@ -238,10 +254,11 @@ export function useReplayEngine(core: ReturnType<typeof useReplayCore>, drawingW
       let reachedVisibleBucket = false;
       let propStopped = false;
       for (let attempt = 0; attempt < 64 && next.currentSequence < next.barCount - 1; attempt += 1) {
-        const abrValue = calculateLatestAbr(warmupBarsRef.current, barsRef.current, abrLength);
-        const historyIndex = Math.max(0, warmupBarsRef.current.length + barsRef.current.length - abrLength);
-        const historyFirst = historyIndex < warmupBarsRef.current.length ? warmupBarsRef.current[historyIndex]
-          : barsRef.current[historyIndex - warmupBarsRef.current.length];
+        const live = playbackWindow();
+        const abrValue = calculateLatestAbr(live.warmupBars, live.bars, abrLength);
+        const historyIndex = Math.max(0, live.warmupBars.length + live.bars.length - abrLength);
+        const historyFirst = historyIndex < live.warmupBars.length ? live.warmupBars[historyIndex]
+          : live.bars[historyIndex - live.warmupBars.length];
         const ok = await executeServerAdvance(`/api/market-datasets/${dataset.id}/replay/advance`, {
           requestId: createUuid(), expectedCurrentSequence: next.currentSequence,
           historyVersion: dataset.historyVersion ?? 1, expectedVersion: snapshot?.session.version ?? null,
@@ -259,14 +276,13 @@ export function useReplayEngine(core: ReturnType<typeof useReplayCore>, drawingW
           reachedVisibleBucket = data.reachedVisibleBucket ?? false;
           commitConfirmedPaperSnapshot(snapshot);
           setReplay(next); currentSourceBarRef.current = lastSourceBar; setCurrentSourceBar(lastSourceBar);
-          const previousTail = barsRef.current.at(-1);
-          const window = mergeDisplayAdvanceWindow(barsRef.current, warmupBarsRef.current, data.aggregatedBars,
+          const previousTail = live.bars.at(-1);
+          const window = mergeDisplayAdvanceWindow(live.bars, live.warmupBars, data.aggregatedBars,
             indicatorWarmupCountRef.current, next.currentSequence >= next.barCount - 1);
-          barsRef.current = window.bars; warmupBarsRef.current = window.warmupBars;
-          setBars(window.bars); setWarmupBars(window.warmupBars);
+          applyPlaybackWindow(window);
           getDisplayCache(next.displayIntervalSeconds, next.displaySession).schedulePersist(
             advancedDisplayBars(window.bars, data.fromSequence, previousTail));
-          if (data.fills.length) void loadTradeAnnotations(window.bars.slice(-DEFAULT_REPLAY_MAX_VISIBLE_BARS));
+          if (data.fills.length) void loadTradeAnnotations(chartWindowDetachedRef.current ? barsRef.current : window.bars.slice(-DEFAULT_REPLAY_MAX_VISIBLE_BARS));
         });
         if (!ok) return false;
         if (propStopped || reachedVisibleBucket || !shouldContinue()) break;
@@ -287,7 +303,7 @@ export function useReplayEngine(core: ReturnType<typeof useReplayCore>, drawingW
     }
   }, [abrLength, autoPausePlayback, beginBuffering, commitConfirmedPaperSnapshot, confirmedPaperSnapshotRef, dataset.id,
     dataset.historyVersion, displayUtcOffsetMinutes, endBuffering, executeServerAdvance, flushVisible, latestReplayRef,
-    getDisplayCache, loadTradeAnnotations, paperMutationActiveRef, paperMutationChainRef, setReplay, advanceCompletionRef, advancingRef, barsRef, currentSourceBarRef, historyConflictRef, indicatorWarmupCountRef, setBars, setCurrentSourceBar, setPaperError, setWarmupBars, viewChangingRef, warmupBarsRef]);
+    getDisplayCache, loadTradeAnnotations, paperMutationActiveRef, paperMutationChainRef, setReplay, advanceCompletionRef, advancingRef, barsRef, currentSourceBarRef, historyConflictRef, indicatorWarmupCountRef, setCurrentSourceBar, setPaperError, viewChangingRef, playbackWindow, applyPlaybackWindow, chartWindowDetachedRef]);
 
   const processServerBars = useCallback(async (
     requestedCount: number,
@@ -319,7 +335,8 @@ export function useReplayEngine(core: ReturnType<typeof useReplayCore>, drawingW
         marketSession,
       );
       const sourceCursor = current.currentSequence;
-      const previousDisplayTail = barsRef.current.at(-1);
+      const live = playbackWindow();
+      const previousDisplayTail = live.bars.at(-1);
       let sourceBars = marketCache.readMemoryBarsAfter(sourceCursor, count);
       if (sourceBars.length < count) {
         beginBuffering();
@@ -342,13 +359,13 @@ export function useReplayEngine(core: ReturnType<typeof useReplayCore>, drawingW
         throw new Error(copy.marketReplay.cacheGap);
       }
       sourceBars = sourceBars.slice(0, count);
-      let aggregates = barsRef.current.length >= REPLAY_HISTORY_BAR_LIMIT
-        ? barsRef.current.slice(-REPLAY_HISTORY_COMPACT_TO)
-        : barsRef.current.slice();
-      let nextWarmup = warmupBarsRef.current;
-      if (aggregates.length !== barsRef.current.length) {
-        const dropped = barsRef.current.slice(0, barsRef.current.length - aggregates.length);
-        nextWarmup = [...warmupBarsRef.current, ...dropped].slice(-indicatorWarmupCountRef.current);
+      let aggregates = live.bars.length >= REPLAY_HISTORY_BAR_LIMIT
+        ? live.bars.slice(-REPLAY_HISTORY_COMPACT_TO)
+        : live.bars.slice();
+      let nextWarmup = live.warmupBars;
+      if (aggregates.length !== live.bars.length) {
+        const dropped = live.bars.slice(0, live.bars.length - aggregates.length);
+        nextWarmup = [...live.warmupBars, ...dropped].slice(-indicatorWarmupCountRef.current);
       }
       const contextRuns: ReplayContextRun[] = [];
       for (const source of sourceBars) {
@@ -383,7 +400,7 @@ export function useReplayEngine(core: ReturnType<typeof useReplayCore>, drawingW
       const ok = await executeServerAdvance(`/api/market-datasets/${dataset.id}/replay/sync`, body, (data) => {
         if (data.currentSequence !== lastSourceBar.sequence) {
           if (!data.propStopped || data.currentSequence < sourceCursor || data.currentSequence > lastSourceBar.sequence) throw new ReplayRequestError(copy.marketReplay.advanceConflict, 409);
-          aggregates = barsRef.current.slice(); nextWarmup = warmupBarsRef.current;
+          aggregates = live.bars.slice(); nextWarmup = live.warmupBars;
           for (const source of sourceBars.filter(bar => bar.sequence <= data.currentSequence)) mergeSourceBarInto(aggregates, source, {
             emissionMode: dataset.barEmissionMode, sourceSeconds: dataset.sourceIntervalSeconds!, displaySeconds: current.displayIntervalSeconds,
             session: displayMarketSession, finalSequence: dataset.barCount - 1,
@@ -391,13 +408,13 @@ export function useReplayEngine(core: ReturnType<typeof useReplayCore>, drawingW
         }
         const acknowledgedLast = sourceBars.find(bar => bar.sequence === data.currentSequence) ?? currentSourceBarRef.current;
         processedCount = data.currentSequence - sourceCursor;
-        barsRef.current = aggregates; warmupBarsRef.current = nextWarmup; currentSourceBarRef.current = acknowledgedLast;
-        setBars(aggregates); setWarmupBars(nextWarmup); setCurrentSourceBar(acknowledgedLast);
+        applyPlaybackWindow({ bars: aggregates, warmupBars: nextWarmup });
+        currentSourceBarRef.current = acknowledgedLast; setCurrentSourceBar(acknowledgedLast);
         commitConfirmedPaperSnapshot(data.snapshot);
         setReplay(value => value ? { ...value, currentSequence: data.currentSequence, confirmedSequence: data.currentSequence,
           syncVersion: data.syncVersion, status: data.currentSequence >= value.barCount - 1 ? "finished" : value.status } : value);
         getDisplayCache(current!.displayIntervalSeconds, current!.displaySession).schedulePersist(advancedDisplayBars(aggregates, sourceCursor, previousDisplayTail));
-        if (data.fills.length) void loadTradeAnnotations(aggregates.slice(-DEFAULT_REPLAY_MAX_VISIBLE_BARS));
+        if (data.fills.length) void loadTradeAnnotations(chartWindowDetachedRef.current ? barsRef.current : aggregates.slice(-DEFAULT_REPLAY_MAX_VISIBLE_BARS));
       });
       return ok ? processedCount : 0;
     } catch (error) {
@@ -419,7 +436,7 @@ export function useReplayEngine(core: ReturnType<typeof useReplayCore>, drawingW
   }, [abrLength, autoPausePlayback, beginBuffering, commitConfirmedPaperSnapshot, confirmedPaperSnapshotRef, dataset.barCount,
     dataset.barEmissionMode, dataset.dataVersion, dataset.historyVersion, dataset.id, dataset.priceTickSize, dataset.sourceIntervalSeconds, dataset.startTime,
     displayMarketSession, displayUtcOffsetMinutes, endBuffering, executeServerAdvance, getDisplayCache, latestReplayRef,
-    loadTradeAnnotations, marketCache, marketSession, paperMutationActiveRef, paperSessionLoadedRef, paperSessionLoadRef, readReplayData, setReplay, advanceCompletionRef, advancingRef, barsRef, currentSourceBarRef, historyConflictRef, indicatorWarmupCountRef, recoveryRequiredRef, setBars, setCurrentSourceBar, setPaperError, setWarmupBars, viewChangingRef, warmupBarsRef]);
+    loadTradeAnnotations, marketCache, marketSession, paperMutationActiveRef, paperSessionLoadedRef, paperSessionLoadRef, readReplayData, setReplay, advanceCompletionRef, advancingRef, barsRef, currentSourceBarRef, historyConflictRef, indicatorWarmupCountRef, recoveryRequiredRef, setCurrentSourceBar, setPaperError, viewChangingRef, playbackWindow, applyPlaybackWindow, chartWindowDetachedRef]);
 
   const replayStatus = replay?.status;
   useEffect(() => {
@@ -579,7 +596,8 @@ export function useReplayEngine(core: ReturnType<typeof useReplayCore>, drawingW
     viewChangingRef.current = true;
     setReviewReturning(true);
     try {
-      await loadWindow(current.currentSequence, current.displayIntervalSeconds, current.displaySession, indicatorWarmupCountRef.current);
+      if (!await loadWindow(current.currentSequence, current.displayIntervalSeconds, current.displaySession, indicatorWarmupCountRef.current)) return false;
+      chartViewportRef.current?.followLatest();
       const latest = latestReplayRef.current;
       if (!latest || latest.generation !== current.generation || latest.currentSequence !== current.currentSequence) return false;
       setJournalReview(null);
@@ -592,7 +610,7 @@ export function useReplayEngine(core: ReturnType<typeof useReplayCore>, drawingW
       viewChangingRef.current = false;
       setReviewReturning(false);
     }
-  }, [latestReplayRef, loadWindow, indicatorWarmupCountRef, setChartFocusSequence, setJournalReview, setPaperError, setReviewReturning, viewChangingRef]);
+  }, [latestReplayRef, loadWindow, indicatorWarmupCountRef, setChartFocusSequence, setJournalReview, setPaperError, setReviewReturning, viewChangingRef, chartViewportRef]);
 
   const togglePlayback = useCallback(async () => {
     if (confirmedPaperSnapshotRef.current?.propAccount?.state.result) return;

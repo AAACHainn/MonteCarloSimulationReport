@@ -63,7 +63,7 @@ export function MarketReplayClient({ dataset: initialDataset, initialJournalFocu
     fetch, replaySession, dateDialogOpen, setDateDialogOpen, dateDialogOpening, dateDialogMinimum,
     dateForwarding, forwardProgress, cancelForwardRef, correctionTarget, setCorrectionTarget, correctionPending,
     setCorrectionPending, dataset, retrying, shortcuts, webFullscreen, setWebFullscreen,
-    bars, chartDataRevision, warmupBars, currentSourceBar, isLoading, loadError,
+    bars, chartDataRevision, chartDisplay, chartViewportRef, chartWindowDetachedRef, warmupBars, currentSourceBar, isLoading, loadError,
     setLoadError, replay, autoPauseEvent, restorePlayback, dismissAutoPause, wantsPlayback,
     startPickerRef, startValue, setStartValue, startDialogOpen, startDialogValue, setStartDialogValue,
     startDialogBusy, confirmationSuspensionRef, startError, confirmAction, setConfirmAction, settingsDialog,
@@ -81,7 +81,7 @@ export function MarketReplayClient({ dataset: initialDataset, initialJournalFocu
     setDefaultRectangleStyle, rectangleTemplates, setRectangleTemplates, setDefaultTextStyle, textTemplates, setTextTemplates,
     defaultTrendLineStyle, setDefaultTrendLineStyle, trendLineTemplates, setTrendLineTemplates, defaultFibonacciStyle, setDefaultFibonacciStyle,
     fibonacciTemplates, setFibonacciTemplates, displayUtcOffsetMinutes, setDisplayUtcOffsetMinutes, textDrawing, drawingWriteScope,
-    drawingsLive, visibleBarCountConfig, displayMarketSession,
+    drawingsLive, visibleBarCountConfig, chartMarketSession,
   } = core;
   const {
     armDrawing, changeChartVisibility, armTrendLine, armFibonacciRetracement, createDrawing, updateDrawing,
@@ -325,7 +325,11 @@ export function MarketReplayClient({ dataset: initialDataset, initialJournalFocu
             bars={bars}
             warmupBars={warmupBars}
             displayUtcOffsetMinutes={displayUtcOffsetMinutes}
-            displayIntervalSeconds={replay.displayIntervalSeconds}
+            displayIntervalSeconds={chartDisplay?.displayIntervalSeconds ?? replay.displayIntervalSeconds}
+            viewportApiRef={chartViewportRef}
+            viewportSnapshot={chartDisplay?.viewport}
+            currentSourceSequence={replay.currentSequence}
+            liveWindow={!chartWindowDetachedRef.current}
             sourceIntervalSeconds={dataset.sourceIntervalSeconds}
             candleCountdownEnabled={chartVisibility.indicators && candleCountdownEnabled}
             playbackActive={replay.status === "playing"}
@@ -353,8 +357,8 @@ export function MarketReplayClient({ dataset: initialDataset, initialJournalFocu
             volumeVisible={chartVisibility.indicators && volumeVisible}
             gridVisible={gridVisible}
             onToggleGrid={() => setGridVisible((current) => !current)}
-            displaySession={replay.displaySession}
-            barCountSession={displayMarketSession}
+            displaySession={chartDisplay?.displaySession ?? replay.displaySession}
+            barCountSession={chartMarketSession}
             barCountConfig={visibleBarCountConfig}
             paperSnapshot={journalReview ? null : paperSnapshot}
             tradeAnnotations={tradeAnnotations}

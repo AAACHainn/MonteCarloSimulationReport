@@ -33,7 +33,7 @@ function setup() {
     emaSettingsLoaded: true, abrSettingsLoaded: true, indicatorWarmupCount: 20,
     previousIndicatorWarmupCountRef: { current: null as number | null }, skipNextIndicatorReloadRef: { current: false },
     latestReplayRef: { current: replay }, barsRef: { current: visible }, warmupBarsRef: { current: warmup },
-    historyEpochRef: { current: 0 }, fetch: vi.fn<typeof fetch>(() => new Promise<Response>(resolve => responders.push(resolve))),
+    viewChangingRef: { current: false }, historyEpochRef: { current: 0 }, fetch: vi.fn<typeof fetch>(() => new Promise<Response>(resolve => responders.push(resolve))),
     setWarmupBars: vi.fn(), setEmaError: vi.fn(),
   };
   const render = () => RenderHook(core as unknown as Parameters<typeof useReplayIndicatorWarmup>[0]);

@@ -5,7 +5,7 @@ import { canUpdateReplayTail, formatChartTick, chartCandleData as candle, chartV
 import { useCallback, useEffect, useMemo } from "react";
 import { CandlestickSeries, ColorType, createChart, CrosshairMode, HistogramSeries, type Time, TickMarkType } from "lightweight-charts";
 import { copy } from "@/lib/i18n";
-import { defaultReplayLogicalRange, rangeAfterNewReplayBar, rangeAfterTimelineChange, rangeAfterWindowReplacement, rangeForReplayFocus } from "@/lib/market-replay/chart-range";
+import { defaultReplayLogicalRange, captureReplayViewport, isReplayRangeFollowing, rangeForReplayViewport, rangeAfterNewReplayBar, rangeAfterWindowReplacement, rangeForReplayFocus } from "@/lib/market-replay/chart-range";
 import { candlestickSeriesStyleOptions } from "@/lib/market-replay/candlestick-style";
 import { RectanglePrimitive } from "@/lib/market-replay/rectangle-primitive";
 import { TrendLinePrimitive } from "@/lib/market-replay/trend-line-primitive";
@@ -25,6 +25,7 @@ import type { useReplayChartCore } from "./use-replay-chart-core";
 
 export function useReplayChartSetup(core: ReturnType<typeof useReplayChartCore>) {
   const {
+    viewportModeRef, viewportGestureRef, viewportUpdatingRef, pendingFollowRef, liveWindowRef, currentSourceSequenceRef, viewportSnapshot,
     visibilityScope, hiddenAfter, visibleBars, visibleWarmupBars, containerRef, chartRef,
     candleRef, volumeRef, priceLinesRef, lineTargetsRef, tradeAnnotationPrimitiveRef, barCountPrimitiveRef,
     candleCountdownPrimitiveRef, rectanglePrimitiveRef, trendLinePrimitiveRef, fibonacciPrimitiveRef, textPrimitiveRef, textEditRef,
@@ -92,6 +93,26 @@ export function useReplayChartSetup(core: ReturnType<typeof useReplayChartCore>)
       }
     });
     observer.observe(container);
+    let pointerActive = false;
+    let gestureTimer: ReturnType<typeof setTimeout> | undefined;
+    const endGesture = () => {
+      if (!pointerActive && !viewportGestureRef.current) return;
+      pointerActive = false;
+      if (gestureTimer) clearTimeout(gestureTimer);
+      gestureTimer = setTimeout(() => { syncVisibleSequenceRange(); viewportGestureRef.current = false; }, 160);
+    };
+    const startGesture = (event: PointerEvent | WheelEvent) => {
+      const x = event.clientX - container.getBoundingClientRect().left;
+      if (x < 0 || x > chart.timeScale().width()) return;
+      if (gestureTimer) clearTimeout(gestureTimer);
+      viewportGestureRef.current = true;
+      if (event.type === "pointerdown") pointerActive = true;
+      else if (!pointerActive) endGesture();
+    };
+    container.addEventListener("pointerdown", startGesture, true);
+    container.addEventListener("wheel", startGesture, { capture: true, passive: true });
+    window.addEventListener("pointerup", endGesture);
+    window.addEventListener("pointercancel", endGesture);
     chart.timeScale().subscribeVisibleLogicalRangeChange(syncLineActionCoordinates);
     chart.timeScale().subscribeVisibleLogicalRangeChange(syncMeasurementCoordinates);
     chart.timeScale().subscribeVisibleLogicalRangeChange(syncVisibleSequenceRange);
@@ -112,6 +133,12 @@ export function useReplayChartSetup(core: ReturnType<typeof useReplayChartCore>)
         cancelAnimationFrame(drawingFrameRef.current);
         drawingFrameRef.current = null;
       }
+      if (gestureTimer) clearTimeout(gestureTimer);
+      viewportGestureRef.current = false;
+      container.removeEventListener("pointerdown", startGesture, true);
+      container.removeEventListener("wheel", startGesture, true);
+      window.removeEventListener("pointerup", endGesture);
+      window.removeEventListener("pointercancel", endGesture);
       observer.disconnect();
       chart.timeScale().unsubscribeVisibleLogicalRangeChange(syncLineActionCoordinates);
       chart.timeScale().unsubscribeVisibleLogicalRangeChange(syncMeasurementCoordinates);
@@ -135,7 +162,7 @@ export function useReplayChartSetup(core: ReturnType<typeof useReplayChartCore>)
       chart.remove(); chartRef.current = null; candleRef.current = null; volumeRef.current = null;
       priceLines.clear(); lineTargets.clear(); lastDataRef.current = [];
     };
-  }, [priceTickSize, syncDrawingPrimitive, syncLineActionCoordinates, syncMeasurementCoordinates, syncVisibleSequenceRange, barCountPrimitiveRef, barsRef, candleCountdownPrimitiveRef, candleRef, candlestickStyleRef, chartRef, containerRef, displayUtcOffsetRef, drawingFrameRef, fibonacciPrimitiveRef, gridVisibleRef, lastDataRef, lineTargetsRef, priceLinesRef, rectanglePrimitiveRef, textDragRef, textEditRef, textPositionRef, textPrimitiveRef, tradeAnnotationPrimitiveRef, tradeAnnotationsRef, tradeAnnotationsVisibleRef, trendLinePrimitiveRef, volumeRef]);
+  }, [priceTickSize, syncDrawingPrimitive, syncLineActionCoordinates, syncMeasurementCoordinates, syncVisibleSequenceRange, barCountPrimitiveRef, barsRef, candleCountdownPrimitiveRef, candleRef, candlestickStyleRef, chartRef, containerRef, displayUtcOffsetRef, drawingFrameRef, fibonacciPrimitiveRef, gridVisibleRef, lastDataRef, lineTargetsRef, priceLinesRef, rectanglePrimitiveRef, textDragRef, textEditRef, textPositionRef, textPrimitiveRef, tradeAnnotationPrimitiveRef, tradeAnnotationsRef, tradeAnnotationsVisibleRef, trendLinePrimitiveRef, volumeRef, viewportGestureRef]);
 
   useEffect(() => {
     chartRef.current?.applyOptions({
@@ -196,6 +223,17 @@ export function useReplayChartSetup(core: ReturnType<typeof useReplayChartCore>)
     const nextDisplaySession = displaySessionRef.current;
     const previous = lastDataRef.current;
     const next = bars;
+    const timelineChanged = lastDataIntervalRef.current !== nextDisplayIntervalSeconds
+      || lastDataSessionRef.current !== nextDisplaySession;
+    const transitionViewport = timelineChanged ? viewportSnapshot ?? captureReplayViewport({
+      visibleRange: chart.timeScale().getVisibleLogicalRange(), bars: previous,
+      sourceSequence: currentSourceSequenceRef.current ?? previous.at(-1)?.lastSequence ?? -1,
+      liveWindow: liveWindowRef.current, mode: readOnly ? "history" : viewportModeRef.current,
+      chartWidth: chart.timeScale().width(), barSpacing: chart.timeScale().options().barSpacing,
+    }) : null;
+    viewportUpdatingRef.current = true;
+    const following = viewportModeRef.current === "following" || (viewportModeRef.current === null
+      && isReplayRangeFollowing(chart.timeScale().getVisibleLogicalRange() ?? { from: 0, to: 0 }, previous.length - 1));
     barsRef.current = visibleBars;
     timelineBarsRef.current = next;
     projectionBarsRef.current = projectionBars;
@@ -206,30 +244,21 @@ export function useReplayChartSetup(core: ReturnType<typeof useReplayChartCore>)
     const candleWasAutoScaled = series.priceScale().options().autoScale;
     const volumeWasAutoScaled = volumeSeries?.priceScale().options().autoScale ?? true;
     const samePrefix = canUpdateReplayTail(previous, next, lastDataRevisionRef.current, dataRevision);
-    if (samePrefix && !hiddenAfter && !lastHiddenAfterRef.current) {
+    if (samePrefix && !timelineChanged && !hiddenAfter && !lastHiddenAfterRef.current) {
       const range = chart.timeScale().getVisibleLogicalRange();
       const previousLastIndex = previous.length - 1;
       for (const bar of next.slice(Math.max(0, previous.length - 1))) {
         series.update(candle(bar)); if (bar.volume !== null) volumeSeries?.update(volume(bar));
       }
       if (range && next.length > previous.length && !readOnly) {
-        chart.timeScale().setVisibleLogicalRange(rangeAfterNewReplayBar(range, previousLastIndex, next.length - previous.length));
+        chart.timeScale().setVisibleLogicalRange(rangeAfterNewReplayBar(range, previousLastIndex, next.length - previous.length, following && liveWindowRef.current));
       }
     } else {
       const range = chart.timeScale().getVisibleLogicalRange();
       const previousLastIndex = previous.length - 1;
       const previousLastInNext = next.findIndex((bar) => bar.timestamp === previous.at(-1)?.timestamp);
-      const timelineChanged = lastDataIntervalRef.current !== nextDisplayIntervalSeconds
-        || lastDataSessionRef.current !== nextDisplaySession;
-      const mappedTimelineRange = range && timelineChanged
-        ? rangeAfterTimelineChange({
-          visibleRange: range,
-          previousBars: previous,
-          nextBars: next,
-          previousDisplayIntervalSeconds: lastDataIntervalRef.current,
-          nextDisplayIntervalSeconds,
-        })
-        : null;
+      const mappedTimelineRange = transitionViewport
+        ? rangeForReplayViewport(transitionViewport, next, nextDisplayIntervalSeconds, chart.timeScale().width()) : null;
       // Whitespace retains the original time axis and viewport without exposing prices.
       if (hiddenAfter) {
         const masked = chartHiddenSeriesData(next, visibleBars);
@@ -243,7 +272,7 @@ export function useReplayChartSetup(core: ReturnType<typeof useReplayChartCore>)
         chart.timeScale().setVisibleLogicalRange(mappedTimelineRange);
       } else if (range && previousLastInNext >= 0) {
         // A rolling server window renumbers logical indices. Preserve zoom and historical panning.
-        const advanced = readOnly ? range : rangeAfterNewReplayBar(range, previousLastIndex, next.length - 1 - previousLastInNext);
+        const advanced = readOnly ? range : rangeAfterNewReplayBar(range, previousLastIndex, next.length - 1 - previousLastInNext, following && liveWindowRef.current);
         const removed = previousLastIndex - previousLastInNext;
         chart.timeScale().setVisibleLogicalRange({ from: advanced.from - removed, to: advanced.to - removed });
       } else if (next.length > 0) {
@@ -254,11 +283,23 @@ export function useReplayChartSetup(core: ReturnType<typeof useReplayChartCore>)
         );
       }
     }
-    // Keep a user-selected manual price scale through every incremental update or window swap.
-    if (!candleWasAutoScaled && series.priceScale().options().autoScale) {
+    if (pendingFollowRef.current && next.length) {
+      const range = chart.timeScale().getVisibleLogicalRange();
+      const span = range ? range.to - range.from : 200;
+      const from = next.length - 1 - span * 0.618;
+      chart.timeScale().setVisibleLogicalRange({ from, to: from + span });
+      pendingFollowRef.current = false;
+      viewportModeRef.current = "following";
+    } else if (!previous.length && next.length) viewportModeRef.current = "following";
+    else if (timelineChanged) viewportModeRef.current = transitionViewport?.mode ?? (following ? "following" : "history");
+    // A new display period gets a fresh vertical fit; ordinary updates keep manual scaling.
+    if (timelineChanged) {
+      series.priceScale().applyOptions({ autoScale: true });
+      volumeSeries?.priceScale().applyOptions({ autoScale: true });
+    } else if (!candleWasAutoScaled && series.priceScale().options().autoScale) {
       series.priceScale().applyOptions({ autoScale: false });
     }
-    if (volumeSeries && !volumeWasAutoScaled && volumeSeries.priceScale().options().autoScale) {
+    if (!timelineChanged && volumeSeries && !volumeWasAutoScaled && volumeSeries.priceScale().options().autoScale) {
       volumeSeries.priceScale().applyOptions({ autoScale: false });
     }
     lastDataRef.current = next;
@@ -266,10 +307,13 @@ export function useReplayChartSetup(core: ReturnType<typeof useReplayChartCore>)
     lastHiddenAfterRef.current = hiddenAfter;
     lastDataIntervalRef.current = nextDisplayIntervalSeconds;
     lastDataSessionRef.current = nextDisplaySession;
-    requestAnimationFrame(syncVisibleSequenceRange);
+    requestAnimationFrame(() => {
+      viewportUpdatingRef.current = false;
+      syncVisibleSequenceRange();
+    });
     requestAnimationFrame(syncMeasurementCoordinates);
     syncDrawingPrimitive();
-  }, [bars, dataRevision, projectionBars, visibleBars, hiddenAfter, readOnly, visibilityScope, displayIntervalSeconds, displaySession, barCountSession, sourceIntervalSeconds, syncDrawingPrimitive, syncMeasurementCoordinates, syncVisibleSequenceRange, barsRef, candleRef, chartRef, displayIntervalSecondsRef, displaySessionRef, drawingScopeRef, drawingSessionRef, lastDataIntervalRef, lastDataRef, lastDataRevisionRef, lastDataSessionRef, lastHiddenAfterRef, projectionBarsRef, requestedDisplayIntervalSecondsRef, requestedDrawingSessionRef, timelineBarsRef, volumeRef]);
+  }, [bars, dataRevision, projectionBars, visibleBars, hiddenAfter, readOnly, visibilityScope, displayIntervalSeconds, displaySession, barCountSession, sourceIntervalSeconds, syncDrawingPrimitive, syncMeasurementCoordinates, syncVisibleSequenceRange, barsRef, candleRef, chartRef, displayIntervalSecondsRef, displaySessionRef, drawingScopeRef, drawingSessionRef, lastDataIntervalRef, lastDataRef, lastDataRevisionRef, lastDataSessionRef, lastHiddenAfterRef, projectionBarsRef, requestedDisplayIntervalSecondsRef, requestedDrawingSessionRef, timelineBarsRef, volumeRef, viewportModeRef, viewportUpdatingRef, pendingFollowRef, liveWindowRef, currentSourceSequenceRef, viewportSnapshot]);
 
   useEffect(() => {
     if (focusSequence === null) return;
@@ -277,9 +321,10 @@ export function useReplayChartSetup(core: ReturnType<typeof useReplayChartCore>)
     if (!chart) return;
     const range = rangeForReplayFocus(bars, focusSequence, chart.timeScale().getVisibleLogicalRange());
     if (!range) return;
+    viewportModeRef.current = "history";
     chart.timeScale().setVisibleLogicalRange(range);
     onFocusAppliedRef.current?.();
-  }, [bars, focusSequence, chartRef, onFocusAppliedRef]);
+  }, [bars, focusSequence, chartRef, onFocusAppliedRef, viewportModeRef]);
 
   useEffect(() => {
     tradeAnnotationPrimitiveRef.current?.setData({

@@ -1,4 +1,5 @@
 import { type Ref } from "react";
+import type { ReplayViewportApi, ReplayViewportSnapshot } from "@/lib/market-replay/chart-range";
 import type { OrderSubmitResult } from "@/lib/paper-trading/types";
 import type { AggregatedMarketBarData, BarCountIndicatorConfig, DisplaySession, EmaIndicatorConfig, TradingSessionConfig } from "@/lib/market-replay/types";
 import { copy } from "@/lib/i18n";
@@ -176,6 +177,10 @@ export type ReplayChartProps = {
   candleCountdownEnabled?: boolean;
   playbackActive?: boolean;
   currentSourceTimestamp?: string | null;
+  currentSourceSequence?: number;
+  liveWindow?: boolean;
+  viewportApiRef?: Ref<ReplayViewportApi>;
+  viewportSnapshot?: ReplayViewportSnapshot | null;
   measurementArmed: boolean;
   candlestickStyle: CandlestickStyle;
   onMeasurementArmedChange: (armed: boolean) => void;

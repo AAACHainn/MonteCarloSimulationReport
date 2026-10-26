@@ -1,5 +1,6 @@
 "use client";
 
+import { captureReplayViewport, isReplayRangeFollowing, latestReplayLogicalIndex, type ReplayViewportMode } from "@/lib/market-replay/chart-range";
 import { useReplaySession } from "./replay-session-context";
 import { normalizeRiskPreferences, type RiskPreferences } from "@/lib/paper-trading/risk-preferences";
 
@@ -26,7 +27,7 @@ export function useReplayChartCore({
   candlestickStyle, gridVisible = true, onToggleGrid,
   onMeasurementArmedChange, drawingTool, onDrawingToolChange, trendLineDraftStyle, fibonacciDraftStyle, rectangleDraftStyle, drawings, selectedDrawingId,
   onSelectedDrawingIdChange, onCreateDrawing, onUpdateDrawing, onDeleteDrawing, onPlaceText, drawingApiRef,
-  onOpenDrawingStyle, emaEnabled, emaIndicators, abrEnabled, abrLength, volumeVisible,
+  onOpenDrawingStyle, viewportApiRef, viewportSnapshot = null, currentSourceSequence, liveWindow = true, emaEnabled, emaIndicators, abrEnabled, abrLength, volumeVisible,
   displaySession, barCountSession, barCountConfig, paperSnapshot,
   tradeAnnotations, tradeAnnotationsTruncated, focusSequence = null, onFocusApplied,
   tradeAnnotationsVisible = true,
@@ -73,7 +74,42 @@ export function useReplayChartCore({
   const displaySessionRef = useRef(displaySession);
   displaySessionRef.current = displaySession;
   const barsRef = useRef(visibleBars);
+  const requestedBarsRef = useRef(visibleBars); requestedBarsRef.current = visibleBars;
   const timelineBarsRef = useRef(bars);
+  const viewportModeRef = useRef<ReplayViewportMode | null>(null);
+  const viewportGestureRef = useRef(false);
+  const viewportUpdatingRef = useRef(false);
+  const pendingFollowRef = useRef(false);
+  const currentSourceSequenceRef = useRef(currentSourceSequence);
+  currentSourceSequenceRef.current = currentSourceSequence;
+  const liveWindowRef = useRef(liveWindow && !hiddenAfter);
+  liveWindowRef.current = liveWindow && !hiddenAfter;
+  useImperativeHandle(viewportApiRef, () => ({
+    capture: (sequence: number, isLive: boolean) => {
+      const chart = chartRef.current;
+      const snapshot = chart ? captureReplayViewport({ visibleRange: chart.timeScale().getVisibleLogicalRange(),
+        bars: barsRef.current, sourceSequence: sequence, liveWindow: isLive && liveWindowRef.current,
+        mode: viewportGestureRef.current ? null : viewportModeRef.current, chartWidth: chart.timeScale().width(), barSpacing: chart.timeScale().options().barSpacing }) : null;
+      if (snapshot) viewportModeRef.current = snapshot.mode;
+      viewportGestureRef.current = false;
+      return snapshot;
+    },
+    followLatest: () => {
+      pendingFollowRef.current = true;
+      viewportModeRef.current = "following";
+      const chart = chartRef.current;
+      // A cache hit may already have committed before the load promise resumes.
+      if (chart && barsRef.current.length && barsRef.current === requestedBarsRef.current && liveWindowRef.current) {
+        const range = chart.timeScale().getVisibleLogicalRange();
+        const span = range ? range.to - range.from : 200;
+        const from = barsRef.current.length - 1 - span * 0.618;
+        viewportUpdatingRef.current = true;
+        chart.timeScale().setVisibleLogicalRange({ from, to: from + span });
+        pendingFollowRef.current = false;
+        requestAnimationFrame(() => { viewportUpdatingRef.current = false; });
+      }
+    },
+  }), []);
   const projectionBars = useMemo(() => drawingTimelineBars(bars), [bars]);
   const projectionBarsRef = useRef(projectionBars);
   const drawingTimelineRef = useRef(new DrawingTimelineLocator());
@@ -335,7 +371,12 @@ export function useReplayChartCore({
     // Paging reports the original timeline, even while part of it is visually hidden.
     const currentBars = timelineBarsRef.current;
     const range = chart?.timeScale().getVisibleLogicalRange();
-    if (!range || !currentBars.length) return;
+    if (!range || !currentBars.length || viewportUpdatingRef.current) return;
+    if (viewportGestureRef.current) {
+      const sequence = currentSourceSequenceRef.current ?? currentBars.at(-1)!.lastSequence;
+      const index = latestReplayLogicalIndex(barsRef.current, sequence, liveWindowRef.current);
+      viewportModeRef.current = isReplayRangeFollowing(range, index) ? "following" : "history";
+    }
     const fromIndex = Math.max(0, Math.min(currentBars.length - 1, Math.floor(range.from)));
     const toIndex = Math.max(fromIndex, Math.min(currentBars.length - 1, Math.ceil(range.to)));
     onVisibleSequenceRangeChangeRef.current?.({
@@ -423,6 +464,7 @@ export function useReplayChartCore({
   // and drawing preferences must update the existing instance so pointer handlers never
   // retain a removed chart or series.
   return {
+    viewportModeRef, viewportGestureRef, viewportUpdatingRef, pendingFollowRef, currentSourceSequenceRef, liveWindowRef, viewportSnapshot,
     replaySession, visibilityScope, setHiddenBoundary, hiddenAfter, visibleBars, visibleWarmupBars,
     containerRef, interactionRef, orderTicketRef, orderTicketDragRef, chartRef, candleRef,
     volumeRef, priceLinesRef, lineTargetsRef, tradeAnnotationPrimitiveRef, barCountPrimitiveRef, candleCountdownPrimitiveRef,

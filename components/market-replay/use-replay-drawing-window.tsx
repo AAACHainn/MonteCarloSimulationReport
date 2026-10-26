@@ -1,5 +1,6 @@
 "use client";
 
+import type { ReplayViewportSnapshot } from "@/lib/market-replay/chart-range";
 import { canReuseAnnotations } from "@/lib/market-replay/advance-display";
 import { startTransition, useCallback, useEffect, useMemo } from "react";
 import { type ReplayVisibleSequenceRange } from "@/components/market-replay/replay-chart";
@@ -25,7 +26,7 @@ import { useReplayIndicatorWarmup } from "./use-replay-indicator-warmup";
 export function useReplayDrawingWindow(core: ReturnType<typeof useReplayCore>) {
   const {
     fetch, replaySession, registerAiScope, aiChartOwner, dataset, initializedDatasetRef,
-    setBars, setChartDataRevision, setWarmupBars, setCurrentSourceBar,
+    setBars, setChartDisplay, setChartDataRevision, setWarmupBars, setCurrentSourceBar,
     setIsLoading, setLoadError, setReplay, latestReplayRef,
     confirmedPaperSnapshotRef, paperSessionLoadedRef, paperSessionLoadRef, commitConfirmedPaperSnapshot,
     setTradeAnnotations, setTradeAnnotationsTruncated, setPaperError, setChartFocusSequence, chartWindowDetachedRef, setMeasurementArmed,
@@ -35,7 +36,7 @@ export function useReplayDrawingWindow(core: ReturnType<typeof useReplayCore>) {
     chartVisibility, setChartVisibility, defaultRectangleStyle, defaultTrendLineStyle, defaultFibonacciStyle, openTextDrawing,
     finishText, discardText, requestTextSettings, drawingWriteScope, drawingScopeGuard, drawingsLive,
     indicatorWarmupCountRef, marketSession, marketCache,
-    getDisplayCache, windowCache, barsRef, warmupBarsRef, currentSourceBarRef, viewChangingRef,
+    getDisplayCache, windowCache, barsRef, warmupBarsRef, playbackDisplayRef, currentSourceBarRef, viewChangingRef,
     windowRequestRef, windowAbortRef, windowPrefetchAbortRef, annotationAbortRef, annotationRequestRef, annotationCoverageRef,
     annotationTimerRef, historyAbortRef, historyLoadingRef, historyHasEarlierRef, historyLaterExhaustedThroughRef, historyLastBarsBeforeRef,
     historyEpochRef, beginBuffering, endBuffering,
@@ -296,6 +297,7 @@ export function useReplayDrawingWindow(core: ReturnType<typeof useReplayCore>) {
     focusJournalNo: number | null = null,
     preserveHistory = false,
     canApply: () => boolean = () => true,
+    viewport: ReplayViewportSnapshot | null = null,
   ): Promise<boolean> => {
     const windowStartedAt = performance.now();
     const expectedGeneration = latestReplayRef.current?.generation ?? null;
@@ -310,6 +312,7 @@ export function useReplayDrawingWindow(core: ReturnType<typeof useReplayCore>) {
     windowAbortRef.current = null;
     const { cacheKey, params } = replayWindowRequest(
       dataset, endSequence, displayIntervalSeconds, displaySession, warmupCount, focusSequence,
+      viewport ? Math.min(2000, Math.max(300, Math.ceil(viewport.logicalSpan) + 4)) : undefined,
     );
     let data = windowCache.current.get(cacheKey);
     const cacheHit = Boolean(data);
@@ -334,8 +337,32 @@ export function useReplayDrawingWindow(core: ReturnType<typeof useReplayCore>) {
       end: performance.now(),
     });
     performance.clearMeasures(cacheHit ? "market-replay-window-cache" : "market-replay-window-network");
+    // A focused chart may omit the live tail. Keep a separate bounded calculation
+    // window so playback/ABR never bridges the unloaded history between the two.
+    let playbackWindow: WindowPayload | null = null;
+    if (viewport?.mode === "history" && (data.lastSourceBar?.sequence ?? -1) < endSequence) {
+      const liveRequest = replayWindowRequest(dataset, endSequence, displayIntervalSeconds, displaySession, warmupCount);
+      playbackWindow = windowCache.current.get(liveRequest.cacheKey) ?? null;
+      if (!playbackWindow) {
+        const controller = new AbortController();
+        windowAbortRef.current = controller;
+        try {
+          const response = await fetch(`/api/market-datasets/${dataset.id}/bars/window?${liveRequest.params}`, { signal: controller.signal });
+          const body = await response.json();
+          if (!response.ok) throw new Error(body.error ?? copy.marketReplay.loadError);
+          playbackWindow = body as WindowPayload;
+          windowCache.current.set(liveRequest.cacheKey, playbackWindow);
+        } catch (error) {
+          if (controller.signal.aborted) return false;
+          throw error;
+        } finally {
+          if (windowAbortRef.current === controller) windowAbortRef.current = null;
+        }
+      }
+      if (playbackWindow.lastSourceBar?.sequence !== endSequence) throw new Error(copy.marketReplay.loadError);
+    }
     if (!canApply() || requestId !== windowRequestRef.current) return false;
-    if (!reviewOnly) {
+    if (!reviewOnly || viewport) {
       const live = latestReplayRef.current;
       if (!live
         || live.generation !== expectedGeneration
@@ -355,7 +382,11 @@ export function useReplayDrawingWindow(core: ReturnType<typeof useReplayCore>) {
     const visible = refreshed.bars;
     barsRef.current = visible;
     warmupBarsRef.current = refreshed.warmupBars;
+    if (!reviewOnly || viewport) playbackDisplayRef.current = playbackWindow
+      ? { bars: playbackWindow.visibleBars, warmupBars: playbackWindow.warmupBars } : null;
     setBars(visible);
+    setChartDisplay({ displayIntervalSeconds, displaySession, viewport });
+    if (viewport) chartWindowDetachedRef.current = (data.lastSourceBar?.sequence ?? -1) < endSequence;
     setChartDataRevision(replayDisplayMetadataKey(dataset));
     setWarmupBars(refreshed.warmupBars);
     void loadTradeAnnotations(visible, focusJournalNo);
@@ -374,7 +405,7 @@ export function useReplayDrawingWindow(core: ReturnType<typeof useReplayCore>) {
       marketCache.prefetch(anchor);
     }
     return true;
-  }, [dataset, getDisplayCache, latestReplayRef, loadTradeAnnotations, marketCache, marketSession, windowCache, fetch, confirmedPaperSnapshotRef, paperSessionLoadedRef, barsRef, chartWindowDetachedRef, currentSourceBarRef, historyAbortRef, historyEpochRef, historyHasEarlierRef, historyLastBarsBeforeRef, historyLaterExhaustedThroughRef, historyLoadingRef, setBars, setChartDataRevision, setCurrentSourceBar, setWarmupBars, warmupBarsRef, windowAbortRef, windowRequestRef]);
+  }, [dataset, getDisplayCache, latestReplayRef, loadTradeAnnotations, marketCache, marketSession, windowCache, fetch, confirmedPaperSnapshotRef, paperSessionLoadedRef, barsRef, chartWindowDetachedRef, currentSourceBarRef, historyAbortRef, historyEpochRef, historyHasEarlierRef, historyLastBarsBeforeRef, historyLaterExhaustedThroughRef, historyLoadingRef, setBars, setChartDisplay, setChartDataRevision, setCurrentSourceBar, setWarmupBars, warmupBarsRef, playbackDisplayRef, windowAbortRef, windowRequestRef]);
 
   const primeWindow = useCallback(async (
     endSequence: number,
@@ -491,7 +522,7 @@ export function useReplayDrawingWindow(core: ReturnType<typeof useReplayCore>) {
 
   const loadEarlierHistory = useCallback(async () => {
     const current = latestReplayRef.current;
-    if (!current || historyLoadingRef.current || !historyHasEarlierRef.current
+    if (!current || viewChangingRef.current || historyLoadingRef.current || !historyHasEarlierRef.current
       || barsRef.current.length >= REPLAY_HISTORY_BAR_LIMIT || !dataset.sourceIntervalSeconds) return;
     const startingEpoch = historyEpochRef.current;
     const addedFromCache = await hydrateCachedHistory(
@@ -548,7 +579,7 @@ export function useReplayDrawingWindow(core: ReturnType<typeof useReplayCore>) {
       }
       endBuffering();
     }
-  }, [beginBuffering, dataset.id, dataset.sourceIntervalSeconds, endBuffering, getDisplayCache, hydrateCachedHistory, latestReplayRef, fetch, barsRef, historyAbortRef, historyEpochRef, historyHasEarlierRef, historyLoadingRef, indicatorWarmupCountRef, setBars, setChartFocusSequence, setPaperError, setWarmupBars, warmupBarsRef]);
+  }, [beginBuffering, dataset.id, dataset.sourceIntervalSeconds, endBuffering, getDisplayCache, hydrateCachedHistory, latestReplayRef, fetch, barsRef, historyAbortRef, historyEpochRef, historyHasEarlierRef, historyLoadingRef, indicatorWarmupCountRef, setBars, setChartFocusSequence, setPaperError, setWarmupBars, warmupBarsRef, viewChangingRef]);
 
   const loadLaterHistory = useCallback(async () => {
     const current = latestReplayRef.current;
@@ -613,6 +644,7 @@ export function useReplayDrawingWindow(core: ReturnType<typeof useReplayCore>) {
   }, [beginBuffering, dataset.id, dataset.sourceIntervalSeconds, endBuffering, getDisplayCache, latestReplayRef, fetch, barsRef, chartWindowDetachedRef, historyAbortRef, historyEpochRef, historyLaterExhaustedThroughRef, historyLoadingRef, indicatorWarmupCountRef, setBars, setChartFocusSequence, setPaperError, setWarmupBars, viewChangingRef, warmupBarsRef]);
 
   const handleVisibleSequenceRange = useCallback((range: ReplayVisibleSequenceRange) => {
+    if (viewChangingRef.current) return;
     if (annotationTimerRef.current) clearTimeout(annotationTimerRef.current);
     annotationTimerRef.current = setTimeout(() => {
       const live = latestReplayRef.current;
@@ -637,7 +669,7 @@ export function useReplayDrawingWindow(core: ReturnType<typeof useReplayCore>) {
     if (movedLeft && range.barsBefore <= REPLAY_HISTORY_PREFETCH_THRESHOLD) {
       void loadEarlierHistory();
     }
-  }, [latestReplayRef, loadEarlierHistory, loadLaterHistory, loadTradeAnnotations, registerAiScope, aiChartOwner, replaySession, annotationTimerRef, barsRef, historyLastBarsBeforeRef, historyLaterExhaustedThroughRef]);
+  }, [latestReplayRef, loadEarlierHistory, loadLaterHistory, loadTradeAnnotations, registerAiScope, aiChartOwner, replaySession, annotationTimerRef, barsRef, historyLastBarsBeforeRef, historyLaterExhaustedThroughRef, viewChangingRef]);
 
   useEffect(() => {
     if (!emaSettingsLoaded || !abrSettingsLoaded || initializedDatasetRef.current === dataset.id) return;

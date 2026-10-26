@@ -12,13 +12,13 @@ type Core = Pick<ReturnType<typeof useReplayCore>,
   "dataset" | "replaySession" | "replay" | "bars" | "emaSettingsLoaded" | "abrSettingsLoaded"
   | "indicatorWarmupCount" | "previousIndicatorWarmupCountRef" | "skipNextIndicatorReloadRef"
   | "latestReplayRef" | "barsRef" | "warmupBarsRef" | "historyEpochRef" | "fetch"
-  | "setWarmupBars" | "setEmaError">;
+  | "setWarmupBars" | "setEmaError" | "viewChangingRef">;
 
 /** Supplement the loaded prefix without replacing candles, moving focus or pausing playback. */
 export function useReplayIndicatorWarmup({
   dataset, replaySession, replay, bars, emaSettingsLoaded, abrSettingsLoaded,
   indicatorWarmupCount, previousIndicatorWarmupCountRef, skipNextIndicatorReloadRef,
-  latestReplayRef, barsRef, warmupBarsRef, historyEpochRef, fetch, setWarmupBars, setEmaError,
+  latestReplayRef, barsRef, warmupBarsRef, historyEpochRef, fetch, setWarmupBars, setEmaError, viewChangingRef,
 }: Core) {
   // Retain one bounded prefix, including a short response at the dataset boundary.
   const completedRef = useRef<{ key: string; count: number; bars: AggregatedMarketBarData[] } | null>(null);
@@ -31,7 +31,7 @@ export function useReplayIndicatorWarmup({
     replaySession?.id, replaySession?.activeProjectionId, generation, displayIntervalSeconds, displaySession]);
 
   useEffect(() => {
-    if (!emaSettingsLoaded || !abrSettingsLoaded) return;
+    if (!emaSettingsLoaded || !abrSettingsLoaded || viewChangingRef.current) return;
     const previous = previousIndicatorWarmupCountRef.current;
     previousIndicatorWarmupCountRef.current = indicatorWarmupCount;
     // ABR's explicit update already loads its own authoritative window.
@@ -91,5 +91,5 @@ export function useReplayIndicatorWarmup({
     return () => controller.abort();
   }, [abrSettingsLoaded, barsRef, dataset.id, displayIntervalSeconds, displaySession, emaSettingsLoaded,
     fetch, firstSequence, firstTimestamp, generation, historyEpochRef, indicatorWarmupCount, latestReplayRef,
-    previousIndicatorWarmupCountRef, scope, setEmaError, setWarmupBars, skipNextIndicatorReloadRef, warmupBarsRef]);
+    previousIndicatorWarmupCountRef, scope, setEmaError, setWarmupBars, skipNextIndicatorReloadRef, warmupBarsRef, viewChangingRef]);
 }

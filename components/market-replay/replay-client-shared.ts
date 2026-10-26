@@ -1,10 +1,16 @@
 import { createUuid } from "@/lib/uuid";
-import { DEFAULT_REPLAY_MAX_VISIBLE_BARS } from "@/lib/market-replay/chart-range";
+import { type ReplayViewportSnapshot, DEFAULT_REPLAY_MAX_VISIBLE_BARS } from "@/lib/market-replay/chart-range";
 import { replayDisplayMetadataKey } from "@/lib/market-replay/dataset-refresh";
 import { EMA_LENGTH_MAX, EMA_LENGTH_MIN, type AggregatedMarketBarData, type DisplaySession, type MarketBarData, type MarketDatasetSummary } from "@/lib/market-replay/types";
 import type { ReplayTradeAnnotationData } from "@/lib/paper-trading/types";
 import type { ReplayServerResult } from "@/lib/market-replay/server-sync-types";
 import { type FibonacciRetracementStyle } from "@/lib/market-replay/chart-drawings";
+
+export type ReplayChartDisplay = {
+  displayIntervalSeconds: number;
+  displaySession: DisplaySession;
+  viewport: ReplayViewportSnapshot | null;
+};
 
 export type WindowPayload = {
   visibleBars: AggregatedMarketBarData[];
@@ -34,15 +40,16 @@ export function replayWindowRequest(
   displaySession: DisplaySession,
   warmupCount: number,
   focusSequence: number | null = null,
+  visibleCount = DEFAULT_REPLAY_MAX_VISIBLE_BARS,
 ) {
   const limitedWarmup = Math.min(EMA_LENGTH_MAX, warmupCount);
   const cacheKey = [
     "time-aggregation-v1", replayDisplayMetadataKey(dataset), dataset.id, dataset.dataVersion, endSequence, displayIntervalSeconds, displaySession,
-    DEFAULT_REPLAY_MAX_VISIBLE_BARS, limitedWarmup, focusSequence ?? "live",
+    visibleCount, limitedWarmup, focusSequence ?? "live",
   ].join(":");
   const params = new URLSearchParams({
     displayIntervalSeconds: String(displayIntervalSeconds), displaySession, endSequence: String(endSequence),
-    visibleCount: String(DEFAULT_REPLAY_MAX_VISIBLE_BARS), warmupCount: String(limitedWarmup),
+    visibleCount: String(visibleCount), warmupCount: String(limitedWarmup),
   });
   if (focusSequence !== null) params.set("focusSequence", String(focusSequence));
   return { cacheKey, params };

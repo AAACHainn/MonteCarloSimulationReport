@@ -19,7 +19,7 @@ import type { useReplayChartSetup } from "./use-replay-chart-setup";
 export function useReplayChartActions(core: ReturnType<typeof useReplayChartCore>, setup: ReturnType<typeof useReplayChartSetup>) {
   const [tradeBlockReason, setTradeBlockReason] = useState<string | null>(null);
   const {
-    replaySession, chartRef, candleRef, volumeRef, barsRef, drawingToolRef,
+    replaySession, viewportModeRef, viewportUpdatingRef, pendingFollowRef, chartRef, candleRef, volumeRef, barsRef, drawingToolRef,
     contextMenu, setContextMenu, measurement, drawingDraftRef, drawingPreviewRef, draft,
     setDraft, setOrderTicketPosition, riskPreferences, setRiskPreferences, setRiskSettingsOpen,
     setDefaultSaved, setDraftError, latest, currentPrice, syncLineActionCoordinates, syncDrawingPrimitive,
@@ -57,6 +57,10 @@ export function useReplayChartActions(core: ReturnType<typeof useReplayChartCore
   function resetChartView() {
     const chart = chartRef.current;
     if (!chart) return;
+    viewportModeRef.current = "following";
+    pendingFollowRef.current = false;
+    viewportUpdatingRef.current = true;
+    requestAnimationFrame(() => { viewportUpdatingRef.current = false; syncLineActionCoordinates(); });
     chart.timeScale().setVisibleLogicalRange(defaultReplayLogicalRange(chart.timeScale().width(), bars.length));
     candleRef.current?.priceScale().applyOptions({ autoScale: true });
     volumeRef.current?.priceScale().applyOptions({ autoScale: true });
