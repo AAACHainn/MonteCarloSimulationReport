@@ -680,6 +680,10 @@ try {
   for (const statement of walletMigration.replace(/^\s*--.*$/gm, "").split(";").map(s => s.trim()).filter(Boolean)) {
     await prisma.$executeRawUnsafe(statement.replace(/^CREATE TABLE /, "CREATE TABLE IF NOT EXISTS ").replace(/^CREATE UNIQUE INDEX /, "CREATE UNIQUE INDEX IF NOT EXISTS ").replace(/^CREATE INDEX /, "CREATE INDEX IF NOT EXISTS "));
   }
+  const cashColumns = await prisma.$queryRawUnsafe('PRAGMA table_info("PaperTradingSession")');
+  if (!cashColumns.some(c => c.name === "cashAdjustment")) {
+    await prisma.$executeRawUnsafe(readFileSync(new URL("../prisma/migrations/20261026170000_user_wallet_transfers/migration.sql", import.meta.url), "utf8"));
+  }
 } finally {
   await prisma.$disconnect();
 }

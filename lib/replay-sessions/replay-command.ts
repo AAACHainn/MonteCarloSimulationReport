@@ -1,3 +1,4 @@
+import { setAccountCashAdjustment } from "@/lib/paper-trading/account-cash";
 import type { Prisma, PaperTradingSession, ReplayCommand } from "@prisma/client";
 import { copy } from "@/lib/i18n";
 import { ReplaySessionError, getReplayScope, storageId } from "./scope";
@@ -8,7 +9,7 @@ import { saveReplayCheckpoint } from "./checkpoint";
 import { executeCurrentPriceClose } from "@/lib/paper-trading/current-price-close";
 import { serializeSourceBar } from "@/lib/market-replay/dataset";
 
-export type RecordedPayload = PaperAccountConfig & { logicalAccountId?: string; equitySampleStride?: number; order?: PaperOrderData; orderIds?: string[]; executeAtCurrentClose?: boolean; generation?: number };
+export type RecordedPayload = PaperAccountConfig & { cashAdjustment?: number; logicalAccountId?: string; equitySampleStride?: number; order?: PaperOrderData; orderIds?: string[]; executeAtCurrentClose?: boolean; generation?: number };
 export async function applyRecordedCommand(tx: Prisma.TransactionClient, command: ReplayCommand, account: PaperTradingSession | null, referencePrice: number | null) {
   const scope = getReplayScope()!;
   const payload = JSON.parse(command.payload) as RecordedPayload;
@@ -35,6 +36,9 @@ export async function applyRecordedCommand(tx: Prisma.TransactionClient, command
         if (!bar || payload.generation === undefined) throw conflict(order.id);
         account = await executeCurrentPriceClose(tx, account, payload.generation, serializeSourceBar(bar), order.id);
       }
+    } else if (command.type === "CASH_TRANSFER") {
+      if (scope.mode !== "TRAINING" || account.netQuantity !== 0 || !Number.isFinite(payload.cashAdjustment) || await tx.paperOrder.count({ where: { sessionId: account.id, status: "PENDING" } })) throw conflict();
+      account = await setAccountCashAdjustment(tx, account, payload.cashAdjustment!);
     } else if (command.type === "ORDER_UPDATE") {
       const order = payload.order;
       if (!order) throw conflict();
@@ -56,7 +60,7 @@ export async function applyRecordedCommand(tx: Prisma.TransactionClient, command
       const updated = await tx.paperOrder.updateMany({ where: { sessionId: account.id, id: { in: ids.map(storageId) }, status: "PENDING" }, data: { status: "CANCELLED", cancelReason: "USER_CANCELLED" } });
       if (updated.count !== ids.length) throw conflict(ids[0]);
     } else throw new ReplaySessionError("HISTORY_MISSING", 409, copy.replaySessions.correctionHistoryMissing);
-    if (!(command.type === "ORDER_CREATE" && payload.executeAtCurrentClose)) {
+    if (command.type !== "CASH_TRANSFER" && !(command.type === "ORDER_CREATE" && payload.executeAtCurrentClose)) {
       account = await tx.paperTradingSession.update({ where: { id: account.id }, data: { version: { increment: 1 } } });
     }
   }

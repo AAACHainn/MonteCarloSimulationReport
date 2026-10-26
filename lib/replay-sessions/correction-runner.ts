@@ -1,3 +1,4 @@
+import { accountBalance } from "@/lib/paper-trading/account-funds";
 import { prisma } from "@/lib/db";
 import { randomUUID } from "node:crypto";
 import type { PaperTradingSession, ReplayCommand, ReplayCorrectionJob } from "@prisma/client";
@@ -190,7 +191,7 @@ export async function runReplayCorrection(jobId: string) {
       const [beforeEntries, afterEntries] = await Promise.all([
         prisma.replayJournalEntry.count({ where: { projectionId: job.baseProjectionId } }), prisma.replayJournalEntry.count({ where: { projectionId: projection.id } }),
       ]);
-      const stats = (a: PaperTradingSession | null) => a ? ({ currency: a.currency, balance: a.initialCapital + a.realizedPnl - a.totalFees, netQuantity: a.netQuantity,
+      const stats = (a: PaperTradingSession | null) => a ? ({ currency: a.currency, balance: accountBalance(a), netQuantity: a.netQuantity,
         realizedPnl: a.realizedPnl, totalFees: a.totalFees, totalSlippage: a.totalSlippage, peakEquity: a.peakEquity, maxDrawdown: a.maxDrawdown, tradeCount: a.closedTradeCount }) : null;
       await prisma.replayCorrectionJob.updateMany({ where: { id: jobId, status: "RUNNING" }, data: { status: "READY", heartbeatAt: new Date(), summary: JSON.stringify({
         ...summary, before: stats(baseAccount), after: stats(after), beforeEntries, afterEntries, removedCommands,

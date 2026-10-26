@@ -307,7 +307,7 @@ describe("replay advance with real SQLite", () => {
     for (const id of ["flat-reference", "flat-summary"]) {
       await seed(id, 1, 5000);
       await prisma.paperTradingSession.updateMany({ where: { datasetId: id }, data: { equitySampleStride: 113,
-        realizedPnl: -100, totalFees: 25, peakEquity: 100500, maxDrawdown: 0.001 } });
+        realizedPnl: -100, totalFees: 25, peakEquity: 100500, maxDrawdown: 0.001, cashAdjustment: 250 } });
     }
     for (const target of [999, 1999, 2999, 3599]) {
       const body = await serverSyncBody("flat-reference", target, `reference-${target}`);
@@ -326,6 +326,9 @@ describe("replay advance with real SQLite", () => {
     const reference = (await getPaperSessionSnapshot("flat-reference"))!;
     expect({ ...fast.session, id: "same", datasetId: "same" }).toEqual({ ...reference.session, id: "same", datasetId: "same" });
     expect(fast.stats).toEqual(reference.stats);
+    expect(fast.session.cashAdjustment).toBe(250);
+    expect(fast.session.maxDrawdown).toBeCloseTo(625 / 100500);
+    expect((await prisma.paperEquityPoint.findFirstOrThrow({ where: { session: { datasetId: "flat-summary" } }, orderBy: { sequence: "asc" } })).balance).toBe(100125);
     const equity = async (id: string) => prisma.paperEquityPoint.findMany({ where: { session: { datasetId: id } },
       orderBy: { sequence: "asc" }, select: { sequence: true, timestamp: true, balance: true, equity: true, drawdown: true } });
     expect(await equity("flat-summary")).toEqual(await equity("flat-reference"));

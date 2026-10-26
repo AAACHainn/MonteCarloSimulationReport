@@ -1,3 +1,4 @@
+import { accountBalance } from "@/lib/paper-trading/account-funds";
 import { sqliteWriteTransaction } from "@/lib/sqlite-write";
 import { isClosingOrder, parseChecklist, parseTrainingGate, type EntryDiscipline } from "@/lib/paper-trading/training-gate";
 import { withReplaySessionRoute } from '@/lib/replay-sessions/scope';
@@ -70,7 +71,8 @@ async function handlePOST(request: Request, context: RouteContext) {
     const reduceOnly = parsed.data.reduceOnly || isClosingOrder(session.netQuantity, parsed.data.side, quantity);
     let discipline: EntryDiscipline | null = null;
     if (getReplayScope()?.mode === "TRAINING" && !reduceOnly) {
-      const owner = await tx.replaySession.findUniqueOrThrow({ where: { id: getReplayScope()!.id }, select: { trainingGate: true } });
+      const owner = await tx.replaySession.findUniqueOrThrow({ where: { id: getReplayScope()!.id }, select: { trainingGate: true, userId: true, accountCategory: true } });
+      if (owner.userId && owner.accountCategory === "STANDARD" && accountBalance(session) < 0.005) return { status: 409, error: copy.userWallet.noTradingCapital };
       const gate = parseTrainingGate(owner.trainingGate);
       if (gate.active) {
         const approval = parsed.data.gateApproval;

@@ -1,3 +1,4 @@
+import { accountBalance, tradingBalance } from "./account-funds";
 import type { PaperEquityPointData, PaperSessionState } from "./types";
 
 /** Include protective, market and not-yet-active orders in pendingCount. */
@@ -10,7 +11,7 @@ export function canAdvanceFlatAccount(state: Pick<PaperSessionState, "netQuantit
 /** Exact equivalent of advancing a constant, flat equity curve source by source. */
 export function advanceFlatAccount(state: PaperSessionState, targetSequence: number): PaperSessionState {
   if (!canAdvanceFlatAccount(state, 0, 0) || targetSequence <= state.lastProcessedSequence) throw new Error("Invalid flat advance.");
-  const equity = state.initialCapital + state.realizedPnl - state.totalFees;
+  const equity = tradingBalance(state);
   const peakEquity = Math.max(state.peakEquity, equity);
   const drawdown = peakEquity > 0 ? Math.max(0, (peakEquity - equity) / peakEquity) : 0;
   return { ...state, lastProcessedSequence: targetSequence, version: state.version + targetSequence - state.lastProcessedSequence,
@@ -18,8 +19,8 @@ export function advanceFlatAccount(state: PaperSessionState, targetSequence: num
 }
 
 export function flatEquityPoint(state: PaperSessionState, sequence: number, timestamp: string): PaperEquityPointData {
-  const equity = state.initialCapital + state.realizedPnl - state.totalFees;
-  return { sequence, timestamp, balance: equity, equity,
+  const equity = tradingBalance(state);
+  return { sequence, timestamp, balance: accountBalance(state), equity: accountBalance(state),
     drawdown: state.peakEquity > 0 ? Math.max(0, (state.peakEquity - equity) / state.peakEquity) : 0 };
 }
 

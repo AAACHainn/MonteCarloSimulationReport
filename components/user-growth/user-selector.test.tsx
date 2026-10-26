@@ -122,8 +122,8 @@ describe("user selector menu ordering and search interaction", () => {
   it("places the selected user first and global second, or global first when selected globally", () => {
     const personalTree = render(identity("beta"));
     const trigger = all(personalTree).find(element => element.type === "button" && element.props["aria-label"] === `${copy.userGrowth.selection}：BETA`)!;
-    expect(trigger.props.className).toContain("h-5 w-5");
-    expect(all(trigger as Node).find(element => element.type === "avatar")?.props.size).toBe("compact");
+    expect(trigger.props.className).toContain("h-8 w-8");
+    expect(all(trigger as Node).find(element => element.type === "avatar")?.props.size).toBe("list");
     const personal = userChoices(openUserList(identity("beta"))).map(button => text(button.props.children as Node));
     expect(personal).toEqual(["BETA凡人", `${copy.userGrowth.all}${copy.userGrowth.global}`, "ALPHA凡人", "GAMMA凡人"]);
     const global = userChoices(openUserList()).map(button => text(button.props.children as Node));

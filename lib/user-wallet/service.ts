@@ -1,3 +1,4 @@
+import { accountBalance } from "@/lib/paper-trading/account-funds";
 import type { Prisma } from "@prisma/client";
 import { copy } from "@/lib/i18n";
 import { formatNumber } from "@/lib/format";
@@ -78,15 +79,15 @@ export async function standardSettlement(tx: Prisma.TransactionClient, owner: Wa
   if (!allocation || allocation.userId !== owner.userId) throw new ReplaySessionError("WALLET_CONFLICT", 409, t.conflict);
   const pending = await tx.paperOrder.count({ where: { sessionId: account.id, status: "PENDING" } });
   const blocked = !allocation.settledAt && (account.netQuantity !== 0 || pending > 0);
-  const amount = allocation.settledAt ? BigInt(0) : moneyMinor(Math.max(0, account.initialCapital + account.realizedPnl - account.totalFees), false);
+  const amount = allocation.settledAt ? BigInt(0) : moneyMinor(Math.max(0, accountBalance(account)), false);
   return { account, allocation, amount, blocked };
 }
-/** Full withdrawal only. The caller archives/deletes the session in this same transaction. */
+/** Final settlement for deletion/restart only; regular transfers keep the allocation open. */
 export async function settleStandardAccount(tx: Prisma.TransactionClient, owner: WalletOwner, projectionId: string) {
   const result = await standardSettlement(tx, owner, projectionId);
   if (!result || result.allocation.settledAt) return result;
   if (result.blocked) throw new ReplaySessionError("WALLET_NOT_FLAT", 409, t.mustBeFlat);
   await writeWalletEntry(tx, { userId: owner.userId!, type: "WITHDRAWAL", sourceKey: `WITHDRAWAL:${projectionId}`, amountMinor: result.amount, sessionId: owner.id, sessionName: owner.name });
-  await tx.userWalletAllocation.update({ where: { projectionId }, data: { withdrawnMinor: result.amount, settledAt: new Date() } });
+  await tx.userWalletAllocation.update({ where: { projectionId }, data: { withdrawnMinor: { increment: result.amount }, settledAt: new Date() } });
   return result;
 }

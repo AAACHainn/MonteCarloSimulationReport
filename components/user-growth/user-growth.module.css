@@ -6,7 +6,7 @@
   --growth-gold-soft: #f6f0e2;
 }
 .identity { background: var(--growth-paper); position: relative; border-top: 2px solid var(--growth-jade); }
-.realm { color: var(--growth-jade); font-family: "Songti SC", "SimSun", serif; }
+.realm { font-family: "Songti SC", "SimSun", serif; }
 .jade { color: var(--growth-jade); }
 .gold { color: var(--growth-gold); background: var(--growth-gold-soft); }
 .mountains { position: absolute; right: 0; bottom: 0; width: 28%; height: 84px; color: var(--growth-jade); opacity: .12; pointer-events: none; }
@@ -26,3 +26,7 @@
 @keyframes attained { from { box-shadow: inset 0 0 0 2px var(--growth-gold); } to { box-shadow: inset 0 0 0 0 transparent; } }
 @media (max-width: 639px) { .condition { grid-template-columns: 1fr auto; } .condition > :last-child { grid-column: 1 / -1; } .track { gap: 12px; } }
 @media (prefers-reduced-motion: reduce) { .bar { transition: none; } .breakthrough { animation: none; } }
+
+.settlementToast { animation: settlement-notice 5s ease-out forwards; }
+@keyframes settlement-notice { 0%, 72% { opacity: 1; } 100% { opacity: 0; } }
+@media (prefers-reduced-motion: reduce) { .settlementToast { animation: none; } }

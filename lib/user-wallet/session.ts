@@ -1,3 +1,4 @@
+import { accountBalance } from "@/lib/paper-trading/account-funds";
 import type { Prisma } from "@prisma/client";
 import { copy } from "@/lib/i18n";
 import { getReplayScope, ReplaySessionError } from "@/lib/replay-sessions/scope";
@@ -10,12 +11,12 @@ export async function sessionWalletPreview(tx: Prisma.TransactionClient) {
   const scope = getReplayScope()!;
   const owner = await tx.replaySession.findUniqueOrThrow({ where: { id: scope.id } });
   if (owner.activeProjectionId !== scope.projectionId || owner.version !== scope.version) throw new ReplaySessionError("SESSION_CONFLICT", 409, copy.replaySessions.conflict);
-  const base = { managed: walletManaged(owner), category: owner.accountCategory, version: owner.version, kind: "FORFEIT" as DeleteSettlement["kind"], amount: 0, received: 0, abandoned: 0, blocked: !!owner.pendingCorrectionId, settled: false, hasAccount: false, available: 0 };
+  const base = { managed: walletManaged(owner), category: owner.accountCategory, version: owner.version, kind: "FORFEIT" as DeleteSettlement["kind"], amount: 0, received: 0, abandoned: 0, blocked: !!owner.pendingCorrectionId, settled: false, hasAccount: false, balance: 0, status: owner.status, available: 0 };
   if (!base.managed) return base;
   base.available = moneyValue((await requireWallet(tx, owner.userId!)).balanceMinor);
   if (owner.accountCategory !== "PROP_PRACTICE") {
     const result = await standardSettlement(tx, owner, scope.projectionId);
-    return result ? { ...base, hasAccount: true, kind: result.allocation.settledAt ? "FORFEIT" as const : "WITHDRAW" as const, amount: moneyValue(result.amount), received: moneyValue(result.amount), blocked: base.blocked || result.blocked, settled: !!result.allocation.settledAt } : base;
+    return result ? { ...base, hasAccount: true, balance: Math.round(accountBalance(result.account) * 100) / 100, kind: result.allocation.settledAt ? "FORFEIT" as const : "WITHDRAW" as const, amount: moneyValue(result.amount), received: moneyValue(result.amount), blocked: base.blocked || result.blocked, settled: !!result.allocation.settledAt } : base;
   }
   const runtime = await loadPropAccount(tx);
   if (!runtime) return base;

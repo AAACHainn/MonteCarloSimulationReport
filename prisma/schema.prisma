@@ -516,6 +516,7 @@ model PaperTradingSession {
   journalSessionId      String?
   journalSession        ReplayJournalSession? @relation(fields: [journalSessionId], references: [id], onDelete: SetNull)
   initialCapital        Float
+  cashAdjustment        Float              @default(0)
   currency              String
   commissionBps         Float              @default(0)
   slippageBps           Float              @default(0)

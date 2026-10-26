@@ -1,3 +1,4 @@
+import { accountBalance } from "./account-funds";
 import { readSessionGrowth } from "@/lib/user-growth/read";
 import { parseEntryDiscipline, parseTrainingGate } from "./training-gate";
 import { accountWhere, entryProjectionWhere, getReplayScope } from '@/lib/replay-sessions/scope';
@@ -29,6 +30,7 @@ export type SessionRecord = {
   tradeStatsVersion: number; closedTradeCount: number; winningTradeCount: number; losingTradeCount: number;
   grossWinningPnl: number; grossLosingPnl: number; currentWinStreak: number; currentLossStreak: number;
   maxConsecutiveWins: number; maxConsecutiveLosses: number;
+  cashAdjustment?: number;
   activeCycleKey?: string | null;
 };
 
@@ -66,7 +68,7 @@ export async function ensurePaperTradeStats(
 export function serializePaperSession(session: SessionRecord): PaperSessionState {
   return {
     id: logicalId(session.id), datasetId: session.datasetId, initialCapital: session.initialCapital,
-    currency: session.currency, commissionBps: session.commissionBps, slippageBps: session.slippageBps,
+    cashAdjustment: session.cashAdjustment ?? 0, currency: session.currency, commissionBps: session.commissionBps, slippageBps: session.slippageBps,
     lastProcessedSequence: session.lastProcessedSequence, netQuantity: session.netQuantity,
     averageEntryPrice: session.averageEntryPrice, realizedPnl: session.realizedPnl,
     totalFees: session.totalFees, totalSlippage: session.totalSlippage,
@@ -192,10 +194,10 @@ export async function getPaperSessionSnapshot(datasetId: string, db: Prisma.Tran
   ];
   const unrealizedPnl = currentBar && session.averageEntryPrice !== null
     ? (currentBar.close - session.averageEntryPrice) * session.netQuantity : 0;
-  const balance = session.initialCapital + session.realizedPnl - session.totalFees;
+  const balance = accountBalance(session);
   const equity = balance + unrealizedPnl;
   const stats: PaperTradingStats = {
-    balance, equity, unrealizedPnl, netPnl: equity - session.initialCapital,
+    balance, equity, unrealizedPnl, netPnl: equity - session.initialCapital - (session.cashAdjustment ?? 0),
     tradeCount: session.closedTradeCount,
     journalEntryCount,
     winRate: session.closedTradeCount ? session.winningTradeCount / session.closedTradeCount : 0,

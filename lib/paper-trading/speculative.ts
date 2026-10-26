@@ -36,6 +36,7 @@ export function paperStateFingerprint(session: PaperSessionState, activeOrders: 
     netQuantity: session.netQuantity,
     activeCycleKey: session.activeCycleKey ?? null,
     averageEntryPrice: session.averageEntryPrice,
+    ...(session.cashAdjustment ? { cashAdjustment: session.cashAdjustment } : {}),
     realizedPnl: session.realizedPnl,
     totalFees: session.totalFees,
     totalSlippage: session.totalSlippage,

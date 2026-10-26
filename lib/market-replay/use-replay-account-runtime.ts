@@ -9,7 +9,8 @@ export function useReplayAccountRuntime(
   paperSnapshot: PaperSessionSnapshot | null,
   setPaperSnapshot: Dispatch<SetStateAction<PaperSessionSnapshot | null>>,
 ) {
-  const [growthNotice, setGrowthNotice] = useState<string | null>(null);
+  const [growthFeedback, setGrowthFeedback] = useState<{ message: string; revision: number } | null>(null);
+  const growthRevision = useRef(0);
   const paperSnapshotRef = useRef<PaperSessionSnapshot | null>(paperSnapshot);
   const confirmedPaperSnapshotRef = useRef<PaperSessionSnapshot | null>(null);
   const paperSessionLoadedRef = useRef(false);
@@ -20,10 +21,10 @@ export function useReplayAccountRuntime(
 
   useEffect(() => { paperSnapshotRef.current = paperSnapshot; }, [paperSnapshot]);
   useEffect(() => {
-    if (!growthNotice) return;
-    const timer = setTimeout(() => setGrowthNotice(null), 5000);
+    if (!growthFeedback) return;
+    const timer = setTimeout(() => setGrowthFeedback(null), 5000);
     return () => clearTimeout(timer);
-  }, [growthNotice]);
+  }, [growthFeedback]);
 
   const commitPaperSnapshot = useCallback((snapshot: PaperSessionSnapshot | null) => {
     paperSnapshotRef.current = snapshot;
@@ -32,14 +33,14 @@ export function useReplayAccountRuntime(
 
   const commitConfirmedPaperSnapshot = useCallback((snapshot: PaperSessionSnapshot | null) => {
     const notice = settledGrowthNotice(confirmedPaperSnapshotRef.current?.growth, snapshot?.growth);
-    if (notice) setGrowthNotice(notice);
-    else if (confirmedPaperSnapshotRef.current?.session.id !== snapshot?.session.id) setGrowthNotice(null);
+    if (notice) setGrowthFeedback({ message: notice, revision: ++growthRevision.current });
+    else if (confirmedPaperSnapshotRef.current?.session.id !== snapshot?.session.id) setGrowthFeedback(null);
     confirmedPaperSnapshotRef.current = snapshot;
     commitPaperSnapshot(snapshot);
   }, [commitPaperSnapshot]);
 
   return {
-    growthNotice, paperSnapshotRef,
+    growthNotice: growthFeedback?.message ?? null, growthNoticeKey: growthFeedback?.revision ?? 0, paperSnapshotRef,
     confirmedPaperSnapshotRef,
     paperSessionLoadedRef,
     paperSessionLoadRef,

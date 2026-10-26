@@ -8,7 +8,7 @@ vi.mock("@/lib/db", async () => {
   const { tmpdir } = await import("node:os");
   const { join } = await import("node:path");
   const { randomUUID: uuid } = await import("node:crypto");
-  return { prisma: createDatabaseClient({ datasourceUrl: `file:${join(tmpdir(), `user-wallet-lifecycle-${uuid()}.db`)}` }, { allowCreate: true }) };
+  return { prisma: createDatabaseClient({ datasourceUrl: `file:${join(tmpdir(), `user-wallet-lifecycle-${uuid()}.db`)}` }, { allowCreate: true }), replayDatabaseQueryCount: () => null };
 });
 
 import { prisma } from "@/lib/db";
@@ -16,11 +16,15 @@ import { sqliteWriteTransaction } from "@/lib/sqlite-write";
 import { saveProfile } from "@/lib/user-growth/service";
 import { createReplaySession, restartReplaySession } from "@/lib/replay-sessions/service";
 import { loadReplayScope, runWithReplayScope } from "@/lib/replay-sessions/scope";
+import { applyRecordedCommand } from "@/lib/replay-sessions/replay-command";
+import { createCorrection } from "@/lib/replay-sessions/corrections";
 import { defaultPropRules, type PropRules } from "@/lib/prop-practice/rules";
 import { savePropTemplate, confirmPropPromotion, confirmPropPayout } from "@/lib/prop-practice/service";
 import { writeWalletEntry } from "./service";
 import { POST as paperAccountPOST } from "@/app/api/market-datasets/[id]/paper-session/route";
-import { GET as walletPreviewGET, POST as walletWithdrawPOST } from "@/app/api/replay-sessions/[sessionId]/wallet/route";
+import { POST as paperOrderPOST } from "@/app/api/market-datasets/[id]/paper-session/orders/route";
+import { POST as replayAdvancePOST } from "@/app/api/market-datasets/[id]/replay/advance/route";
+import { GET as walletPreviewGET, POST as walletTransferPOST } from "@/app/api/replay-sessions/[sessionId]/wallet/route";
 import { GET as userWalletGET } from "@/app/api/users/[userId]/wallet/route";
 import { DELETE as sessionDELETE } from "@/app/api/replay-sessions/[sessionId]/route";
 import { DELETE as datasetDELETE } from "@/app/api/market-datasets/[id]/route";
@@ -71,6 +75,11 @@ async function createStandard(userId: string, capital = 1000, marketId = dataset
   const response = await paperAccountPOST(apiRequest(session, "POST", { ...config, initialCapital: capital }), datasetContext(marketId));
   expect(response.status, JSON.stringify(await response.clone().json())).toBe(201);
   return session;
+}
+async function postTransfer(session: Session, userId: string, kind: "DEPOSIT" | "WITHDRAW", amount: number, requestId = randomUUID()) {
+  const scope = await loadReplayScope(session.id);
+  return walletTransferPOST(new Request("http://localhost/api/test", { method: "POST", headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ userId, kind, amount, expectedVersion: scope.version, requestId }) }), { params: Promise.resolve({ sessionId: session.id }) });
 }
 function propRules(purchaseCost = 0, activationCost = 0): PropRules {
   const rules = structuredClone(defaultPropRules);
@@ -143,21 +152,184 @@ describe("wallet lifecycle APIs with isolated SQLite", () => {
     expect(await ownerWallet(poor.id)).toMatchObject({ balanceMinor: BigInt(1_000_000) });
   });
 
-  it("withdraws a standard account in full, archives it, and keeps the same projection settled", async () => {
+  it("supports repeated full withdrawal and deposits without archiving or settling the account", async () => {
     const user = await makeUser();
     const session = await createStandard(user.id, 3000);
-    const current = await loadReplayScope(session.id);
-    const previewResponse = await walletPreviewGET(new Request(`http://localhost/api/test?replaySessionId=${session.id}`), { params: Promise.resolve({ sessionId: session.id }) });
-    expect(await previewResponse.json()).toMatchObject({ kind: "WITHDRAW", amount: 3000, blocked: false });
-    const response = await walletWithdrawPOST(new Request("http://localhost/api/test", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ expectedVersion: current.version, requestId: randomUUID() }) }), { params: Promise.resolve({ sessionId: session.id }) });
-    expect(response.status, JSON.stringify(await response.clone().json())).toBe(200);
-    expect(await response.json()).toMatchObject({ ok: true, amount: 3000 });
+    const transfer = async (kind: "DEPOSIT" | "WITHDRAW", amount: number, requestId = randomUUID()) => {
+      const scope = await loadReplayScope(session.id);
+      return walletTransferPOST(new Request("http://localhost/api/test", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ userId: user.id, kind, amount, expectedVersion: scope.version, requestId }) }), { params: Promise.resolve({ sessionId: session.id }) });
+    };
+
+    const first = await transfer("WITHDRAW", 3000);
+    expect(first.status, JSON.stringify(await first.clone().json())).toBe(200);
     expect(await ownerWallet(user.id)).toMatchObject({ balanceMinor: BigInt(1_000_000) });
-    expect(await prisma.userWalletAllocation.findUniqueOrThrow({ where: { projectionId: session.activeProjectionId } })).toMatchObject({ withdrawnMinor: BigInt(300_000), settledAt: expect.any(Date) });
-    expect(await prisma.userWalletEntry.count({ where: { userId: user.id, type: "WITHDRAWAL" } })).toBe(1);
-    expect(await prisma.replaySession.findUniqueOrThrow({ where: { id: session.id } })).toMatchObject({ status: "ARCHIVED" });
+    expect(await prisma.paperTradingSession.findUniqueOrThrow({ where: { projectionId: session.activeProjectionId } })).toMatchObject({ cashAdjustment: -3000, initialCapital: 3000, realizedPnl: 0, totalFees: 0 });
+    expect(await prisma.replaySession.findUniqueOrThrow({ where: { id: session.id } })).toMatchObject({ status: "ACTIVE" });
+    expect(await prisma.userWalletAllocation.findUniqueOrThrow({ where: { projectionId: session.activeProjectionId } })).toMatchObject({ depositedMinor: BigInt(300_000), withdrawnMinor: BigInt(300_000), settledAt: null });
+
+    const deposit = await transfer("DEPOSIT", 1500);
+    expect(deposit.status, JSON.stringify(await deposit.clone().json())).toBe(200);
+    expect(await ownerWallet(user.id)).toMatchObject({ balanceMinor: BigInt(850_000) });
+    expect(await prisma.paperTradingSession.findUniqueOrThrow({ where: { projectionId: session.activeProjectionId } })).toMatchObject({ cashAdjustment: -1500 });
+
+    const second = await transfer("WITHDRAW", 1500);
+    expect(second.status, JSON.stringify(await second.clone().json())).toBe(200);
+    expect(await ownerWallet(user.id)).toMatchObject({ balanceMinor: BigInt(1_000_000) });
+    expect(await prisma.replaySession.findUniqueOrThrow({ where: { id: session.id } })).toMatchObject({ status: "ACTIVE" });
+    const allocation = await prisma.userWalletAllocation.findUniqueOrThrow({ where: { projectionId: session.activeProjectionId } });
+    expect(allocation).toMatchObject({ depositedMinor: BigInt(450_000), withdrawnMinor: BigInt(450_000), settledAt: null });
+
+    const walletResponse = await userWalletGET(new Request("http://localhost/api/test"), { params: Promise.resolve({ userId: user.id }) });
+    expect(await walletResponse.json()).toMatchObject({ available: 10_000, held: 0, accountsTotal: 1, accounts: [expect.objectContaining({ id: session.activeProjectionId, status: "ACTIVE", balance: 0, deposited: 4500, withdrawn: 4500 })] });
+    expect(await prisma.userWalletEntry.count({ where: { userId: user.id, type: "WITHDRAWAL" } })).toBe(2);
+    expect(await prisma.userWalletEntry.count({ where: { userId: user.id, type: "DEPOSIT" } })).toBe(2);
   });
 
+  it("shows negative account cash accurately, accepts a deposit, and caps withdrawal at the recovered balance without changing trading PnL", async () => {
+    const user = await makeUser();
+    const session = await createStandard(user.id, 1000);
+    await prisma.paperTradingSession.update({ where: { projectionId: session.activeProjectionId }, data: { cashAdjustment: -1150, realizedPnl: 75, totalFees: 25 } });
+
+    const preview = () => walletPreviewGET(new Request("http://localhost/api/test"), { params: Promise.resolve({ sessionId: session.id }) });
+    const wallet = () => userWalletGET(new Request("http://localhost/api/test"), { params: Promise.resolve({ userId: user.id }) });
+    expect(await (await preview()).json()).toMatchObject({ balance: -100, amount: 0 });
+    expect(await (await wallet()).json()).toMatchObject({ held: 0, accounts: [expect.objectContaining({ balance: -100 })] });
+
+    const deposit = await postTransfer(session, user.id, "DEPOSIT", 200);
+    expect(deposit.status, JSON.stringify(await deposit.clone().json())).toBe(200);
+    expect(await (await preview()).json()).toMatchObject({ balance: 100, amount: 100 });
+
+    const withdrawal = await postTransfer(session, user.id, "WITHDRAW", 100);
+    expect(withdrawal.status, JSON.stringify(await withdrawal.clone().json())).toBe(200);
+    expect(await (await wallet()).json()).toMatchObject({ available: 8900, held: 0, accounts: [expect.objectContaining({ balance: 0 })] });
+    expect(await prisma.paperTradingSession.findUniqueOrThrow({ where: { projectionId: session.activeProjectionId } })).toMatchObject({ initialCapital: 1000, cashAdjustment: -1050, realizedPnl: 75, totalFees: 25 });
+  });
+
+  it("deduplicates concurrent transfer retries and rejects request-id reuse with different details", async () => {
+    const user = await makeUser();
+    const session = await createStandard(user.id, 1000);
+    const requestId = randomUUID();
+    const scope = await loadReplayScope(session.id);
+    const send = (kind: "DEPOSIT" | "WITHDRAW", amount: number) => walletTransferPOST(new Request("http://localhost/api/test", {
+      method: "POST", headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ userId: user.id, kind, amount, expectedVersion: scope.version, requestId }),
+    }), { params: Promise.resolve({ sessionId: session.id }) });
+    const [first, retry] = await Promise.all([send("DEPOSIT", 125.25), send("DEPOSIT", 125.25)]);
+    expect(first.status).toBe(200);
+    expect(retry.status).toBe(200);
+    expect(await ownerWallet(user.id)).toMatchObject({ balanceMinor: BigInt(887_475) });
+    expect(await prisma.userWalletEntry.count({ where: { userId: user.id, sourceKey: `TRANSFER:${session.id}:${requestId}` } })).toBe(1);
+    expect(await prisma.userWalletAllocation.findUniqueOrThrow({ where: { projectionId: session.activeProjectionId } })).toMatchObject({ depositedMinor: BigInt(112_525), withdrawnMinor: BigInt(0), settledAt: null });
+    expect((await prisma.paperTradingSession.findUniqueOrThrow({ where: { projectionId: session.activeProjectionId } })).cashAdjustment).toBe(125.25);
+
+    expect((await send("DEPOSIT", 125.26)).status).toBe(409);
+    expect((await send("WITHDRAW", 125.25)).status).toBe(409);
+    expect((await ownerWallet(user.id)).balanceMinor).toBe(BigInt(887_475));
+    expect(await prisma.userWalletEntry.count({ where: { userId: user.id, sourceKey: `TRANSFER:${session.id}:${requestId}` } })).toBe(1);
+  });
+
+  it("allows replay to continue at zero balance, blocks new orders, then resumes trading after a deposit", async () => {
+    const user = await makeUser();
+    const session = await createStandard(user.id, 1000);
+    const advance = async (expectedCurrentSequence: number) => {
+      const account = await prisma.paperTradingSession.findUniqueOrThrow({ where: { projectionId: session.activeProjectionId } });
+      return replayAdvancePOST(new Request(`http://localhost/api/advance?replaySessionId=${session.id}`, { method: "POST",
+        headers: { "Content-Type": "application/json", "X-Replay-Projection": session.activeProjectionId },
+        body: JSON.stringify({ expectedCurrentSequence, expectedVersion: account.version, count: 1, displayIntervalSeconds: 60, displaySession: "ETH" }) }), context);
+    };
+    expect((await advance(-1)).status).toBe(200);
+    expect((await postTransfer(session, user.id, "WITHDRAW", 1000)).status).toBe(200);
+    const emptyAccount = await prisma.paperTradingSession.findUniqueOrThrow({ where: { projectionId: session.activeProjectionId } });
+    expect(emptyAccount.cashAdjustment).toBe(-1000);
+    expect((await advance(0)).status).toBe(200);
+
+    const order = async () => {
+      const account = await prisma.paperTradingSession.findUniqueOrThrow({ where: { projectionId: session.activeProjectionId } });
+      return paperOrderPOST(apiRequest(session, "POST", { side: "BUY", type: "MARKET", quantity: 1, expectedVersion: account.version }), context);
+    };
+    const denied = await order();
+    expect(denied.status).toBe(409);
+    expect(await denied.json()).toMatchObject({ error: expect.any(String) });
+    expect(await prisma.paperOrder.count({ where: { sessionId: (await prisma.paperTradingSession.findUniqueOrThrow({ where: { projectionId: session.activeProjectionId } })).id } })).toBe(0);
+
+    expect((await postTransfer(session, user.id, "DEPOSIT", 500)).status).toBe(200);
+    expect((await order()).status).toBe(201);
+    expect((await advance(1)).status).toBe(200);
+    const account = await prisma.paperTradingSession.findUniqueOrThrow({ where: { projectionId: session.activeProjectionId } });
+    expect(account.netQuantity).toBe(1);
+    expect(account.cashAdjustment).toBe(-500);
+  });
+  it("replays a cash-transfer command into a new projection without charging the wallet again", async () => {
+    const user = await makeUser();
+    const session = await createStandard(user.id, 1000);
+    const baseAccount = await prisma.paperTradingSession.findUniqueOrThrow({ where: { projectionId: session.activeProjectionId } });
+    const requestId = randomUUID();
+    const response = await postTransfer(session, user.id, "DEPOSIT", 200, requestId);
+    expect(response.status).toBe(200);
+    const availableAfterTransfer = (await ownerWallet(user.id)).balanceMinor;
+    expect(availableAfterTransfer).toBe(BigInt(880_000));
+    const command = await prisma.replayCommand.findFirstOrThrow({ where: { replaySessionId: session.id, type: "CASH_TRANSFER" } });
+    await expect(createCorrection(session.id, { requestId: randomUUID(), type: "REWIND", targetSequence: -1, expectedVersion: (await loadReplayScope(session.id)).version })).rejects.toMatchObject({ code: "MODE_NOT_ALLOWED" });
+    expect(JSON.parse(command.payload)).toEqual({ cashAdjustment: 200 });
+
+    const dataset = await prisma.marketDataset.findUniqueOrThrow({ where: { id: datasetId }, select: { historyVersion: true } });
+    const projection = await prisma.replayProjection.create({ data: { replaySessionId: session.id, status: "BUILDING", historyVersion: dataset.historyVersion, currentSequence: -1 } });
+    const replayAccount = await prisma.paperTradingSession.create({ data: { ...baseAccount, id: `replay-${randomUUID()}`, projectionId: projection.id, cashAdjustment: 0 } });
+    const scope = await loadReplayScope(session.id);
+    await runWithReplayScope({ ...scope, projectionId: projection.id, status: "ACTIVE" }, () => prisma.$transaction(tx => applyRecordedCommand(tx, command, replayAccount, null)));
+
+    expect(await prisma.paperTradingSession.findUniqueOrThrow({ where: { projectionId: projection.id } })).toMatchObject({ cashAdjustment: 200, initialCapital: 1000, realizedPnl: 0, totalFees: 0 });
+    expect((await ownerWallet(user.id)).balanceMinor).toBe(availableAfterTransfer);
+    expect(await prisma.userWalletEntry.count({ where: { userId: user.id, sourceKey: `TRANSFER:${session.id}:${requestId}` } })).toBe(1);
+    expect(await prisma.userWalletEntry.count({ where: { userId: user.id, type: "DEPOSIT" } })).toBe(2);
+    expect(await prisma.replayProjectionCommand.count({ where: { projectionId: projection.id, commandId: command.id } })).toBe(1);
+  });
+  it("rejects invalid, misowned, excluded, unaffordable, archived-deposit and non-flat transfers without mutations", async () => {
+    const owner = await makeUser();
+    const other = await makeUser();
+    const session = await createStandard(owner.id, 1000);
+    expect((await postTransfer(session, other.id, "DEPOSIT", 10)).status).toBe(409);
+    expect((await postTransfer(session, owner.id, "DEPOSIT", 10.001)).status).toBe(400);
+    expect((await postTransfer(session, owner.id, "DEPOSIT", 10_001)).status).toBe(409);
+
+    await prisma.paperTradingSession.update({ where: { projectionId: session.activeProjectionId }, data: { netQuantity: 1, averageEntryPrice: 100 } });
+    expect((await postTransfer(session, owner.id, "WITHDRAW", 10)).status).toBe(409);
+    await prisma.paperTradingSession.update({ where: { projectionId: session.activeProjectionId }, data: { netQuantity: 0, averageEntryPrice: null } });
+    const account = await prisma.paperTradingSession.findUniqueOrThrow({ where: { projectionId: session.activeProjectionId } });
+    await prisma.paperOrder.create({ data: { sessionId: account.id, side: "BUY", type: "LIMIT", quantity: 1, price: 100, createdSequence: -1, activeFromSequence: 0 } });
+    expect((await postTransfer(session, owner.id, "DEPOSIT", 10)).status).toBe(409);
+    await prisma.paperOrder.deleteMany({ where: { sessionId: account.id } });
+
+    await prisma.replaySession.update({ where: { id: session.id }, data: { status: "ARCHIVED" } });
+    expect((await postTransfer(session, owner.id, "DEPOSIT", 10)).status).toBe(409);
+    const archivedWithdrawal = await postTransfer(session, owner.id, "WITHDRAW", 1000);
+    expect(archivedWithdrawal.status, JSON.stringify(await archivedWithdrawal.clone().json())).toBe(200);
+    expect(await prisma.replaySession.findUniqueOrThrow({ where: { id: session.id } })).toMatchObject({ status: "ARCHIVED" });
+
+    const unassigned = await createReplaySession(datasetId, { name: "unassigned transfer", mode: "TRAINING", timestamp: times[0], playbackRate: 1, displayIntervalSeconds: 60, displaySession: "ETH" });
+    expect((await postTransfer(unassigned, owner.id, "DEPOSIT", 10)).status).toBe(409);
+    const live = await createReplaySession(datasetId, { name: "live transfer", mode: "LIVE_REPLAY", userId: owner.id, timestamp: times[0], playbackRate: 1, displayIntervalSeconds: 60, displaySession: "ETH" });
+    expect((await postTransfer(live, owner.id, "DEPOSIT", 10)).status).toBe(409);
+    const prop = await createProp(owner.id);
+    expect((await postTransfer(prop, owner.id, "DEPOSIT", 10)).status).toBe(409);
+  });
+
+  it("rolls back a transfer ledger, allocation, cash adjustment and command when any write fails", async () => {
+    const user = await makeUser();
+    const session = await createStandard(user.id, 1000);
+    const accountBefore = await prisma.paperTradingSession.findUniqueOrThrow({ where: { projectionId: session.activeProjectionId } });
+    const commandsBefore = await prisma.replayCommand.count({ where: { replaySessionId: session.id } });
+    await prisma.$executeRawUnsafe("CREATE TRIGGER reject_transfer BEFORE INSERT ON UserWalletEntry WHEN NEW.sourceKey LIKE 'TRANSFER:%' BEGIN SELECT RAISE(ABORT, 'transfer ledger failure'); END");
+    try {
+      const failed = await postTransfer(session, user.id, "DEPOSIT", 100);
+      expect(failed.status).toBe(500);
+    } finally { await prisma.$executeRawUnsafe("DROP TRIGGER reject_transfer"); }
+    expect(await ownerWallet(user.id)).toMatchObject({ balanceMinor: BigInt(900_000) });
+    expect(await prisma.paperTradingSession.findUniqueOrThrow({ where: { projectionId: session.activeProjectionId } })).toMatchObject({ cashAdjustment: accountBefore.cashAdjustment, version: accountBefore.version });
+    expect(await prisma.userWalletAllocation.findUniqueOrThrow({ where: { projectionId: session.activeProjectionId } })).toMatchObject({ depositedMinor: BigInt(100_000), withdrawnMinor: BigInt(0), settledAt: null });
+    expect(await prisma.userWalletEntry.count({ where: { userId: user.id, sourceKey: { startsWith: `TRANSFER:${session.id}:` } } })).toBe(0);
+    expect(await prisma.replayCommand.count({ where: { replaySessionId: session.id } })).toBe(commandsBefore);
+  });
   it("rolls back wallet settlement and ledger writes when the withdrawal or session delete fails", async () => {
     const user = await makeUser();
     const session = await createStandard(user.id, 1000);
@@ -183,6 +355,34 @@ describe("wallet lifecycle APIs with isolated SQLite", () => {
     expect(await prisma.replaySession.findUnique({ where: { id: session.id } })).not.toBeNull();
   });
 
+  it("uses the remaining cash-adjusted account balance once for final delete settlement", async () => {
+    const user = await makeUser();
+    const session = await createStandard(user.id, 1000);
+    expect((await postTransfer(session, user.id, "DEPOSIT", 200)).status).toBe(200);
+    expect((await postTransfer(session, user.id, "WITHDRAW", 100)).status).toBe(200);
+    const scope = await loadReplayScope(session.id);
+    const previewResponse = await walletPreviewGET(new Request("http://localhost"), { params: Promise.resolve({ sessionId: session.id }) });
+    expect(await previewResponse.json()).toMatchObject({ kind: "WITHDRAW", amount: 1100, settled: false });
+    const deleted = await sessionDELETE(new Request("http://localhost", { method: "DELETE", headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ expectedVersion: scope.version, settlement: { kind: "WITHDRAW", amount: 1100, requestId: randomUUID() } }) }), { params: Promise.resolve({ sessionId: session.id }) });
+    expect(deleted.status, JSON.stringify(await deleted.clone().json())).toBe(200);
+    expect(await ownerWallet(user.id)).toMatchObject({ balanceMinor: BigInt(1_000_000) });
+    expect(await prisma.userWalletAllocation.findUniqueOrThrow({ where: { projectionId: session.activeProjectionId } })).toMatchObject({ depositedMinor: BigInt(120_000), withdrawnMinor: BigInt(120_000), settledAt: expect.any(Date) });
+    expect(await prisma.userWalletEntry.count({ where: { userId: user.id, sourceKey: `WITHDRAWAL:${session.activeProjectionId}` } })).toBe(1);
+    expect(await prisma.userWalletEntry.count({ where: { userId: user.id, type: "WITHDRAWAL" } })).toBe(2);
+  });
+
+  it("settles prior transfers once when restarting and funds the new account from the returned wallet balance", async () => {
+    const user = await makeUser();
+    const oldSession = await createStandard(user.id, 1000);
+    expect((await postTransfer(oldSession, user.id, "DEPOSIT", 200)).status).toBe(200);
+    expect((await postTransfer(oldSession, user.id, "WITHDRAW", 100)).status).toBe(200);
+    const next = await runWithReplayScope(await loadReplayScope(oldSession.id), () => restartReplaySession());
+    expect(await ownerWallet(user.id)).toMatchObject({ balanceMinor: BigInt(900_000) });
+    expect(await prisma.userWalletAllocation.findUniqueOrThrow({ where: { projectionId: oldSession.activeProjectionId } })).toMatchObject({ depositedMinor: BigInt(120_000), withdrawnMinor: BigInt(120_000), settledAt: expect.any(Date) });
+    expect(await prisma.userWalletAllocation.findUniqueOrThrow({ where: { projectionId: next.activeProjectionId } })).toMatchObject({ depositedMinor: BigInt(100_000), withdrawnMinor: BigInt(0), settledAt: null });
+    expect(await prisma.userWalletEntry.count({ where: { userId: user.id, sourceKey: `WITHDRAWAL:${oldSession.activeProjectionId}` } })).toBe(1);
+  });
   it("restarts a standard account atomically and rolls back old settlement when new capital cannot be afforded", async () => {
     const fundedUser = await makeUser();
     const funded = await createStandard(fundedUser.id, 3000);
@@ -351,9 +551,10 @@ describe("wallet lifecycle APIs with isolated SQLite", () => {
     const scope = await loadReplayScope(rounded.id);
     const previewResponse = await walletPreviewGET(new Request("http://localhost"), { params: Promise.resolve({ sessionId: rounded.id }) });
     expect(await previewResponse.json()).toMatchObject({ kind: "WITHDRAW", amount: 10.02 });
-    const withdrawal = await walletWithdrawPOST(new Request("http://localhost", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ expectedVersion: scope.version, requestId: randomUUID() }) }), { params: Promise.resolve({ sessionId: rounded.id }) });
+    const withdrawal = await walletTransferPOST(new Request("http://localhost", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ userId: roundingUser.id, kind: "WITHDRAW", amount: 10.02, expectedVersion: scope.version, requestId: randomUUID() }) }), { params: Promise.resolve({ sessionId: rounded.id }) });
     expect(withdrawal.status).toBe(200);
     expect(await ownerWallet(roundingUser.id)).toMatchObject({ balanceMinor: BigInt(1_000_001) });
+    expect(await prisma.userWalletAllocation.findUniqueOrThrow({ where: { projectionId: rounded.activeProjectionId } })).toMatchObject({ withdrawnMinor: BigInt(1002), settledAt: null });
 
     const pagedUser = await makeUser();
     for (let index = 0; index < 25; index++) await sqliteWriteTransaction(prisma, tx => writeWalletEntry(tx, {

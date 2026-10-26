@@ -13,6 +13,7 @@ import type { GrowthProfile, GrowthRecord, ProfileSession, QueryState, UserIdent
 import { UserAvatar } from "./user-avatar";
 import { GrowthRecordList } from "./growth-record-list";
 import { ExperienceProgress } from "./experience-progress";
+import { RealmBadge } from "./realm-badge";
 import styles from "./user-growth.module.css";
 
 const t = copy.userGrowth;
@@ -47,7 +48,7 @@ export function ProfileView({ profile, selected, state, onRetry, onSwitch, onEdi
       <div className="relative flex flex-wrap items-start gap-5">
         <UserAvatar avatar={profile.user.avatar} size="profile" />
         <div className="min-w-0 flex-1 basis-72"><p className="mb-2 text-xs text-slate-600">{t.viewing}</p><h1 className="break-words text-3xl font-semibold tracking-tight text-slate-950">{profile.user.nickname}</h1>
-          <div className="mt-3 flex flex-wrap items-center gap-3"><h2 ref={realmRef} tabIndex={-1} className={cn(styles.realm, "rounded-sm text-2xl font-semibold focus-visible:ring-2 focus-visible:ring-ring")}>{profile.user.realmLabel}</h2>
+          <div className="mt-3 flex flex-wrap items-center gap-3"><RealmBadge realm={profile.realm} className="px-3 py-1"><h2 ref={realmRef} tabIndex={-1} className={cn(styles.realm, "rounded-sm text-xl font-semibold focus-visible:ring-2 focus-visible:ring-ring")}>{profile.user.realmLabel}</h2></RealmBadge>
             {profile.realm === "foundation" || ready ? <Badge className={cn(styles.gold, "gap-1 border-current")}><Sparkles className="h-3 w-3" aria-hidden="true" />{profile.realm === "foundation" ? t.achieved : t.ready}</Badge> : profile.layer === 12 ? <span className="text-sm text-slate-600">{xpMet ? t.experienceMet : t.preparing}</span> : null}
           </div><p className="mt-3 text-sm text-slate-700">{t.totalXp}<strong className="ml-3 font-mono text-lg tabular-nums text-slate-950">{fmt(profile.totalXp)}</strong>{profile.growthPending && <span className="ml-3 text-xs text-slate-600">{t.growthPending}</span>}</p>
         </div>

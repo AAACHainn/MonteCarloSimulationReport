@@ -89,7 +89,7 @@ export function applyLiveAccountStats(
     balance,
     equity,
     unrealizedPnl: equity - balance,
-    netPnl: equity - snapshot.session.initialCapital,
+    netPnl: equity - snapshot.session.initialCapital - (snapshot.session.cashAdjustment ?? 0),
     maxDrawdown: snapshot.session.maxDrawdown,
     totalFees: snapshot.session.totalFees,
     totalSlippage: snapshot.session.totalSlippage,

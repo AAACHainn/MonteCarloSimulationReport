@@ -14,6 +14,7 @@ export type PaperAccountConfig = {
 };
 
 export type PaperSessionState = PaperAccountConfig & {
+  cashAdjustment?: number;
   id: string;
   datasetId: string;
   lastProcessedSequence: number;

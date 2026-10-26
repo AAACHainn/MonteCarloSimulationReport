@@ -8,6 +8,13 @@ const account: PaperSessionState = { id: "a", datasetId: "d", initialCapital: 10
   realizedPnl: -100, totalFees: 5, totalSlippage: 0, peakEquity: 1000, maxDrawdown: 0, version: 1 };
 
 describe("constant flat-account advance", () => {
+  it("advances cash-adjusted accounts without treating deposits or withdrawals as trading return", () => {
+    const state = { ...account, cashAdjustment: 500, peakEquity: 1000, lastProcessedSequence: 0 };
+    const advanced = advanceFlatAccount(state, 10);
+    expect(advanced).toMatchObject({ cashAdjustment: 500, peakEquity: 1000, maxDrawdown: 0.105 });
+    const point = flatEquityPoint(advanced, 10, new Date(10_000).toISOString());
+    expect(point).toMatchObject({ balance: 1395, equity: 1395, drawdown: 0.105 });
+  });
   it.each([0, 800, 1000, 1200])("matches every source result with an existing equity peak of %s", peakEquity => {
     const original = { ...account, peakEquity };
     let state = original;

@@ -8,6 +8,7 @@ import { tradeStatsFromSession } from "@/lib/paper-trading/serialize";
 
 export function paperStateUpdate(state: PaperSessionState) {
   return {
+    cashAdjustment: state.cashAdjustment ?? 0,
     lastProcessedSequence: state.lastProcessedSequence, netQuantity: state.netQuantity, activeCycleKey: state.activeCycleKey ?? null,
     averageEntryPrice: state.averageEntryPrice, realizedPnl: state.realizedPnl,
     totalFees: state.totalFees, totalSlippage: state.totalSlippage,

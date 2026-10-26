@@ -19,6 +19,13 @@ const order = (overrides: Partial<PaperOrderData> = {}): PaperOrderData => ({
 const bar = { sequence: 10, timestamp: "2026-01-01T00:10:00.000Z", open: 100, high: 110, low: 90, close: 105, volume: null };
 
 describe("paper trading engine", () => {
+  it("includes external cash flows in account balance while keeping trading equity and drawdown cash-flow-neutral", () => {
+    const result = advancePaperTrading({
+      state: state({ cashAdjustment: 5_000, realizedPnl: -100, peakEquity: 100_000 }), orders: [], bar, makeId,
+    });
+    expect(result.equityPoint).toMatchObject({ balance: 104_900, equity: 104_900, drawdown: 0.001 });
+    expect(result.state).toMatchObject({ cashAdjustment: 5_000, peakEquity: 100_000, maxDrawdown: 0.001 });
+  });
   it("fills a market order at the next bar open", () => {
     const result = advancePaperTrading({ state: state(), orders: [order()], bar, makeId });
     expect(result.fills[0]).toMatchObject({ price: 100, quantity: 1, reason: "ENTRY" });

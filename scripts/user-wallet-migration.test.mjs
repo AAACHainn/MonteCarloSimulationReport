@@ -55,4 +55,23 @@ describe("user wallet migration on an existing isolated SQLite database", () => 
       db.close();
     }
   });
+
+  it("adds cashAdjustment as zero without changing existing account capital or results", () => {
+    const db = new Database(":memory:");
+    try {
+      db.exec(`CREATE TABLE "PaperTradingSession" (
+        "id" TEXT NOT NULL PRIMARY KEY,
+        "initialCapital" REAL NOT NULL,
+        "realizedPnl" REAL NOT NULL DEFAULT 0,
+        "totalFees" REAL NOT NULL DEFAULT 0
+      );
+      INSERT INTO "PaperTradingSession" ("id", "initialCapital", "realizedPnl", "totalFees") VALUES ('old', 1000, -25, 5);`);
+      const migration = readFileSync("prisma/migrations/20261026170000_user_wallet_transfers/migration.sql", "utf8");
+      db.exec(migration);
+      expect(db.prepare('SELECT "initialCapital", "realizedPnl", "totalFees", "cashAdjustment" FROM "PaperTradingSession" WHERE "id"=?').get("old"))
+        .toEqual({ initialCapital: 1000, realizedPnl: -25, totalFees: 5, cashAdjustment: 0 });
+    } finally {
+      db.close();
+    }
+  });
 });

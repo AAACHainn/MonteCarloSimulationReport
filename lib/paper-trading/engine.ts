@@ -1,3 +1,4 @@
+import { accountBalance, tradingBalance } from "./account-funds";
 import { cancelUncheckedEntries, countGateEntry, disciplineMatchesMode, settleGateEntries } from "./training-gate";
 import type {
   PaperAdvanceInput,
@@ -322,11 +323,12 @@ function processPaperTrading(input: PaperAdvanceInput, immediateOrderId?: string
 
   state.lastProcessedSequence = bar.sequence;
   state.version += 1;
-  const balance = state.initialCapital + state.realizedPnl - state.totalFees;
+  const balance = accountBalance(state);
   const unrealized = state.averageEntryPrice === null ? 0 : (bar.close - state.averageEntryPrice) * state.netQuantity;
   const equity = balance + unrealized;
-  state.peakEquity = Math.max(state.peakEquity, equity);
-  const drawdown = state.peakEquity > 0 ? Math.max(0, (state.peakEquity - equity) / state.peakEquity) : 0;
+  const performanceEquity = tradingBalance(state) + unrealized;
+  state.peakEquity = Math.max(state.peakEquity, performanceEquity);
+  const drawdown = state.peakEquity > 0 ? Math.max(0, (state.peakEquity - performanceEquity) / state.peakEquity) : 0;
   state.maxDrawdown = Math.max(state.maxDrawdown, drawdown);
 
   return {
