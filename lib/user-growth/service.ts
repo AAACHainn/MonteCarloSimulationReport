@@ -6,7 +6,7 @@ import { copy } from "@/lib/i18n";
 import { sqliteWriteTransaction } from "@/lib/sqlite-write";
 import { ReplaySessionError, replayErrorResponse } from "@/lib/replay-sessions/scope";
 import { growthRealm } from "./rules";
-import { realmLabel } from "./presentation";
+import { growthProgress, realmLabel } from "./presentation";
 import { assertUserExists } from "./ownership";
 import type { ProfileSession, UserIdentity } from "./types";
 import { avatarChoice, decodeAvatar } from "./avatar";
@@ -15,7 +15,7 @@ import { AvatarError } from "./avatar-storage";
 export const profileInput = z.object({ nickname: z.string().trim().refine(value => Array.from(value).length >= 1 && Array.from(value).length <= 24), avatar: avatarChoice.optional() }).strict();
 export function userIdentity(user: { id: string; nickname: string; avatar?: string; growth?: { totalXp: number; realm: string } | null }): UserIdentity {
   const current = growthRealm(user.growth?.totalXp ?? 0, user.growth?.realm === "FOUNDATION");
-  return { id: user.id, nickname: user.nickname, avatar: decodeAvatar(user.avatar), realmLabel: realmLabel(current.realm, current.layer) };
+  return { id: user.id, nickname: user.nickname, avatar: decodeAvatar(user.avatar), realmLabel: realmLabel(current.realm, current.layer), growth: growthProgress(user.growth?.totalXp ?? 0, user.growth?.realm === "FOUNDATION") };
 }
 export async function saveProfile(input: z.infer<typeof profileInput>, id?: string, uploadedAvatar?: string) {
   return sqliteWriteTransaction(prisma, async tx => {

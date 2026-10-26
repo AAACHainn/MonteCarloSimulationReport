@@ -3,8 +3,8 @@ import { prisma } from "@/lib/db";
 import { copy } from "@/lib/i18n";
 import { formatInteger, formatNumber } from "@/lib/format";
 import { replayJournalTradeHref } from "@/lib/paper-trading/journal-links";
-import { growthRealm, growthSegment, FOUNDATION_REQUIREMENTS, emptyGrowthTotals } from "./rules";
-import { realmLabel, type SessionGrowthView } from "./presentation";
+import { growthRealm, FOUNDATION_REQUIREMENTS, emptyGrowthTotals } from "./rules";
+import { growthProgress, realmLabel, type SessionGrowthView } from "./presentation";
 import type { GrowthProfile, GrowthRecord, GrowthRecordPage } from "./types";
 import type { GrowthSource } from "./settlement";
 const t = copy.userGrowth;
@@ -33,13 +33,12 @@ export async function readGrowthView(userId: string): Promise<Omit<GrowthProfile
   return prisma.$transaction(async tx => {
     const stored = await tx.userGrowth.findUnique({ where: { userId } });
     const totals = stored ?? emptyGrowthTotals();
-    const current = growthRealm(totals.totalXp, stored?.realm === "FOUNDATION"), segment = growthSegment(totals.totalXp, current.realm === "FOUNDATION");
+    const current = growthRealm(totals.totalXp, stored?.realm === "FOUNDATION");
     const [facts, count, attained] = await Promise.all([
       tx.userGrowthFact.findMany({ where: { userId }, orderBy: [{ settledAt: "desc" }, { id: "desc" }], take: 5 }),
       tx.userGrowthFact.count({ where: { userId } }), tx.userRealmRecord.findUnique({ where: { userId_toRealm: { userId, toRealm: "FOUNDATION" } } }),
     ]);
-    return { realm: current.realm === "MORTAL" ? "mortal" : current.realm === "QI" ? "qi" : "foundation", layer: current.layer, totalXp: totals.totalXp,
-      segment: segment ? { value: segment.value, max: segment.max, next: segment.nextLayer > 12 ? t.foundationOne : realmLabel("QI", segment.nextLayer) } : undefined,
+    return { ...growthProgress(totals.totalXp, current.realm === "FOUNDATION"), layer: current.layer,
       attainedAt: attained ? dateText(attained.attainedAt) : undefined,
       conditions: (Object.keys(FOUNDATION_REQUIREMENTS) as Array<keyof typeof FOUNDATION_REQUIREMENTS>).map(key => ({ value: key === "receivedUsdtMinor" ? Number(totals[key]) / 100 : Number(totals[key]), target: key === "receivedUsdtMinor" ? Number(FOUNDATION_REQUIREMENTS[key]) / 100 : Number(FOUNDATION_REQUIREMENTS[key]) })),
       records: await recordViews(tx, facts), recordCount: count };

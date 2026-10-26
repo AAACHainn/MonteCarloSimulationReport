@@ -35,13 +35,14 @@ vi.mock("@/components/ui/input", () => ({ Input: "input" }));
 vi.mock("@/components/ui/label", () => ({ Label: "label" }));
 vi.mock("@/components/ui/option-popover", () => ({ OptionPopoverContent: "content" }));
 vi.mock("./user-avatar", () => ({ UserAvatar: "avatar" }));
+vi.mock("./experience-progress", () => ({ ExperienceProgress: "experience-progress" }));
 
 import React, { type ReactNode } from "react";
 import { copy } from "@/lib/i18n";
 import type { UserIdentity } from "@/lib/user-growth/types";
 import { UserSelector } from "./user-selector";
 
-const identity = (id: string): UserIdentity => ({ id, nickname: id.toUpperCase(), avatar: { preset: 0, zoom: 1, x: 50, y: 50 }, realmLabel: "凡人" });
+const identity = (id: string, growth?: UserIdentity["growth"]): UserIdentity => ({ id, nickname: id.toUpperCase(), avatar: { preset: 0, zoom: 1, x: 50, y: 50 }, realmLabel: "凡人", growth });
 const users = [identity("alpha"), identity("beta"), identity("gamma")];
 
 beforeEach(() => {
@@ -54,9 +55,9 @@ beforeEach(() => {
 });
 afterEach(() => vi.unstubAllGlobals());
 
-function render(selected?: UserIdentity, context?: ReactNode) {
+function render(selected?: UserIdentity, context?: ReactNode, onOpen = vi.fn()) {
   runtime.index = 0;
-  const tree = UserSelector({ users, selected, compact: true, context, onSelect: vi.fn(), onCreate: vi.fn(), onProfiles: vi.fn(), onRetry: vi.fn() }) as Node;
+  const tree = UserSelector({ users, selected, compact: true, context, onSelect: vi.fn(), onCreate: vi.fn(), onProfiles: vi.fn(), onRetry: vi.fn(), onOpen }) as Node;
   runtime.effects.splice(0).forEach(effect => effect());
   return tree;
 }
@@ -92,6 +93,32 @@ function openUserList(selected?: UserIdentity) {
 }
 
 describe("user selector menu ordering and search interaction", () => {
+  it("shows only the selected identity's progress and refreshes users when the avatar menu opens", () => {
+    const progress = { totalXp: 600, realm: "qi" as const, segment: { value: 200, max: 450, next: "炼气三层" } };
+    const selected = identity("beta", progress);
+    const originalBeta = users[1];
+    users[1] = selected;
+    const refresh = vi.fn();
+    let tree = render(selected, undefined, refresh);
+    expect(root(tree).props.open).toBe(false);
+    root(tree).props.onOpenChange(true);
+    expect(refresh).toHaveBeenCalledOnce();
+    tree = render(selected);
+    expect(all(tree).find(element => element.type === "experience-progress")?.props.growth).toBe(progress);
+
+    users[1] = originalBeta;
+    runtime.slots = [];
+    const unknown = identity("unknown");
+    tree = render(unknown);
+    expect(all(tree).some(element => element.type === "experience-progress")).toBe(false);
+  });
+
+  it("hides progress while the user-switch list is open", () => {
+    const selected = identity("beta", { totalXp: 600, realm: "qi", segment: { value: 200, max: 450, next: "炼气三层" } });
+    const tree = openUserList(selected);
+    expect(all(tree).some(element => element.type === "experience-progress")).toBe(false);
+  });
+
   it("places the selected user first and global second, or global first when selected globally", () => {
     const personalTree = render(identity("beta"));
     const trigger = all(personalTree).find(element => element.type === "button" && element.props["aria-label"] === `${copy.userGrowth.selection}：BETA`)!;

@@ -14,7 +14,7 @@ export function UserEntry({ compact = false, session }: { compact?: boolean; ses
   const displayed = session ? current.users.find(user => user.id === session.userId) ?? (session.owner ? { id: session.owner.id, nickname: session.owner.nickname, avatar: { preset: -1, zoom: 1, x: 50, y: 50 }, realmLabel: "" } : undefined) : current.selected;
   const profileId = session ? session.userId : current.selectedId;
   return <>
-    <UserSelector allowSwitch={!session} compact={compact} context={session ? <OwnershipContext session={session} /> : undefined} users={current.users} selected={displayed} state={current.state} notice={current.notice} onRetry={current.refresh} onSelect={id => {
+    <UserSelector allowSwitch={!session} compact={compact} context={session ? <OwnershipContext session={session} /> : undefined} users={current.users} selected={displayed} state={current.state} notice={current.notice} onRetry={current.refresh} onOpen={current.refresh} onSelect={id => {
       if (session) return;
       current.select(id);
       // Follow explicit profile switches; direct links and replay ownership remain independent.

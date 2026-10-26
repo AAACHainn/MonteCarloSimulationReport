@@ -12,6 +12,7 @@ import { cn } from "@/lib/utils";
 import type { GrowthProfile, GrowthRecord, ProfileSession, QueryState, UserIdentity } from "@/lib/user-growth/types";
 import { UserAvatar } from "./user-avatar";
 import { GrowthRecordList } from "./growth-record-list";
+import { ExperienceProgress } from "./experience-progress";
 import styles from "./user-growth.module.css";
 
 const t = copy.userGrowth;
@@ -39,7 +40,6 @@ export function ProfileView({ profile, selected, state, onRetry, onSwitch, onEdi
   const ready = satisfied === 6 && profile.realm !== "foundation";
   const xpCondition = profile.conditions[0];
   const xpMet = !!xpCondition && xpCondition.value >= xpCondition.target;
-  const segment = profile.segment;
   const breakthrough = async () => { if (await onBreakthrough()) { setConditionsOpen(false); requestAnimationFrame(() => realmRef.current?.focus()); } };
   return <div className={cn(styles.theme, "space-y-6")} aria-busy={state === "loading"}>
     <section className={cn(styles.identity, "overflow-hidden rounded-lg border px-6 pb-6 pt-7", profile.realm === "foundation" && styles.breakthrough)} aria-label={t.realm}>
@@ -57,10 +57,7 @@ export function ProfileView({ profile, selected, state, onRetry, onSwitch, onEdi
       </div>
       {selected?.id !== profile.user.id && <div className="relative mt-5 flex flex-wrap items-center gap-2 border-t pt-3 text-sm text-slate-700"><span>{t.selection}：{selected?.nickname ?? t.all}</span><Button variant="ghost" onClick={onSwitch}>{t.switchTo(profile.user.nickname)}</Button></div>}
       <div className="relative mt-5 max-w-3xl">
-        {profile.growthPending ? <p className="text-sm text-slate-600">{t.growthPending}</p> : segment ? <><div className="mb-2 flex flex-wrap justify-between gap-2 text-sm"><span>{t.segmentXp} <strong className="ml-2 font-mono tabular-nums">{fmt(segment.value)} / {fmt(segment.max)}</strong></span><span className="text-slate-700">{segment.value >= segment.max ? t.experienceMet : t.remainingXp(fmt(segment.max - segment.value))}</span></div>
-          <div role="progressbar" aria-label={t.segmentXp} aria-valuemin={0} aria-valuemax={segment.max} aria-valuenow={Math.min(segment.value, segment.max)} aria-valuetext={`${fmt(segment.value)} / ${fmt(segment.max)} ${t.xp}`} className={cn(styles.progress, "h-1.5 overflow-hidden rounded-full")}><div className={cn(styles.bar, "h-full rounded-full")} style={{ width: `${Math.min(100, segment.value / segment.max * 100)}%` }} /></div>
-          <p className="mt-3 text-sm text-slate-700">{profile.realm === "mortal" ? t.nextMortal : t.nextLayer(segment.next)}</p>{profile.realm === "mortal" && <p className="mt-2 text-sm leading-6 text-slate-600">{t.mortalHint}</p>}
-        </> : <><p className="text-sm text-slate-700">{t.foundationHint}</p><p className="mt-2 text-xs text-slate-600">{profile.attainedAt ? t.reached(profile.attainedAt) : copy.common.dash}</p></>}
+        {profile.growthPending ? <p className="text-sm text-slate-600">{t.growthPending}</p> : <><ExperienceProgress growth={profile} />{!profile.segment && <p className="mt-2 text-xs text-slate-600">{profile.attainedAt ? t.reached(profile.attainedAt) : copy.common.dash}</p>}</>}
         <RealmTrack profile={profile} />
       </div>
     </section>

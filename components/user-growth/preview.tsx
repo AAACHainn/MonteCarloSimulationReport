@@ -60,7 +60,10 @@ export function UserGrowthPreview() {
     const original = makePreviewProfile(user, scenario);
     profile.totalXp = original.totalXp; profile.conditions = original.conditions;
   }
-  const visibleUsers = emptyUsers ? [] : users.map((u) => u.id === user.id ? profile.user : makePreviewProfile(u, brokenThrough.includes(u.id) ? 6 : userScenarios[u.id] ?? 0).user);
+  const visibleUsers = emptyUsers ? [] : users.map((u) => {
+    const view = u.id === user.id ? profile : makePreviewProfile(u, brokenThrough.includes(u.id) ? 6 : userScenarios[u.id] ?? 0);
+    return { ...view.user, growth: { realm: view.realm, totalXp: view.totalXp, segment: view.segment } };
+  });
   const selectedDisplay = emptyUsers ? undefined : visibleUsers.find((u) => u.id === selection) ?? selected;
   const choose = (id: string | null) => { setSelection(id); setStatus(""); };
   const openProfile = (id: string) => { setViewed(id); setList(false); setActionError(""); setStatus(""); };

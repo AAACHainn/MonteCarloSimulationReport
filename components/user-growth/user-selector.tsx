@@ -11,11 +11,12 @@ import { copy } from "@/lib/i18n";
 import { cn } from "@/lib/utils";
 import type { QueryState, UserIdentity } from "@/lib/user-growth/types";
 import { UserAvatar } from "./user-avatar";
+import { ExperienceProgress } from "./experience-progress";
 
 const t = copy.userGrowth;
-export function UserSelector({ users, selected, onSelect, onCreate, onProfiles, state = "normal", onRetry, notice = "", compact = false, context, allowSwitch = true }: {
+export function UserSelector({ users, selected, onSelect, onCreate, onProfiles, state = "normal", onRetry, notice = "", compact = false, context, allowSwitch = true, onOpen }: {
   users: UserIdentity[]; selected?: UserIdentity; onSelect: (id: string | null) => void; onCreate: () => void; onProfiles: () => void; state?: QueryState; onRetry: () => void;
-  notice?: string; compact?: boolean; context?: ReactNode; allowSwitch?: boolean;
+  notice?: string; compact?: boolean; context?: ReactNode; allowSwitch?: boolean; onOpen?: () => void;
 }) {
   const [open, setOpen] = useState(false);
   const [view, setView] = useState<"menu" | "users">("menu");
@@ -30,7 +31,7 @@ export function UserSelector({ users, selected, onSelect, onCreate, onProfiles, 
   const [portalContainer, setPortalContainer] = useState<HTMLElement | null>(null);
   useEffect(() => { if (searchOpen) searchRef.current?.focus(); }, [searchOpen]);
   const changeOpen = (value: boolean) => {
-    if (value) setPortalContainer(triggerRef.current?.closest<HTMLElement>('[role="dialog"]') ?? null);
+    if (value) { setPortalContainer(triggerRef.current?.closest<HTMLElement>('[role="dialog"]') ?? null); onOpen?.(); }
     else { setView("menu"); setSearch(""); setSearchOpen(false); }
     setOpen(value);
   };
@@ -63,6 +64,7 @@ export function UserSelector({ users, selected, onSelect, onCreate, onProfiles, 
         </div>
       </> : <>
         <div className="flex shrink-0 items-center gap-3 px-2 py-3">{avatar(selected)}<div className="min-w-0"><p className="break-words text-sm font-medium">{selected?.nickname ?? t.all}</p><p className="text-xs text-slate-600">{selected?.realmLabel ?? t.global}</p></div></div>
+        {selectedUser?.growth && <div className="shrink-0 px-2 pb-3"><ExperienceProgress growth={selectedUser.growth} compact /></div>}
         {context && <div className="shrink-0 border-t px-2 py-3">{context}</div>}
         {allowSwitch && <Button ref={switchRef} variant="ghost" className="w-full justify-start gap-3" onClick={() => setView("users")}><ArrowRightLeft className="h-4 w-4" aria-hidden="true" />{t.switchUser}</Button>}
         <p className="shrink-0 border-t px-2 py-3 text-xs text-slate-600">{t.scopeHint}</p>
