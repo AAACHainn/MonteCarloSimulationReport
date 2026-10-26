@@ -9,17 +9,21 @@ import { growthRealm } from "./rules";
 import { realmLabel } from "./presentation";
 import { assertUserExists } from "./ownership";
 import type { ProfileSession, UserIdentity } from "./types";
+import { avatarChoice, decodeAvatar } from "./avatar";
+import { AvatarError } from "./avatar-storage";
 
-export const profileInput = z.object({ nickname: z.string().trim().refine(value => Array.from(value).length >= 1 && Array.from(value).length <= 24) }).strict();
+export const profileInput = z.object({ nickname: z.string().trim().refine(value => Array.from(value).length >= 1 && Array.from(value).length <= 24), avatar: avatarChoice.optional() }).strict();
 export const assignmentInput = z.object({ sessionIds: z.array(z.string().min(1).max(128)).min(1).max(200).refine(ids => new Set(ids).size === ids.length) }).strict();
-export function userIdentity(user: { id: string; nickname: string; growth?: { totalXp: number; realm: string } | null }): UserIdentity {
+export function userIdentity(user: { id: string; nickname: string; avatar?: string; growth?: { totalXp: number; realm: string } | null }): UserIdentity {
   const current = growthRealm(user.growth?.totalXp ?? 0, user.growth?.realm === "FOUNDATION");
-  return { id: user.id, nickname: user.nickname, avatar: { preset: 0, zoom: 1, x: 50, y: 50 }, realmLabel: realmLabel(current.realm, current.layer) };
+  return { id: user.id, nickname: user.nickname, avatar: decodeAvatar(user.avatar), realmLabel: realmLabel(current.realm, current.layer) };
 }
-export async function saveProfile(input: z.infer<typeof profileInput>, id?: string) {
+export async function saveProfile(input: z.infer<typeof profileInput>, id?: string, uploadedAvatar?: string) {
   return sqliteWriteTransaction(prisma, async tx => {
     if (id) await assertUserExists(tx, id);
-    const row = id ? await tx.userProfile.update({ where: { id }, data: input, include: { growth: true } }) : await tx.userProfile.create({ data: { ...input, growth: { create: {} } }, include: { growth: true } });
+    const avatar = uploadedAvatar ?? (input.avatar ? `PRESET:${input.avatar.preset}` : undefined);
+    const data = { nickname: input.nickname, ...(avatar ? { avatar } : {}) };
+    const row = id ? await tx.userProfile.update({ where: { id }, data, include: { growth: true } }) : await tx.userProfile.create({ data: { ...data, growth: { create: {} } }, include: { growth: true } });
     return userIdentity(row);
   });
 }
@@ -58,6 +62,7 @@ export async function sessionPage(params: URLSearchParams, fixedUserId?: string)
   });
 }
 export function userErrorResponse(error: unknown) {
+  if (error instanceof AvatarError) return NextResponse.json({ error: error.message }, { status: error.status });
   if (error instanceof AssignmentConflict) return NextResponse.json({ error: copy.userGrowth.historyConflict(error.labels.join("、")), conflictIds: error.ids }, { status: 409 });
   if (error instanceof SyntaxError || error instanceof z.ZodError) return NextResponse.json({ error: copy.userGrowth.invalidRequest }, { status: 400 });
   if (error instanceof Prisma.PrismaClientKnownRequestError && error.code === "P2002") return NextResponse.json({ error: copy.userGrowth.nicknameTaken }, { status: 409 });

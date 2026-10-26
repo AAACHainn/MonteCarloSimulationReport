@@ -1,7 +1,8 @@
 import { readGrowthView } from "@/lib/user-growth/read";
 import { realmLabel } from "@/lib/user-growth/presentation";
 import { NextResponse } from "next/server";
-import { profileInput, saveProfile, requireProfile, sessionPage, userErrorResponse } from "@/lib/user-growth/service";
+import { requireProfile, sessionPage, userErrorResponse } from "@/lib/user-growth/service";
+import { saveProfileRequest } from "@/lib/user-growth/profile-request";
 type Context = { params: Promise<{ userId: string }> };
 export async function GET(request: Request, context: Context) {
   try {
@@ -12,6 +13,6 @@ export async function GET(request: Request, context: Context) {
   } catch (error) { return userErrorResponse(error); }
 }
 export async function PATCH(request: Request, context: Context) {
-  try { return NextResponse.json({ user: await saveProfile(profileInput.parse(await request.json()), (await context.params).userId) }); }
+  try { return NextResponse.json({ user: await saveProfileRequest(request, (await context.params).userId) }); }
   catch (error) { return userErrorResponse(error); }
 }

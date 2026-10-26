@@ -37,7 +37,7 @@ export function AppHeader() {
             </Link>
           ))}
         </nav>
-        {pathname !== "/preview/user-growth" && <UserEntry />}
+        {pathname !== "/preview/user-growth" && !/^\/market-replay\/[^/]+\/trade-history\/?$/.test(pathname) && <UserEntry />}
       </div>
     </header>
   );

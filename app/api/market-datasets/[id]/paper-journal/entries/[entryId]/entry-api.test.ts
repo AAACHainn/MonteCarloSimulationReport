@@ -7,6 +7,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 
 const mocks = vi.hoisted(() => ({
   entryFindFirst: vi.fn(),
+  entryFindUnique: vi.fn(),
   entryUpdate: vi.fn(),
   entryUpdateMany: vi.fn(),
   optionFindFirst: vi.fn(),
@@ -17,6 +18,7 @@ vi.mock("@/lib/db", () => {
   const client = {
     replayJournalEntry: {
       findFirst: mocks.entryFindFirst,
+      findUnique: mocks.entryFindUnique,
       update: mocks.entryUpdate,
       updateMany: mocks.entryUpdateMany,
     },
@@ -59,6 +61,7 @@ function record(setupOptionId: string | null, setupName: string | null) {
 beforeEach(() => {
   vi.clearAllMocks();
   mocks.entryFindFirst.mockResolvedValue({ id: "entry-1", logicalKey: "entry-1", review: "等待回踩确认后入场" });
+  mocks.entryFindUnique.mockResolvedValue({ ...record(null, null), projectionId: "projection-1", logicalKey: "entry-1" });
   mocks.entryUpdateMany.mockResolvedValue({ count: 1 });
   mocks.optionFindFirst.mockResolvedValue({ id: "setup-1" });
   mocks.reasonCount.mockResolvedValue(2);

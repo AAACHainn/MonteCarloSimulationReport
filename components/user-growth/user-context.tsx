@@ -53,6 +53,6 @@ export function CurrentUserProvider({ children }: { children: React.ReactNode })
     requestRevision.current++; activeRequest.current?.abort();
     setUsers(items => items.some(item => item.id === user.id) ? items.map(item => item.id === user.id ? user : item) : [...items, user]); setState("normal");
   }, []);
-  const selected = users.find(user => user.id === selectedId) ?? (selectedId ? { id: selectedId, nickname: copy.userGrowth.selectionUnknown, avatar: { preset: 0, zoom: 1, x: 50, y: 50 }, realmLabel: "" } : undefined);
+  const selected = users.find(user => user.id === selectedId) ?? (selectedId ? { id: selectedId, nickname: copy.userGrowth.selectionUnknown, avatar: { preset: -1, zoom: 1, x: 50, y: 50 }, realmLabel: "" } : undefined);
   return <Context.Provider value={{ users, selected, selectedId, state, hydrated, notice, select, refresh, upsert }}>{children}</Context.Provider>;
 }

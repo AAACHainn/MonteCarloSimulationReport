@@ -1,5 +1,5 @@
-import { OwnershipContext } from "@/components/user-growth/ownership-context";
-import { UserEntry } from "@/components/user-growth/user-entry";
+import { ReplaySessionGate } from "@/components/market-replay/replay-session-entry-guard";
+import { UserContextHeader } from "@/components/user-growth/user-context-header";
 import { notFound, redirect } from "next/navigation";
 import { Breadcrumbs } from "@/components/breadcrumbs";
 import { PaperJournalTable } from "@/components/market-replay/paper-journal-table";
@@ -33,21 +33,20 @@ export default async function ReplayTradeHistoryPage({ params, searchParams }: {
   const selectedScope = number !== undefined ? await loadPropRoundScope(baseScope, number) : baseScope;
   const snapshot = number && number > 0 ? await runWithReplayScope(selectedScope, () => getPaperSessionSnapshot(id)) : null;
   const selectedSession = { ...session, activeProjectionId: selectedScope.projectionId, propRoundNumber: number };
-  return <ReplaySessionProvider key={`${session.id}:${number}:${selectedScope.projectionId}`} session={selectedSession}><div className="relative left-1/2 w-[calc(100vw-2rem)] max-w-[1800px] -translate-x-1/2 space-y-6 sm:w-[calc(100vw-3rem)]">
-    <Breadcrumbs items={[
+  return <ReplaySessionGate key={`${session.id}:${session.activeProjectionId}:${session.status}:${session.userId ?? ""}`} session={session}><ReplaySessionProvider key={`${session.id}:${number}:${selectedScope.projectionId}`} session={selectedSession}><div className="relative left-1/2 w-[calc(100vw-2rem)] max-w-[1800px] -translate-x-1/2 space-y-6 sm:w-[calc(100vw-3rem)]">
+    <UserContextHeader session={session}><Breadcrumbs items={[
       { label: copy.marketReplay.title, href: "/market-replay" },
       { label: dataset.name, href: `/market-replay/${id}` },
       { label: copy.paperTrading.journalHistory },
-    ]} />
+    ]} /></UserContextHeader>
     <section className="border-b pb-5">
       <p className="font-mono text-sm uppercase tracking-wide text-blue-700">{dataset.symbol}</p>
       <h1 className="text-3xl font-semibold tracking-tight text-slate-950">{copy.paperTrading.journalHistory}</h1>
       <p className="mt-2 text-sm text-slate-600">{copy.paperTrading.journalHistoryDescription}</p>
     </section>
-    <div className="flex flex-wrap items-center justify-between gap-3"><OwnershipContext session={session} /><UserEntry /></div>
     {isProp ? <PropRoundHistory datasetId={id} sessionId={session.id} rounds={rounds} selected={number!} /> : null}
     {snapshot?.propAccount ? <PropAccountPanel sessionId={session.id} runtime={snapshot.propAccount} tradingSnapshot={snapshot} readOnly /> : null}
     {snapshot?.propAccount?.state.result ? <PropRoundTradingRecords snapshot={snapshot} /> : null}
     <PaperJournalTable datasetId={id} scope="history" replaySessions={sessions} />
-  </div></ReplaySessionProvider>;
+  </div></ReplaySessionProvider></ReplaySessionGate>;
 }

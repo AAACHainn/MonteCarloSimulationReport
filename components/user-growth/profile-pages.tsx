@@ -10,6 +10,7 @@ import { formatInteger } from "@/lib/format";
 import type { GrowthProfile, GrowthRecord, ProfileSession, UserIdentity } from "@/lib/user-growth/types";
 import { useCurrentUser } from "./user-context";
 import { UserAvatar } from "./user-avatar";
+import { writeProfile } from "./profile-save";
 import { ProfileDialog } from "./profile-dialog";
 import { ProfileView } from "./profile-view";
 import { GrowthHistory, GrowthSourceDialog } from "./growth-history";
@@ -18,11 +19,6 @@ import { useReplaySessionEntry } from "@/components/market-replay/replay-session
 const t = copy.userGrowth;
 type SessionPage = { items: ProfileSession[]; page: number; total: number };
 const emptyPage: SessionPage = { items: [], page: 1, total: 0 };
-async function writeProfile(nickname: string, id?: string) {
-  const response = await fetch(id ? `/api/users/${encodeURIComponent(id)}` : "/api/users", { method: id ? "PATCH" : "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ nickname }) });
-  const result = await response.json(); if (!response.ok) throw new Error(result.error ?? t.requestFailed);
-  return result.user as UserIdentity;
-}
 export function UserProfiles() {
   const current = useCurrentUser(), router = useRouter();
   const [creating, setCreating] = useState(false);
@@ -33,8 +29,8 @@ export function UserProfiles() {
     {current.state === "error" && <div role="alert" className="flex items-center gap-3 text-sm text-red-700">{t.failedUsers}<Button variant="outline" onClick={current.refresh}>{t.retry}</Button></div>}
     <div className="grid gap-4 md:grid-cols-2">{current.users.map(user => <Card key={user.id}><CardContent className="flex items-center gap-4 p-5"><UserAvatar avatar={user.avatar} /><div className="min-w-0 flex-1"><h2 className="break-words font-semibold">{user.nickname}</h2><p className="mt-1 text-sm text-slate-600">{user.realmLabel}</p></div><Button asChild variant="outline"><Link href={`/users/${encodeURIComponent(user.id)}`}>{t.openProfile}</Link></Button></CardContent></Card>)}</div>
     {current.state === "normal" && !current.users.length && <p className="rounded-lg border border-dashed p-6 text-sm text-slate-600">{t.noUsers}</p>}
-    {creating && <ProfileDialog defaultAvatarOnly description={t.avatarPending} onClose={() => setCreating(false)} onSave={async nickname => {
-      try { const user = await writeProfile(nickname); current.upsert(user); current.select(user.id); current.refresh(); setCreating(false); router.push(`/users/${encodeURIComponent(user.id)}`); return null; }
+    {creating && <ProfileDialog description={t.profileAvatarHint} onClose={() => setCreating(false)} onSave={async (nickname, avatar, image) => {
+      try { const user = await writeProfile(nickname, avatar, image); current.upsert(user); current.select(user.id); current.refresh(); setCreating(false); router.push(`/users/${encodeURIComponent(user.id)}`); return null; }
       catch (error) { return error instanceof Error ? error.message : t.requestFailed; }
     }} />}
   </div>;
@@ -103,8 +99,8 @@ export function UserProfilePage({ userId }: { userId: string }) {
         finally { setBreaking(false); }
       }} breaking={breaking} actionError={actionError} onAssign={() => setAssigning(true)} onOpenSession={session => { if (!entry.busy) void entry.open({ sessionId: session.id }); }} onSource={setSource} onAllRecords={() => setRecordsOpen(true)} />
     <div className="flex items-center justify-between gap-3 text-sm"><span>{t.page(formatInteger(data.sessions.page), formatInteger(Math.max(1, Math.ceil(data.sessions.total / 20))))}</span><div className="flex gap-2"><Button variant="outline" disabled={state === "loading" || data.sessions.page <= 1} onClick={() => setPage(data.sessions.page - 1)}>{t.previous}</Button><Button variant="outline" disabled={state === "loading" || data.sessions.page * 20 >= data.sessions.total} onClick={() => setPage(data.sessions.page + 1)}>{t.next}</Button></div></div>
-    {editing && <ProfileDialog defaultAvatarOnly user={data.user} description={t.avatarPending} onClose={() => setEditing(false)} onSave={async nickname => {
-      try { const user = await writeProfile(nickname, userId); current.upsert(user); current.refresh(); setData(old => old ? { ...old, user } : old); setEditing(false); setStatus(t.profileSaved); setRevision(value => value + 1); return null; }
+    {editing && <ProfileDialog user={data.user} description={t.profileAvatarHint} onClose={() => setEditing(false)} onSave={async (nickname, avatar, image) => {
+      try { const user = await writeProfile(nickname, avatar, image, userId); current.upsert(user); current.refresh(); setData(old => old ? { ...old, user } : old); setEditing(false); setStatus(t.profileSaved); setRevision(value => value + 1); return null; }
       catch (cause) { return cause instanceof Error ? cause.message : t.requestFailed; }
     }} />}
     {assigning && <HistoryAssignment user={data.user} onClose={() => setAssigning(false)} onSuccess={() => { setAssigning(false); setStatus(t.historyAssigned); setRevision(value => value + 1); }} />}

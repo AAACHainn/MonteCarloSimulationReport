@@ -1,5 +1,6 @@
 "use client";
 import { useCurrentUser } from "@/components/user-growth/user-context";
+import { useReplaySessionEntry } from "./replay-session-entry-guard";
 import { usePaperJournalTableController } from "./use-paper-journal-table-controller";
 
 
@@ -82,6 +83,7 @@ export function PaperJournalTable({
   replaySessions?: Pick<ReplaySessionSummary, "id" | "name" | "mode" | "status" | "createdAt" | "userId">[];
 }) {
   const currentUser = useCurrentUser();
+  const sessionEntry = useReplaySessionEntry();
   const {
     replaySession, ai, router, switchingSession, startSessionNavigation, correction,
     canDeleteCycle, scopedUrl, items, sessions, page, setPage,
@@ -101,15 +103,17 @@ export function PaperJournalTable({
     visibleColumnEdges, activeFilterCount, hasActiveFilters, optionFilters,
   } = usePaperJournalTableController({ datasetId, scope });
 
-  const sessionPicker = scope === "history" && replaySession && replaySessions ? <div className="w-full space-y-2 sm:max-w-xl" aria-busy={switchingSession}>
+  const sessionPicker = scope === "history" && replaySession && replaySessions ? <div className="w-full space-y-2 sm:max-w-xl" aria-busy={switchingSession || sessionEntry.busy}>
     <Label htmlFor="replay-journal-session">{copy.paperTrading.journalSessionSelect}</Label>
     <Select
       value={replaySession.id}
       onValueChange={(id) => {
         if (id === replaySession.id) return;
-        startSessionNavigation(() => router.push(`/market-replay/${datasetId}/trade-history?sessionId=${encodeURIComponent(id)}`));
+        void sessionEntry.open({ sessionId: id, onEnter: () => {
+          startSessionNavigation(() => router.push(`/market-replay/${datasetId}/trade-history?sessionId=${encodeURIComponent(id)}`));
+        } });
       }}
-      disabled={loading || switchingSession || renaming || savingSetupIds.size > 0 || savingTradeReasonIds.size > 0 || savingReviewIds.size > 0}
+      disabled={loading || switchingSession || sessionEntry.busy || renaming || savingSetupIds.size > 0 || savingTradeReasonIds.size > 0 || savingReviewIds.size > 0}
     >
       <SelectTrigger id="replay-journal-session" className="w-full bg-white">
         <SelectValue placeholder={copy.paperTrading.journalSessionSelectPlaceholder} />
@@ -123,10 +127,11 @@ export function PaperJournalTable({
     {switchingSession ? <p className="flex items-center gap-2 text-xs text-slate-500" role="status"><Loader2 className="h-4 w-4 animate-spin" aria-hidden="true" />{copy.paperTrading.journalSessionSwitching}</p> : null}
   </div> : null;
 
-  if (loading && items.length === 0 && sessions.length === 0) return <div className="space-y-4">{sessionPicker}<div className="flex items-center gap-2 py-8 text-sm text-slate-500"><Loader2 className="h-4 w-4 animate-spin" />{copy.paperTrading.journalLoading}</div></div>;
-  if (error && items.length === 0 && sessions.length === 0) return <div className="space-y-4">{sessionPicker}<p className="py-6 text-sm text-red-600" role="alert">{error}</p></div>;
-  if (items.length === 0 && sessions.length === 0) return <div className="space-y-4">{sessionPicker}<p className="rounded-md border border-dashed p-6 text-center text-sm text-slate-500">{copy.paperTrading.noJournalEntries}</p></div>;
-  return <div className="space-y-4" aria-busy={loading || switchingSession}>
+  if (loading && items.length === 0 && sessions.length === 0) return <div className="space-y-4">{sessionEntry.ui}{sessionPicker}<div className="flex items-center gap-2 py-8 text-sm text-slate-500"><Loader2 className="h-4 w-4 animate-spin" />{copy.paperTrading.journalLoading}</div></div>;
+  if (error && items.length === 0 && sessions.length === 0) return <div className="space-y-4">{sessionEntry.ui}{sessionPicker}<p className="py-6 text-sm text-red-600" role="alert">{error}</p></div>;
+  if (items.length === 0 && sessions.length === 0) return <div className="space-y-4">{sessionEntry.ui}{sessionPicker}<p className="rounded-md border border-dashed p-6 text-center text-sm text-slate-500">{copy.paperTrading.noJournalEntries}</p></div>;
+  return <div className="space-y-4" aria-busy={loading || switchingSession || sessionEntry.busy}>
+    {sessionEntry.ui}
     {scope === "history" && selectedSession ? <>
       <div className="flex flex-col gap-3 sm:flex-row sm:items-end sm:justify-between">
         {sessionPicker}

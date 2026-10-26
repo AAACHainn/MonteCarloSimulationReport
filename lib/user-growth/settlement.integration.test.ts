@@ -247,4 +247,3 @@ describe("foundation achievement and bounded history", () => {
     for (const query of ["page=0", "page=-1", "page=1.5", "snapshot=-1"]) expect((await recordsGET(new Request(`http://localhost/api/test?${query}`), context)).status).toBe(400);
   });
 });
-
