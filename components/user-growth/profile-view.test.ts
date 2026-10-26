@@ -36,6 +36,11 @@ describe("growth profile presentation contract", () => {
     expect(html).toContain("当前选择：");
     expect(html).toContain(previewUsers[1].nickname);
   });
+  it("provides separate profile entries for reward details and realm thresholds", () => {
+    const html = render(3);
+    expect(html).toContain(copy.userGrowth.guide.title);
+    expect(html).toContain(copy.userGrowth.guide.viewThresholds);
+  });
   it("shows a mortal without a layer, fabricated records or a breakthrough action", () => {
     const html = render(0);
     expect(html).toContain('aria-valuenow="0"');

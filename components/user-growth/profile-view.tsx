@@ -1,7 +1,7 @@
 "use client";
 
 import { useRef, useState, type ReactNode } from "react";
-import { Check, ChevronDown, Loader2, Pencil, Sparkles } from "lucide-react";
+import { Check, ChevronDown, Info, Loader2, Pencil, Sparkles } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
@@ -14,6 +14,7 @@ import { UserAvatar } from "./user-avatar";
 import { GrowthRecordList } from "./growth-record-list";
 import { ExperienceProgress } from "./experience-progress";
 import { RealmBadge } from "./realm-badge";
+import { GrowthRulesDialog, type GrowthRulesTab } from "./growth-rules-dialog";
 import styles from "./user-growth.module.css";
 
 const t = copy.userGrowth;
@@ -22,12 +23,12 @@ export function sessionEligibility(session: ProfileSession) {
   return session.eligibility === "growth" ? t.growthSession : session.eligibility === "unassigned" ? t.unownedHint : t.replayExcluded;
 }
 
-function RealmTrack({ profile }: { profile: GrowthProfile }) {
+function RealmTrack({ profile, onViewThresholds }: { profile: GrowthProfile; onViewThresholds: () => void }) {
   return <div className="mt-7 border-t border-slate-200 pt-5">
     <div className={styles.track} aria-hidden="true"><span className={cn("text-sm", profile.realm === "mortal" ? styles.jade : "text-slate-600")}>{t.mortal}</span>
       <div><div className="mb-2 flex justify-between text-sm"><span className={styles.jade}>{t.qi}</span><span className={styles.jade}>{profile.realm === "qi" ? profile.user.realmLabel : ""}</span></div><div className={styles.ticks}>{t.layerNames.map((name, i) => <span key={name} className={cn(styles.tick, (profile.realm === "foundation" || (profile.realm === "qi" && i < profile.layer)) && styles.tickActive)} />)}</div></div>
       <span className={cn("text-sm", profile.realm === "foundation" ? styles.jade : "text-slate-600")}>{t.foundation}</span>
-    </div><p className="mt-3 text-xs text-slate-600">{profile.realm === "qi" ? t.trackHint(t.layerNames[profile.layer - 1]) : profile.realm === "foundation" ? t.trackFoundation : t.trackMortal} <span className="ml-2">{t.future}</span></p>
+    </div><p className="mt-3 text-xs text-slate-600">{profile.realm === "qi" ? t.trackHint(t.layerNames[profile.layer - 1]) : profile.realm === "foundation" ? t.trackFoundation : t.trackMortal} <span className="ml-2">{t.future}</span></p><Button type="button" variant="ghost" size="sm" className="mt-2 text-blue-700" onClick={onViewThresholds}>{t.guide.viewThresholds}</Button>
   </div>;
 }
 
@@ -36,6 +37,7 @@ export function ProfileView({ profile, selected, state, onRetry, onSwitch, onEdi
   onBreakthrough: () => Promise<boolean>; breaking: boolean; actionError: string; onOpenSession: (session: ProfileSession) => void; onSource: (record: GrowthRecord) => void; onAllRecords: () => void; walletContent?: ReactNode;
 }) {
   const [conditionsOpen, setConditionsOpen] = useState(profile.realm === "qi");
+  const [rulesTab, setRulesTab] = useState<GrowthRulesTab | null>(null);
   const realmRef = useRef<HTMLHeadingElement>(null);
   const satisfied = profile.conditions.filter((c) => c.value >= c.target).length;
   const ready = satisfied === 6 && profile.realm !== "foundation";
@@ -58,10 +60,11 @@ export function ProfileView({ profile, selected, state, onRetry, onSwitch, onEdi
       </div>
       {selected?.id !== profile.user.id && <div className="relative mt-5 flex flex-wrap items-center gap-2 border-t pt-3 text-sm text-slate-700"><span>{t.selection}：{selected?.nickname ?? t.all}</span><Button variant="ghost" onClick={onSwitch}>{t.switchTo(profile.user.nickname)}</Button></div>}
       <div className="relative mt-5 max-w-3xl">
-        {profile.growthPending ? <p className="text-sm text-slate-600">{t.growthPending}</p> : <><ExperienceProgress growth={profile} />{!profile.segment && <p className="mt-2 text-xs text-slate-600">{profile.attainedAt ? t.reached(profile.attainedAt) : copy.common.dash}</p>}</>}
-        <RealmTrack profile={profile} />
+        {profile.growthPending ? <p className="text-sm text-slate-600">{t.growthPending}</p> : <><ExperienceProgress growth={profile} action={<Button type="button" variant="ghost" size="sm" className="text-blue-700" onClick={() => setRulesTab("experience")}><Info className="h-4 w-4" aria-hidden="true" />{t.guide.title}</Button>} />{!profile.segment && <p className="mt-2 text-xs text-slate-600">{profile.attainedAt ? t.reached(profile.attainedAt) : copy.common.dash}</p>}</>}
+        <RealmTrack profile={profile} onViewThresholds={() => setRulesTab("realms")} />
       </div>
     </section>
+    <GrowthRulesDialog tab={rulesTab} onTabChange={setRulesTab} current={profile.growthPending ? undefined : profile} onClose={() => setRulesTab(null)} />
     {walletContent}
     {actionError && <p role="alert" className="rounded-md border border-red-200 bg-red-50 p-3 text-sm text-red-700">{actionError}</p>}
     {state !== "normal" && <div role={state === "error" ? "alert" : "status"} className="flex items-center justify-between gap-3 rounded-md border bg-white p-3 text-sm text-slate-700"><span>{state === "loading" ? profile.growthPending ? t.loadingProfile : t.loadingHint : profile.growthPending ? t.profileStale : t.stale}</span>{state === "error" && <Button variant="outline" onClick={onRetry}>{t.retry}</Button>}</div>}
