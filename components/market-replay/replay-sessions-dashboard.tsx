@@ -2,7 +2,7 @@
 
 import { useCurrentUser } from "@/components/user-growth/user-context";
 import { NewSessionOwner, eligibilityLabel } from "@/components/user-growth/ownership-context";
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { useReplaySessionEntry } from "./replay-session-entry-guard";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
@@ -21,6 +21,8 @@ import { Select, SelectTrigger, SelectValue, SelectContent, SelectItem } from "@
 import { Table, TableHeader, TableRow, TableHead, TableBody, TableCell } from "@/components/ui/table";
 import { copy } from "@/lib/i18n";
 import { formatNumber, formatMoney } from "@/lib/format";
+import { createUuid } from "@/lib/uuid";
+import type { SessionWalletPreview } from "@/lib/user-wallet/session";
 import { propResultLabel } from "@/lib/prop-practice/result-label";
 import { dateTimeLocalValue, selectedTimeToTimestamp } from "@/lib/market-replay/start-time";
 import type { MarketDatasetSummary } from "@/lib/market-replay/types";
@@ -42,6 +44,14 @@ export function ReplaySessionsDashboard({ dataset, initialSessions, initialCreat
   const [archiveTarget, setArchiveTarget] = useState<ReplaySessionSummary | null>(null);
   const [deleteTarget, setDeleteTarget] = useState<ReplaySessionSummary | null>(null);
   const [deleteError, setDeleteError] = useState<string | null>(null);
+  const [deletePreview, setDeletePreview] = useState<SessionWalletPreview | null>(null), [deleteLoading, setDeleteLoading] = useState(false);
+  const [deleteRevision, setDeleteRevision] = useState(0), [deleteRequestId, setDeleteRequestId] = useState("");
+  useEffect(() => {
+    if (!deleteTarget?.id) return;
+    const sessionId = deleteTarget.id, controller = new AbortController(); setDeletePreview(null); setDeleteLoading(true); setDeleteError(null); setDeleteRequestId(createUuid());
+    void fetch('/api/replay-sessions/' + encodeURIComponent(sessionId) + '/wallet', { signal: controller.signal, cache: "no-store" }).then(async response => { const result = await response.json(); if (!response.ok) throw new Error(result.error ?? t.deleteFailed); if (!controller.signal.aborted) { setDeletePreview(result); setDeleteTarget(previous => previous?.id === sessionId ? { ...previous, version: result.version } : previous); } }).catch(cause => { if (!controller.signal.aborted) setDeleteError(cause instanceof Error ? cause.message : t.deleteFailed); }).finally(() => { if (!controller.signal.aborted) setDeleteLoading(false); });
+    return () => controller.abort();
+  }, [deleteTarget?.id, deleteRevision]);
   const [renameTarget, setRenameTarget] = useState<ReplaySessionSummary | null>(null);
   const [renameDraft, setRenameDraft] = useState("");
   const [renameError, setRenameError] = useState<string | null>(null);
@@ -112,12 +122,12 @@ export function ReplaySessionsDashboard({ dataset, initialSessions, initialCreat
     finally { setBusy(false); }
   }
   async function remove() {
-    if (!deleteTarget || busy) return;
+    if (!deleteTarget || !deletePreview || deleteLoading || deletePreview.blocked || busy) return;
     setBusy(true); setDeleteError(null);
     try {
       const response = await fetch(`/api/replay-sessions/${encodeURIComponent(deleteTarget.id)}`, {
         method: "DELETE", headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ expectedVersion: deleteTarget.version }),
+        body: JSON.stringify({ expectedVersion: deleteTarget.version, settlement: deletePreview.managed ? { kind: deletePreview.kind, amount: deletePreview.amount, requestId: deleteRequestId } : undefined }),
       });
       const result = await response.json();
       if (!response.ok) {
@@ -126,7 +136,7 @@ export function ReplaySessionsDashboard({ dataset, initialSessions, initialCreat
         throw new Error(result.error ?? t.deleteFailed);
       }
       setSessions((items) => items.filter((session) => session.id !== deleteTarget.id));
-      setDeleteTarget(null); setStatus(t.deleted); router.refresh();
+      setDeleteTarget(null); setStatus(t.deleted); currentUser.refresh(); router.refresh();
     } catch (error) { setDeleteError(error instanceof Error ? error.message : t.deleteFailed); }
     finally { setBusy(false); }
   }
@@ -178,7 +188,8 @@ export function ReplaySessionsDashboard({ dataset, initialSessions, initialCreat
     <RenameDialog open={Boolean(renameTarget)} title={t.renameTitle} description={t.renameDescription} label={t.name}
       value={renameDraft} onChange={(value) => { setRenameDraft(value); setRenameError(null); }} maxLength={100}
       error={renameError} isLoading={busy} confirmLabel={t.saveName} onCancel={() => setRenameTarget(null)} onConfirm={() => void rename()} />
-    <ConfirmDialog open={Boolean(deleteTarget)} title={t.deleteTitle} description={t.deleteDescription(deleteTarget?.name ?? "")}
-      confirmLabel={t.delete} isLoading={busy} error={deleteError} onCancel={() => setDeleteTarget(null)} onConfirm={() => void remove()} />
+    <ConfirmDialog open={Boolean(deleteTarget)} title={deletePreview?.managed && deletePreview.hasAccount ? copy.userWallet.deleteTitle : t.deleteTitle}
+      description={!deletePreview ? copy.userWallet.deleteLoading : !deletePreview.managed || !deletePreview.hasAccount || deletePreview.settled ? t.deleteDescription(deleteTarget?.name ?? "") : deletePreview.kind === "WITHDRAW" ? copy.userWallet.deleteStandard(deleteTarget?.name ?? "", formatNumber(deletePreview.received)) : deletePreview.kind === "PAYOUT" ? copy.userWallet.deleteProp(deleteTarget?.name ?? "", formatNumber(deletePreview.received), formatNumber(deletePreview.abandoned)) : copy.userWallet.deleteNoPayout(deleteTarget?.name ?? "")}
+      confirmLabel={deletePreview?.kind === "WITHDRAW" ? copy.userWallet.deleteWithdraw : deletePreview?.kind === "PAYOUT" ? copy.userWallet.deletePayout : t.delete} confirmDisabled={deleteLoading || !deletePreview || deletePreview.blocked} isLoading={busy} error={deleteError ?? (deletePreview?.blocked ? copy.userWallet.deleteBlocked : null)} secondaryAction={deleteError && !deleteLoading ? { label: copy.userWallet.deleteRefresh, onClick: () => setDeleteRevision(n => n + 1) } : undefined} onCancel={() => setDeleteTarget(null)} onConfirm={() => void remove()} />
   </div>;
 }

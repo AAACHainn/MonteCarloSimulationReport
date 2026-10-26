@@ -705,6 +705,47 @@ model UserProfile {
   growth UserGrowth?
   facts UserGrowthFact[]
   breakthroughs UserRealmRecord[]
+  wallet UserWallet?
+  walletEntries UserWalletEntry[]
+  walletAllocations UserWalletAllocation[]
+}
+
+model UserWallet {
+  userId String @id
+  user UserProfile @relation(fields: [userId], references: [id], onDelete: Restrict)
+  balanceMinor BigInt @default(1000000)
+  version Int @default(1)
+  updatedAt DateTime @updatedAt
+}
+
+// Independent evidence: session/projection identifiers intentionally have no cascading relation.
+model UserWalletEntry {
+  id String @id @default(cuid())
+  userId String
+  user UserProfile @relation(fields: [userId], references: [id], onDelete: Restrict)
+  sourceKey String @unique
+  type String
+  amountMinor BigInt
+  balanceAfterMinor BigInt
+  sessionId String?
+  sessionName String @default("")
+  roundNumber Int?
+  createdAt DateTime @default(now())
+  @@index([userId, createdAt, id])
+}
+
+model UserWalletAllocation {
+  projectionId String @id
+  userId String
+  user UserProfile @relation(fields: [userId], references: [id], onDelete: Restrict)
+  sessionId String
+  sessionName String
+  depositedMinor BigInt
+  withdrawnMinor BigInt @default(0)
+  settledAt DateTime?
+  createdAt DateTime @default(now())
+  @@index([userId, settledAt, createdAt])
+  @@index([sessionId])
 }
 
 // Projection only. Rebuilt from settled deltas, never from surviving sessions.

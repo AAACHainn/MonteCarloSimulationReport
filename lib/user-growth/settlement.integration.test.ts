@@ -13,6 +13,7 @@ import { createReplaySession, archiveReplaySession, deleteReplaySession } from "
 import { loadReplayScope, runWithReplayScope } from "@/lib/replay-sessions/scope";
 import { saveProfile } from "./service";
 import { settleGrowth, sourceKey, rebuildGrowth, breakthroughFoundation } from "./settlement";
+import { sessionWalletPreview } from "@/lib/user-wallet/session";
 import { readGrowthRecords, readGrowthView } from "./read";
 import { FOUNDATION_REQUIREMENTS } from "./rules";
 import { POST as accountPOST } from "@/app/api/market-datasets/[id]/paper-session/route";
@@ -107,7 +108,10 @@ describe("daily rewards in actual trading and review transactions", () => {
     expect((await review(s, row, "归档后的首次复盘")).status).toBe(200);
     const before = await totals(owner!.id), key = (await prisma.userGrowthFact.findFirstOrThrow({ where: { userId: owner!.id, type: "REVIEW" } })).sourceKey;
     const deleteScope = await loadReplayScope(s.id);
-    await runWithReplayScope(deleteScope, () => sqliteWriteTransaction(prisma, tx => deleteReplaySession(tx, deleteScope.version)));
+    const walletPreview = await runWithReplayScope(deleteScope, () => prisma.$transaction(tx => sessionWalletPreview(tx)));
+    await runWithReplayScope(deleteScope, () => sqliteWriteTransaction(prisma, tx => deleteReplaySession(tx, deleteScope.version, {
+      kind: walletPreview.kind, amount: walletPreview.amount, requestId: randomUUID(),
+    })));
     expect(await totals(owner!.id)).toEqual(before);
     const rebuilt = await sqliteWriteTransaction(prisma, tx => rebuildGrowth(tx, owner!.id)); expect(rebuilt).toMatchObject({ totalXp: 15, completedCycles: 1, completedReviews: 1 });
     expect(await prisma.userGrowthFact.findUnique({ where: { sourceKey: key } })).not.toBeNull();

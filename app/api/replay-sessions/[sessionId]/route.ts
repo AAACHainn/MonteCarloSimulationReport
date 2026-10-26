@@ -47,7 +47,7 @@ export async function DELETE(request: Request, context: Context) {
     const parsed = deleteReplaySessionSchema.safeParse(await request.json().catch(() => null));
     if (!parsed.success) return NextResponse.json({ error: copy.replaySessions.deleteInvalid }, { status: 400 });
     const scope = await loadReplayScope((await context.params).sessionId);
-    await runWithReplayScope(scope, () => sqliteWriteTransaction(prisma, (tx) => deleteReplaySession(tx, parsed.data.expectedVersion)));
+    await runWithReplayScope(scope, () => sqliteWriteTransaction(prisma, (tx) => deleteReplaySession(tx, parsed.data.expectedVersion, parsed.data.settlement)));
     return NextResponse.json({ ok: true });
   } catch (error) { return replayErrorResponse(error); }
 }

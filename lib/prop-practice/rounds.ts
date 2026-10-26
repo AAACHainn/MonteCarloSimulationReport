@@ -7,6 +7,8 @@ import { projectionRecordId } from "@/lib/replay-sessions/identity";
 import { funds, resetPropState, propRulesSchema, type PropState } from "./rules";
 import type { PropSnapshot } from "./service";
 
+import { chargePropPurchase } from "@/lib/user-wallet/service";
+
 export async function listPropRounds() {
   const scope = getReplayScope()!;
   const [account, rounds] = await Promise.all([
@@ -51,6 +53,7 @@ export async function resetPropAccount(input: { expectedVersion: number; expecte
     await tx.replayProjection.update({ where: { id: scope.projectionId }, data: { status: `ROUND_${prop.roundNumber}` } });
     const projection = await tx.replayProjection.create({ data: { replaySessionId: scope.id, status: "CURRENT", historyVersion: oldProjection.historyVersion, currentSequence: owner.progress.currentSequence } });
     const number = prop.roundNumber + 1;
+    await chargePropPurchase(tx, owner, number, snapshot.rules);
     const config = { initialCapital: snapshot.rules.evaluation.risk.initialCapital, currency: oldAccount.currency,
       commissionBps: oldAccount.commissionBps, slippageBps: oldAccount.slippageBps };
     await tx.paperTradingSession.create({ data: { id: projectionRecordId(projection.id, `account_${scope.id}`), projectionId: projection.id,

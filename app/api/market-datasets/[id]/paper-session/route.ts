@@ -10,6 +10,7 @@ import { getPaperSessionSnapshot } from "@/lib/paper-trading/serialize";
 import { paperSessionSchema } from "@/lib/validations";
 import { createPaperAccountSchema } from "@/lib/prop-practice/account-input";
 import { archiveAndDeletePaperSession } from "@/lib/paper-trading/journal-storage";
+import { fundStandardAccount } from "@/lib/user-wallet/service";
 
 type RouteContext = { params: Promise<{ id: string }> };
 
@@ -42,7 +43,7 @@ async function handlePOST(request: Request, context: RouteContext) {
         tx.marketDataset.findUnique({ where: { id }, select: { barCount: true } }),
       ]);
       if (!progress || !dataset) return false;
-      const owner = scope ? await tx.replaySession.findUniqueOrThrow({ where: { id: scope.id }, select: { name: true } }) : null;
+      const owner = scope ? await tx.replaySession.findUniqueOrThrow({ where: { id: scope.id }, }) : null;
       const journalData = {
           datasetId: id,
           replaySessionId: getReplayScope()?.id,
@@ -65,6 +66,7 @@ async function handlePOST(request: Request, context: RouteContext) {
           equitySampleStride: Math.max(1, Math.ceil(dataset.barCount / 20_000)),
         },
       });
+      if (scope && owner) await fundStandardAccount(tx, owner, scope.projectionId, config.initialCapital);
       await recordReplayCommand(tx, progress.currentSequence, "ACCOUNT_INIT", {
         ...config, logicalAccountId: scope ? `account_${scope.id}` : undefined,
         equitySampleStride: Math.max(1, Math.ceil(dataset.barCount / 20_000)),

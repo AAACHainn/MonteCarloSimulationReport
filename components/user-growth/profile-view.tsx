@@ -1,6 +1,6 @@
 "use client";
 
-import { useRef, useState } from "react";
+import { useRef, useState, type ReactNode } from "react";
 import { Check, ChevronDown, Loader2, Pencil, Sparkles } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
@@ -30,9 +30,9 @@ function RealmTrack({ profile }: { profile: GrowthProfile }) {
   </div>;
 }
 
-export function ProfileView({ profile, selected, state, onRetry, onSwitch, onEdit, onBreakthrough, breaking, actionError, onOpenSession, onSource, onAllRecords }: {
+export function ProfileView({ profile, selected, state, onRetry, onSwitch, onEdit, onBreakthrough, breaking, actionError, onOpenSession, onSource, onAllRecords, walletContent }: {
   profile: GrowthProfile; selected?: UserIdentity; state: QueryState; onRetry: () => void; onSwitch: () => void; onEdit: () => void;
-  onBreakthrough: () => Promise<boolean>; breaking: boolean; actionError: string; onOpenSession: (session: ProfileSession) => void; onSource: (record: GrowthRecord) => void; onAllRecords: () => void;
+  onBreakthrough: () => Promise<boolean>; breaking: boolean; actionError: string; onOpenSession: (session: ProfileSession) => void; onSource: (record: GrowthRecord) => void; onAllRecords: () => void; walletContent?: ReactNode;
 }) {
   const [conditionsOpen, setConditionsOpen] = useState(profile.realm === "qi");
   const realmRef = useRef<HTMLHeadingElement>(null);
@@ -61,6 +61,7 @@ export function ProfileView({ profile, selected, state, onRetry, onSwitch, onEdi
         <RealmTrack profile={profile} />
       </div>
     </section>
+    {walletContent}
     {actionError && <p role="alert" className="rounded-md border border-red-200 bg-red-50 p-3 text-sm text-red-700">{actionError}</p>}
     {state !== "normal" && <div role={state === "error" ? "alert" : "status"} className="flex items-center justify-between gap-3 rounded-md border bg-white p-3 text-sm text-slate-700"><span>{state === "loading" ? profile.growthPending ? t.loadingProfile : t.loadingHint : profile.growthPending ? t.profileStale : t.stale}</span>{state === "error" && <Button variant="outline" onClick={onRetry}>{t.retry}</Button>}</div>}
     {profile.growthPending ? <Card className="shadow-none"><CardHeader><CardTitle>{t.growthPending}</CardTitle><CardDescription>{t.growthPendingHint}</CardDescription></CardHeader></Card> : <div className="space-y-6">

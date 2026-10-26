@@ -5,6 +5,7 @@
   "packageManager": "pnpm@11.4.0",
   "scripts": {
     "dev": "next dev",
+    "acceptance:user-wallet": "node scripts/acceptance-user-wallet.mjs",
     "acceptance:user-growth:final": "node scripts/acceptance-user-growth-final.mjs",
     "acceptance:user-growth": "node scripts/acceptance-user-growth.mjs",
     "preview:user-growth": "node scripts/preview-user-growth.mjs",

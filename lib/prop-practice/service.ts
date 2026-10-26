@@ -10,6 +10,8 @@ import { applyPayout, payoutPreview, promotePropManually, promotionPreview, prop
 import { propTradingDay, type PropCalendar } from "./trading-day";
 import { hydrateStageMetrics } from "./stage-metrics-read";
 
+import { chargePropActivation, creditPropPayout } from "@/lib/user-wallet/service";
+
 export type PropSnapshot = { rules: PropRules; calendar: PropCalendar; currency: string; accountConfig: import("@/lib/paper-trading/types").PaperAccountConfig };
 export type PropRuntime = { snapshot: PropSnapshot; state: PropState; roundNumber?: number };
 export async function loadPropAccount(tx: Prisma.TransactionClient = prisma): Promise<PropRuntime | null> {
@@ -91,8 +93,10 @@ export async function readPropAccount() {
   return { ...prop, preview: payoutPreview(prop.snapshot.rules, prop.state), payouts, events };
 }
 export async function confirmPropPayout(input: { expectedVersion: number; requestId: string; amount: number }) {
+  return sqliteWriteTransaction(prisma, tx => confirmPropPayoutInTransaction(tx, input));
+}
+export async function confirmPropPayoutInTransaction(tx: Prisma.TransactionClient, input: { expectedVersion: number; requestId: string; amount: number }) {
   const scope = getReplayScope()!;
-  return sqliteWriteTransaction(prisma, async (tx) => {
     const existing = await tx.propPracticePayout.findUnique({ where: { replaySessionId_requestId: { replaySessionId: scope.id, requestId: input.requestId } } });
     if (existing) {
       if (existing.amount !== input.amount) throw new ReplaySessionError("PROP_REQUEST_CONFLICT", 409, copy.propPractice.payoutInvalid);
@@ -113,6 +117,7 @@ export async function confirmPropPayout(input: { expectedVersion: number; reques
     catch { throw new ReplaySessionError("PROP_PAYOUT_INVALID", 409, copy.propPractice.payoutInvalid); }
     const payout = await tx.propPracticePayout.create({ data: { replaySessionId: scope.id, roundNumber: updated.roundNumber ?? 1, requestId: input.requestId,
       amount: input.amount, received: result.received, share: result.share, evidence: JSON.stringify(result.evidence) } });
+    await creditPropPayout(tx, await tx.replaySession.findUniqueOrThrow({ where: { id: scope.id } }), payout);
     updated.state = result.state;
     await tx.propPracticeAccount.update({ where: { replaySessionId: scope.id }, data: { state: JSON.stringify(result.state) } });
     await tx.propPracticeRound.updateMany({ where: { projectionId: scope.projectionId }, data: { state: JSON.stringify(result.state) } });
@@ -123,7 +128,6 @@ export async function confirmPropPayout(input: { expectedVersion: number; reques
       payout: { received: payout.received, currency: updated.snapshot.currency, firstInRound: await tx.propPracticePayout.count({ where: { replaySessionId: scope.id, roundNumber: payout.roundNumber } }) === 1 } });
     await markReplayMutation(tx);
     return payout;
-  });
 }
 export async function confirmPropPromotion(input: { expectedVersion: number; requestId: string }) {
   const scope = getReplayScope()!;
@@ -142,6 +146,7 @@ export async function confirmPropPromotion(input: { expectedVersion: number; req
     let state: PropState;
     try { state = promotePropManually(updated.snapshot.rules, updated.state); }
     catch { throw new ReplaySessionError("PROP_PROMOTION_INVALID", 409, copy.propPractice.promotionUnavailable); }
+    await chargePropActivation(tx, await tx.replaySession.findUniqueOrThrow({ where: { id: scope.id } }), updated.roundNumber ?? 1, updated.snapshot.rules.activationCost ?? 0);
     const evidence = { requestId: input.requestId, manual: true, sequence: state.last!.sequence, day: state.last!.day,
       progress: promotionPreview(updated.snapshot.rules, updated.state), state };
     await tx.propPracticeAccount.update({ where: { replaySessionId: scope.id }, data: { state: JSON.stringify(state) } });

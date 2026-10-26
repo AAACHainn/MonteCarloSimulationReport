@@ -8,10 +8,11 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { copy } from "@/lib/i18n";
-import { formatMoney } from "@/lib/format";
+import { formatMoney, formatNumber } from "@/lib/format";
 import type { CreatePaperAccountInput } from "@/lib/prop-practice/account-input";
 import type { PropRules } from "@/lib/prop-practice/rules";
 import { useReplaySession } from "./replay-session-context";
+import type { SessionWalletPreview } from "@/lib/user-wallet/session";
 import { PropRuleSummary, type PropTemplateRow } from "./prop-template-manager";
 
 export function PaperAccountCreateForm({ busy, error, onCreate }: {
@@ -26,11 +27,20 @@ export function PaperAccountCreateForm({ busy, error, onCreate }: {
   const [loadError, setLoadError] = useState<string | null>(null);
   const [retry, setRetry] = useState(0);
   const [detailsOpen, setDetailsOpen] = useState(false);
-  const [currency, setCurrency] = useState("USDT");
+  const currency = "USDT";
+  const [wallet, setWallet] = useState<SessionWalletPreview | null>(null), [walletError, setWalletError] = useState("");
+  const [walletRevision, setWalletRevision] = useState(0);
+  const managed = session?.mode === "TRAINING" && !!session.userId;
   const isProp = category === "PROP_PRACTICE";
   const t = copy.propPractice;
   const selected = templates.find(row => row.versions[0]?.id === templateId);
   const rules: PropRules | null = selected ? JSON.parse(selected.versions[0].rules) : null;
+  useEffect(() => {
+    if (!managed || !session?.id) return;
+    const controller = new AbortController(); setWallet(null); setWalletError("");
+    void fetch('/api/replay-sessions/' + encodeURIComponent(session.id) + '/wallet', { cache: "no-store", signal: controller.signal }).then(async response => { const result = await response.json(); if (!response.ok) throw new Error(result.error ?? copy.userWallet.failed); if (!controller.signal.aborted) setWallet(result); }).catch(cause => { if (!controller.signal.aborted) setWalletError(cause instanceof Error ? cause.message : copy.userWallet.failed); });
+    return () => controller.abort();
+  }, [session?.id, managed, walletRevision]);
 
   useEffect(() => {
     if (!isProp) return;
@@ -78,15 +88,16 @@ export function PaperAccountCreateForm({ busy, error, onCreate }: {
           {detailsOpen ? <div id={`${id}-rules`}><PropRuleSummary rules={rules} currency={currency} /></div> : null}
         </div> : null}
       </div> : null}
+      {managed ? <div className="space-y-2 text-sm" role={walletError ? "alert" : "status"}>{walletError ? <>{walletError}<Button type="button" variant="outline" className="ml-2" onClick={() => setWalletRevision(n => n + 1)}>{copy.userWallet.retry}</Button></> : wallet ? <><p>{(isProp ? copy.userWallet.availableHint : copy.userWallet.canDeposit)(formatNumber(wallet.available))}</p>{isProp && rules && <p className="text-xs text-slate-600">{copy.userWallet.purchaseHint(formatNumber(rules.purchaseCost ?? 0), formatNumber(rules.activationCost ?? 0))}</p>}{isProp && rules && wallet.available < (rules.purchaseCost ?? 0) + (rules.activationCost ?? 0) ? <p className="text-xs text-red-600">{copy.userWallet.insufficient(formatNumber(wallet.available), formatNumber((rules.purchaseCost ?? 0) + (rules.activationCost ?? 0)))}</p> : !isProp && wallet.available <= 0 ? <p className="text-xs text-amber-800">{copy.userWallet.zeroBalance}</p> : null}</> : copy.userWallet.loading}</div> : <p className="text-xs text-slate-600">{copy.userWallet.excluded}</p>}
       <div className="grid gap-4 sm:grid-cols-2">
-        {!isProp ? <div className="space-y-2"><Label htmlFor={`${id}-capital`}>{copy.paperTrading.initialCapital}</Label><Input id={`${id}-capital`} name="initialCapital" type="number" min="0.01" step="any" defaultValue="100000" disabled={busy} required /></div> : null}
-        <div className="space-y-2"><Label htmlFor={`${id}-currency`}>{copy.paperTrading.currency}</Label><Input id={`${id}-currency`} name="currency" value={currency} onChange={event => setCurrency(event.target.value)} maxLength={12} disabled={busy} required /></div>
+        {!isProp ? <div className="space-y-2"><Label htmlFor={`${id}-capital`}>{copy.paperTrading.initialCapital}</Label><Input id={`${id}-capital`} name="initialCapital" key={wallet?.available ?? "pending"} type="number" min="0.01" max={managed ? wallet?.available : undefined} step="0.01" defaultValue={managed ? Math.min(wallet?.available ?? 0, 10000) : 100000} disabled={busy || (managed && !wallet)} required /></div> : null}
+        <div className="space-y-2"><Label htmlFor={`${id}-currency`}>{copy.paperTrading.currency}</Label><Input id={`${id}-currency`} name="currency" value={currency} readOnly /></div>
       </div>
       <div className="grid gap-4 sm:grid-cols-2">
           <div className="space-y-2"><Label htmlFor={`${id}-fee`}>{copy.paperTrading.commissionBps}</Label><Input id={`${id}-fee`} name="commissionBps" type="number" min="0" max="10000" step="any" defaultValue="0" disabled={busy} required /></div>
           <div className="space-y-2"><Label htmlFor={`${id}-slip`}>{copy.paperTrading.slippageBps}</Label><Input id={`${id}-slip`} name="slippageBps" type="number" min="0" max="10000" step="any" defaultValue="0" disabled={busy} required /></div>
       </div>
       {error ? <p role="alert" className="text-sm text-red-600">{error}</p> : null}
-      <div className="flex justify-end border-t pt-4"><Button type="submit" disabled={busy || (isProp && (!selected || loading || !!loadError))}>{busy ? <Loader2 className="h-4 w-4 animate-spin" aria-hidden="true" /> : null}{busy ? copy.paperTrading.creating : isProp ? t.createPracticeAccount : copy.paperTrading.createAccount}</Button></div>
+      <div className="flex justify-end border-t pt-4"><Button type="submit" disabled={busy || (managed && (!wallet || (!isProp && wallet.available <= 0) || (isProp && !!rules && wallet.available < (rules.purchaseCost ?? 0) + (rules.activationCost ?? 0)))) || (isProp && (!selected || loading || !!loadError))}>{busy ? <Loader2 className="h-4 w-4 animate-spin" aria-hidden="true" /> : null}{busy ? copy.paperTrading.creating : isProp ? t.createPracticeAccount : copy.paperTrading.createAccount}</Button></div>
     </form>;
 }

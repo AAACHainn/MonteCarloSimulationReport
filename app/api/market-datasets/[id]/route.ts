@@ -7,12 +7,14 @@ import { isMarketTimestampAligned } from "@/lib/market-replay/parse-market-bars"
 import { formatInterval, isValidDisplayInterval } from "@/lib/market-replay/types";
 import { withDatasetUpdate } from "@/lib/market-sync/lease";
 import { SyncError } from "@/lib/market-sync/security";
+import { sqliteWriteTransaction } from "@/lib/sqlite-write";
+import { ReplaySessionError, replayErrorResponse } from "@/lib/replay-sessions/scope";
 
 type RouteContext = { params: Promise<{ id: string }> };
 
 export async function DELETE(request: Request, context: RouteContext) {
   try { return await withDatasetUpdate((await context.params).id, () => deleteDataset(request, context)); }
-  catch (error) { return NextResponse.json({ error: error instanceof SyncError ? error.message : copy.marketSync.failed }, { status: error instanceof SyncError ? error.status : 500 }); }
+  catch (error) { if (error instanceof ReplaySessionError) return replayErrorResponse(error); return NextResponse.json({ error: error instanceof SyncError ? error.message : copy.marketSync.failed }, { status: error instanceof SyncError ? error.status : 500 }); }
 }
 export async function PATCH(request: Request, context: RouteContext) {
   try { return await withDatasetUpdate((await context.params).id, () => patchDataset(request, context)); }
@@ -30,7 +32,11 @@ async function deleteDataset(_request: Request, context: RouteContext) {
   const { id } = await context.params;
   const dataset = await prisma.marketDataset.findUnique({ where: { id }, select: { id: true } });
   if (!dataset) return NextResponse.json({ error: copy.marketReplay.datasetNotFound }, { status: 404 });
-  await prisma.marketDataset.delete({ where: { id } });
+  await sqliteWriteTransaction(prisma, async tx => {
+    const protectedSessions = await tx.$queryRaw<Array<{ id: string }>>`SELECT r.id FROM ReplaySession r WHERE r.datasetId=${id} AND r.userId IS NOT NULL AND r.mode='TRAINING' AND (EXISTS (SELECT 1 FROM UserWalletAllocation a WHERE a.sessionId=r.id AND a.settledAt IS NULL) OR EXISTS (SELECT 1 FROM PropPracticeAccount p WHERE p.replaySessionId=r.id)) LIMIT 1`;
+    if (protectedSessions.length) throw new ReplaySessionError("WALLET_UNSETTLED", 409, copy.userWallet.datasetBlocked);
+    await tx.marketDataset.delete({ where: { id } });
+  });
   return NextResponse.json({ ok: true });
 }
 

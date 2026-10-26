@@ -36,7 +36,7 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { copy } from "@/lib/i18n";
-import { formatMoney } from "@/lib/format";
+import { formatMoney, formatNumber } from "@/lib/format";
 import { funds } from "@/lib/prop-practice/rules";
 import { Type as TextIcon } from "lucide-react";
 import { TextSettingsDialog, TextToolOption } from "./text-settings-dialog";
@@ -167,6 +167,7 @@ export function MarketReplayClient({ dataset: initialDataset, initialJournalFocu
     );
   }
 
+  const restartWalletHint = replaySession?.mode === "TRAINING" && replaySession.userId && paperSnapshot ? (paperSnapshot.propAccount ? copy.userWallet.resetCost(formatNumber(paperSnapshot.propAccount.snapshot.rules.purchaseCost ?? 0)) : copy.userWallet.restartStandard) : "";
   return (
     <ReplayCorrectionProvider pending={correctionPending} onDeleteCycle={(entry) => { if (entry.cycleKey) openCorrectionTarget({ type: "DELETE_CYCLE", cycleKey: entry.cycleKey, no: entry.no }); }}>
     {wrapWorkspace(<>
@@ -634,7 +635,7 @@ export function MarketReplayClient({ dataset: initialDataset, initialJournalFocu
       <ConfirmDialog
         open={Boolean(confirmAction)}
         title={confirmAction === "paper-clear" ? copy.replaySessions.archiveTitle : copy.replaySessions.restartTitle}
-        description={confirmAction === "paper-clear" ? copy.replaySessions.archiveDescription : `${copy.replaySessions.restartDescription} ${replaySession ? copy.userGrowth.restartOwnership(replaySession.owner?.nickname ?? copy.userGrowth.unowned, eligibilityLabel(replaySession)) : ""}`}
+        description={confirmAction === "paper-clear" ? copy.replaySessions.archiveDescription : `${copy.replaySessions.restartDescription} ${restartWalletHint} ${replaySession ? copy.userGrowth.restartOwnership(replaySession.owner?.nickname ?? copy.userGrowth.unowned, eligibilityLabel(replaySession)) : ""}`}
         onCancel={() => {
           const suspension = confirmationSuspensionRef.current;
           confirmationSuspensionRef.current = null;
@@ -655,7 +656,7 @@ export function MarketReplayClient({ dataset: initialDataset, initialJournalFocu
         onChange={setStartDialogValue}
         onCancel={closeStartDialog}
         onConfirm={(value) => void applyNewReplayStart(value)}
-      >{replaySession && <p className="text-sm text-slate-700">{copy.userGrowth.restartOwnership(replaySession.owner?.nickname ?? copy.userGrowth.unowned, eligibilityLabel(replaySession))}</p>}</ReplayStartDialog>
+      >{replaySession && <p className="text-sm text-slate-700">{copy.userGrowth.restartOwnership(replaySession.owner?.nickname ?? copy.userGrowth.unowned, eligibilityLabel(replaySession))} {restartWalletHint}</p>}</ReplayStartDialog>
     </>)}
     </ReplayCorrectionProvider>
   );

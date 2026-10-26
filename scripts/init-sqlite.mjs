@@ -676,6 +676,10 @@ try {
     }
     await prisma.$executeRawUnsafe(statement.replace(/^CREATE TABLE /, "CREATE TABLE IF NOT EXISTS ").replace(/^CREATE UNIQUE INDEX /, "CREATE UNIQUE INDEX IF NOT EXISTS ").replace(/^CREATE INDEX /, "CREATE INDEX IF NOT EXISTS "));
   }
+  const walletMigration = readFileSync(new URL("../prisma/migrations/20261026140000_user_wallet/migration.sql", import.meta.url), "utf8");
+  for (const statement of walletMigration.replace(/^\s*--.*$/gm, "").split(";").map(s => s.trim()).filter(Boolean)) {
+    await prisma.$executeRawUnsafe(statement.replace(/^CREATE TABLE /, "CREATE TABLE IF NOT EXISTS ").replace(/^CREATE UNIQUE INDEX /, "CREATE UNIQUE INDEX IF NOT EXISTS ").replace(/^CREATE INDEX /, "CREATE INDEX IF NOT EXISTS "));
+  }
 } finally {
   await prisma.$disconnect();
 }

@@ -56,7 +56,18 @@ describe("unpublished user profiles migration", () => {
       INSERT INTO "UserGrowth" (userId,totalXp,updatedAt) VALUES ('owner',137,1000);
       INSERT INTO "ReplaySession" (id,datasetId,name,mode,userId,growthEligible,updatedAt) VALUES ('owned','data','已有个人会话','TRAINING','owner',true,1000);`);
     const before = fingerprint(db); expectFinalSchema(db); db.close();
-    init(file); init(file); const after = new Database(file);
-    try { expectFinalSchema(after); expect(fingerprint(after)).toEqual(before); } finally { after.close(); }
+    init(file); const initialized = new Database(file);
+    let afterFirstInit;
+    try {
+      expectFinalSchema(initialized);
+      const legacyTables = before.filter(table => !["UserWallet", "UserWalletEntry", "UserWalletAllocation"].includes(table.name));
+      expect(fingerprint(initialized, legacyTables)).toEqual(legacyTables);
+      expect(initialized.prepare('SELECT "balanceMinor" FROM "UserWallet" WHERE "userId"=?').get("owner")).toEqual({ balanceMinor: 1_000_000 });
+      expect(initialized.prepare('SELECT "type", "amountMinor", "balanceAfterMinor" FROM "UserWalletEntry" WHERE "userId"=?').get("owner"))
+        .toEqual({ type: "INITIAL", amountMinor: 1_000_000, balanceAfterMinor: 1_000_000 });
+      afterFirstInit = fingerprint(initialized);
+    } finally { initialized.close(); }
+    init(file); const after = new Database(file);
+    try { expectFinalSchema(after); expect(fingerprint(after)).toEqual(afterFirstInit); } finally { after.close(); }
   }, 30000);
 });

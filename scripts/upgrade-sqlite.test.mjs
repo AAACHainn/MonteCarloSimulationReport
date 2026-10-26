@@ -40,10 +40,21 @@ beforeAll(() => {
 describe("repeatable offline SQLite upgrade", () => {
   it("fills the missing prop fields/tables using the existing init script and safely repeats", async () => {
     const file = fixture(); preProp(file);
+    const profileCreatedAt = "2025-01-02T03:04:05.000Z";
+    inspect(file, db => {
+      db.pragma("foreign_keys=OFF");
+      db.exec('DROP TABLE "UserWalletAllocation"; DROP TABLE "UserWalletEntry"; DROP TABLE "UserWallet";');
+      db.prepare('INSERT INTO "UserProfile" ("id", "nickname", "createdAt", "updatedAt") VALUES (?, ?, ?, ?)')
+        .run("upgrade-existing-user", "升级前用户", profileCreatedAt, profileCreatedAt);
+    });
     const before = inspect(file, fingerprint);
     const first = await upgradeDatabase(options(file));
     expect(first).toMatchObject({ method: "init", originalJournalMode: "delete", status: "SUCCESS" });
     expect(inspect(file, db => fingerprint(db, before))).toEqual(before);
+    expect(inspect(file, db => db.prepare('SELECT "balanceMinor", "updatedAt" FROM "UserWallet" WHERE "userId"=?').get("upgrade-existing-user")))
+      .toEqual({ balanceMinor: 1_000_000, updatedAt: profileCreatedAt });
+    expect(inspect(file, db => db.prepare('SELECT "type", "amountMinor", "balanceAfterMinor", "createdAt" FROM "UserWalletEntry" WHERE "userId"=?').get("upgrade-existing-user")))
+      .toEqual({ type: "INITIAL", amountMinor: 1_000_000, balanceAfterMinor: 1_000_000, createdAt: profileCreatedAt });
     expect(inspect(file, db => db.prepare('SELECT accountCategory FROM ReplaySession').get().accountCategory)).toBe("STANDARD");
     expect(existsSync(join(first.directory, "before.db"))).toBe(true);
     expect(first.cleanup.status).toBe("COMPLETE");
@@ -96,17 +107,17 @@ describe("repeatable offline SQLite upgrade", () => {
     // while removing earlier history correctly triggers the production prefix guard.
     inspect(file, db => {
       db.pragma("foreign_keys=OFF");
-      db.exec('DROP TABLE "UserRealmRecord"; DROP TABLE "UserGrowthFact"; DROP TABLE "UserGrowth"; DROP TABLE "UserProfile"; DROP INDEX "ReplaySession_userId_createdAt_idx";');
+      db.exec('DROP TABLE "UserWalletAllocation"; DROP TABLE "UserWalletEntry"; DROP TABLE "UserWallet"; DROP TABLE "UserRealmRecord"; DROP TABLE "UserGrowthFact"; DROP TABLE "UserGrowth"; DROP TABLE "UserProfile"; DROP INDEX "ReplaySession_userId_createdAt_idx";');
       for (const column of ["userId", "growthEligible"]) db.exec(`ALTER TABLE "ReplaySession" DROP COLUMN "${column}"`);
     });
     preProp(file);
-    inspect(file, db => db.exec("DELETE FROM _prisma_migrations WHERE migration_name IN ('20261023120000_prop_practice','20261024090000_prop_practice_rounds','20261025120000_user_profiles')"));
+    inspect(file, db => db.exec("DELETE FROM _prisma_migrations WHERE migration_name IN ('20261023120000_prop_practice','20261024090000_prop_practice_rounds','20261025120000_user_profiles','20261026140000_user_wallet')"));
     inspect(file, db => {
       db.pragma(`journal_mode=${mode}`);
       db.exec(`INSERT INTO MarketDataset(id,name,symbol,timeframe,timezone,barCount,startTime,endTime,updatedAt) VALUES ('prisma-data','行情','ES','1m','UTC',1,1000,1000,1000);
         INSERT INTO MarketBar(datasetId,sequence,timestamp,open,high,low,close,volume) VALUES ('prisma-data',0,1000,100,110,90,105,10);`);
     });
-    const plan = inspect(file, db => identifyMigration(db)); expect(plan.pending).toHaveLength(3);
+    const plan = inspect(file, db => identifyMigration(db)); expect(plan.pending).toHaveLength(4);
     const before = inspect(file, fingerprint);
     const observed = [];
     const execute = (args, env, log) => {

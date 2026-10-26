@@ -17,6 +17,7 @@ type ConfirmDialogProps = {
   confirmVariant?: "default" | "destructive";
   secondaryAction?: { label: string; onClick: () => void; variant?: "outline" | "destructive" };
   isLoading?: boolean;
+  confirmDisabled?: boolean;
   error?: string | null;
   layerClassName?: string;
   onCancel: () => void;
@@ -32,6 +33,7 @@ export function ConfirmDialog({
   confirmVariant = "destructive",
   secondaryAction,
   isLoading = false,
+  confirmDisabled = false,
   error,
   layerClassName,
   onCancel,
@@ -86,7 +88,7 @@ export function ConfirmDialog({
           {secondaryAction ? <Button type="button" variant={secondaryAction.variant ?? "outline"} onClick={secondaryAction.onClick} disabled={isLoading}>
             {secondaryAction.label}
           </Button> : null}
-          <Button type="button" variant={confirmVariant} onClick={onConfirm} disabled={isLoading}>
+          <Button type="button" variant={confirmVariant} onClick={onConfirm} disabled={isLoading || confirmDisabled}>
             {isLoading ? <Loader2 className="h-4 w-4 animate-spin" aria-hidden="true" /> : null}
             {confirmLabel}
           </Button>

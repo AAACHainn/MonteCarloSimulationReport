@@ -11,6 +11,7 @@ import { assertUserExists } from "./ownership";
 import type { ProfileSession, UserIdentity } from "./types";
 import { avatarChoice, decodeAvatar } from "./avatar";
 import { AvatarError } from "./avatar-storage";
+import { initializeWallet } from "@/lib/user-wallet/service";
 
 export const profileInput = z.object({ nickname: z.string().trim().refine(value => Array.from(value).length >= 1 && Array.from(value).length <= 24), avatar: avatarChoice.optional() }).strict();
 export function userIdentity(user: { id: string; nickname: string; avatar?: string; growth?: { totalXp: number; realm: string } | null }): UserIdentity {
@@ -23,6 +24,7 @@ export async function saveProfile(input: z.infer<typeof profileInput>, id?: stri
     const avatar = uploadedAvatar ?? (input.avatar ? `PRESET:${input.avatar.preset}` : undefined);
     const data = { nickname: input.nickname, ...(avatar ? { avatar } : {}) };
     const row = id ? await tx.userProfile.update({ where: { id }, data, include: { growth: true } }) : await tx.userProfile.create({ data: { ...data, growth: { create: {} } }, include: { growth: true } });
+    if (!id) await initializeWallet(tx, row.id);
     return userIdentity(row);
   });
 }

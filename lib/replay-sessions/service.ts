@@ -15,6 +15,9 @@ import { projectionRecordId } from "./identity";
 import { saveReplayCheckpoint } from "./checkpoint";
 import { assertUserExists, inheritSessionOwnership, newSessionOwnership, type SessionOwnershipData } from "@/lib/user-growth/ownership";
 
+import { chargePropPurchase, fundStandardAccount, settleStandardAccount } from "@/lib/user-wallet/service";
+import { settleSessionDeletion, type DeleteSettlement } from "@/lib/user-wallet/session";
+
 export const createReplaySessionSchema = replayStartSchema.extend({
   name: z.string().trim().min(1).max(100),
   mode: z.enum(["TRAINING", "LIVE_REPLAY"]),
@@ -25,7 +28,7 @@ export const createReplaySessionSchema = replayStartSchema.extend({
 });
 export type CreateReplaySessionInput = z.infer<typeof createReplaySessionSchema>;
 
-export const deleteReplaySessionSchema = z.object({ expectedVersion: z.number().int().positive() }).strict();
+export const deleteReplaySessionSchema = z.object({ expectedVersion: z.number().int().positive(), settlement: z.object({ kind: z.enum(["WITHDRAW", "PAYOUT", "FORFEIT"]), amount: z.number().finite().nonnegative(), requestId: z.string().min(1).max(128) }).strict().optional() }).strict();
 
 export async function createReplaySession(datasetId: string, input: CreateReplaySessionInput) {
   return sqliteWriteTransaction(prisma, async (tx) => createSessionInTransaction(tx, datasetId, input));
@@ -100,6 +103,7 @@ export async function initializePropPracticeAccount(
   if (!bar || !propTradingDay(bar.timestamp, calendar)) throw new ReplaySessionError("PROP_CALENDAR", 400, copy.propPractice.calendarInvalid);
   const config = paperSessionSchema.parse({ ...accountConfig, initialCapital: rules.evaluation.risk.initialCapital });
   const snapshot = { rules, calendar, currency: config.currency, accountConfig: config };
+  await chargePropPurchase(tx, owner, 1, rules);
   await tx.replaySession.update({ where: { id: scope.id }, data: { accountCategory: "PROP_PRACTICE" } });
   await tx.propPracticeAccount.create({ data: { replaySessionId: scope.id, templateVersionId: template.id,
     snapshot: JSON.stringify(snapshot), state: JSON.stringify(initialPropState(rules, progress.currentSequence + 1)) } });
@@ -142,9 +146,10 @@ export async function renameReplaySession(tx: Prisma.TransactionClient, name: st
   await markReplayMutation(tx);
 }
 
-export async function deleteReplaySession(tx: Prisma.TransactionClient, expectedVersion: number) {
+export async function deleteReplaySession(tx: Prisma.TransactionClient, expectedVersion: number, settlement?: DeleteSettlement) {
   const scope = await assertSessionMetadataWritable(tx);
   if (scope.version !== expectedVersion) throw new ReplaySessionError("SESSION_CONFLICT", 409, copy.replaySessions.conflict);
+  await settleSessionDeletion(tx, settlement);
   // Session-owned records cascade; shared market data and other sessions remain intact.
   await tx.replaySession.delete({ where: { id: scope.id } });
 }
@@ -161,6 +166,7 @@ export async function restartReplaySession(input?: CreateReplaySessionInput) {
     });
     const previousAccount = await tx.paperTradingSession.findUnique({ where: { projectionId: scope.projectionId } });
     const previousProp = existing.accountCategory === "PROP_PRACTICE" ? await tx.propPracticeAccount.findUniqueOrThrow({ where: { replaySessionId: scope.id } }) : null;
+    if (!previousProp) await settleStandardAccount(tx, existing, scope.projectionId);
     const nextInput = input ?? {
       name: existing.name, mode: scope.mode, timestamp: start.timestamp.toISOString(),
       playbackRate: existing.progress.playbackRate,
@@ -184,6 +190,7 @@ export async function restartReplaySession(input?: CreateReplaySessionInput) {
         lastProcessedSequence: next.progress.currentSequence, peakEquity: config.initialCapital,
         equitySampleStride: account.equitySampleStride,
       } });
+      await fundStandardAccount(tx, next, next.activeProjectionId, config.initialCapital);
       await runWithReplayScope({ id: next.id, datasetId: next.datasetId, projectionId: next.activeProjectionId,
         mode: next.mode as "TRAINING" | "LIVE_REPLAY", status: "ACTIVE", version: 1 },
       () => recordReplayCommand(tx, next.progress.currentSequence, "ACCOUNT_INIT", { ...config, logicalAccountId: `account_${next.id}`, equitySampleStride: account.equitySampleStride }));

@@ -23,7 +23,7 @@ function hydrate(base: object, values: Record<string, string>, prefix = ""): obj
   return Object.fromEntries(Object.entries(base).map(([key, v]) => [key, v !== null && typeof v === "object" ? hydrate(v, values, prefix + key + ".")
     : ["name", "description", "mode"].includes(key) ? values[prefix + key] : values[prefix + key] === "" ? null : Number(values[prefix + key])]));
 }
-export function PropRuleSummary({ rules, currency = "USD" }: { rules: PropRules; currency?: string }) {
+export function PropRuleSummary({ rules, currency = "USDT" }: { rules: PropRules; currency?: string }) {
   return <div className="space-y-2 text-xs text-slate-600">
     <p>{t.evaluation}: {t.initialCapital} {formatMoney(rules.evaluation.risk.initialCapital, currency)} · {t.target} {formatMoney(rules.evaluation.target, currency)} · {t.drawdown} {formatMoney(rules.evaluation.risk.drawdown, currency)} · {t[rules.evaluation.risk.mode]}</p>
     <p>{t.funded}: {t.initialCapital} {formatMoney(rules.funded.risk.initialCapital, currency)} · {t.drawdown} {formatMoney(rules.funded.risk.drawdown, currency)} · {t[rules.funded.risk.mode]}</p>

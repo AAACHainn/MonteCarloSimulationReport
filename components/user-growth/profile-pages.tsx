@@ -9,6 +9,7 @@ import { copy } from "@/lib/i18n";
 import { formatInteger } from "@/lib/format";
 import type { GrowthProfile, GrowthRecord, ProfileSession, UserIdentity } from "@/lib/user-growth/types";
 import { useCurrentUser } from "./user-context";
+import { WalletPanel } from "./wallet-panel";
 import { UserAvatar } from "./user-avatar";
 import { writeProfile } from "./profile-save";
 import { ProfileDialog } from "./profile-dialog";
@@ -61,7 +62,7 @@ export function UserProfilePage({ userId }: { userId: string }) {
   return <div className="space-y-6"><Breadcrumbs items={[{ label: t.title, href: "/users" }, { label: data.user.nickname }]} />
     {status && <p role="status" className="rounded-md border border-emerald-200 bg-emerald-50 p-3 text-sm text-emerald-700">{status}</p>}
     {error && <p role="alert" className="text-sm text-red-700">{error}<Button variant="outline" className="ml-3" onClick={() => setRevision(value => value + 1)}>{t.retry}</Button></p>}
-    <ProfileView key={userId} profile={profile} selected={current.selected} state={state} onRetry={() => setRevision(value => value + 1)} onSwitch={() => current.select(userId)} onEdit={() => setEditing(true)}
+    <ProfileView key={userId} profile={profile} selected={current.selected} state={state} onRetry={() => setRevision(value => value + 1)} onSwitch={() => current.select(userId)} onEdit={() => setEditing(true)} walletContent={<WalletPanel userId={userId} />}
       onBreakthrough={async () => {
         if (breaking) return false; setBreaking(true); setActionError("");
         try {
