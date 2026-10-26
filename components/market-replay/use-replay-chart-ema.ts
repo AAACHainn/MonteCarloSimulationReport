@@ -1,13 +1,16 @@
 "use client";
 
-import { useEffect, useRef, type RefObject } from "react";
+import { useEffect, useLayoutEffect, useRef, type RefObject } from "react";
 import { LineSeries, type IChartApi, type ISeriesApi, type UTCTimestamp } from "lightweight-charts";
 import { copy } from "@/lib/i18n";
+import { canUpdateReplayTail } from "@/lib/market-replay/chart-data";
 import { calculateEmaSeries, nextEma } from "@/lib/market-replay/ema";
 import { emaSeriesStyleOptions } from "@/lib/market-replay/ema-style";
 import type { AggregatedMarketBarData, EmaIndicatorConfig } from "@/lib/market-replay/types";
 
 type EmaRenderState = {
+  bars: AggregatedMarketBarData[];
+  warmupBars: AggregatedMarketBarData[];
   length: number;
   firstTimestamp: string | null;
   lastTimestamp: string | null;
@@ -38,6 +41,18 @@ export function useReplayChartEma({
   const stateRef = useRef(new Map<string, EmaRenderState>());
   const ownerChartRef = useRef<IChartApi | null>(null);
 
+  // Remove old timeline points before the candle effect maps the next window's range.
+  // In particular, retained hidden lines must not pin a discarded history/timeframe.
+  useLayoutEffect(() => {
+    if (ownerChartRef.current !== chartRef.current) return;
+    for (const [id, previous] of stateRef.current) {
+      if (previous.bars !== bars && !canUpdateReplayTail(previous.bars, bars, "", "")) {
+        seriesRef.current.get(id)?.setData([]);
+        stateRef.current.delete(id);
+      }
+    }
+  }, [bars, chartRef]);
+
   useEffect(() => {
     const chart = chartRef.current;
     if (!chart) return;
@@ -46,32 +61,50 @@ export function useReplayChartEma({
       seriesRef.current.clear();
       stateRef.current.clear();
     }
-    const active = enabled ? indicators.filter((item) => item.visible) : [];
-    const activeIds = new Set(active.map((item) => item.id));
+    const configuredIds = new Set(indicators.map((item) => item.id));
     for (const [id, series] of seriesRef.current) {
-      if (!activeIds.has(id)) {
+      if (!configuredIds.has(id)) {
         chart.removeSeries(series);
         seriesRef.current.delete(id);
         stateRef.current.delete(id);
       }
     }
     const all = [...warmupBars, ...bars];
-    for (const indicator of active) {
+    for (const indicator of indicators) {
+      const visible = enabled && indicator.visible;
       let series = seriesRef.current.get(indicator.id);
+      const previous = stateRef.current.get(indicator.id);
+      if (!visible) {
+        series?.applyOptions({ visible: false });
+        // A hidden series must not keep timestamps from an old window/timeframe.
+        if (series && previous && (previous.bars !== bars || previous.warmupBars !== warmupBars)) {
+          series.setData([]);
+          stateRef.current.delete(indicator.id);
+        }
+        continue;
+      }
       if (!series) {
         series = chart.addSeries(LineSeries, {
           ...emaSeriesStyleOptions(indicator),
           title: copy.marketReplay.emaLine(indicator.length),
           priceLineVisible: false,
           crosshairMarkerVisible: false,
+          // Keep the candle scale and axis width independent of indicator visibility.
+          autoscaleInfoProvider: () => null,
+          lastValueVisible: false,
+          visible: false,
         });
         seriesRef.current.set(indicator.id, series);
       }
-      series.applyOptions({
+      const renderOptions = {
         ...emaSeriesStyleOptions(indicator),
         title: copy.marketReplay.emaLine(indicator.length),
-      });
-      const previous = stateRef.current.get(indicator.id);
+        visible: true,
+      };
+      if (previous?.length === indicator.length && previous.bars === bars && previous.warmupBars === warmupBars) {
+        series.applyOptions(renderOptions);
+        continue;
+      }
       const samePrefix = previous?.length === indicator.length
         && all.length >= previous.barCount
         && previous.firstTimestamp === (all[0]?.timestamp ?? null)
@@ -83,12 +116,14 @@ export function useReplayChartEma({
         series.setData(result.points.filter((point) => point.sequence >= warmupBars.length)
           .map((point) => ({ time: chartTime(all[point.sequence].timestamp), value: point.value })));
         stateRef.current.set(indicator.id, {
+          bars, warmupBars,
           length: indicator.length,
           firstTimestamp: all[0]?.timestamp ?? null,
           lastTimestamp: all.at(-1)?.timestamp ?? null,
           barCount: all.length,
           values,
         });
+        series.applyOptions(renderOptions);
         continue;
       }
       const values = previous.values;
@@ -107,12 +142,14 @@ export function useReplayChartEma({
         }
       }
       stateRef.current.set(indicator.id, {
+        bars, warmupBars,
         length: indicator.length,
         firstTimestamp: all[0]?.timestamp ?? null,
         lastTimestamp: all.at(-1)?.timestamp ?? null,
         barCount: all.length,
         values,
       });
+      series.applyOptions(renderOptions);
     }
   }, [bars, chartKey, chartRef, enabled, indicators, warmupBars]);
 }

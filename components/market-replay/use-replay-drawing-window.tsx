@@ -20,20 +20,21 @@ import type { PaperSessionSnapshot } from "@/lib/paper-trading/types";
 import { DRAWING_TYPE_FIB_RETRACEMENT, DRAWING_TYPE_TREND_LINE, DRAWING_TYPE_RECTANGLE, DRAWING_TYPE_TEXT, drawingGeometryMatchesType, type TwoPointDrawingTool, type DrawingGeometry, drawingStyleMatchesType, type DrawingTool, type MarketDrawing, type MarketDrawingStyle, type TrendLineGeometry } from "@/lib/market-replay/chart-drawings";
 import { WindowPayload, TradeAnnotationsPayload, replayWindowRequest, createLocalDrawingId, cloneFibonacciStyle } from "./replay-client-shared";
 import type { useReplayCore } from "./use-replay-core";
+import { useReplayIndicatorWarmup } from "./use-replay-indicator-warmup";
 
 export function useReplayDrawingWindow(core: ReturnType<typeof useReplayCore>) {
   const {
     fetch, replaySession, registerAiScope, aiChartOwner, dataset, initializedDatasetRef,
     setBars, setChartDataRevision, setWarmupBars, setCurrentSourceBar,
-    setIsLoading, setLoadError, setReplay, latestReplayRef, suspendPlayback,
-    restorePlayback, setEmaError, confirmedPaperSnapshotRef, paperSessionLoadedRef, paperSessionLoadRef, commitConfirmedPaperSnapshot,
+    setIsLoading, setLoadError, setReplay, latestReplayRef,
+    confirmedPaperSnapshotRef, paperSessionLoadedRef, paperSessionLoadRef, commitConfirmedPaperSnapshot,
     setTradeAnnotations, setTradeAnnotationsTruncated, setPaperError, setChartFocusSequence, chartWindowDetachedRef, setMeasurementArmed,
     setDrawingToolOpen, setDrawingTool, drawings, setDrawings, setClearingDrawings, clearingDrawingsRef,
     setDrawingError, setSelectedDrawingId, setDrawingObjectsOpen, setRectangleStyleId, styleDrawingId, setStyleDrawingId,
     styleDraft, setStyleDraft, pendingDrawingIds, setPendingDrawingIds, emaSettingsLoaded, abrSettingsLoaded,
     chartVisibility, setChartVisibility, defaultRectangleStyle, defaultTrendLineStyle, defaultFibonacciStyle, openTextDrawing,
     finishText, discardText, requestTextSettings, drawingWriteScope, drawingScopeGuard, drawingsLive,
-    indicatorWarmupCount, indicatorWarmupCountRef, previousIndicatorWarmupCountRef, skipNextIndicatorReloadRef, marketSession, marketCache,
+    indicatorWarmupCountRef, marketSession, marketCache,
     getDisplayCache, windowCache, barsRef, warmupBarsRef, currentSourceBarRef, viewChangingRef,
     windowRequestRef, windowAbortRef, windowPrefetchAbortRef, annotationAbortRef, annotationRequestRef, annotationCoverageRef,
     annotationTimerRef, historyAbortRef, historyLoadingRef, historyHasEarlierRef, historyLaterExhaustedThroughRef, historyLastBarsBeforeRef,
@@ -686,30 +687,7 @@ export function useReplayDrawingWindow(core: ReturnType<typeof useReplayCore>) {
     return () => { cancelled = true; };
   }, [abrSettingsLoaded, commitConfirmedPaperSnapshot, dataset, emaSettingsLoaded, loadWindow, paperSessionLoadedRef, paperSessionLoadRef, primeWindow, setReplay, fetch, replaySession?.activeProjectionId, indicatorWarmupCountRef, initializedDatasetRef, setIsLoading, setLoadError]);
 
-  useEffect(() => {
-    if (!emaSettingsLoaded || !abrSettingsLoaded) return;
-    const previous = previousIndicatorWarmupCountRef.current;
-    previousIndicatorWarmupCountRef.current = indicatorWarmupCount;
-    if (previous === null || previous === indicatorWarmupCount) return;
-    if (skipNextIndicatorReloadRef.current) {
-      skipNextIndicatorReloadRef.current = false;
-      return;
-    }
-    const current = latestReplayRef.current;
-    if (!current) return;
-    const suspension = suspendPlayback();
-    void loadWindow(
-      current.currentSequence,
-      current.displayIntervalSeconds,
-      current.displaySession,
-      indicatorWarmupCount,
-    ).then(() => {
-      restorePlayback(suspension);
-    }).catch((error) => {
-      setEmaError(error instanceof Error ? error.message : copy.marketReplay.loadError);
-      restorePlayback(suspension);
-    });
-  }, [abrSettingsLoaded, emaSettingsLoaded, indicatorWarmupCount, latestReplayRef, loadWindow, restorePlayback, suspendPlayback, previousIndicatorWarmupCountRef, setEmaError, skipNextIndicatorReloadRef]);
+  useReplayIndicatorWarmup(core);
 
   return {
     armDrawing, changeChartVisibility, armTrendLine, armFibonacciRetracement, createDrawing, updateDrawing,
