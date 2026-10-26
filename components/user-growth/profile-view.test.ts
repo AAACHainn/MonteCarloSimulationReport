@@ -11,7 +11,7 @@ function render(scenario: number, state: "normal" | "error" = "normal") {
   return renderToStaticMarkup(createElement(ProfileView, {
     profile: makePreviewProfile(previewUsers[0], scenario), selected: previewUsers[1], state,
     onRetry: vi.fn(), onSwitch: vi.fn(), onEdit: vi.fn(), onBreakthrough: async () => true,
-    breaking: false, actionError: "", onAssign: vi.fn(), onOpenSession: vi.fn(), onSource: vi.fn(), onAllRecords: vi.fn(),
+    breaking: false, actionError: "", onOpenSession: vi.fn(), onSource: vi.fn(), onAllRecords: vi.fn(),
   }));
 }
 describe("growth profile presentation contract", () => {
@@ -19,10 +19,10 @@ describe("growth profile presentation contract", () => {
     const profile = { ...makePreviewProfile(previewUsers[0], 0), growthPending: true, conditions: [] };
     const html = renderToStaticMarkup(createElement(ProfileView, {
       profile, state: "normal", onRetry: vi.fn(), onSwitch: vi.fn(), onEdit: vi.fn(), onBreakthrough: async () => false,
-      breaking: false, actionError: "", onAssign: vi.fn(), onOpenSession: vi.fn(), onSource: vi.fn(), onAllRecords: vi.fn(),
+      breaking: false, actionError: "", onOpenSession: vi.fn(), onSource: vi.fn(), onAllRecords: vi.fn(),
     }));
     expect(html).toContain(copy.userGrowth.growthPending);
-    expect(html).toContain(copy.userGrowth.assign);
+    expect(html).not.toContain("归属历史会话");
     expect(html).not.toContain('role="progressbar"');
     expect(html).not.toContain(copy.userGrowth.showConditions);
     expect(html).not.toContain(copy.userGrowth.records + "</h3>");

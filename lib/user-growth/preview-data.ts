@@ -4,7 +4,7 @@ import type { GrowthProfile, GrowthRecord, GrowthRecordPage, ProfileSession, Use
 const t = copy.userGrowth;
 export const previewAvatar = { preset: 0, zoom: 1, x: 50, y: 50 };
 export const previewUsers: UserIdentity[] = t.demoPeople.map((nickname, i) => ({ id: `demo-${i}`, nickname, avatar: { ...previewAvatar, preset: i }, realmLabel: [t.qiLayer(t.layerNames[11]), t.mortal, t.qiLayer(t.layerNames[5])][i] }));
-export const previewHistory: ProfileSession[] = t.fixtureSessions.map((name, i) => ({ id: `history-${i}`, name, market: i % 2 ? "BTCUSDT · 5m" : "NQ · 1m", mode: i === 4 ? "replay" : "training", account: i % 2 ? "default" : "prop", trades: 16 + i * 9, created: `2026-10-${20 + i} 10:30`, eligibility: "historical" }));
+export const previewSessions: ProfileSession[] = t.fixtureSessions.map((name, i) => ({ id: `demo-session-${i}`, name, market: i % 2 ? "BTCUSDT · 5m" : "NQ · 1m", mode: i === 4 ? "replay" : "training", account: i % 2 ? "default" : "prop", trades: 16 + i * 9, created: `2026-10-${20 + i} 10:30`, eligibility: i === 4 ? "replay" : "growth" }));
 
 /** Simulates a paginated source: generates at most one page, never a 5,000-item array. */
 export function makePreviewRecordPage(scenario: number, requestedPage: number, breakthrough = false): GrowthRecordPage {
@@ -42,6 +42,6 @@ export function makePreviewProfile(user: UserIdentity, scenario: number): Growth
     segment: realm === "foundation" ? undefined : realm === "mortal" ? { value: totalXp, max: 100, next: t.qiLayer(t.layerNames[0]) } : scenario === 2 ? { value: 570, max: 1050, next: t.qiLayer(t.layerNames[6]) } : { value: totalXp - 13600, max: 4500, next: t.foundationOne },
     conditions: [18100, 1200, 600, 20, 10, 100000].map((target, i) => ({ target, value: values[i] })),
     records: recordPage.items.slice(0, 5), recordCount: recordPage.total,
-    sessions: scenario === 0 ? [] : previewHistory.slice(0, scenario === 1 ? 1 : 3).map((session, i) => ({ ...session, id: `session-${i}`, name: t.fixtureCurrentSessions[i], eligibility: i === 0 ? "growth" : i === 1 ? "historical" : "replay", mode: i === 2 ? "replay" : "training" })),
+    sessions: scenario === 0 ? [] : previewSessions.slice(0, scenario === 1 ? 1 : 3).map((session, i) => ({ ...session, id: `session-${i}`, name: t.fixtureCurrentSessions[i], eligibility: i === 2 ? "replay" : "growth", mode: i === 2 ? "replay" : "training" })),
   };
 }

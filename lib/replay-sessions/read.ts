@@ -14,7 +14,7 @@ export async function listReplaySessions(datasetId: string, userId?: string | nu
   });
   return sessions.map((session) => ({
     id: session.id, datasetId, name: session.name,
-    userId: session.userId, owner: session.user, ownershipSource: session.ownershipSource, growthEligible: session.growthEligible,
+    userId: session.userId, owner: session.user, growthEligible: session.growthEligible,
     mode: session.mode as ReplaySessionSummary["mode"], status: session.status as ReplaySessionSummary["status"],
     version: session.version, activeProjectionId: session.activeProjectionId!, pendingCorrectionId: session.pendingCorrectionId,
     legacy: session.legacy, riskPreferences: JSON.parse(session.riskPreferences),

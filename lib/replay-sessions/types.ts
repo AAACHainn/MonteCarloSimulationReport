@@ -7,7 +7,6 @@ export type ReplaySessionSummary = {
   name: string;
   userId?: string | null;
   owner?: { id: string; nickname: string } | null;
-  ownershipSource?: string;
   growthEligible?: boolean;
   mode: ReplaySessionMode;
   status: "ACTIVE" | "ARCHIVED";

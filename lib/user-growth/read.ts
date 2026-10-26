@@ -59,9 +59,9 @@ export async function readGrowthRecords(userId: string, requestedPage = 1, snaps
   });
 }
 export async function readSessionGrowth(tx: Prisma.TransactionClient, sessionId: string): Promise<SessionGrowthView | null> {
-  const session = await tx.replaySession.findUnique({ where: { id: sessionId }, select: { userId: true, mode: true, ownershipSource: true, growthEligible: true, user: { select: { nickname: true, growth: true } } } });
+  const session = await tx.replaySession.findUnique({ where: { id: sessionId }, select: { userId: true, mode: true, growthEligible: true, user: { select: { nickname: true, growth: true } } } });
   const growth = session?.user?.growth;
-  if (!session?.userId || !session.growthEligible || session.mode !== "TRAINING" || session.ownershipSource !== "CREATED" || !growth) return null;
+  if (!session?.userId || !session.growthEligible || session.mode !== "TRAINING" || !growth) return null;
   const current = growthRealm(growth.totalXp, growth.realm === "FOUNDATION");
   return { userId: session.userId, nickname: session.user!.nickname, totalXp: growth.totalXp, version: growth.version, realmLabel: realmLabel(current.realm, current.layer) };
 }

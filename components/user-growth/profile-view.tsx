@@ -17,7 +17,7 @@ import styles from "./user-growth.module.css";
 const t = copy.userGrowth;
 const fmt = formatInteger;
 export function sessionEligibility(session: ProfileSession) {
-  return session.eligibility === "growth" ? t.growthSession : session.eligibility === "historical" ? t.historical : t.replayExcluded;
+  return session.eligibility === "growth" ? t.growthSession : session.eligibility === "unassigned" ? t.unownedHint : t.replayExcluded;
 }
 
 function RealmTrack({ profile }: { profile: GrowthProfile }) {
@@ -29,9 +29,9 @@ function RealmTrack({ profile }: { profile: GrowthProfile }) {
   </div>;
 }
 
-export function ProfileView({ profile, selected, state, onRetry, onSwitch, onEdit, onBreakthrough, breaking, actionError, onAssign, onOpenSession, onSource, onAllRecords }: {
+export function ProfileView({ profile, selected, state, onRetry, onSwitch, onEdit, onBreakthrough, breaking, actionError, onOpenSession, onSource, onAllRecords }: {
   profile: GrowthProfile; selected?: UserIdentity; state: QueryState; onRetry: () => void; onSwitch: () => void; onEdit: () => void;
-  onBreakthrough: () => Promise<boolean>; breaking: boolean; actionError: string; onAssign: () => void; onOpenSession: (session: ProfileSession) => void; onSource: (record: GrowthRecord) => void; onAllRecords: () => void;
+  onBreakthrough: () => Promise<boolean>; breaking: boolean; actionError: string; onOpenSession: (session: ProfileSession) => void; onSource: (record: GrowthRecord) => void; onAllRecords: () => void;
 }) {
   const [conditionsOpen, setConditionsOpen] = useState(profile.realm === "qi");
   const realmRef = useRef<HTMLHeadingElement>(null);
@@ -80,6 +80,6 @@ export function ProfileView({ profile, selected, state, onRetry, onSwitch, onEdi
         {profile.recordCount > 5 && <div className="mt-5 flex justify-end border-t pt-4"><Button variant="outline" onClick={onAllRecords}>{t.allRecords}</Button></div>}
       </CardContent></Card>
     </div>}
-    <section className="rounded-lg" aria-label={t.sessions}><Card className="shadow-none"><CardHeader><div className="flex flex-wrap items-center justify-between gap-3"><CardTitle>{t.sessions}</CardTitle><Button variant="outline" onClick={onAssign}>{t.assign}</Button></div><CardDescription>{t.sessionsHint}</CardDescription></CardHeader><CardContent>{profile.sessions.length ? <Table><TableHeader><TableRow><TableHead>{t.sessionName}</TableHead><TableHead>{t.mode}</TableHead><TableHead>{t.account}</TableHead><TableHead>{t.eligibility}</TableHead><TableHead className="text-right">{t.trades}</TableHead><TableHead><span className="sr-only">{t.openSession}</span></TableHead></TableRow></TableHeader><TableBody>{profile.sessions.map((session) => <TableRow key={session.id}><TableCell className="min-w-36"><strong className="font-medium">{session.name}</strong><p className="mt-1 text-xs text-slate-500">{session.market}</p></TableCell><TableCell className="whitespace-nowrap">{session.mode === "training" ? t.training : t.replay}</TableCell><TableCell className="whitespace-nowrap">{session.account === "default" ? t.defaultAccount : t.propAccount}</TableCell><TableCell className="min-w-40"><Badge className={session.eligibility === "growth" ? "border-emerald-200 bg-emerald-50 text-emerald-700" : "bg-slate-50 text-slate-600"}>{profile.growthPending && session.eligibility === "growth" ? t.eligibilityReserved : sessionEligibility(session)}</Badge></TableCell><TableCell className="text-right tabular-nums">{fmt(session.trades)}</TableCell><TableCell><Button variant="ghost" className="whitespace-nowrap text-blue-700" onClick={() => onOpenSession(session)}>{t.openSession}</Button></TableCell></TableRow>)}</TableBody></Table> : <p className="rounded-md border border-dashed p-6 text-sm text-slate-600">{profile.growthPending ? t.realSessionEmpty : t.sessionEmpty}</p>}</CardContent></Card></section>
+    <section className="rounded-lg" aria-label={t.sessions}><Card className="shadow-none"><CardHeader><div className="flex flex-wrap items-center justify-between gap-3"><CardTitle>{t.sessions}</CardTitle></div><CardDescription>{t.sessionsHint}</CardDescription></CardHeader><CardContent>{profile.sessions.length ? <Table><TableHeader><TableRow><TableHead>{t.sessionName}</TableHead><TableHead>{t.mode}</TableHead><TableHead>{t.account}</TableHead><TableHead>{t.eligibility}</TableHead><TableHead className="text-right">{t.trades}</TableHead><TableHead><span className="sr-only">{t.openSession}</span></TableHead></TableRow></TableHeader><TableBody>{profile.sessions.map((session) => <TableRow key={session.id}><TableCell className="min-w-36"><strong className="font-medium">{session.name}</strong><p className="mt-1 text-xs text-slate-500">{session.market}</p></TableCell><TableCell className="whitespace-nowrap">{session.mode === "training" ? t.training : t.replay}</TableCell><TableCell className="whitespace-nowrap">{session.account === "default" ? t.defaultAccount : t.propAccount}</TableCell><TableCell className="min-w-40"><Badge className={session.eligibility === "growth" ? "border-emerald-200 bg-emerald-50 text-emerald-700" : "bg-slate-50 text-slate-600"}>{profile.growthPending && session.eligibility === "growth" ? t.eligibilityReserved : sessionEligibility(session)}</Badge></TableCell><TableCell className="text-right tabular-nums">{fmt(session.trades)}</TableCell><TableCell><Button variant="ghost" className="whitespace-nowrap text-blue-700" onClick={() => onOpenSession(session)}>{t.openSession}</Button></TableCell></TableRow>)}</TableBody></Table> : <p className="rounded-md border border-dashed p-6 text-sm text-slate-600">{profile.growthPending ? t.realSessionEmpty : t.sessionEmpty}</p>}</CardContent></Card></section>
   </div>;
 }

@@ -2,8 +2,8 @@
 import { useCurrentUser } from "./user-context";
 import { copy } from "@/lib/i18n";
 import type { ReplaySessionSummary } from "@/lib/replay-sessions/types";
-export function eligibilityLabel(session: Pick<ReplaySessionSummary, "ownershipSource" | "growthEligible" | "mode">) {
-  return session.ownershipSource === "HISTORICAL" ? copy.userGrowth.historical : session.growthEligible ? copy.userGrowth.eligibilityReserved : session.mode === "LIVE_REPLAY" ? copy.userGrowth.replayExcluded : copy.userGrowth.unownedHint;
+export function eligibilityLabel(session: Pick<ReplaySessionSummary, "growthEligible" | "mode">) {
+  return session.growthEligible ? copy.userGrowth.eligibilityReserved : session.mode === "LIVE_REPLAY" ? copy.userGrowth.replayExcluded : copy.userGrowth.unownedHint;
 }
 export function OwnershipContext({ session }: { session: ReplaySessionSummary }) {
   const current = useCurrentUser();

@@ -97,7 +97,7 @@ describe("repeatable offline SQLite upgrade", () => {
     inspect(file, db => {
       db.pragma("foreign_keys=OFF");
       db.exec('DROP TABLE "UserRealmRecord"; DROP TABLE "UserGrowthFact"; DROP TABLE "UserGrowth"; DROP TABLE "UserProfile"; DROP INDEX "ReplaySession_userId_createdAt_idx";');
-      for (const column of ["userId", "ownershipSource", "growthEligible", "assignedAt"]) db.exec(`ALTER TABLE "ReplaySession" DROP COLUMN "${column}"`);
+      for (const column of ["userId", "growthEligible"]) db.exec(`ALTER TABLE "ReplaySession" DROP COLUMN "${column}"`);
     });
     preProp(file);
     inspect(file, db => db.exec("DELETE FROM _prisma_migrations WHERE migration_name IN ('20261023120000_prop_practice','20261024090000_prop_practice_rounds','20261025120000_user_profiles')"));

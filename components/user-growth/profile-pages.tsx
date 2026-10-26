@@ -1,5 +1,5 @@
 "use client";
-import { useCallback, useEffect, useState } from "react";
+import { useEffect, useState } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { Breadcrumbs } from "@/components/breadcrumbs";
@@ -14,11 +14,9 @@ import { writeProfile } from "./profile-save";
 import { ProfileDialog } from "./profile-dialog";
 import { ProfileView } from "./profile-view";
 import { GrowthHistory, GrowthSourceDialog } from "./growth-history";
-import { HistoryDialog } from "./history-dialog";
 import { useReplaySessionEntry } from "@/components/market-replay/replay-session-entry-guard";
 const t = copy.userGrowth;
 type SessionPage = { items: ProfileSession[]; page: number; total: number };
-const emptyPage: SessionPage = { items: [], page: 1, total: 0 };
 export function UserProfiles() {
   const current = useCurrentUser(), router = useRouter();
   const [creating, setCreating] = useState(false);
@@ -36,31 +34,6 @@ export function UserProfiles() {
   </div>;
 }
 
-function HistoryAssignment({ user, onClose, onSuccess }: { user: UserIdentity; onClose: () => void; onSuccess: () => void }) {
-  const [query, setQuery] = useState({ search: "", mode: "all", page: 1 });
-  const [data, setData] = useState<SessionPage>(emptyPage), [loading, setLoading] = useState(true), [error, setError] = useState("");
-  const [revision, setRevision] = useState(0);
-  const onQuery = useCallback((search: string, mode: string, page: number) => setQuery(old => old.search === search && old.mode === mode && old.page === page ? old : { search, mode, page }), []);
-  useEffect(() => {
-    const controller = new AbortController(); setLoading(true); setError("");
-    const params = new URLSearchParams({ unassigned: "1", search: query.search, mode: query.mode, page: String(query.page) });
-    void fetch(`/api/user-sessions?${params}`, { cache: "no-store", signal: controller.signal }).then(async response => {
-      const result = await response.json(); if (!response.ok) throw new Error(result.error ?? t.requestFailed);
-      if (!controller.signal.aborted) setData(result);
-    }).catch(cause => { if (!controller.signal.aborted) setError(cause instanceof Error ? cause.message : t.requestFailed); }).finally(() => { if (!controller.signal.aborted) setLoading(false); });
-    return () => controller.abort();
-  }, [query, revision]);
-  return <HistoryDialog user={user} sessions={loading ? [] : data.items} remote={{ page: data.page, total: data.total, loading, error, onRetry: () => setRevision(value => value + 1), onQuery }} onClose={onClose} onAssign={async ids => {
-    if (ids.length > 200) return { error: t.historyLimit };
-    try {
-      const response = await fetch(`/api/users/${encodeURIComponent(user.id)}/assign-history`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ sessionIds: ids }) });
-      const result = await response.json();
-      if (!response.ok) { setRevision(value => value + 1); return { error: result.error ?? t.requestFailed, removedIds: result.conflictIds }; }
-      onSuccess(); return {};
-    } catch { return { error: t.requestFailed }; }
-  }} />;
-}
-
 type ProfileData = { user: UserIdentity; sessions: SessionPage; growth: Omit<GrowthProfile, "user" | "sessions"> };
 export function UserProfilePage({ userId }: { userId: string }) {
   const current = useCurrentUser();
@@ -68,7 +41,7 @@ export function UserProfilePage({ userId }: { userId: string }) {
   const [data, setData] = useState<ProfileData | null>(null);
   const [page, setPage] = useState(1), [revision, setRevision] = useState(0);
   const [state, setState] = useState<"normal" | "loading" | "error">("loading"), [error, setError] = useState("");
-  const [editing, setEditing] = useState(false), [assigning, setAssigning] = useState(false), [status, setStatus] = useState("");
+  const [editing, setEditing] = useState(false), [status, setStatus] = useState("");
   const [recordsOpen, setRecordsOpen] = useState(false), [source, setSource] = useState<GrowthRecord | null>(null);
   const [breaking, setBreaking] = useState(false), [actionError, setActionError] = useState("");
   useEffect(() => {
@@ -97,13 +70,12 @@ export function UserProfilePage({ userId }: { userId: string }) {
           setStatus(t.breakthroughSaved); setRevision(value => value + 1); current.refresh(); return true;
         } catch (cause) { setActionError(cause instanceof Error ? cause.message : t.requestFailed); return false; }
         finally { setBreaking(false); }
-      }} breaking={breaking} actionError={actionError} onAssign={() => setAssigning(true)} onOpenSession={session => { if (!entry.busy) void entry.open({ sessionId: session.id }); }} onSource={setSource} onAllRecords={() => setRecordsOpen(true)} />
+      }} breaking={breaking} actionError={actionError} onOpenSession={session => { if (!entry.busy) void entry.open({ sessionId: session.id }); }} onSource={setSource} onAllRecords={() => setRecordsOpen(true)} />
     <div className="flex items-center justify-between gap-3 text-sm"><span>{t.page(formatInteger(data.sessions.page), formatInteger(Math.max(1, Math.ceil(data.sessions.total / 20))))}</span><div className="flex gap-2"><Button variant="outline" disabled={state === "loading" || data.sessions.page <= 1} onClick={() => setPage(data.sessions.page - 1)}>{t.previous}</Button><Button variant="outline" disabled={state === "loading" || data.sessions.page * 20 >= data.sessions.total} onClick={() => setPage(data.sessions.page + 1)}>{t.next}</Button></div></div>
     {editing && <ProfileDialog user={data.user} description={t.profileAvatarHint} onClose={() => setEditing(false)} onSave={async (nickname, avatar, image) => {
       try { const user = await writeProfile(nickname, avatar, image, userId); current.upsert(user); current.refresh(); setData(old => old ? { ...old, user } : old); setEditing(false); setStatus(t.profileSaved); setRevision(value => value + 1); return null; }
       catch (cause) { return cause instanceof Error ? cause.message : t.requestFailed; }
     }} />}
-    {assigning && <HistoryAssignment user={data.user} onClose={() => setAssigning(false)} onSuccess={() => { setAssigning(false); setStatus(t.historyAssigned); setRevision(value => value + 1); }} />}
     {entry.ui}
     {recordsOpen && <GrowthHistory key={`history:${userId}`} userId={userId} onClose={() => setRecordsOpen(false)} onSource={setSource} />}
     {source && <GrowthSourceDialog record={source} onClose={() => setSource(null)} />}

@@ -11,7 +11,7 @@ import { prisma } from "@/lib/db";
 import { sqliteWriteTransaction } from "@/lib/sqlite-write";
 import { createReplaySession, archiveReplaySession, deleteReplaySession } from "@/lib/replay-sessions/service";
 import { loadReplayScope, runWithReplayScope } from "@/lib/replay-sessions/scope";
-import { saveProfile, assignHistory } from "./service";
+import { saveProfile } from "./service";
 import { settleGrowth, sourceKey, rebuildGrowth, breakthroughFoundation } from "./settlement";
 import { readGrowthRecords, readGrowthView } from "./read";
 import { FOUNDATION_REQUIREMENTS } from "./rules";
@@ -113,9 +113,9 @@ describe("daily rewards in actual trading and review transactions", () => {
     expect(await prisma.userGrowthFact.findUnique({ where: { sourceKey: key } })).not.toBeNull();
     expect((await readGrowthRecords(owner!.id)).items.every(item => item.deleted)).toBe(true);
   });
-  it.each(["unassigned", "historical", "replay"])("excludes %s sessions while preserving their trading/review operations", async kind => {
-    const owner = await user(); const { s } = await create({ owner: kind === "historical" || kind === "unassigned" ? null : owner, mode: kind === "replay" ? "LIVE_REPLAY" : "TRAINING" });
-    if (kind === "historical") await assignHistory(owner.id, [s.id]); await cycle(s);
+  it.each(["unassigned", "replay"])("excludes %s sessions while preserving their trading/review operations", async kind => {
+    const owner = await user(); const { s } = await create({ owner: kind === "unassigned" ? null : owner, mode: kind === "replay" ? "LIVE_REPLAY" : "TRAINING" });
+    await cycle(s);
     const row = await entry(s); expect((await review(s, row, "可以保存，但不发成长")).status).toBe(200);
     expect(await totals(owner.id)).toMatchObject({ totalXp: 0, completedReviews: 0, completedCycles: 0 });
   });

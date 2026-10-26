@@ -10,10 +10,9 @@ import { prisma } from "@/lib/db";
 import { createReplaySession, restartReplaySession } from "@/lib/replay-sessions/service";
 import { loadReplayScope, runWithReplayScope } from "@/lib/replay-sessions/scope";
 import { listReplaySessions } from "@/lib/replay-sessions/read";
-import { saveProfile, assignHistory, sessionPage, profileInput, assignmentInput } from "./service";
+import { saveProfile, sessionPage, profileInput } from "./service";
 import { POST as createUser } from "@/app/api/users/route";
 import { GET as readProfile } from "@/app/api/users/[userId]/route";
-import { POST as assignRoute } from "@/app/api/users/[userId]/assign-history/route";
 import { inheritSessionOwnership, newSessionOwnership } from "./ownership";
 import { savePropTemplate } from "@/lib/prop-practice/service";
 import { resetPropAccount } from "@/lib/prop-practice/rounds";
@@ -49,8 +48,8 @@ describe("real profiles and fixed ownership", () => {
   it("keeps shared data accessible and rejects missing owners instead of silently unassigning", async () => {
     const a = await saveProfile({ nickname: "归属甲" }), b = await saveProfile({ nickname: "归属乙" });
     const owned = await create(a.id), global = await create(), replay = await create(b.id, "LIVE_REPLAY");
-    expect(owned).toMatchObject({ userId: a.id, ownershipSource: "CREATED", growthEligible: true });
-    expect(global).toMatchObject({ userId: null, ownershipSource: "UNASSIGNED", growthEligible: false });
+    expect(owned).toMatchObject({ userId: a.id, growthEligible: true });
+    expect(global).toMatchObject({ userId: null, growthEligible: false });
     expect(replay).toMatchObject({ userId: b.id, growthEligible: false });
     const count = await prisma.replaySession.count(); await expect(create("missing-user")).rejects.toMatchObject({ code: "USER_NOT_FOUND" });
     expect(await prisma.replaySession.count()).toBe(count);
@@ -61,47 +60,16 @@ describe("real profiles and fixed ownership", () => {
     await saveProfile({ nickname: "归属甲更名" }, a.id);
     expect((await listReplaySessions("shared", a.id))[0].owner?.nickname).toBe("归属甲更名");
   });
-  it("makes history assignment atomic, removes conflicting IDs and never changes growth", async () => {
-    const a = await saveProfile({ nickname: "历史甲" }), b = await saveProfile({ nickname: "历史乙" });
-    const first = await create(), second = await create();
-    await assignHistory(a.id, [first.id]);
-    const failed = await assignRoute(post({ sessionIds: [first.id, second.id, "deleted"] }), context(b.id));
-    expect(failed.status).toBe(409); expect((await failed.json()).conflictIds).toEqual([first.id, "deleted"]);
-    expect((await prisma.replaySession.findUniqueOrThrow({ where: { id: second.id } })).userId).toBeNull();
-    await assignHistory(b.id, [second.id]);
-    expect(await prisma.replaySession.findUniqueOrThrow({ where: { id: second.id } })).toMatchObject({ userId: b.id, ownershipSource: "HISTORICAL", growthEligible: false });
-    expect(await prisma.userGrowthFact.count()).toBe(0);
-    expect((await prisma.userGrowth.findUniqueOrThrow({ where: { userId: b.id } })).totalXp).toBe(0);
-    expect(assignmentInput.safeParse({ sessionIds: [first.id, first.id] }).success).toBe(false);
-  });
-  it("serializes two competing whole-batch claims without partial writes", async () => {
-    const a = await saveProfile({ nickname: "并发甲" }), b = await saveProfile({ nickname: "并发乙" });
-    const ids = [(await create()).id, (await create()).id];
-    const results = await Promise.allSettled([assignHistory(a.id, ids), assignHistory(b.id, ids)]);
-    expect(results.filter(result => result.status === "fulfilled")).toHaveLength(1);
-    const rows = await prisma.replaySession.findMany({ where: { id: { in: ids } } });
-    expect(new Set(rows.map(row => row.userId)).size).toBe(1); expect(rows.every(row => !row.growthEligible)).toBe(true);
-  });
-  it("rolls the entire assignment back when persistence fails partway through the batch", async () => {
-    const a = await saveProfile({ nickname: "归属回滚" });
-    const first = await create(), second = await create();
-    await prisma.$executeRawUnsafe(`CREATE TRIGGER fail_user_assignment BEFORE UPDATE ON ReplaySession WHEN NEW.id='${second.id}' AND NEW.userId IS NOT NULL BEGIN SELECT RAISE(ABORT, 'test assignment failure'); END`);
-    try { await expect(assignHistory(a.id, [first.id, second.id])).rejects.toThrow(); }
-    finally { await prisma.$executeRawUnsafe("DROP TRIGGER fail_user_assignment"); }
-    const rows = await prisma.replaySession.findMany({ where: { id: { in: [first.id, second.id] } } });
-    expect(rows.every(row => row.userId === null && row.ownershipSource === "UNASSIGNED" && !row.growthEligible)).toBe(true);
-  });
-  it.each(["growth", "historical", "unassigned", "replay"])("restart inherits %s regardless of submitted browser user", async kind => {
+  it.each(["growth", "unassigned", "replay"])("restart inherits %s regardless of submitted browser user", async kind => {
     const a = await saveProfile({ nickname: `继承甲${kind}` }), b = await saveProfile({ nickname: `继承乙${kind}` });
     const source = await create(kind === "growth" || kind === "replay" ? a.id : null, kind === "replay" ? "LIVE_REPLAY" : "TRAINING");
-    if (kind === "historical") await assignHistory(a.id, [source.id]);
     const original = await prisma.replaySession.findUniqueOrThrow({ where: { id: source.id } });
     const next = await runWithReplayScope(await loadReplayScope(source.id), () => restartReplaySession({ name: "重新开始", userId: b.id, mode: original.mode as "TRAINING" | "LIVE_REPLAY", timestamp, playbackRate: 1, displayIntervalSeconds: 60, displaySession: "ETH" }));
-    expect(next).toMatchObject({ userId: original.userId, ownershipSource: original.ownershipSource, growthEligible: original.growthEligible });
+    expect(next).toMatchObject({ userId: original.userId, growthEligible: original.growthEligible });
     expect((await prisma.replaySession.findUniqueOrThrow({ where: { id: source.id } })).status).toBe("ARCHIVED");
     expect(await prisma.userGrowthFact.count()).toBe(0);
   });
-  it("bounds personal/unassigned paging and filters without granting ownership", async () => {
+  it("bounds personal paging and filters without granting ownership", async () => {
     const a = await saveProfile({ nickname: "分页甲" });
     for (let i = 0; i < 23; i++) await create(a.id);
     const first = await sessionPage(new URLSearchParams("page=1"), a.id), last = await sessionPage(new URLSearchParams("page=99999"), a.id);
@@ -110,11 +78,10 @@ describe("real profiles and fixed ownership", () => {
     expect((await sessionPage(new URLSearchParams("mode=replay"), a.id)).total).toBe(0);
     expect((await sessionPage(new URLSearchParams("search=不存在"), a.id)).total).toBe(0);
   });
-  it.each(["growth", "historical", "unassigned"])("same-session re-exam retains %s ownership and eligibility", async kind => {
+  it.each(["growth", "unassigned"])("same-session re-exam retains %s ownership and eligibility", async kind => {
     const a = await saveProfile({ nickname: `考核甲${kind}` });
     const template = await savePropTemplate({ ...structuredClone(defaultPropRules), name: `归属测试${kind}` });
     const source = await createReplaySession("shared", { name: "自营继承", userId: kind === "growth" ? a.id : null, mode: "TRAINING", timestamp, playbackRate: 1, displayIntervalSeconds: 60, displaySession: "ETH", accountCategory: "PROP_PRACTICE", propTemplateVersionId: template.versions[0].id, propAccountConfig: { currency: "USDT", commissionBps: 0, slippageBps: 0 } });
-    if (kind === "historical") await assignHistory(a.id, [source.id]);
     const original = await prisma.replaySession.findUniqueOrThrow({ where: { id: source.id } });
     const prop = await prisma.propPracticeAccount.findUniqueOrThrow({ where: { replaySessionId: source.id } });
     await prisma.propPracticeAccount.update({ where: { replaySessionId: source.id }, data: { state: JSON.stringify({ ...JSON.parse(prop.state), result: "FAILED" }) } });
@@ -122,7 +89,7 @@ describe("real profiles and fixed ownership", () => {
     const input = { expectedVersion: scope.version, expectedProjectionId: scope.projectionId, requestId: randomUUID() };
     const next = await runWithReplayScope(scope, () => resetPropAccount(input)); expect(next.number).toBe(2);
     const result = await prisma.replaySession.findUniqueOrThrow({ where: { id: source.id } });
-    expect(result).toMatchObject({ userId: original.userId, growthEligible: original.growthEligible, ownershipSource: original.ownershipSource });
+    expect(result).toMatchObject({ userId: original.userId, growthEligible: original.growthEligible });
     expect(await prisma.userGrowthFact.count()).toBe(0);
   });
   it("reserves independent source keys, settled deltas and realm idempotency even after deleting source", async () => {
@@ -135,10 +102,10 @@ describe("real profiles and fixed ownership", () => {
     await prisma.userRealmRecord.create({ data: { userId: user.id, fromRealm: "QI", toRealm: "FOUNDATION", metricsSnapshot: "{}", ruleVersion: "test-only-v1", idempotencyKey: "test-realm" } });
     await expect(prisma.userRealmRecord.create({ data: { userId: user.id, fromRealm: "QI", toRealm: "FOUNDATION", metricsSnapshot: "{}", ruleVersion: "test-only-v1", idempotencyKey: "test-realm-other" } })).rejects.toMatchObject({ code: "P2002" });
   });
-  it("keeps live replay derivatives ineligible and does not turn historical sessions into growth", () => {
+  it("keeps unowned restarts and live replay derivatives ineligible", () => {
     expect(newSessionOwnership(null, "TRAINING").growthEligible).toBe(false);
-    const historical = { userId: "a", ownershipSource: "HISTORICAL", growthEligible: false, assignedAt: new Date() };
-    expect(inheritSessionOwnership(historical, "TRAINING").growthEligible).toBe(false);
-    expect(inheritSessionOwnership({ ...historical, growthEligible: true }, "LIVE_REPLAY").growthEligible).toBe(false);
+    const unowned = newSessionOwnership(null, "TRAINING");
+    expect(inheritSessionOwnership(unowned, "TRAINING").growthEligible).toBe(false);
+    expect(inheritSessionOwnership({ userId: "a", growthEligible: true }, "LIVE_REPLAY").growthEligible).toBe(false);
   });
 });

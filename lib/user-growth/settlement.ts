@@ -20,7 +20,7 @@ export async function settleGrowth(tx: Prisma.TransactionClient, input: {
   const sessionId = input.sessionId ?? getReplayScope()?.id;
   if (!sessionId) return null;
   const session = await tx.replaySession.findUnique({ where: { id: sessionId }, include: { dataset: { select: { name: true, symbol: true } }, user: { select: { nickname: true } } } });
-  if (!session?.userId || !session.user || !session.growthEligible || session.ownershipSource !== "CREATED" || session.mode !== "TRAINING") return null;
+  if (!session?.userId || !session.user || !session.growthEligible || session.mode !== "TRAINING") return null;
   const round = input.roundNumber ?? 0;
   const key = sourceKey(input.type, session.id, round, input.sourceId);
   const existing = await tx.userGrowthFact.findUnique({ where: { sourceKey: key } });

@@ -680,9 +680,7 @@ model ReplaySession {
   accountCategory    String @default("STANDARD")
   userId             String?
   user               UserProfile? @relation(fields: [userId], references: [id], onDelete: Restrict)
-  ownershipSource    String @default("UNASSIGNED")
   growthEligible     Boolean @default(false)
-  assignedAt         DateTime?
   propAccount        PropPracticeAccount?
   progress           ReplayProgress?
   journal            ReplayJournalSession?

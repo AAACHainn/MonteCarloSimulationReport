@@ -7,9 +7,7 @@ CREATE TABLE "UserProfile" (
 );
 CREATE UNIQUE INDEX "UserProfile_nickname_key" ON "UserProfile"("nickname");
 ALTER TABLE "ReplaySession" ADD COLUMN "userId" TEXT REFERENCES "UserProfile"("id") ON DELETE RESTRICT ON UPDATE CASCADE;
-ALTER TABLE "ReplaySession" ADD COLUMN "ownershipSource" TEXT NOT NULL DEFAULT 'UNASSIGNED';
 ALTER TABLE "ReplaySession" ADD COLUMN "growthEligible" BOOLEAN NOT NULL DEFAULT false;
-ALTER TABLE "ReplaySession" ADD COLUMN "assignedAt" DATETIME;
 CREATE INDEX "ReplaySession_userId_createdAt_idx" ON "ReplaySession"("userId", "createdAt");
 CREATE TABLE "UserGrowth" (
   "userId" TEXT NOT NULL PRIMARY KEY REFERENCES "UserProfile"("id") ON DELETE RESTRICT ON UPDATE CASCADE,
