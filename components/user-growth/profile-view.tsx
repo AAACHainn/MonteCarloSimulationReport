@@ -23,12 +23,25 @@ export function sessionEligibility(session: ProfileSession) {
   return session.eligibility === "growth" ? t.growthSession : session.eligibility === "unassigned" ? t.unownedHint : t.replayExcluded;
 }
 
-function RealmTrack({ profile, onViewThresholds }: { profile: GrowthProfile; onViewThresholds: () => void }) {
+function RealmTrack({ profile }: { profile: GrowthProfile }) {
+  const labels = [t.mortal, ...t.layerNames.map(name => t.qiLayer(name)), t.foundationOne];
+  const position = profile.growthPending ? null : profile.realm === "foundation" ? labels.length - 1 : profile.realm === "qi" ? profile.layer : 0;
   return <div className="mt-7 border-t border-slate-200 pt-5">
-    <div className={styles.track} aria-hidden="true"><span className={cn("text-sm", profile.realm === "mortal" ? styles.jade : "text-slate-600")}>{t.mortal}</span>
-      <div><div className="mb-2 flex justify-between text-sm"><span className={styles.jade}>{t.qi}</span><span className={styles.jade}>{profile.realm === "qi" ? profile.user.realmLabel : ""}</span></div><div className={styles.ticks}>{t.layerNames.map((name, i) => <span key={name} className={cn(styles.tick, (profile.realm === "foundation" || (profile.realm === "qi" && i < profile.layer)) && styles.tickActive)} />)}</div></div>
-      <span className={cn("text-sm", profile.realm === "foundation" ? styles.jade : "text-slate-600")}>{t.foundation}</span>
-    </div><p className="mt-3 text-xs text-slate-600">{profile.realm === "qi" ? t.trackHint(t.layerNames[profile.layer - 1]) : profile.realm === "foundation" ? t.trackFoundation : t.trackMortal} <span className="ml-2">{t.future}</span></p><Button type="button" variant="ghost" size="sm" className="mt-2 text-blue-700" onClick={onViewThresholds}>{t.guide.viewThresholds}</Button>
+    <div className={styles.milestoneTrack}>
+      <div className={styles.milestoneLine} aria-hidden="true"><span className={styles.milestoneFill} style={{ width: `${(position ?? 0) / (labels.length - 1) * 100}%` }} /></div>
+      <ol className={styles.milestones} aria-label={t.realmTrack}>
+        {labels.map((label, index) => {
+          const current = position === index;
+          const visibleLabel = current || index === 0 || index === labels.length - 1;
+          return <li key={label} aria-current={current ? "step" : undefined} className="flex min-w-0 flex-col items-center">
+            <span className={cn("h-6 whitespace-nowrap text-xs", current ? styles.jade : "text-slate-600")}>{visibleLabel ? !current && index === labels.length - 1 ? t.foundation : label : <span className="sr-only">{label}</span>}</span>
+            <span className="flex h-4 items-center"><span aria-hidden="true" className={cn(styles.milestoneDot, position !== null && index <= position && styles.milestoneReached, current && styles.milestoneCurrent)} /></span>
+            <span aria-hidden="true" className={cn("mt-1 h-4 text-xs tabular-nums", current ? "font-semibold text-slate-950" : "text-slate-500")}>{index > 0 && index < labels.length - 1 ? fmt(index) : ""}</span>
+          </li>;
+        })}
+      </ol>
+    </div>
+    <p className="mt-3 text-xs text-slate-600">{profile.realm === "qi" ? t.trackHint(t.layerNames[profile.layer - 1]) : profile.realm === "foundation" ? t.trackFoundation : t.trackMortal} <span className="ml-2">{t.future}</span></p>
   </div>;
 }
 
@@ -49,8 +62,8 @@ export function ProfileView({ profile, selected, state, onRetry, onSwitch, onEdi
       <svg viewBox="0 0 380 100" className={styles.mountains} fill="none" aria-hidden="true"><path d="M0 99 60 55 85 71 142 12 195 77 237 46 287 82 330 34 380 99M67 99 142 36 182 82 203 70 230 99" stroke="currentColor" strokeWidth="1" /></svg>
       <div className="relative flex flex-wrap items-start gap-5">
         <UserAvatar avatar={profile.user.avatar} size="profile" />
-        <div className="min-w-0 flex-1 basis-72"><p className="mb-2 text-xs text-slate-600">{t.viewing}</p><h1 className="break-words text-3xl font-semibold tracking-tight text-slate-950">{profile.user.nickname}</h1>
-          <div className="mt-3 flex flex-wrap items-center gap-3"><RealmBadge realm={profile.realm} className="px-3 py-1"><h2 ref={realmRef} tabIndex={-1} className={cn(styles.realm, "rounded-sm text-xl font-semibold focus-visible:ring-2 focus-visible:ring-ring")}>{profile.user.realmLabel}</h2></RealmBadge>
+        <div className="min-w-0 flex-1 basis-72"><p className="mb-2 text-xs text-slate-600">{t.viewing}</p>
+          <div className="flex flex-wrap items-center gap-3"><h1 className="max-w-full break-words text-3xl font-semibold tracking-tight text-slate-950">{profile.user.nickname}</h1><RealmBadge realm={profile.realm} className="px-3 py-1"><h2 ref={realmRef} tabIndex={-1} className={cn(styles.realm, "rounded-sm text-xl font-semibold focus-visible:ring-2 focus-visible:ring-ring")}>{profile.user.realmLabel}</h2></RealmBadge>
             {profile.realm === "foundation" || ready ? <Badge className={cn(styles.gold, "gap-1 border-current")}><Sparkles className="h-3 w-3" aria-hidden="true" />{profile.realm === "foundation" ? t.achieved : t.ready}</Badge> : profile.layer === 12 ? <span className="text-sm text-slate-600">{xpMet ? t.experienceMet : t.preparing}</span> : null}
           </div><p className="mt-3 text-sm text-slate-700">{t.totalXp}<strong className="ml-3 font-mono text-lg tabular-nums text-slate-950">{fmt(profile.totalXp)}</strong>{profile.growthPending && <span className="ml-3 text-xs text-slate-600">{t.growthPending}</span>}</p>
         </div>
@@ -61,7 +74,7 @@ export function ProfileView({ profile, selected, state, onRetry, onSwitch, onEdi
       {selected?.id !== profile.user.id && <div className="relative mt-5 flex flex-wrap items-center gap-2 border-t pt-3 text-sm text-slate-700"><span>{t.selection}：{selected?.nickname ?? t.all}</span><Button variant="ghost" onClick={onSwitch}>{t.switchTo(profile.user.nickname)}</Button></div>}
       <div className="relative mt-5 max-w-3xl">
         {profile.growthPending ? <p className="text-sm text-slate-600">{t.growthPending}</p> : <><ExperienceProgress growth={profile} action={<Button type="button" variant="ghost" size="sm" className="text-blue-700" onClick={() => setRulesTab("experience")}><Info className="h-4 w-4" aria-hidden="true" />{t.guide.title}</Button>} />{!profile.segment && <p className="mt-2 text-xs text-slate-600">{profile.attainedAt ? t.reached(profile.attainedAt) : copy.common.dash}</p>}</>}
-        <RealmTrack profile={profile} onViewThresholds={() => setRulesTab("realms")} />
+        <RealmTrack profile={profile} />
       </div>
     </section>
     <GrowthRulesDialog tab={rulesTab} onTabChange={setRulesTab} current={profile.growthPending ? undefined : profile} onClose={() => setRulesTab(null)} />

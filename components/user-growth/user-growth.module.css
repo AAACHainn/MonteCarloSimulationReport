@@ -12,11 +12,13 @@
 .mountains { position: absolute; right: 0; bottom: 0; width: 28%; height: 84px; color: var(--growth-jade); opacity: .12; pointer-events: none; }
 .bar { background: var(--growth-jade); transition: width 180ms ease-out; }
 .progress { background: var(--growth-jade-soft); }
-.track { display: grid; grid-template-columns: auto minmax(180px, 1fr) auto; gap: 24px; align-items: center; }
-.ticks { display: flex; justify-content: space-between; position: relative; padding: 8px 0; }
-.ticks::before { content: ""; position: absolute; height: 1px; left: 0; right: 0; top: 50%; background: #cbd5e1; }
-.tick { position: relative; width: 7px; height: 7px; border-radius: 50%; background: #cbd5e1; }
-.tickActive { background: var(--growth-jade); outline: 4px solid var(--growth-jade-soft); }
+.milestoneTrack { position: relative; }
+.milestones { display: grid; grid-template-columns: repeat(14, minmax(0, 1fr)); position: relative; }
+.milestoneLine { position: absolute; left: calc(100% / 28); right: calc(100% / 28); top: 32px; height: 1px; background: #cbd5e1; }
+.milestoneFill { display: block; height: 100%; background: var(--growth-jade); }
+.milestoneDot { position: relative; width: 7px; height: 7px; border-radius: 50%; background: #cbd5e1; }
+.milestoneReached { background: var(--growth-jade); }
+.milestoneCurrent { width: 10px; height: 10px; outline: 4px solid var(--growth-jade-soft); }
 .avatar { background: var(--growth-jade-soft); color: var(--growth-jade); }
 .avatar[data-preset="1"] { background: #eceef3; color: #53617a; }
 .avatar[data-preset="2"] { background: #f4eee4; color: #806342; }
@@ -24,7 +26,7 @@
 .condition { display: grid; grid-template-columns: minmax(110px, 1fr) auto minmax(120px, auto); gap: 16px; align-items: center; }
 .breakthrough { animation: attained 450ms ease-out; }
 @keyframes attained { from { box-shadow: inset 0 0 0 2px var(--growth-gold); } to { box-shadow: inset 0 0 0 0 transparent; } }
-@media (max-width: 639px) { .condition { grid-template-columns: 1fr auto; } .condition > :last-child { grid-column: 1 / -1; } .track { gap: 12px; } }
+@media (max-width: 639px) { .condition { grid-template-columns: 1fr auto; } .condition > :last-child { grid-column: 1 / -1; } }
 @media (prefers-reduced-motion: reduce) { .bar { transition: none; } .breakthrough { animation: none; } }
 
 .settlementToast { animation: settlement-notice 5s ease-out forwards; }

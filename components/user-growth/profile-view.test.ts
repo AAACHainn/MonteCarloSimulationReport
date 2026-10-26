@@ -3,17 +3,25 @@ import { renderToStaticMarkup } from "react-dom/server";
 import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
 import { copy } from "@/lib/i18n";
 import { makePreviewProfile, previewUsers } from "@/lib/user-growth/preview-data";
+import type { GrowthProfile } from "@/lib/user-growth/types";
 import { ProfileView } from "./profile-view";
 
 beforeAll(() => vi.stubGlobal("React", React));
 afterAll(() => vi.unstubAllGlobals());
 function render(scenario: number, state: "normal" | "error" = "normal") {
+  return renderProfile(makePreviewProfile(previewUsers[0], scenario), state);
+}
+function renderProfile(profile: GrowthProfile, state: "normal" | "error" = "normal") {
   return renderToStaticMarkup(createElement(ProfileView, {
-    profile: makePreviewProfile(previewUsers[0], scenario), selected: previewUsers[1], state,
+    profile, selected: previewUsers[1], state,
     onRetry: vi.fn(), onSwitch: vi.fn(), onEdit: vi.fn(), onBreakthrough: async () => true,
     breaking: false, actionError: "", onOpenSession: vi.fn(), onSource: vi.fn(), onAllRecords: vi.fn(),
   }));
 }
+function realmTrack(html: string) {
+  return html.match(/<ol\b(?=[^>]*aria-label="境界轨迹")[^>]*>([\s\S]*?)<\/ol>/)?.[1] ?? "";
+}
+function trackItems(html: string) { return [...realmTrack(html).matchAll(/<li\b[^>]*>[\s\S]*?<\/li>/g)].map(match => match[0]); }
 describe("growth profile presentation contract", () => {
   it("reuses identity and session views while hiding disconnected growth controls", () => {
     const profile = { ...makePreviewProfile(previewUsers[0], 0), growthPending: true, conditions: [] };
@@ -38,8 +46,49 @@ describe("growth profile presentation contract", () => {
   });
   it("provides separate profile entries for reward details and realm thresholds", () => {
     const html = render(3);
-    expect(html).toContain(copy.userGrowth.guide.title);
-    expect(html).toContain(copy.userGrowth.guide.viewThresholds);
+    expect(html.split(copy.userGrowth.guide.title)).toHaveLength(2);
+    expect(html).not.toContain(copy.userGrowth.guide.viewThresholds);
+  });
+  it("places a 100 XP qi-one profile on the second true realm milestone", () => {
+    const base = makePreviewProfile(previewUsers[0], 0);
+    const profile: GrowthProfile = { ...base, totalXp: 100, realm: "qi", layer: 1, user: { ...base.user, realmLabel: copy.userGrowth.qiLayer(copy.userGrowth.layerNames[0]) } };
+    const html = renderProfile(profile);
+    const items = trackItems(html);
+    expect(items).toHaveLength(14);
+    expect(items.filter(item => item.includes('aria-current="step"'))).toHaveLength(1);
+    expect(items.findIndex(item => item.includes('aria-current="step"'))).toBe(1);
+    expect(items[1]).toContain(copy.userGrowth.qiLayer(copy.userGrowth.layerNames[0]));
+    expect(items[1]).toContain(">1</span>");
+    expect(items[0]).toContain("milestoneReached");
+    expect(items[1]).toContain("milestoneCurrent");
+    expect(html).toContain(`style="width:${1 / 13 * 100}%"`);
+  });
+  it.each([
+    [0, 0, "mortal"], [2, 6, "qi"], [3, 12, "qi"], [6, 13, "foundation"],
+  ] as const)("marks exactly one current node for scenario %i", (scenario, index, realm) => {
+    const items = trackItems(render(scenario));
+    expect(items).toHaveLength(14);
+    const current = items.flatMap((item, itemIndex) => item.includes('aria-current="step"') ? [itemIndex] : []);
+    expect(current).toEqual([index]);
+    expect(items[index]).toContain("milestoneCurrent");
+    if (realm === "foundation") expect(items[13]).toContain(copy.userGrowth.foundationOne);
+  });
+  it("does not highlight any milestone while growth is pending", () => {
+    const profile = { ...makePreviewProfile(previewUsers[0], 3), growthPending: true };
+    const html = renderProfile(profile);
+    expect(trackItems(html).filter(item => item.includes('aria-current="step"'))).toHaveLength(0);
+    expect(html).toContain("width:0%");
+  });
+  it("groups the nickname and realm badge in one row", () => {
+    const profile = makePreviewProfile(previewUsers[0], 3);
+    const html = renderProfile(profile);
+    const name = html.indexOf(`<h1 class="max-w-full break-words text-3xl font-semibold tracking-tight text-slate-950">${profile.user.nickname}</h1>`);
+    const realm = html.indexOf(`<h2`);
+    const row = html.lastIndexOf('<div class="flex flex-wrap items-center gap-3">', name);
+    expect(row).toBeGreaterThan(-1);
+    expect(name).toBeGreaterThan(row);
+    expect(realm).toBeGreaterThan(name);
+    expect(html.slice(row, realm)).toContain(profile.user.nickname);
   });
   it("shows a mortal without a layer, fabricated records or a breakthrough action", () => {
     const html = render(0);
@@ -84,8 +133,9 @@ describe("growth profile presentation contract", () => {
   });
   it("keeps the recent list bounded even when the archive has thousands of records", () => {
     const html = render(8);
+    const records = html.match(new RegExp(`<ol aria-label="${copy.userGrowth.recordsList}"[^>]*>([\\s\\S]*?)<\\/ol>`))?.[1] ?? "";
     expect(html).toContain("共 5,000 条记录");
-    expect(html.match(/<li /g)).toHaveLength(5);
+    expect(records.match(/<li /g)).toHaveLength(5);
     expect(html).toContain(copy.userGrowth.allRecords);
     expect(html).not.toContain("分币种实得");
   });
