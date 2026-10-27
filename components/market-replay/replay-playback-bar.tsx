@@ -70,7 +70,7 @@ export function ReplayPlaybackBar({
           {playbackRequested ? <Pause className="h-4 w-4" /> : <Play className="h-4 w-4" />}{playbackRequested ? copy.marketReplay.pause : copy.marketReplay.play}
         </Button>
         <Button type="button" size="sm" variant="outline" className="h-9" title={copy.marketReplay.playbackShortcutHint(shortcuts.nextBar)} aria-keyshortcuts={shortcuts.nextBarAria} onClick={onNext} disabled={retrying || replay.status === "finished" || replay.status === "playing" || correctionPending}>
-          <ChevronRight className="h-4 w-4" />{copy.marketReplay.nextBar}<kbd className="ml-1 hidden rounded border bg-white px-1.5 py-0.5 font-mono text-[10px] text-slate-500 lg:inline">{shortcuts.nextBar}</kbd>
+          <ChevronRight className="h-4 w-4" />{copy.marketReplay.nextBar}
         </Button>
         {onLocateDate ? <Button type="button" variant="outline" size="sm" className="h-9" disabled={correctionPending || dateForwarding} onClick={onLocateDate}><CalendarDays className="h-4 w-4" aria-hidden="true" />{copy.replaySessions.locateDate}</Button> : null}
         {dateForwarding ? <><span role="status" className="max-w-64 truncate text-xs tabular-nums text-slate-600" title={dateForwardStatus}>{dateForwardStatus}</span><Button type="button" size="sm" variant="outline" className="h-9" onClick={onStopDateForward}>{copy.replaySessions.forwardCancel}</Button></> : null}

@@ -2,14 +2,11 @@
 
 import { useEffect, useRef, useState } from "react";
 import { QuickIntervalDialog } from "@/components/market-replay/quick-interval-dialog";
-import { Button } from "@/components/ui/button";
-import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { copy } from "@/lib/i18n";
 import { hasVisibleReplayDialog } from "@/lib/market-replay/keyboard-shortcuts";
 import { displayIntervalOptions } from "@/lib/market-replay/display-interval";
-import { quickIntervalUnitSeconds, type QuickIntervalUnit } from "@/lib/market-replay/quick-interval";
 import { formatInterval } from "@/lib/market-replay/types";
 
 export function DisplayIntervalControls({
@@ -20,8 +17,6 @@ export function DisplayIntervalControls({
   disabled?: boolean;
   onChange: (seconds: number) => Promise<boolean>;
 }) {
-  const [customInterval, setCustomInterval] = useState("");
-  const [customIntervalUnit, setCustomIntervalUnit] = useState<QuickIntervalUnit>("m");
   const [quickIntervalInitialValue, setQuickIntervalInitialValue] = useState<string | null>(null);
   const [applying, setApplying] = useState(false);
   const applyingRef = useRef(false);
@@ -58,19 +53,6 @@ export function DisplayIntervalControls({
         {displayIntervalOptions(sourceIntervalSeconds, value).map((seconds) => <SelectItem key={seconds} value={String(seconds)}>{formatInterval(seconds)}</SelectItem>)}
       </SelectContent>
     </Select>
-    <div className="hidden items-center gap-1 2xl:flex">
-      <Input aria-label={copy.marketReplay.customInterval} disabled={controlsDisabled} type="number" min="1" value={customInterval} onChange={(event) => setCustomInterval(event.target.value)} className="h-8 w-16" placeholder="9" />
-      <Select disabled={controlsDisabled} value={customIntervalUnit} onValueChange={(unit) => setCustomIntervalUnit(unit as QuickIntervalUnit)}>
-        <SelectTrigger className="h-8 w-20" aria-label={copy.marketReplay.intervalUnit}><SelectValue /></SelectTrigger>
-        <SelectContent>
-          <SelectItem value="s">{copy.marketReplay.intervalSeconds}</SelectItem>
-          <SelectItem value="m">{copy.marketReplay.intervalMinutes}</SelectItem>
-          <SelectItem value="h">{copy.marketReplay.intervalHours}</SelectItem>
-        </SelectContent>
-      </Select>
-      <Button type="button" variant="outline" size="sm" className="h-8" disabled={controlsDisabled} onClick={() => void applyInterval(Number(customInterval) * quickIntervalUnitSeconds(customIntervalUnit))}>{copy.marketReplay.customInterval}</Button>
-    </div>
-    <Button type="button" variant="outline" size="sm" className="h-8 2xl:hidden" disabled={controlsDisabled} onClick={() => setQuickIntervalInitialValue("")}>{copy.marketReplay.customInterval}</Button>
     {sourceIntervalSeconds !== null ? <QuickIntervalDialog
       open={quickIntervalInitialValue !== null}
       initialValue={quickIntervalInitialValue ?? ""}
