@@ -1,4 +1,6 @@
 "use client";
+import { isArrowDrawing, type ArrowDrawing } from "@/lib/market-replay/chart-drawings";
+import { ArrowPrimitive, type ArrowDragPreview } from "@/lib/market-replay/arrow-primitive";
 
 import { captureReplayViewport, isReplayRangeFollowing, latestReplayLogicalIndex, type ReplayViewportMode } from "@/lib/market-replay/chart-range";
 import { useReplaySession } from "./replay-session-context";
@@ -26,7 +28,7 @@ export function useReplayChartCore({
   datasetId, dataRevision = "", priceTickSize, bars, warmupBars, displayUtcOffsetMinutes, displayIntervalSeconds, measurementArmed,
   candlestickStyle, gridVisible = true, onToggleGrid,
   onMeasurementArmedChange, drawingTool, onDrawingToolChange, trendLineDraftStyle, fibonacciDraftStyle, rectangleDraftStyle, drawings, selectedDrawingId,
-  onSelectedDrawingIdChange, onCreateDrawing, onUpdateDrawing, onDeleteDrawing, onPlaceText, drawingApiRef,
+  onSelectedDrawingIdChange, onCreateDrawing, onUpdateDrawing, onDeleteDrawing, onPlaceText, onPlaceArrow, drawingApiRef,
   onOpenDrawingStyle, viewportApiRef, viewportSnapshot = null, currentSourceSequence, liveWindow = true, emaEnabled, emaIndicators, abrEnabled, abrLength, volumeVisible,
   displaySession, barCountSession, barCountConfig, paperSnapshot,
   tradeAnnotations, tradeAnnotationsTruncated, focusSequence = null, onFocusApplied,
@@ -60,6 +62,9 @@ export function useReplayChartCore({
   const trendLinePrimitiveRef = useRef<TrendLinePrimitive | null>(null);
   const fibonacciPrimitiveRef = useRef<FibonacciRetracementPrimitive | null>(null);
   const textPrimitiveRef = useRef<TextDrawingPrimitive | null>(null);
+  const arrowPrimitiveRef = useRef<ArrowPrimitive | null>(null);
+  const arrowDragRef = useRef<ArrowDragPreview | null>(null);
+  const onPlaceArrowRef = useRef(onPlaceArrow); onPlaceArrowRef.current = onPlaceArrow;
   const textEditRef = useRef<TextEditPreview | null>(null);
   const textClicks = useRef<ReturnType<typeof createTextClickBridge> | null>(null);
   textClicks.current ??= createTextClickBridge();
@@ -141,14 +146,15 @@ export function useReplayChartCore({
   const drawingToolRef = useRef(drawingTool);
   const drawingsRef = useRef(drawings);
   const drawingGroups = useMemo(() => {
-    const trend: TrendLineDrawing[] = [], fibonacci: FibonacciRetracementDrawing[] = [], rectangle: RectangleDrawing[] = [], text: TextDrawing[] = [];
+    const trend: TrendLineDrawing[] = [], fibonacci: FibonacciRetracementDrawing[] = [], rectangle: RectangleDrawing[] = [], text: TextDrawing[] = [], arrow: ArrowDrawing[] = [];
     for (const drawing of drawings) {
       if (drawing.type === DRAWING_TYPE_RECTANGLE) rectangle.push(drawing);
       else if (drawing.type === DRAWING_TYPE_TREND_LINE) trend.push(drawing);
       else if (drawing.type === DRAWING_TYPE_FIB_RETRACEMENT) fibonacci.push(drawing);
       else if (drawing.type === DRAWING_TYPE_TEXT) text.push(drawing);
+      else if (isArrowDrawing(drawing)) arrow.push(drawing);
     }
-    return { trend, fibonacci, rectangle, text };
+    return { trend, fibonacci, rectangle, text, arrow };
   }, [drawings]);
   const drawingGroupsRef = useRef(drawingGroups);
   drawingGroupsRef.current = drawingGroups;
@@ -273,6 +279,8 @@ export function useReplayChartCore({
       const height = chartRef.current?.panes()[0]?.getHeight() ?? 0;
       textPrimitiveRef.current?.setDrawings({ drawings: drawingGroupsRef.current.text, timeline,
         selectedDrawingId: selectedDrawingIdRef.current, edit: textEditRef.current, drag: textDragRef.current });
+      arrowPrimitiveRef.current?.setDrawings({ drawings: drawingGroupsRef.current.arrow, timeline,
+        selectedDrawingId: selectedDrawingIdRef.current, preview: arrowDragRef.current });
       const position = textPositionRef.current;
       if (position) {
         const chart = chartRef.current, series = candleRef.current, host = interactionRef.current;
@@ -469,6 +477,7 @@ export function useReplayChartCore({
     containerRef, interactionRef, orderTicketRef, orderTicketDragRef, chartRef, candleRef,
     volumeRef, priceLinesRef, lineTargetsRef, tradeAnnotationPrimitiveRef, barCountPrimitiveRef, candleCountdownPrimitiveRef,
     rectanglePrimitiveRef, trendLinePrimitiveRef, fibonacciPrimitiveRef, textPrimitiveRef, textEditRef, textClicks,
+    arrowPrimitiveRef, arrowDragRef, onPlaceArrowRef,
     textPositionRef, textDragRef, onPlaceTextRef, lastDataRef, lastDataRevisionRef, lastHiddenAfterRef,
     lastDataIntervalRef, lastDataSessionRef, displaySessionRef, barsRef, timelineBarsRef, projectionBars,
     projectionBarsRef, drawingTimelineRef, drawingScopeRef, drawingFrameRef, drawingSessionRef, requestedDrawingSessionRef,

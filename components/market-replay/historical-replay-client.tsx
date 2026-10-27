@@ -1,4 +1,7 @@
 "use client";
+import { ArrowSettingsDialog, ArrowToolOptions } from "./arrow-controls";
+import { useArrowPreferences } from "./use-arrow-preferences";
+import { isArrowDrawing } from "@/lib/market-replay/chart-drawings";
 import { useReplayFetch, useReplaySession } from "./replay-session-context";
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
@@ -113,6 +116,8 @@ export function HistoricalReplayClient({
     writeScope: dataset.id + ":" + replaySession?.id + ":" + replaySession?.activeProjectionId });
   const { drawings, loaded: drawingsLoaded, busy: drawingBusy, error: drawingError } = drawingState;
   const [rectangleStyleId, setRectangleStyleId] = useState<string | null>(null);
+  const [arrowStyleId, setArrowStyleId] = useState<string | null>(null);
+  const { arrowPreferences, setArrowPreferences } = useArrowPreferences();
   const [styleDrawingId, setStyleDrawingId] = useState<string | null>(null);
   const [styleDraft, setStyleDraft] = useState<LineDrawingStyle | null>(null);
   const [selectedDrawingId, setSelectedDrawingId] = useState<string | null>(null);
@@ -272,6 +277,7 @@ export function HistoricalReplayClient({
     setSelectedDrawingId(id);
     if (drawing.type === DRAWING_TYPE_TEXT) { openTextDrawing(drawing, inlineText); return; }
     if (drawing.type === DRAWING_TYPE_RECTANGLE) { setRectangleStyleId(id); return; }
+    if (isArrowDrawing(drawing)) { setArrowStyleId(id); return; }
     setStyleDrawingId(id); setStyleDraft(cloneLineDrawingStyle(drawing.style));
   }, [drawings, drawingBusy, openTextDrawing, finishText, requestTextSettings]);
 
@@ -505,6 +511,7 @@ export function HistoricalReplayClient({
               </button>
               <RectangleToolOption shortcut={shortcuts.rectangle} onArm={() => armDrawing(DRAWING_TYPE_RECTANGLE)} />
               <TextToolOption onArm={() => armDrawing(DRAWING_TYPE_TEXT)} />
+              <ArrowToolOptions onArm={type => void armDrawing(type)} />
             </Popover.Content>
           </Popover.Portal>
         </Popover.Root>
@@ -543,6 +550,10 @@ export function HistoricalReplayClient({
           trendLineDraftStyle={defaultTrendLineStyle}
           fibonacciDraftStyle={defaultFibonacciStyle}
           rectangleDraftStyle={defaultRectangleStyle}
+          onPlaceArrow={async (type, anchor) => {
+            const drawing = await drawingState.create({ datasetId: dataset.id, type, geometry: { anchor }, style: { ...arrowPreferences[type].defaultStyle } });
+            if (drawing) setSelectedDrawingId(drawing.id);
+          }}
           drawings={visibleDrawings}
           selectedDrawingId={selectedDrawingId}
           onSelectedDrawingIdChange={setSelectedDrawingId}
@@ -614,13 +625,24 @@ export function HistoricalReplayClient({
         }} /> : null}
 
     {(() => {
+      const drawing = drawings.find(d => d.id === arrowStyleId);
+      return drawing && isArrowDrawing(drawing) ? <ArrowSettingsDialog key={drawing.id} drawing={drawing}
+        templates={arrowPreferences[drawing.type].templates}
+        onTemplatesChange={templates => setArrowPreferences(current => ({ ...current, [drawing.type]: { ...current[drawing.type], templates } }))}
+        onClose={() => setArrowStyleId(null)} onSave={async style => {
+          if (!await drawingState.update(drawing.id, { style })) return false;
+          setArrowPreferences(current => ({ ...current, [drawing.type]: { ...current[drawing.type], defaultStyle: { ...style } } }));
+          return true;
+        }} /> : null;
+    })()}
+    {(() => {
       const drawing = drawings.find(d => d.id === rectangleStyleId);
       return drawing?.type === DRAWING_TYPE_RECTANGLE ? <RectangleSettingsDialog key={drawing.id} drawing={drawing} templates={rectangleTemplates}
         onTemplatesChange={setRectangleTemplates} onClose={() => setRectangleStyleId(null)} onSave={style => saveRectangleStyle(drawing.id, style)} /> : null;
     })()}
     {(() => {
       const drawing = drawings.find(item => item.id === styleDrawingId);
-      return drawing && drawing.type !== DRAWING_TYPE_RECTANGLE && drawing.type !== DRAWING_TYPE_TEXT && styleDraft ? <LineSettingsDialog key={drawing.id}
+      return drawing && !isArrowDrawing(drawing) && drawing.type !== DRAWING_TYPE_RECTANGLE && drawing.type !== DRAWING_TYPE_TEXT && styleDraft ? <LineSettingsDialog key={drawing.id}
         drawing={drawing} draft={styleDraft} onDraftChange={setStyleDraft}
         templates={drawing.type === DRAWING_TYPE_FIB_RETRACEMENT ? fibonacciTemplates : trendLineTemplates}
         onTemplatesChange={templates => {

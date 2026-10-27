@@ -1,4 +1,5 @@
 "use client";
+import { isArrowDrawing, isArrowDrawingType, type ArrowDrawingType, type ArrowGeometry } from "@/lib/market-replay/chart-drawings";
 
 import type { ReplayViewportSnapshot } from "@/lib/market-replay/chart-range";
 import { canReuseAnnotations } from "@/lib/market-replay/advance-display";
@@ -31,7 +32,7 @@ export function useReplayDrawingWindow(core: ReturnType<typeof useReplayCore>) {
     confirmedPaperSnapshotRef, paperSessionLoadedRef, paperSessionLoadRef, commitConfirmedPaperSnapshot,
     setTradeAnnotations, setTradeAnnotationsTruncated, setPaperError, setChartFocusSequence, chartWindowDetachedRef, setMeasurementArmed,
     setDrawingToolOpen, setDrawingTool, drawings, setDrawings, setClearingDrawings, clearingDrawingsRef,
-    setDrawingError, setSelectedDrawingId, setDrawingObjectsOpen, setRectangleStyleId, styleDrawingId, setStyleDrawingId,
+    setDrawingError, setSelectedDrawingId, setDrawingObjectsOpen, setRectangleStyleId, setArrowStyleId, arrowPreferences, styleDrawingId, setStyleDrawingId,
     styleDraft, setStyleDraft, pendingDrawingIds, setPendingDrawingIds, emaSettingsLoaded, abrSettingsLoaded,
     chartVisibility, setChartVisibility, defaultRectangleStyle, defaultTrendLineStyle, defaultFibonacciStyle, openTextDrawing,
     finishText, discardText, requestTextSettings, drawingWriteScope, drawingScopeGuard, drawingsLive,
@@ -89,11 +90,12 @@ export function useReplayDrawingWindow(core: ReturnType<typeof useReplayCore>) {
   const armTrendLine = useCallback(() => armDrawing(DRAWING_TYPE_TREND_LINE), [armDrawing]);
   const armFibonacciRetracement = useCallback(() => armDrawing(DRAWING_TYPE_FIB_RETRACEMENT), [armDrawing]);
 
-  const createDrawing = useCallback(async (type: TwoPointDrawingTool, geometry: TrendLineGeometry) => runDrawingWrite(drawingWriteScope, async () => {
+  const createDrawing = useCallback(async (type: TwoPointDrawingTool | ArrowDrawingType, geometry: TrendLineGeometry | ArrowGeometry) => runDrawingWrite(drawingWriteScope, async () => {
     if (clearingDrawingsRef.current) return;
     const temporaryId = createLocalDrawingId("temporary");
     const now = new Date().toISOString();
-    const style = type === DRAWING_TYPE_RECTANGLE ? { ...defaultRectangleStyle } : type === DRAWING_TYPE_TREND_LINE
+    const style = isArrowDrawingType(type) ? { ...arrowPreferences[type].defaultStyle }
+      : type === DRAWING_TYPE_RECTANGLE ? { ...defaultRectangleStyle } : type === DRAWING_TYPE_TREND_LINE
       ? { ...defaultTrendLineStyle }
       : cloneFibonacciStyle(defaultFibonacciStyle);
     const optimistic = {
@@ -120,7 +122,7 @@ export function useReplayDrawingWindow(core: ReturnType<typeof useReplayCore>) {
     } finally {
       setDrawingPending(temporaryId, false);
     }
-  }), [dataset.id, drawingWriteScope, defaultRectangleStyle, defaultFibonacciStyle, defaultTrendLineStyle, setDrawingPending, fetch, clearingDrawingsRef, setDrawingError, setDrawings, setSelectedDrawingId]);
+  }), [dataset.id, drawingWriteScope, arrowPreferences, defaultRectangleStyle, defaultFibonacciStyle, defaultTrendLineStyle, setDrawingPending, fetch, clearingDrawingsRef, setDrawingError, setDrawings, setSelectedDrawingId]);
 
   const updateDrawing = useCallback(async (
     id: string,
@@ -218,11 +220,12 @@ export function useReplayDrawingWindow(core: ReturnType<typeof useReplayCore>) {
     setSelectedDrawingId(id);
     if (drawing.type === DRAWING_TYPE_TEXT) { openTextDrawing(drawing, inlineText); return; }
     if (drawing.type === DRAWING_TYPE_RECTANGLE) { setRectangleStyleId(id); return; }
+    if (isArrowDrawing(drawing)) { setArrowStyleId(id); return; }
     setStyleDrawingId(id);
     setStyleDraft(drawing.type === DRAWING_TYPE_TREND_LINE
       ? { ...drawing.style }
       : cloneFibonacciStyle(drawing.style));
-  }, [finishText, requestTextSettings, openTextDrawing, drawingsLive, setRectangleStyleId, setSelectedDrawingId, setStyleDraft, setStyleDrawingId]);
+  }, [finishText, requestTextSettings, openTextDrawing, drawingsLive, setArrowStyleId, setRectangleStyleId, setSelectedDrawingId, setStyleDraft, setStyleDrawingId]);
 
   const displayedDrawings = useMemo(() => (
     styleDrawingId && styleDraft

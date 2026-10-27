@@ -1,4 +1,5 @@
 "use client";
+import { isArrowDrawing, isArrowDrawingType, type ArrowGeometry } from "@/lib/market-replay/chart-drawings";
 
 import { useEffect } from "react";
 import { anchorForLogicalIndex, DRAWING_TYPE_FIB_RETRACEMENT, DRAWING_TYPE_TREND_LINE, DRAWING_TYPE_RECTANGLE, DRAWING_TYPE_TEXT, type TextGeometry, isValidRectangleGeometry, snapScreenPointTo45, type DrawingAnchor, type MarketDrawing, type TrendLineGeometry } from "@/lib/market-replay/chart-drawings";
@@ -13,7 +14,7 @@ export function useReplayChartDrawingPointer(core: ReturnType<typeof useReplayCh
   const {
     visibilityScope, containerRef, interactionRef, chartRef, candleRef, lineTargetsRef,
     rectanglePrimitiveRef, trendLinePrimitiveRef, fibonacciPrimitiveRef, textPrimitiveRef, textEditRef, textClicks,
-    textDragRef, onPlaceTextRef, barsRef, drawingTimelineRef, drawingSessionRef, measurementArmedRef,
+    textDragRef, onPlaceTextRef, arrowPrimitiveRef, arrowDragRef, onPlaceArrowRef, barsRef, drawingTimelineRef, drawingSessionRef, measurementArmedRef,
     drawingToolRef, drawingsRef, drawingGroupsRef, selectedDrawingIdRef, onDrawingToolChangeRef, onSelectedDrawingIdChangeRef,
     onCreateDrawingRef, onUpdateDrawingRef, onDeleteDrawingRef, onOpenDrawingStyleRef, displayIntervalSecondsRef, sourceIntervalSecondsRef,
     setContextMenu, drawingDraftRef, drawingDraftCoordinateRef, drawingPreviewRef, syncDrawingPrimitive,
@@ -38,10 +39,11 @@ export function useReplayChartDrawingPointer(core: ReturnType<typeof useReplayCh
     } | null = null;
     let textDragging: { id: string; clientX: number; clientY: number; timeStamp: number; geometry: TextGeometry; x: number; y: number; moved: boolean } | null = null;
     let capturedPointer: number | null = null;
+    let arrowDragging: { id: string; clientX: number; clientY: number; geometry: ArrowGeometry; x: number; y: number; moved: boolean } | null = null;
     let hoveredText: string | null = null;
     const hoverText = (id: string | null) => {
       textPrimitiveRef.current?.setHovered(id);
-      if (hoveredText !== id) { hoveredText = id; if (!dragging && !textDragging) setChartCursor(id ? "pointer" : ""); }
+      if (hoveredText !== id) { hoveredText = id; if (!dragging && !textDragging && !arrowDragging) setChartCursor(id ? "pointer" : ""); }
     };
 
     const pointAtCoordinate = (x: number, y: number, requireInside: boolean): PositionedAnchor | null => {
@@ -96,7 +98,8 @@ export function useReplayChartDrawingPointer(core: ReturnType<typeof useReplayCh
       const fibonacci = fibonacciPrimitiveRef.current?.hitTestAt(point) ?? null;
       const rectangle = rectanglePrimitiveRef.current?.hitTestAt(point) ?? null;
       const text = textPrimitiveRef.current?.hitTestAt(point) ?? null;
-      return [trend, fibonacci, rectangle, text].filter(item => item !== null)
+      const arrow = arrowPrimitiveRef.current?.hitTestAt(point) ?? null;
+      return [trend, fibonacci, rectangle, text, arrow].filter(item => item !== null)
         .sort((a, b) => b.priority - a.priority || Number(b.part === "text") - Number(a.part === "text") || a.distance - b.distance)[0] ?? null;
     };
     const drawingCoordinates = (drawing: MarketDrawing) => (
@@ -116,6 +119,10 @@ export function useReplayChartDrawingPointer(core: ReturnType<typeof useReplayCh
         const initial = pointAt(event.clientX, event.clientY);
         if (!initial) return;
         stopEvent(event);
+        if (isArrowDrawingType(activeTool)) {
+          commitDraft(null, null); drawingToolRef.current = null; onDrawingToolChangeRef.current(null);
+          onPlaceArrowRef.current?.(activeTool, initial.anchor); setChartCursor(""); return;
+        }
         if (activeTool === DRAWING_TYPE_TEXT) {
           const height = chart.panes()[0]?.getHeight() ?? 0;
           if (initial.coordinate.y > height) return;
@@ -170,6 +177,19 @@ export function useReplayChartDrawingPointer(core: ReturnType<typeof useReplayCh
         })) return;
       const id = hit.drawingId;
       const drawing = drawingsRef.current.find((item) => item.id === id);
+      if (drawing && isArrowDrawing(drawing)) {
+        const coordinate = arrowPrimitiveRef.current?.getDrawingCoordinates(id);
+        if (!coordinate || id.startsWith("temporary-")) return;
+        // Existing order controls retain priority over annotations at the same price.
+        if ([...lineTargetsRef.current.values()].some(target => {
+          const y = series.priceToCoordinate(target.price); return y !== null && Math.abs(Number(y) - (event.clientY - rect.top)) <= 8;
+        })) return;
+        stopEvent(event); onSelectedDrawingIdChangeRef.current(id); selectedDrawingIdRef.current = id;
+        arrowDragging = { id, clientX: event.clientX, clientY: event.clientY, geometry: drawing.geometry,
+          x: coordinate.x, y: coordinate.y, moved: false };
+        capturedPointer = event.pointerId; interaction.setPointerCapture(event.pointerId);
+        chart.applyOptions({ handleScroll: false }); setChartCursor("move"); return;
+      }
       if (drawing?.type === DRAWING_TYPE_TEXT) {
         const textCoordinate = textPrimitiveRef.current?.getDrawingCoordinates(id);
         if (!textCoordinate || id.startsWith("temporary-")) return;
@@ -203,6 +223,21 @@ export function useReplayChartDrawingPointer(core: ReturnType<typeof useReplayCh
     };
 
     const processDrawingMove = (event: PointerEvent) => {
+      if (arrowDragging) {
+        stopEvent(event);
+        const dx = event.clientX - arrowDragging.clientX, dy = event.clientY - arrowDragging.clientY;
+        if (!arrowDragging.moved && Math.hypot(dx, dy) < 3) return;
+        arrowDragging.moved = true;
+        const positioned = pointAtCoordinate(arrowDragging.x + dx, arrowDragging.y + dy, false);
+        if (positioned) {
+          const original = arrowDragging.geometry.anchor;
+          const anchor = { ...positioned.anchor };
+          if (dx === 0 || positioned.coordinate.x === arrowDragging.x) { anchor.timestamp = original.timestamp; anchor.sourceSequence = original.sourceSequence; }
+          if (dy === 0 || positioned.coordinate.y === arrowDragging.y) anchor.price = original.price;
+          arrowDragRef.current = { id: arrowDragging.id, geometry: { anchor } }; syncDrawingPrimitive();
+        }
+        return;
+      }
       if (textDragging) {
         stopEvent(event);
         const dx = event.clientX - textDragging.clientX, dy = event.clientY - textDragging.clientY;
@@ -300,7 +335,7 @@ export function useReplayChartDrawingPointer(core: ReturnType<typeof useReplayCh
       pendingPointer = null;
     };
     const move = (event: PointerEvent) => {
-      const active = dragging || textDragging || drawingToolRef.current && drawingDraftRef.current;
+      const active = dragging || textDragging || arrowDragging || drawingToolRef.current && drawingDraftRef.current;
       if (!active && !drawingGroupsRef.current.text.length) return;
       if (!active && (textEditRef.current?.inline || !interaction.contains(event.target as Node))) { hoverText(null); return; }
       if (active) stopEvent(event);
@@ -313,6 +348,16 @@ export function useReplayChartDrawingPointer(core: ReturnType<typeof useReplayCh
       });
     };
     const finish = (event: PointerEvent) => {
+      if (arrowDragging) {
+        const moved = pendingPointer !== null || event.clientX !== arrowDragging.clientX || event.clientY !== arrowDragging.clientY;
+        clearPointerFrame(); if (moved) processDrawingMove(event); stopEvent(event);
+        const preview = arrowDragRef.current;
+        if (preview && JSON.stringify(preview.geometry) !== JSON.stringify(arrowDragging.geometry)) onUpdateDrawingRef.current(preview.id, preview.geometry);
+        arrowDragging = null;
+        requestAnimationFrame(() => { arrowDragRef.current = null; syncDrawingPrimitive(); });
+        if (interaction.hasPointerCapture(event.pointerId)) interaction.releasePointerCapture(event.pointerId);
+        capturedPointer = null; chart.applyOptions({ handleScroll: true }); setChartCursor(""); return;
+      }
       if (textDragging) {
         const moved = pendingPointer !== null || event.clientX !== textDragging.clientX || event.clientY !== textDragging.clientY;
         clearPointerFrame(); if (moved) processDrawingMove(event); stopEvent(event);
@@ -338,6 +383,7 @@ export function useReplayChartDrawingPointer(core: ReturnType<typeof useReplayCh
       })) onUpdateDrawingRef.current(preview.id, preview.geometry);
       dragging = null;
       textDragging = null; textDragRef.current = null;
+      arrowDragging = null; arrowDragRef.current = null;
       requestAnimationFrame(() => commitPreview(null));
       if (interaction.hasPointerCapture(event.pointerId)) interaction.releasePointerCapture(event.pointerId);
       capturedPointer = null;
@@ -349,13 +395,14 @@ export function useReplayChartDrawingPointer(core: ReturnType<typeof useReplayCh
       clearPointerFrame();
       dragging = null;
       textDragging = null; textDragRef.current = null;
+      arrowDragging = null; arrowDragRef.current = null;
       commitPreview(null);
       if (capturedPointer !== null && interaction.hasPointerCapture(capturedPointer)) interaction.releasePointerCapture(capturedPointer);
       capturedPointer = null;
       chart.applyOptions({ handleScroll: true });
       setChartCursor(drawingToolRef.current ? "crosshair" : "");
     };
-    const leave = () => { if (!dragging && !textDragging) hoverText(null); };
+    const leave = () => { if (!dragging && !textDragging && !arrowDragging) hoverText(null); };
     const doubleClick = (event: MouseEvent) => {
       textClicks.current!.clear();
       if ((event.target as HTMLElement).closest("[data-text-editor]")) return;
@@ -370,7 +417,7 @@ export function useReplayChartDrawingPointer(core: ReturnType<typeof useReplayCh
     };
     const key = (event: KeyboardEvent) => {
       if (event.defaultPrevented || event.isComposing || hasVisibleReplayDialog() || isReplayShortcutInputTarget(event.target)) return;
-      if (event.key === "Escape" && (dragging || textDragging)) {
+      if (event.key === "Escape" && (dragging || textDragging || arrowDragging)) {
         stopEvent(event);
         cancelDrag();
         return;
@@ -407,6 +454,7 @@ export function useReplayChartDrawingPointer(core: ReturnType<typeof useReplayCh
       textClicks.current!.clear(); hoverText(null);
       clearPointerFrame();
       textDragRef.current = null;
+      arrowDragRef.current = null;
       if (capturedPointer !== null && interaction.hasPointerCapture(capturedPointer)) interaction.releasePointerCapture(capturedPointer);
       // eslint-disable-next-line react-hooks/exhaustive-deps
       if (chartRef.current === chart) { chart.applyOptions({ handleScroll: true }); commitPreview(null); }
@@ -419,6 +467,6 @@ export function useReplayChartDrawingPointer(core: ReturnType<typeof useReplayCh
       interaction.removeEventListener("dblclick", doubleClick, true);
       window.removeEventListener("keydown", key, true);
     };
-  }, [priceTickSize, setChartCursor, syncDrawingPrimitive, visibilityScope, barsRef, candleRef, chartRef, containerRef, displayIntervalSecondsRef, drawingDraftCoordinateRef, drawingDraftRef, drawingGroupsRef, drawingPreviewRef, drawingSessionRef, drawingTimelineRef, drawingToolRef, drawingsRef, fibonacciPrimitiveRef, interactionRef, lineTargetsRef, measurementArmedRef, onCreateDrawingRef, onDeleteDrawingRef, onDrawingToolChangeRef, onOpenDrawingStyleRef, onPlaceTextRef, onSelectedDrawingIdChangeRef, onUpdateDrawingRef, rectanglePrimitiveRef, selectedDrawingIdRef, setContextMenu, sourceIntervalSecondsRef, textClicks, textDragRef, textEditRef, textPrimitiveRef, trendLinePrimitiveRef]);
+  }, [arrowPrimitiveRef, arrowDragRef, onPlaceArrowRef, priceTickSize, setChartCursor, syncDrawingPrimitive, visibilityScope, barsRef, candleRef, chartRef, containerRef, displayIntervalSecondsRef, drawingDraftCoordinateRef, drawingDraftRef, drawingGroupsRef, drawingPreviewRef, drawingSessionRef, drawingTimelineRef, drawingToolRef, drawingsRef, fibonacciPrimitiveRef, interactionRef, lineTargetsRef, measurementArmedRef, onCreateDrawingRef, onDeleteDrawingRef, onDrawingToolChangeRef, onOpenDrawingStyleRef, onPlaceTextRef, onSelectedDrawingIdChangeRef, onUpdateDrawingRef, rectanglePrimitiveRef, selectedDrawingIdRef, setContextMenu, sourceIntervalSecondsRef, textClicks, textDragRef, textEditRef, textPrimitiveRef, trendLinePrimitiveRef]);
 
 }

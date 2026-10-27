@@ -1,7 +1,7 @@
 import { webcrypto } from "node:crypto";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { useHistoricalDrawings } from "./use-historical-drawings";
-import { DEFAULT_RECTANGLE_STYLE, DEFAULT_TEXT_STYLE, type MarketDrawing, type TextDrawing } from "@/lib/market-replay/chart-drawings";
+import { DEFAULT_RECTANGLE_STYLE, DEFAULT_TEXT_STYLE, DEFAULT_ARROW_STYLES, type MarketDrawing, type TextDrawing } from "@/lib/market-replay/chart-drawings";
 
 // Keep state/ref slots across explicit renders; exercise network and storage behavior without adding a DOM dependency.
 const hooks = vi.hoisted(() => ({ index: 0, slots: [] as unknown[], effects: [] as Array<() => () => void> }));
@@ -58,6 +58,21 @@ function harness() {
 }
 
 describe("historical drawing persistence", () => {
+  it.each(["ARROW_UP", "ARROW_DOWN"] as const)("creates, moves, styles and deletes %s through the shared backend workflow", async type => {
+    const app = harness(); await app.ready();
+    const geometry = { anchor: original.geometry.start };
+    const saved = await app.render().create({ datasetId: "dataset", type, geometry, style: DEFAULT_ARROW_STYLES[type] });
+    expect(saved?.type).toBe(type);
+    const nextGeometry = { anchor: { ...geometry.anchor, price: 110 } };
+    expect(await app.render().update(saved!.id, { geometry: nextGeometry, style: { color: "#123456" } })).toBe(true);
+    await app.render().refresh();
+    expect(app.render().drawings.find(item => item.id === saved!.id)).toMatchObject({ type, geometry: nextGeometry, style: { color: "#123456" } });
+    fetcher.mockResolvedValueOnce(json({ error: "offline" }, 503));
+    expect(await app.render().remove(saved!.id)).toBe(false);
+    expect(app.render().drawings.some(item => item.id === saved!.id)).toBe(true);
+    expect(await app.render().remove(saved!.id)).toBe(true);
+    expect(app.render().drawings).toEqual([original]); app.cleanup();
+  });
   it("removes cleared text from the server and collection, preserving other drawing types", async () => {
     const text: TextDrawing = { ...original, id: "text", type: "TEXT", geometry: { anchor: original.geometry.start, text: "old" }, style: DEFAULT_TEXT_STYLE };
     remote.push(text); const app = harness(); await app.ready();

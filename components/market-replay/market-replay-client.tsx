@@ -1,4 +1,7 @@
 "use client";
+import { ArrowBigDown, ArrowBigUp } from "lucide-react";
+import { ArrowSettingsDialog, ArrowToolOptions } from "./arrow-controls";
+import { isArrowDrawing } from "@/lib/market-replay/chart-drawings";
 
 import { UserContextHeader } from "@/components/user-growth/user-context-header";
 import { eligibilityLabel } from "@/components/user-growth/ownership-context";
@@ -78,7 +81,7 @@ export function MarketReplayClient({ dataset: initialDataset, initialJournalFocu
     setCandlestickStyle, emaEnabled, setEmaEnabled, emaIndicators, setEmaIndicators, abrEnabled,
     setAbrEnabled, abrLength, gridVisible, setGridVisible, volumeVisible, setVolumeVisible,
     candleCountdownEnabled, setCandleCountdownEnabled, barCountConfig, setBarCountConfig, chartVisibility, defaultRectangleStyle,
-    setDefaultRectangleStyle, rectangleTemplates, setRectangleTemplates, setDefaultTextStyle, textTemplates, setTextTemplates,
+    setDefaultRectangleStyle, rectangleTemplates, setRectangleTemplates, arrowStyleId, setArrowStyleId, arrowPreferences, setArrowPreferences, setDefaultTextStyle, textTemplates, setTextTemplates,
     defaultTrendLineStyle, setDefaultTrendLineStyle, trendLineTemplates, setTrendLineTemplates, defaultFibonacciStyle, setDefaultFibonacciStyle,
     fibonacciTemplates, setFibonacciTemplates, displayUtcOffsetMinutes, setDisplayUtcOffsetMinutes, textDrawing, drawingWriteScope,
     drawingsLive, visibleBarCountConfig, chartMarketSession,
@@ -258,6 +261,7 @@ export function MarketReplayClient({ dataset: initialDataset, initialJournalFocu
                 </button>
                 <RectangleToolOption shortcut={shortcuts.rectangle} onArm={() => armDrawing(DRAWING_TYPE_RECTANGLE)} />
               <TextToolOption onArm={() => armDrawing(DRAWING_TYPE_TEXT)} />
+              <ArrowToolOptions onArm={type => void armDrawing(type)} />
               </Popover.Content>
             </Popover.Portal>
           </Popover.Root>
@@ -340,6 +344,7 @@ export function MarketReplayClient({ dataset: initialDataset, initialJournalFocu
             drawingTool={drawingTool}
             onDrawingToolChange={setDrawingTool}
             onPlaceText={textDrawing.place} drawingApiRef={textDrawing.apiRef}
+            onPlaceArrow={(type, anchor) => void createDrawing(type, { anchor })}
             trendLineDraftStyle={defaultTrendLineStyle}
             fibonacciDraftStyle={defaultFibonacciStyle}
             rectangleDraftStyle={defaultRectangleStyle}
@@ -424,12 +429,15 @@ export function MarketReplayClient({ dataset: initialDataset, initialJournalFocu
                         }
                       }}
                     >
-                      {drawing.type === DRAWING_TYPE_RECTANGLE ? <Square className="h-4 w-4 shrink-0" style={{ color: drawingColor }} aria-hidden="true" /> : drawing.type === DRAWING_TYPE_TREND_LINE
+                      {isArrowDrawing(drawing) ? (drawing.type === "ARROW_UP"
+                        ? <ArrowBigUp className="h-4 w-4 shrink-0" style={{ color: drawingColor }} aria-hidden="true" />
+                        : <ArrowBigDown className="h-4 w-4 shrink-0" style={{ color: drawingColor }} aria-hidden="true" />)
+                        : drawing.type === DRAWING_TYPE_RECTANGLE ? <Square className="h-4 w-4 shrink-0" style={{ color: drawingColor }} aria-hidden="true" /> : drawing.type === DRAWING_TYPE_TREND_LINE
                         ? <TrendingUp className="h-4 w-4 shrink-0" style={{ color: drawingColor, opacity: drawing.style.opacity / 100 }} />
                         : drawing.type === DRAWING_TYPE_TEXT ? <TextIcon className="h-4 w-4 shrink-0" style={{ color: drawingColor }} aria-hidden="true" />
                         : <span className="flex h-4 w-4 shrink-0 items-center justify-center font-mono text-[9px] font-bold" style={{ color: drawingColor }}>Fib</span>}
                       <span className="min-w-0 flex-1 truncate font-medium">{drawingObjectName(drawing, index + 1)}</span>
-                      {drawing.type === DRAWING_TYPE_RECTANGLE || drawing.type === DRAWING_TYPE_TEXT ? <Button type="button" variant="ghost" size="icon" disabled={pending}
+                      {isArrowDrawing(drawing) || drawing.type === DRAWING_TYPE_RECTANGLE || drawing.type === DRAWING_TYPE_TEXT ? <Button type="button" variant="ghost" size="icon" disabled={pending}
                         data-text-settings={drawing.id} aria-label={drawingSettingsLabel(drawing)} onClick={event => { event.stopPropagation(); openDrawingStyle(drawing.id); }}>
                         <Settings2 className="h-4 w-4" aria-hidden="true" />
                       </Button> : null}
@@ -498,6 +506,17 @@ export function MarketReplayClient({ dataset: initialDataset, initialJournalFocu
           setDefaultTextStyle({ ...saved.style }); return saved;
         })} /> : null}
 
+      {(() => {
+        const drawing = drawings.find(d => d.id === arrowStyleId);
+        return drawing && isArrowDrawing(drawing) ? <ArrowSettingsDialog key={drawing.id} drawing={drawing}
+          templates={arrowPreferences[drawing.type].templates}
+          onTemplatesChange={templates => setArrowPreferences(current => ({ ...current, [drawing.type]: { ...current[drawing.type], templates } }))}
+          onClose={() => setArrowStyleId(null)} onSave={async style => {
+            if (!await updateDrawing(drawing.id, { style })) return false;
+            setArrowPreferences(current => ({ ...current, [drawing.type]: { ...current[drawing.type], defaultStyle: { ...style } } }));
+            return true;
+          }} /> : null;
+      })()}
       {(() => {
         const drawing = drawings.find(d => d.id === rectangleStyleId);
         return drawing?.type === DRAWING_TYPE_RECTANGLE ? <RectangleSettingsDialog key={drawing.id} drawing={drawing}
@@ -621,7 +640,7 @@ export function MarketReplayClient({ dataset: initialDataset, initialJournalFocu
       </Dialog>
       {(() => {
         const drawing = drawings.find(item => item.id === styleDrawingId);
-        return drawing && drawing.type !== DRAWING_TYPE_RECTANGLE && drawing.type !== DRAWING_TYPE_TEXT && styleDraft ? <LineSettingsDialog key={drawing.id}
+        return drawing && !isArrowDrawing(drawing) && drawing.type !== DRAWING_TYPE_RECTANGLE && drawing.type !== DRAWING_TYPE_TEXT && styleDraft ? <LineSettingsDialog key={drawing.id}
           drawing={drawing} draft={styleDraft} onDraftChange={setStyleDraft}
           templates={drawing.type === DRAWING_TYPE_FIB_RETRACEMENT ? fibonacciTemplates : trendLineTemplates}
           onTemplatesChange={templates => {

@@ -9,17 +9,37 @@ export const DRAWING_TYPE_TREND_LINE = "TREND_LINE" as const;
 export const DRAWING_TYPE_FIB_RETRACEMENT = "FIB_RETRACEMENT" as const;
 export const DRAWING_TYPE_RECTANGLE = "RECTANGLE" as const;
 export const DRAWING_TYPE_TEXT = "TEXT" as const;
+export const DRAWING_TYPE_ARROW_UP = "ARROW_UP" as const;
+export const DRAWING_TYPE_ARROW_DOWN = "ARROW_DOWN" as const;
 export const TREND_LINE_STYLES = ["SOLID", "DASHED", "DOTTED"] as const;
-export const DRAWING_TYPES = [DRAWING_TYPE_TREND_LINE, DRAWING_TYPE_FIB_RETRACEMENT, DRAWING_TYPE_RECTANGLE, DRAWING_TYPE_TEXT] as const;
+export const DRAWING_TYPES = [DRAWING_TYPE_TREND_LINE, DRAWING_TYPE_FIB_RETRACEMENT, DRAWING_TYPE_RECTANGLE, DRAWING_TYPE_TEXT, DRAWING_TYPE_ARROW_UP, DRAWING_TYPE_ARROW_DOWN] as const;
 
 export type DrawingType = (typeof DRAWING_TYPES)[number];
 export type DrawingTool = DrawingType;
-export type TwoPointDrawingTool = Exclude<DrawingTool, "TEXT">;
+export type ArrowDrawingType = typeof DRAWING_TYPE_ARROW_UP | typeof DRAWING_TYPE_ARROW_DOWN;
+export type TwoPointDrawingTool = Exclude<DrawingTool, "TEXT" | ArrowDrawingType>;
+export function isArrowDrawingType(type: string): type is ArrowDrawingType {
+  return type === DRAWING_TYPE_ARROW_UP || type === DRAWING_TYPE_ARROW_DOWN;
+}
+export function isArrowDrawing(drawing: MarketDrawing): drawing is ArrowDrawing {
+  return isArrowDrawingType(drawing.type);
+}
 
 export type DrawingAnchor = {
   timestamp: string;
   sourceSequence: number | null;
   price: number;
+};
+
+export type ArrowGeometry = { anchor: DrawingAnchor };
+export type ArrowStyle = { color: string };
+export type ArrowDrawing = Omit<TrendLineDrawing, "type" | "geometry" | "style"> & {
+  type: ArrowDrawingType; geometry: ArrowGeometry; style: ArrowStyle;
+};
+export type ArrowTemplate = { id: string; name: string; style: ArrowStyle };
+export type ArrowPreferences = { defaultStyle: ArrowStyle; templates: ArrowTemplate[] };
+export const DEFAULT_ARROW_STYLES: Record<ArrowDrawingType, ArrowStyle> = {
+  ARROW_UP: { color: "#059669" }, ARROW_DOWN: { color: "#dc2626" },
 };
 
 export type TrendLineGeometry = {
@@ -109,9 +129,9 @@ export const DEFAULT_TEXT_STYLE: TextDrawingStyle = {
 };
 export function normalizeDrawingText(text: string) { return text.replace(/\r\n?/g, "\n"); }
 export type TwoPointDrawing = TrendLineDrawing | FibonacciRetracementDrawing | RectangleDrawing;
-export type MarketDrawing = TwoPointDrawing | TextDrawing;
-export type DrawingGeometry = TrendLineGeometry | TextGeometry;
-export type MarketDrawingStyle = TrendLineStyle | FibonacciRetracementStyle | RectangleStyle | TextDrawingStyle;
+export type MarketDrawing = TwoPointDrawing | TextDrawing | ArrowDrawing;
+export type DrawingGeometry = TrendLineGeometry | TextGeometry | ArrowGeometry;
+export type MarketDrawingStyle = TrendLineStyle | FibonacciRetracementStyle | RectangleStyle | TextDrawingStyle | ArrowStyle;
 type NewDrawing<T> = T extends MarketDrawing ? Omit<T, "id" | "createdAt" | "updatedAt"> : never;
 export type NewMarketDrawing = NewDrawing<MarketDrawing>;
 export function twoPointDrawingInput(datasetId: string, type: TwoPointDrawingTool, geometry: TrendLineGeometry,
@@ -181,6 +201,17 @@ const drawingAnchorSchema = z.object({
   sourceSequence: z.number().int().nonnegative().nullable(),
   price: finiteNumber,
 }).strict();
+
+export const arrowGeometrySchema = z.object({ anchor: drawingAnchorSchema }).strict();
+export const arrowStyleSchema = z.object({ color: z.string().regex(/^#[0-9a-f]{6}$/i) }).strict();
+const arrowPreferencesSchema = z.object({ defaultStyle: arrowStyleSchema,
+  templates: z.array(z.object({ id: z.string().min(1), name: z.string().trim().min(1).max(50), style: arrowStyleSchema }).strict()).max(50),
+}).strict();
+export function parseArrowPreferences(value: string | null, type: ArrowDrawingType): ArrowPreferences {
+  try { const parsed = arrowPreferencesSchema.safeParse(value ? JSON.parse(value) : null); if (parsed.success) return parsed.data; }
+  catch { /* Unavailable or invalid browser storage uses the direction's defaults. */ }
+  return { defaultStyle: { ...DEFAULT_ARROW_STYLES[type] }, templates: [] };
+}
 
 export const textGeometrySchema = z.object({
   anchor: drawingAnchorSchema,
@@ -289,6 +320,10 @@ export const fibonacciRetracementPreferencesSchema = z.object({
 }).strict();
 
 export const createMarketDrawingSchema = z.discriminatedUnion("type", [
+  z.object({ type: z.literal(DRAWING_TYPE_ARROW_UP), geometry: arrowGeometrySchema,
+    style: arrowStyleSchema.default(DEFAULT_ARROW_STYLES.ARROW_UP) }).strict(),
+  z.object({ type: z.literal(DRAWING_TYPE_ARROW_DOWN), geometry: arrowGeometrySchema,
+    style: arrowStyleSchema.default(DEFAULT_ARROW_STYLES.ARROW_DOWN) }).strict(),
   z.object({ type: z.literal(DRAWING_TYPE_TEXT), clientId: z.string().uuid().optional(), geometry: textGeometrySchema,
     style: textDrawingStyleSchema.default(DEFAULT_TEXT_STYLE) }).strict(),
   z.object({
@@ -309,8 +344,8 @@ export const createMarketDrawingSchema = z.discriminatedUnion("type", [
 ]);
 
 export const updateMarketDrawingSchema = z.object({
-  geometry: z.union([trendLineGeometrySchema, textGeometrySchema]).optional(),
-  style: z.union([trendLineStyleSchema, fibonacciRetracementStyleSchema, rectangleStyleSchema, textDrawingStyleSchema]).optional(),
+  geometry: z.union([trendLineGeometrySchema, textGeometrySchema, arrowGeometrySchema]).optional(),
+  style: z.union([trendLineStyleSchema, fibonacciRetracementStyleSchema, rectangleStyleSchema, textDrawingStyleSchema, arrowStyleSchema]).optional(),
 }).strict().refine((value) => value.geometry !== undefined || value.style !== undefined);
 
 type StoredDrawing = {
@@ -330,6 +365,8 @@ export function serializeMarketDrawing(record: StoredDrawing): MarketDrawing {
     createdAt: record.createdAt.toISOString(),
     updatedAt: record.updatedAt.toISOString(),
   };
+  if (isArrowDrawingType(record.type)) return { ...base, type: record.type,
+    geometry: arrowGeometrySchema.parse(JSON.parse(record.geometry)), style: arrowStyleSchema.parse(JSON.parse(record.style)) };
   if (record.type === DRAWING_TYPE_TEXT) return { ...base, type: DRAWING_TYPE_TEXT,
     geometry: textGeometrySchema.parse(JSON.parse(record.geometry)), style: textDrawingStyleSchema.parse(JSON.parse(record.style)) };
   const geometry = trendLineGeometrySchema.parse(JSON.parse(record.geometry));
@@ -374,6 +411,7 @@ export function parseFibonacciRetracementPreferences(value: string | null): Fibo
 }
 
 export function drawingStyleMatchesType(type: DrawingType, style: MarketDrawingStyle) {
+  if (isArrowDrawingType(type)) return arrowStyleSchema.safeParse(style).success;
   if (type === DRAWING_TYPE_TEXT) return textDrawingStyleSchema.safeParse(style).success;
   if (type === DRAWING_TYPE_RECTANGLE) return rectangleStyleSchema.safeParse(style).success;
   return type === DRAWING_TYPE_TREND_LINE
@@ -383,6 +421,7 @@ export function drawingStyleMatchesType(type: DrawingType, style: MarketDrawingS
 
 export function drawingGeometryMatchesType(type: string, geometry: DrawingGeometry) {
   if (!DRAWING_TYPES.includes(type as DrawingType)) return false;
+  if (isArrowDrawingType(type)) return arrowGeometrySchema.safeParse(geometry).success;
   if (type === DRAWING_TYPE_TEXT) return textGeometrySchema.safeParse(geometry).success;
   const result = trendLineGeometrySchema.safeParse(geometry);
   return result.success && (type !== DRAWING_TYPE_RECTANGLE || isValidRectangleGeometry(result.data));

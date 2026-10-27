@@ -1,4 +1,5 @@
 import { type Ref } from "react";
+import type { ArrowDrawingType } from "@/lib/market-replay/chart-drawings";
 import type { ReplayViewportApi, ReplayViewportSnapshot } from "@/lib/market-replay/chart-range";
 import type { OrderSubmitResult } from "@/lib/paper-trading/types";
 import type { AggregatedMarketBarData, BarCountIndicatorConfig, DisplaySession, EmaIndicatorConfig, TradingSessionConfig } from "@/lib/market-replay/types";
@@ -195,6 +196,7 @@ export type ReplayChartProps = {
   onCreateDrawing: (type: TwoPointDrawingTool, geometry: TrendLineGeometry) => void;
   onUpdateDrawing: (id: string, geometry: DrawingGeometry) => void;
   onPlaceText?: (anchor: DrawingAnchor) => void;
+  onPlaceArrow?: (type: ArrowDrawingType, anchor: DrawingAnchor) => void;
   drawingApiRef?: Ref<TextDrawingApi>;
   onDeleteDrawing: (id: string) => void;
   onOpenDrawingStyle: (id: string, inlineText?: boolean) => void;

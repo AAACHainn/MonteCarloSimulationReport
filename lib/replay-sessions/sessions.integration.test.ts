@@ -27,7 +27,7 @@ import { PATCH as drawingPATCH, DELETE as drawingDELETE } from "@/app/api/market
 import { DELETE as sessionDELETE, GET as sessionGET, PATCH as sessionPATCH } from "@/app/api/replay-sessions/[sessionId]/route";
 import { DELETE as journalSessionDELETE } from "@/app/api/market-datasets/[id]/paper-journal/sessions/[sessionId]/route";
 import { getPaperSessionSnapshot } from "@/lib/paper-trading/serialize";
-import { DEFAULT_TREND_LINE_STYLE, DEFAULT_RECTANGLE_STYLE, DEFAULT_FIBONACCI_RETRACEMENT_STYLE, DEFAULT_TEXT_STYLE } from "@/lib/market-replay/chart-drawings";
+import { DEFAULT_TREND_LINE_STYLE, DEFAULT_RECTANGLE_STYLE, DEFAULT_FIBONACCI_RETRACEMENT_STYLE, DEFAULT_TEXT_STYLE, DEFAULT_ARROW_STYLES, isArrowDrawingType } from "@/lib/market-replay/chart-drawings";
 import { randomUUID } from "node:crypto";
 import { createCorrection, commitCorrection, cancelCorrection, readCorrection } from "./corrections";
 import { runReplayCorrection } from "./correction-runner";
@@ -123,9 +123,12 @@ describe("session drawing persistence", () => {
     { type: "RECTANGLE", style: DEFAULT_RECTANGLE_STYLE },
     { type: "FIB_RETRACEMENT", style: DEFAULT_FIBONACCI_RETRACEMENT_STYLE },
     { type: "TEXT", style: DEFAULT_TEXT_STYLE },
+    { type: "ARROW_UP", style: DEFAULT_ARROW_STYLES.ARROW_UP },
+    { type: "ARROW_DOWN", style: DEFAULT_ARROW_STYLES.ARROW_DOWN },
   ].flatMap(drawing => (["ACTIVE", "ARCHIVED"] as const).map(status => ({ ...drawing, status }))))("retains and edits $status $type drawings without changing trading records", async ({ type, style, status }) => {
     const session = await create("LIVE_REPLAY"), sibling = await create("TRAINING");
-    const shape = type === "TEXT" ? { anchor: geometry.start, text: "测试文字\n多行" } : geometry;
+    const shape = type === "TEXT" ? { anchor: geometry.start, text: "测试文字\n多行" }
+      : isArrowDrawingType(type) ? { anchor: geometry.start } : geometry;
     expect((await accountPOST(request(session, "POST", { initialCapital: 10000, currency: "USD", commissionBps: 0, slippageBps: 0 }), context)).status).toBe(201);
     const beforeArchive = await drawingPOST(request(session, "POST", { type, style, geometry: shape }), context);
     expect(beforeArchive.status).toBe(201);
@@ -138,6 +141,7 @@ describe("session drawing persistence", () => {
     const created = await drawingPOST(request(session, "POST", { type, style, geometry: shape }), context);
     expect(created.status).toBe(201);
     const nextGeometry = type === "TEXT" ? { anchor: { ...geometry.start, price: 103 }, text: "更新文字" }
+      : isArrowDrawingType(type) ? { anchor: { ...geometry.start, price: 103 } }
       : { ...geometry, end: { ...geometry.end, price: 103 } };
     expect((await drawingPATCH(request(session, "PATCH", { geometry: nextGeometry }), itemContext(original.id))).status).toBe(200);
     expect((await read(session)).drawings.find((item: { id: string }) => item.id === original.id).geometry).toEqual(nextGeometry);
@@ -146,6 +150,15 @@ describe("session drawing persistence", () => {
       expect((await drawingPATCH(request(session, "PATCH", { style: displayStyle }), itemContext(original.id))).status).toBe(200);
       expect((await read(session)).drawings.find((item: { id: string }) => item.id === original.id).style).toEqual(displayStyle);
       expect(JSON.parse((await prisma.marketDrawing.findUniqueOrThrow({ where: { id: original.id } })).style)).toEqual(displayStyle);
+    }
+    if (isArrowDrawingType(type)) {
+      const nextStyle = { color: "#123456" };
+      expect((await drawingPATCH(request(session, "PATCH", { style: nextStyle }), itemContext(original.id))).status).toBe(200);
+      expect((await read(session)).drawings.find((item: { id: string }) => item.id === original.id)).toMatchObject({ geometry: nextGeometry, style: nextStyle });
+      expect((await drawingPATCH(request(session, "PATCH", { geometry }), itemContext(original.id))).status).toBe(400);
+      expect((await drawingPATCH(request(session, "PATCH", { style: DEFAULT_TREND_LINE_STYLE }), itemContext(original.id))).status).toBe(400);
+      expect((await drawingPATCH(request(sibling, "PATCH", { style: nextStyle }), itemContext(original.id))).status).toBe(404);
+      expect((await drawingDELETE(request(sibling, "DELETE"), itemContext(original.id))).status).toBe(404);
     }
     if (type === "TEXT") {
       const nextStyle = { ...DEFAULT_TEXT_STYLE, bold: true, backgroundEnabled: true, wrapEnabled: true, wrapWidth: 200 };
