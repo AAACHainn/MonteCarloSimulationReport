@@ -15,9 +15,19 @@
 - 行情聚合复用 `lib/market-replay/aggregation.ts`；模拟撮合放在 `lib/paper-trading/`，会话与纠错放在 `lib/replay-sessions/`。不要在组件或 API 中复制业务规则。
 - 模拟配置与限制以 `lib/validations.ts` 为准；行情与回放限制以 `lib/market-replay/types.ts` 为准，保留计算量和资源上限校验。
 - SQLite 中 `SimulationRun` 的 `config`、`summary`、`samplePaths`、`percentileCurves` 使用 String 保存 JSON；改为 Prisma Json 前必须验证迁移与 engine 兼容性。持久化 `samplePaths` 最多 100 条。
-- 修改数据库结构时同步 Prisma 迁移与 `scripts/init-sqlite.mjs`。兜底脚本不维护 Prisma 迁移历史，不与迁移命令混用来跳过错误。
+- 修改数据库结构时同步 Prisma schema、增量迁移、当前新安装流程和适用的升级入口，遵守下节版本基线；不再要求向旧 `scripts/init-sqlite.mjs` 追加后续版本的兼容升级逻辑。旧兜底脚本不维护 Prisma 迁移历史，不与迁移命令混用来跳过错误。
 - 浏览器与共享代码必须兼容普通 HTTP（含局域网 IP / 域名访问），不能假定处于 HTTPS 安全上下文。生成 UUID 一律使用 `lib/uuid.ts` 的 `createUuid()`（`import { createUuid } from "@/lib/uuid"`），禁止直接访问或解构 `crypto.randomUUID`、`window.crypto.randomUUID`、`globalThis.crypto.randomUUID`，也不在业务代码重复实现回退。统一封装已提供 `getRandomValues` 回退，不用 `Math.random()` 或时间戳代替 UUID；纯服务端可使用 `import { randomUUID } from "node:crypto"`。
 - 新增依赖安全上下文的浏览器 API 时，先检查能力并提供适合 HTTP 的兼容方案；相关验证至少覆盖 `crypto.randomUUID` 不可用的环境。不能仅凭 `http://localhost` 通过就认定普通 HTTP 可用；UUID 直接访问由 ESLint 阻止，例外仅限统一封装。
+
+## 数据库版本基线与升级
+
+- `v1.0` tag 是数据库兼容性最低基线，固定提交与结构范围见 [升级指南](docs/operations/upgrade.md)。不能仅凭 `package.json` 版本、代码 tag 或个别表存在认定实际数据库已达到基线。
+- `v0.2 → v1.0` 使用 `v1.0` tag 内的旧升级脚本及文档。后续版本不支持从 v1.0 之前的数据库直接升级；旧安装须先在 v1.0 完成升级和验收，再进入后续升级链路。
+- v1.0 之后首次发生数据库变更时，建立新的统一升级入口，仅支持已核验的 v1.0 基线及其后续版本，按顺序执行尚未应用的增量迁移；不得继续向旧升级脚本追加后续迁移或自动回退到旧兼容路径。
+- 新入口须核验实际结构与迁移状态，并覆盖 v1.0 的 Prisma 安装和旧初始化路径升级所得的有效基线库；缺少 `_prisma_migrations` 不能直接视为低于基线，也不能未经核验就标记迁移完成。低于基线、无法识别或迁移状态异常时停止，保留数据与现场。
+- 旧升级实现由 `v1.0` tag 保留；新入口实现、验证并完成调用方切换后，从主线移除已无引用的旧入口及专用实现，不长期保留一套改名的旧兼容入口。新入口就绪前保留现有脚本；仍被新安装或其他功能使用的代码须先替换或拆分，按文件明确处理，遵守禁止批量删除的约束。
+- 基线化不等于删除或重写已发布的 `prisma/migrations`。保留历史迁移及校验和；如需压缩迁移历史，须另行设计并验证已有数据库接续与全新安装方案。
+- 新升级方案须验证全新安装、v1.0 两种有效基线来源升级、后续版本连续升级、重复执行及失败保护；继续执行停写、一致性备份、副本演练、数据核对和密钥保留要求。具体入口、基线识别和验收结果同步更新升级指南及 README。
 
 ## 回放与导入约束
 
