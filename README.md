@@ -34,14 +34,13 @@
 
 头像文件默认保存在 `storage/user-avatars/`，与 SQLite 一起备份/恢复及持久化，不能只复制数据库；可通过 `USER_AVATAR_DIR` 指向持久化目录。正式头像资源在 `public/avatars/` 随代码交付，用户上传不进 Git。代理服务器应允许至少 6 MiB 请求，应用仍限制文件为 5 MiB。
 
-当前成长规则为 `user-growth-v1`：完整持仓周期 +5、首次逐笔复盘 +10、每轮考核通过 +100、每轮首次成功出金 +200；后续出金仍计次数及 USDT 实得。六项条件、去重、删除保留及未开放层级详见[设计](docs/account/user-growth-design.md)与[第五阶段记录](docs/account/user-growth-stage-5-progress.md)。部署状态以目标机器实际迁移/构建结果为准，开发验收副本不自动合入日常数据库。本机正式升级证据见[2026-10-26 升级记录](docs/account/user-growth-formal-upgrade-2026-10-26.md)。
-
+当前成长规则为 `user-growth-v1`：完整持仓周期 +5、首次逐笔复盘 +10、每轮考核通过 +100、每轮首次成功出金 +200；后续出金仍计次数及 USDT 实得。六项条件、去重、删除保留及未开放层级详见[成长规则设计](docs/account/user-growth-design.md)。
 
 ## 用户资金
 
 每个用户一次性获得 10,000 USDT，余额为 0 不自动补发。在用户档案的“用户资金”中查看可用余额、账户内资金和按页展示的账本。账户创建界面固定使用 USDT，数据库币种字段保留。
 
-只有归属用户的模拟训练参与资金管理：自有资金账户支持在用户档案中部分/全部提取及再次存入，存取不归档会话；自营公司账户购买及重新考核扣购买费，通过考核转为出金账户时扣激活费，成功出金只计交易者实得。实盘重演及未归属会话不参与。删除会话须确认提取、出金或放弃不可提资金，费用不退；用户账本保留。详见[用户余额实施记录](docs/account/user-wallet-progress.md)和[资金存取调整](docs/account/user-wallet-transfers-progress.md)。
+只有归属用户的模拟训练参与资金管理：自有资金账户支持在用户档案中部分/全部提取及再次存入，存取不归档会话；自营公司账户购买及重新考核扣购买费，通过考核转为出金账户时扣激活费，成功出金只计交易者实得。实盘重演及未归属会话不参与。删除会话须确认提取、出金或放弃不可提资金，费用不退；用户账本保留。
 
 ## 快速开始
 
@@ -54,7 +53,40 @@ git clone https://github.com/AAACHainn/MonteCarloSimulationReport.git
 cd MonteCarloSimulationReport
 ```
 
-### 方式一：本地 Node.js
+### 方式一：Windows 一键安装（生产模式）
+
+适用于全新安装。先安装 Node.js 22.14 或以上版本和 Corepack，并确保 `node --version`、`corepack --version` 能正常执行。安装过程需要联网下载依赖，无需管理员权限。
+
+获取完整源码后，在项目根目录双击 [`install.bat`](install.bat)，或在 PowerShell 中运行：
+
+```powershell
+.\install.bat
+```
+
+脚本会自动完成以下步骤：
+
+1. 提示选择 SQLite 同步模式，回车默认选择 **NORMAL**；两种模式均使用 `better-sqlite3 + WAL`。
+2. 通过 Corepack 安装项目锁定版本的 pnpm 依赖，准备 SQLite 原生模块并生成 Prisma Client。
+3. 确认数据库可用于全新安装后，根据 `.env.example` 创建或补齐 `.env`，分别生成 `MARKET_DATA_ENCRYPTION_KEY` 和 `AI_ENCRYPTION_KEY`：均为 32 个安全随机字节的 Base64 编码；已有有效密钥保留。
+4. 应用数据库迁移，核对 SQLite 版本、WAL、同步级别、完整性和外键检查结果。
+5. 执行生产构建，并通过 `corepack pnpm start` 启动服务。
+
+| 同步模式 | 提交行为与取舍 |
+| --- | --- |
+| NORMAL（安装脚本默认） | 减少提交时的磁盘同步，通常更快；断电或系统崩溃时可能丢失最近已提交的事务 |
+| FULL | 每次提交额外同步 WAL，已提交事务的持久性更强，磁盘写入开销更大 |
+
+等待终端显示 `Ready` 后打开 [http://localhost:3000](http://localhost:3000)。保持窗口打开以运行服务，按 `Ctrl+C` 停止。之后启动只需在项目根目录执行：
+
+```powershell
+corepack pnpm start
+```
+
+请保留生成的 `.env` 和其中的加密密钥，以便跨重启和升级解密已保存的行情、AI 凭据。
+
+脚本发现非空数据库文件、WAL/SHM 文件或升级锁时会停止，即使数据库尚无业务记录，也不作为全新库重新初始化；已有安装使用[升级流程](#已有安装升级)。若已完成迁移，仅构建或启动失败，解决报错后按[本地生产模式](#本地生产模式)重新构建并启动。若提示环境变量冲突，先核对 `.env.local`、`.env.production`、`.env.production.local` 和终端／系统中的覆盖项，再重新执行。
+
+### 方式二：手动安装 Node.js
 
 使用 Node.js 22，建议 22.14 或更新的 22.x 版本；pnpm 版本由 `package.json` 固定为 `11.4.0`，通过 Corepack 执行。
 
@@ -88,7 +120,7 @@ cd MonteCarloSimulationReport
 
 若环境无法运行 Prisma migrate，仓库提供 `corepack pnpm run db:init-sqlite` 兜底入口。它不维护 Prisma 迁移历史；选择前请阅读 [数据库升级路径](docs/operations/upgrade.md#3-获取代码并选择迁移路径)，不要与迁移命令混用来跳过错误。
 
-### 方式二：Docker Compose 开发
+### 方式三：Docker Compose 开发
 
 需要 Docker Engine + Compose，或 Docker Desktop；容器内已包含 Node.js 与 pnpm。
 
@@ -112,16 +144,17 @@ docker compose down
 
 ### 环境变量
 
-完整示例见 [`.env.example`](.env.example)。仅使用本地导入、回放和蒙特卡洛分析时，无需配置 Databento 连接。
+完整示例见 [`.env.example`](.env.example)。一键安装会自动补齐环境配置并生成两项加密密钥；手动安装使用示例中的默认值。仅使用本地导入、回放和蒙特卡洛分析时，无需配置 Databento 连接。
 
 | 变量 | 默认值 / 示例 | 用途 |
 | --- | --- | --- |
 | `DATABASE_URL` | `file:./dev.db` | 本地 Node 与开发 Compose 下对应 `prisma/dev.db` |
-| `SQLITE_DRIVER` | `native` | 可选 `better-sqlite3`；切换前按升级指南备份并在目标环境验证 |
-| `SQLITE_JOURNAL_MODE` | `delete`（示例配置） | 新驱动可显式设为 `wal`，每条连接保持 FULL；native 仅支持 DELETE |
-| `MARKET_DATA_ENCRYPTION_KEY` | 空 | 可选；行情连接使用的 32 字节 Base64 加密主密钥，配置后须跨重启与升级保留 |
+| `SQLITE_DRIVER` | 示例 `native`；一键安装 `better-sqlite3` | native 仅支持 DELETE + FULL；已有数据库切换驱动前按升级指南备份并验证 |
+| `SQLITE_JOURNAL_MODE` | 示例 `delete`；一键安装 `wal` | `wal` 需要 `better-sqlite3`，不能单独交给 native 驱动使用 |
+| `SQLITE_SYNCHRONOUS` | 示例 `FULL`；一键安装默认 `NORMAL` | NORMAL 仅支持 better-sqlite3 + WAL；FULL 更重视已提交事务的持久性 |
+| `MARKET_DATA_ENCRYPTION_KEY` | 示例为空；一键安装自动生成 | 行情连接使用的 32 字节 Base64 加密主密钥，配置后须跨重启与升级保留 |
 | `MARKET_DATA_SYNC_ENABLED` | `1` | 行情同步任务处理与调度开关；设为 `0` 关闭，数据集仍需单独启用同步 |
-| `AI_ENCRYPTION_KEY` | 空 | 独立 AI 密钥加密主密钥；本地运行 `node scripts/setup-ai-key.mjs` 生成一次并保留 |
+| `AI_ENCRYPTION_KEY` | 示例为空；一键安装自动生成 | 独立 AI 凭据加密主密钥；手动安装可运行 `node scripts/setup-ai-key.mjs` 生成一次并保留 |
 | `APP_PORT` | `3001` | Compose 的宿主机端口；本地 Node 开发默认使用 `3000` |
 
 ### 本地生产模式
@@ -321,7 +354,7 @@ lib/
 prisma/                 数据模型与迁移
 scripts/                数据库初始化与升级、后台 worker 与专项验证
 public/templates/       CSV 模板
-docs/logs/              开发周报、近期日记录与完整 Git 提交索引
+install.bat             Windows 全新安装、环境配置与生产启动
 docs/                   按主题分类的文档与目录索引
 ```
 
@@ -341,8 +374,7 @@ Windows 下若 Prisma query engine DLL 被占用，请先确认并停止本项�
 
 | 文档 | 内容 |
 | --- | --- |
-| [分类文档目录](docs/README.md) | 按 AI、绘图、行情、回放、运维、UI、历史与审查查找专题说明 |
-| [开发日志](docs/logs/README.md) | main 分支开发历史：早期按周、近期按天及完整提交索引 |
+| [分类文档目录](docs/README.md) | 按主题查找功能说明、部署指南与开发规范 |
 | [现有安装升级与跨机器部署](docs/operations/upgrade.md) | `db:upgrade`、备份、迁移路径、密钥保留、生产部署检查、验收与回退 |
 | [行情增量同步](docs/market-data/market-data-sync.md) | Databento 连接、自动计划、预算与冲突处理 |
 | [模拟训练交易关卡](docs/replay/training-gate.md) | 策略清单、连亏触发、计数与会话恢复 |
