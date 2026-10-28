@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { applyPayout, currentStage, defaultPropRules, evaluationProgress, funds, initialPropState, observeProp, payoutPreview, payoutQualification, preparePropDay, promotePropManually, promotionPreview, propRulesSchema, settlePropDay, shouldStopPropReplay, type Observation, type PropRules } from "./rules";
+import { applyPayout, currentStage, defaultPropRules, evaluationProgress, funds, initialPropState, observeProp, payoutPreview, payoutQualification, preparePropDay, promotePropManually, promotionPreview, propRulesSchema, settlePropLiquidation, settlePropDay, shouldStopPropReplay, type Observation, type PropRules } from "./rules";
 import { propTradingDay } from "./trading-day";
 import { propResultLabel } from "./result-label";
 import { formatMoney } from "@/lib/format";
@@ -269,5 +269,35 @@ describe("source trading days", () => {
     expect(propTradingDay("2026-10-30T20:59:00Z", calendar)?.eod).toBe(true);
     expect(propTradingDay("2026-11-02T21:59:00Z", calendar)?.eod).toBe(true);
     expect(propTradingDay("2026-11-02T22:00:00Z", calendar)).toBeNull();
+  });
+});
+
+
+describe("failed round liquidation ledger", () => {
+  it.each(["EVALUATION", "FUNDED"] as const)("settles %s close costs without replacing breach evidence", phase => {
+    const r = rules();
+    const start = initialPropState(r, 0); start.phase = phase; start.stages[0].kind = phase;
+    const failed = observeProp(r, start, o(100, { unrealized: -2200, flat: false, pending: 3, realizedPnl: 100, totalFees: 0 }));
+    expect(failed.result).toBe("FAILED");
+    const completed = settlePropLiquidation(r, failed, o(-2110, { realizedPnl: -2100, totalFees: 10 }));
+    expect(completed.failure).toEqual(failed.failure);
+    expect(failed.last).toMatchObject({ unrealized: -2200, flat: false, pending: 3 });
+    expect(completed.last).toMatchObject({ rawNet: -2110, unrealized: 0, flat: true, pending: 0 });
+    expect(funds(completed)).toMatchObject({ balance: 47890, equity: 47890 });
+    expect(currentStage(completed).metrics).toMatchObject({ realizedPnl: -2100, totalFees: 10 });
+    expect(currentStage(completed).days).toHaveLength(1);
+    expect(currentStage(completed).days[0]).toMatchObject({ endRawNet: -2110, balance: 47890 });
+    expect(completed.result).toBe("FAILED");
+  });
+  it("does not restore a failed account even if the final observation recovers above its floor", () => {
+    const r = rules(); const failed = observeProp(r, initialPropState(r, 0), o(-2100));
+    expect(settlePropLiquidation(r, failed, o(1))).toMatchObject({ result: "FAILED", failure: failed.failure });
+  });
+  it("rejects unfinished or mismatched liquidation observations", () => {
+    const r = rules(); const start = initialPropState(r, 0); const failed = observeProp(r, start, o(-2100));
+    expect(() => settlePropLiquidation(r, start, o(0))).toThrow();
+    expect(() => settlePropLiquidation(r, failed, o(-2100, { sequence: 2 }))).toThrow();
+    expect(() => settlePropLiquidation(r, failed, o(-2100, { flat: false }))).toThrow();
+    expect(() => settlePropLiquidation(r, failed, o(-2100, { pending: 1 }))).toThrow();
   });
 });

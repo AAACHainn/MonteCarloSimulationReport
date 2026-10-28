@@ -9,6 +9,7 @@ import { getPaperSessionSnapshot } from "@/lib/paper-trading/serialize";
 import { applyPayout, payoutPreview, promotePropManually, promotionPreview, propRulesSchema, propTradingBlockReason, observeProp, settlePropDay, type PropState, type PropRules } from "./rules";
 import { propTradingDay, type PropCalendar } from "./trading-day";
 import { hydrateStageMetrics } from "./stage-metrics-read";
+import { liquidatePropFailure } from "./failure-close";
 
 import { chargePropActivation, creditPropPayout } from "@/lib/user-wallet/service";
 
@@ -30,7 +31,8 @@ export async function loadPropAccount(tx: Prisma.TransactionClient = prisma): Pr
 }
 export async function persistPropAccount(tx: Prisma.TransactionClient, runtime: PropRuntime, previous: PropState) {
   const scope = getReplayScope()!;
-  if (JSON.stringify(previous) === JSON.stringify(runtime.state)) return;
+  const liquidation = await liquidatePropFailure(tx, runtime, previous);
+  if (JSON.stringify(previous) === JSON.stringify(runtime.state)) return null;
   await tx.propPracticeAccount.update({ where: { replaySessionId: scope.id }, data: { state: JSON.stringify(runtime.state) } });
   const owner = await tx.replaySession.findUniqueOrThrow({ where: { id: scope.id } });
   await tx.propPracticeRound.updateMany({ where: { projectionId: scope.projectionId }, data: {
@@ -47,6 +49,7 @@ export async function persistPropAccount(tx: Prisma.TransactionClient, runtime: 
       await settleGrowth(tx, { type: "EVALUATION", sourceId: "promotion", roundNumber: runtime.roundNumber ?? 1, occurredAt: bar?.timestamp ?? new Date(), source: { sequence: runtime.state.last?.sequence } });
     }
   }
+  return liquidation;
 }
 export async function assertPropTradingAvailable(tx: Prisma.TransactionClient) {
   const prop = await loadPropAccount(tx);
