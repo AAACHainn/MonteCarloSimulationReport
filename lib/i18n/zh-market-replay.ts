@@ -51,6 +51,7 @@ export const zhMarketReplay = {
       timeframe: "周期",
       timeframePlaceholder: "例如：1m、15m、1h、1d",
       sourceInterval: "源 K 线周期",
+      sourcePeriod: "源周期",
       sourceIntervalPlaceholder: "自动识别",
       sourceIntervalHint: "建议留空自动识别；Databento 文件会读取 rtype，普通 CSV 会根据时间戳间隔推断。",
       priceTickSize: "最小价格变动",

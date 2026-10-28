@@ -49,7 +49,7 @@ import { runDrawingWrite } from "@/lib/market-replay/drawing-write-queue";
 import { deleteTextDrawing, persistTextDrawing } from "@/lib/market-replay/text-persistence";
 import { drawingObjectName, drawingObjectColor, drawingSettingsLabel, drawingDeleteLabel } from "@/lib/market-replay/drawing-presentation";
 import { UTC_OFFSET_OPTIONS, formatUtcOffset } from "@/lib/market-replay/display-timezone";
-import { type DisplaySession } from "@/lib/market-replay/types";
+import { formatInterval, type DisplaySession } from "@/lib/market-replay/types";
 import { DRAWING_TYPE_FIB_RETRACEMENT, DRAWING_TYPE_TREND_LINE, DRAWING_TYPE_RECTANGLE, DRAWING_TYPE_TEXT, type FibonacciRetracementStyle, type TrendLineStyle } from "@/lib/market-replay/chart-drawings";
 import { cloneFibonacciStyle, formatDatasetTime } from "./replay-client-shared";
 import type { JournalFocus } from "./replay-client-shared";
@@ -113,13 +113,22 @@ export function MarketReplayClient({ dataset: initialDataset, initialJournalFocu
   }
   function wrapWorkspace(content: ReactNode) {
     return <div className="flex h-full min-h-0 flex-col gap-2">
-      <header className="shrink-0" data-replay-workspace-header>
-        <UserContextHeader session={replaySession ?? undefined} growthNotice={growthNotice} growthNoticeKey={growthNoticeKey}>{!webFullscreen && <Breadcrumbs items={[{ label: copy.marketReplay.title, href: "/market-replay" }, { label: dataset.name }]} />}</UserContextHeader>
-        {!webFullscreen && <div className="mt-1 flex flex-wrap items-center gap-4">
-          <h1 className="shrink-0 text-xl font-semibold tracking-tight text-slate-950">{copy.marketReplay.replayTitle(dataset.symbol, dataset.timeframe)}</h1>
-          <p className="min-w-0 truncate text-xs text-slate-500">{dataset.name} · {dataset.timezone}</p>
-          <div className="ml-auto flex min-w-0 flex-wrap items-center gap-2">{gateButton}<ReplaySessionSwitch beforeSwitch={prepareSessionSwitch} disabled={isLoading || Boolean(loadError) || !replay || Boolean(checkingOrder)} /></div>
-        </div>}
+      <header className={webFullscreen ? "hidden" : "shrink-0 rounded-lg border bg-white px-4 py-3 shadow-sm"} data-replay-workspace-header>
+        <UserContextHeader className="items-center" session={replaySession ?? undefined} growthNotice={growthNotice} growthNoticeKey={growthNoticeKey}>
+          <div className="flex min-w-0 flex-wrap items-center justify-between gap-x-5 gap-y-2">
+            <div className="min-w-0">
+              <Breadcrumbs className="text-xs" items={[{ label: copy.marketReplay.title, href: "/market-replay" }, { label: dataset.name }]} />
+              <div className="mt-1 flex min-w-0 items-center gap-3">
+                <h1 className="shrink-0 text-xl font-semibold tracking-tight text-slate-950">{dataset.symbol}</h1>
+                <p className="min-w-0 truncate border-l border-slate-200 pl-3 text-xs text-slate-500">{copy.marketReplay.sourcePeriod} {dataset.sourceIntervalSeconds !== null ? formatInterval(dataset.sourceIntervalSeconds) : copy.common.dash} · {dataset.timezone}</p>
+              </div>
+            </div>
+            <div className="ml-auto flex min-w-0 flex-wrap items-center gap-2">
+              <ReplaySessionSwitch beforeSwitch={prepareSessionSwitch} disabled={isLoading || Boolean(loadError) || !replay || Boolean(checkingOrder)} />
+              {gateButton}
+            </div>
+          </div>
+        </UserContextHeader>
       </header>
       {!webFullscreen ? gateNoticeBlock : null}
       {gateDialogOpen ? <TrainingGateConfigDialog gate={currentGate} busy={gateBusy} error={gateError} onClose={() => setGateDialogOpen(false)} onSave={saveGateConfig} /> : null}
@@ -194,7 +203,6 @@ export function MarketReplayClient({ dataset: initialDataset, initialJournalFocu
         {paperSnapshot?.propAccount?.state.result === "FAILED" ? <Alert role="alert" className="flex shrink-0 items-center justify-between gap-3 rounded-none border-x-0 border-t-0 border-amber-200 bg-amber-50 py-2 text-amber-800"><AlertDescription>{copy.propPractice.roundFailed}</AlertDescription><Button size="sm" variant="outline" onClick={() => setSettingsDialog("paper")}>{copy.propPractice.reset}</Button></Alert> : null}
         {replaySession?.mode === "LIVE_REPLAY" ? <ReplayCorrectionDialog target={correctionTarget} displayUtcOffsetMinutes={displayUtcOffsetMinutes} beforeCreate={prepareSessionSwitch} onClose={() => setCorrectionTarget(null)} onPendingChange={setCorrectionPending} /> : null}
         <div className="flex h-12 shrink-0 items-center gap-2 overflow-x-auto border-b px-3 [&>*]:shrink-0">
-          {webFullscreen ? gateButton : null}
           <DisplayIntervalControls
             value={replay.displayIntervalSeconds}
             sourceIntervalSeconds={dataset.sourceIntervalSeconds}
