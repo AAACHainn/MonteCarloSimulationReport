@@ -15,7 +15,7 @@ import type { ReplayChartDisplay } from "./replay-client-shared";
 import { useCallback, useEffect, useMemo, useRef, useState, useId } from "react";
 import type { CandlestickStyle } from "@/lib/market-replay/candlestick-style";
 import { useReplayShortcuts } from "@/components/market-replay/use-replay-shortcuts";
-import { createReplayStepShortcut } from "@/lib/market-replay/keyboard-shortcuts";
+import { createReplayStepShortcut, hasVisibleReplayDialog } from "@/lib/market-replay/keyboard-shortcuts";
 import { type DateTimePickerHandle } from "@/components/ui/date-time-picker";
 import { useTextDrawingEditor } from "./use-text-drawing-editor";
 import { useDrawingScopeGuard } from "./use-drawing-scope-guard";
@@ -173,7 +173,8 @@ export function useReplayCore({ dataset: initialDataset, initialJournalFocus = n
       if (
         event.key !== "Escape" || event.defaultPrevented || event.isComposing
         || drawingTool || selectedDrawingId || measurementArmed || draftActive
-        || document.querySelector("[role='dialog'], [role='alertdialog'], [role='menu'], [role='listbox'], [data-context-menu], [data-radix-popper-content-wrapper]")
+        || hasVisibleReplayDialog()
+        || document.querySelector("[role='menu'], [role='listbox'], [data-context-menu], [data-radix-popper-content-wrapper]")
       ) return;
       event.preventDefault();
       setWebFullscreen(false);

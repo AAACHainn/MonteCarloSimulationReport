@@ -23,9 +23,10 @@ import { CandleCountdownPrimitive } from "@/lib/market-replay/candle-countdown-p
 import { chartBarsBeforeHiddenBoundary, type ChartHideAfter } from "@/lib/market-replay/chart-hide-after";
 import { DraftOrder, ContextMenuState, AbrTooltipState, LineTarget, LineAction, MeasurementState, DrawingDraft, DrawingSegmentCoordinate, sameLineActions } from "./replay-chart-shared";
 import type { ReplayChartProps } from "./replay-chart-shared";
+import { replayCrosshairVisible, resolveReplayCursor, type ReplayChartCursor } from "@/lib/market-replay/cursor-mode";
 
 export function useReplayChartCore({
-  datasetId, dataRevision = "", priceTickSize, bars, warmupBars, displayUtcOffsetMinutes, displayIntervalSeconds, measurementArmed,
+  datasetId, dataRevision = "", priceTickSize, bars, warmupBars, displayUtcOffsetMinutes, displayIntervalSeconds, measurementArmed, cursorMode = "crosshair",
   candlestickStyle, gridVisible = true, onToggleGrid,
   onMeasurementArmedChange, drawingTool, onDrawingToolChange, trendLineDraftStyle, fibonacciDraftStyle, rectangleDraftStyle, drawings, selectedDrawingId,
   onSelectedDrawingIdChange, onCreateDrawing, onUpdateDrawing, onDeleteDrawing, onPlaceText, onPlaceArrow, drawingApiRef,
@@ -142,6 +143,8 @@ export function useReplayChartCore({
   const fibonacciDraftStyleRef = useRef(fibonacciDraftStyle);
   fibonacciDraftStyleRef.current = fibonacciDraftStyle;
   const measurementArmedRef = useRef(measurementArmed);
+  const cursorModeRef = useRef(cursorMode);
+  cursorModeRef.current = cursorMode;
   const onMeasurementArmedChangeRef = useRef(onMeasurementArmedChange);
   const drawingToolRef = useRef(drawingTool);
   const drawingsRef = useRef(drawings);
@@ -306,11 +309,19 @@ export function useReplayChartCore({
     },
   }), [syncDrawingPrimitive]);
 
-  const setChartCursor = useCallback((cursor: "" | "crosshair" | "ns-resize" | "move" | "pointer") => {
+  const setChartCursor = useCallback((cursor: ReplayChartCursor) => {
     const container = containerRef.current;
     if (!container) return;
-    container.style.cursor = cursor;
-    container.querySelectorAll("canvas").forEach((canvas) => { canvas.style.cursor = cursor; });
+    const resolved = resolveReplayCursor(cursorModeRef.current, cursor);
+    container.style.cursor = resolved;
+    container.querySelectorAll("canvas").forEach((canvas) => { canvas.style.cursor = resolved; });
+  }, []);
+
+  const restoreCrosshair = useCallback(() => {
+    const visible = replayCrosshairVisible(Boolean(measurementRef.current));
+    chartRef.current?.applyOptions({ crosshair: {
+      vertLine: { visible, labelVisible: visible }, horzLine: { visible, labelVisible: visible },
+    } });
   }, []);
 
   useEffect(() => {
@@ -338,12 +349,7 @@ export function useReplayChartCore({
       setMeasurement(null);
       measurementArmedRef.current = false;
       onMeasurementArmedChangeRef.current(false);
-      chart.applyOptions({
-        crosshair: {
-          vertLine: { visible: true, labelVisible: true },
-          horzLine: { visible: true, labelVisible: true },
-        },
-      });
+      restoreCrosshair();
       setChartCursor("");
       return;
     }
@@ -372,7 +378,7 @@ export function useReplayChartCore({
     };
     measurementRef.current = next;
     setMeasurement(next);
-  }, [setChartCursor]);
+  }, [restoreCrosshair, setChartCursor]);
 
   const syncVisibleSequenceRange = useCallback(() => {
     const chart = chartRef.current;
@@ -490,9 +496,9 @@ export function useReplayChartCore({
     setRiskPreferences, riskSettingsOpen, setRiskSettingsOpen, defaultSaved, setDefaultSaved, draftError,
     setDraftError, lineActions, setLineActions, hasVolume, warmupBarsRef, abrLengthRef,
     latest, currentPrice, currentPriceRef, displayUtcOffsetRef, onOrderPriceChangeRef, hasPendingClose,
-    syncLineActionCoordinates, syncDrawingPrimitive, setChartCursor, syncMeasurementCoordinates, syncVisibleSequenceRange, datasetId,
+    syncLineActionCoordinates, syncDrawingPrimitive, setChartCursor, restoreCrosshair, syncMeasurementCoordinates, syncVisibleSequenceRange, datasetId,
     dataRevision, priceTickSize, bars, warmupBars, displayUtcOffsetMinutes, displayIntervalSeconds,
-    measurementArmed, candlestickStyle, gridVisible, onToggleGrid, drawingTool, trendLineDraftStyle,
+    measurementArmed, cursorMode, candlestickStyle, gridVisible, onToggleGrid, drawingTool, trendLineDraftStyle,
     fibonacciDraftStyle, rectangleDraftStyle, emaEnabled, emaIndicators, abrEnabled, abrLength,
     volumeVisible, displaySession, barCountSession, barCountConfig, paperSnapshot, tradeAnnotations,
     tradeAnnotationsTruncated, focusSequence, tradeAnnotationsVisible, candleCountdownEnabled, playbackActive, currentSourceTimestamp,

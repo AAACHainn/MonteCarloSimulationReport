@@ -167,6 +167,7 @@ export function bracketPriceLineTitle(reference: PriceRReference | null, price: 
 
 
 export type ReplayChartProps = {
+  cursorMode?: import("@/lib/market-replay/cursor-mode").ReplayCursorMode;
   datasetId: string;
   dataRevision?: string;
   priceTickSize: number;

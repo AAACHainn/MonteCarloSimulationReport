@@ -1,7 +1,7 @@
 "use client";
 
 import * as Popover from "@radix-ui/react-popover";
-import { CalendarDays, ChevronRight, Maximize, Minimize, Pause, Play } from "lucide-react";
+import { CalendarDays, ChevronRight, Pause, Play } from "lucide-react";
 import { PaperTradingDetails } from "./paper-trading-panel";
 import { useReplayShortcuts } from "./use-replay-shortcuts";
 import { Button } from "@/components/ui/button";
@@ -21,8 +21,6 @@ type Props = {
   revealedCount: number;
   replayCount: number;
   statusText: string;
-  webFullscreen: boolean;
-  onToggleWebFullscreen: () => void;
   onToggle: () => void;
   onNext: () => void;
   onSpeedChange: (value: number) => void;
@@ -39,7 +37,6 @@ type Props = {
 export function ReplayPlaybackBar({
   replay, sourceIntervalSeconds, paperSnapshot, currentBar,
   displayUtcOffsetMinutes, revealedCount, replayCount, statusText,
-  webFullscreen, onToggleWebFullscreen,
   onToggle, onNext, onSpeedChange, onFocusJournalEntry, correctionPending = false, retrying = false, playbackRequested = replay.status === "playing",
   onLocateDate, dateForwarding = false, dateForwardStatus, onStopDateForward,
 }: Props) {
@@ -88,18 +85,6 @@ export function ReplayPlaybackBar({
           {status}
         </div>
       </div>
-      <Button
-        type="button"
-        variant="ghost"
-        size="icon"
-        className="shrink-0 sm:h-9 sm:w-9"
-        aria-label={webFullscreen ? copy.marketReplay.exitWebFullscreen : copy.marketReplay.enterWebFullscreen}
-        aria-pressed={webFullscreen}
-        title={webFullscreen ? copy.marketReplay.webFullscreenExitHint : copy.marketReplay.enterWebFullscreen}
-        onClick={onToggleWebFullscreen}
-      >
-        {webFullscreen ? <Minimize className="h-4 w-4" aria-hidden="true" /> : <Maximize className="h-4 w-4" aria-hidden="true" />}
-      </Button>
     </div>
   );
 }

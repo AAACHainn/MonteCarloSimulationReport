@@ -1,28 +1,29 @@
 "use client";
-import { ArrowSettingsDialog, ArrowToolOptions } from "./arrow-controls";
+import { ArrowSettingsDialog } from "./arrow-controls";
 import { useArrowPreferences } from "./use-arrow-preferences";
 import { isArrowDrawing } from "@/lib/market-replay/chart-drawings";
 import { useReplayFetch, useReplaySession } from "./replay-session-context";
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { ListTree, Loader2, Palette, Ruler, Settings2, Trash2, TrendingUp, X } from "lucide-react";
-import * as Popover from "@radix-ui/react-popover";
+import { ListTree, Loader2, Palette, Settings2, Trash2, X } from "lucide-react";
+import { ReplayDrawingToolbar } from "./replay-drawing-toolbar";
+import { useReplayCursorPreference } from "./use-replay-cursor-preference";
+import type { ReplayCursorMode } from "@/lib/market-replay/cursor-mode";
 import { ReplayChart, type ReplayVisibleSequenceRange } from "@/components/market-replay/replay-chart";
 import { IndicatorSettingsDialog } from "@/components/market-replay/indicator-settings-dialog";
 import { ChartVisibilityMenu } from "@/components/market-replay/chart-visibility-menu";
 import { DisplayIntervalControls } from "@/components/market-replay/display-interval-controls";
 import { useReplayPreferences } from "@/components/market-replay/use-replay-preferences";
 import { useHistoricalDrawings } from "./use-historical-drawings";
-import { RectangleSettingsDialog, RectangleToolOption } from "./rectangle-controls";
+import { RectangleSettingsDialog } from "./rectangle-controls";
 import { LineSettingsDialog, cloneLineDrawingStyle, type LineDrawingStyle } from "./line-settings-dialog";
-import { useReplayShortcuts } from "@/components/market-replay/use-replay-shortcuts";
 import { hasVisibleReplayDialog, isReplayShortcutInputTarget, replayDrawingShortcutKey } from "@/lib/market-replay/keyboard-shortcuts";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { Button } from "@/components/ui/button";
 import { Dialog } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
 import { copy } from "@/lib/i18n";
-import { TextSettingsDialog, TextToolOption } from "./text-settings-dialog";
+import { TextSettingsDialog } from "./text-settings-dialog";
 import { useTextDrawingEditor } from "./use-text-drawing-editor";
 import { drawingObjectName, drawingSettingsLabel, drawingDeleteLabel } from "@/lib/market-replay/drawing-presentation";
 import { isValidBarCountInterval, isValidBarCountRecentTradingDays } from "@/lib/market-replay/bar-count";
@@ -31,7 +32,6 @@ import type { ReplayChartVisibility } from "@/lib/market-replay/chart-visibility
 import { resolveDisplaySession } from "@/lib/market-replay/chart-sessions";
 import {
   DRAWING_TYPE_FIB_RETRACEMENT,
-  DRAWING_TYPE_TREND_LINE,
   DRAWING_TYPE_RECTANGLE,
   DRAWING_TYPE_TEXT, twoPointDrawingInput, type TwoPointDrawingTool, type DrawingGeometry,
   rectangleStyleSchema,
@@ -94,9 +94,9 @@ export function HistoricalReplayClient({
   session: HistoricalReplaySession;
   focusSequence: number;
 }) {
+  const [cursorMode, setCursorMode] = useReplayCursorPreference();
   const fetch = useReplayFetch();
   const replaySession = useReplaySession();
-  const shortcuts = useReplayShortcuts();
   const [displayIntervalSeconds, setDisplayIntervalSeconds] = useState(session.displayIntervalSeconds);
   const requestedIntervalRef = useRef(session.displayIntervalSeconds);
   const displayedIntervalRef = useRef(session.displayIntervalSeconds);
@@ -109,7 +109,6 @@ export function HistoricalReplayClient({
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [measurementArmed, setMeasurementArmed] = useState(false);
-  const [drawingToolOpen, setDrawingToolOpen] = useState(false);
   const [drawingTool, setDrawingTool] = useState<DrawingTool | null>(null);
   const [drawingObjectsOpen, setDrawingObjectsOpen] = useState(false);
   const drawingState = useHistoricalDrawings({ datasetId: dataset.id, fetch,
@@ -162,6 +161,13 @@ export function HistoricalReplayClient({
     chartVisibility.drawings, drawings, defaultTextStyle);
   const { open: openTextDrawing } = textDrawing;
   const { beforeExit: finishText, discard: discardText, requestSettings: requestTextSettings } = textDrawing;
+  async function selectCursor(mode: ReplayCursorMode) {
+    if (!await finishText()) return;
+    setDrawingTool(null);
+    setMeasurementArmed(false);
+    setSelectedDrawingId(null);
+    setCursorMode(mode);
+  }
   const visibleBarCountConfig = useMemo(() => (
     chartVisibility.indicators ? barCountConfig : { ...barCountConfig, enabled: false }
   ), [barCountConfig, chartVisibility.indicators]);
@@ -245,7 +251,6 @@ export function HistoricalReplayClient({
     setMeasurementArmed(false);
     setChartVisibility((current) => current.drawings ? current : { ...current, drawings: true });
     setDrawingTool(tool);
-    setDrawingToolOpen(false);
     setSelectedDrawingId(null);
   }, [setChartVisibility, drawingsLoaded, drawingBusy, finishText]);
 
@@ -254,7 +259,6 @@ export function HistoricalReplayClient({
     setChartVisibility(next);
     if (!next.drawings) {
       setDrawingTool(null);
-      setDrawingToolOpen(false);
       setDrawingObjectsOpen(false);
       setSelectedDrawingId(null);
     }
@@ -495,32 +499,6 @@ export function HistoricalReplayClient({
           disabled={windowLoading}
           onChange={changeDisplayInterval}
         />
-        <Popover.Root open={drawingToolOpen} onOpenChange={setDrawingToolOpen}>
-          <Popover.Trigger asChild>
-            <Button type="button" disabled={!drawingsLoaded || drawingBusy} variant={drawingTool ? "secondary" : "ghost"} size="sm" className="h-8" aria-pressed={Boolean(drawingTool)} aria-label={copy.marketReplay.drawingToolsHint}>
-              <TrendingUp className="h-4 w-4" />{copy.marketReplay.drawingTools}
-            </Button>
-          </Popover.Trigger>
-          <Popover.Portal>
-            <Popover.Content side="bottom" align="start" sideOffset={6} collisionPadding={8} className="z-[80] w-64 rounded-lg border border-slate-200 bg-white p-1.5 shadow-xl">
-              <button type="button" aria-keyshortcuts="Alt+t" className="flex w-full items-center gap-3 rounded-md px-3 py-2 text-left text-sm text-slate-700 hover:bg-slate-100 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-600" onClick={() => armDrawing(DRAWING_TYPE_TREND_LINE)}>
-                <TrendingUp className="h-4 w-4 text-slate-600" /><span className="font-medium">{copy.marketReplay.trendLine}</span><kbd className="ml-auto whitespace-nowrap font-mono text-[11px] text-slate-400">{shortcuts.trendLine}</kbd>
-              </button>
-              <button type="button" aria-keyshortcuts="Alt+f" className="flex w-full items-center gap-3 rounded-md px-3 py-2 text-left text-sm text-slate-700 hover:bg-slate-100 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-600" onClick={() => armDrawing(DRAWING_TYPE_FIB_RETRACEMENT)}>
-                <span className="flex h-4 w-4 items-center justify-center font-mono text-[10px] font-bold text-slate-600">Fib</span><span className="font-medium">{copy.marketReplay.fibonacciRetracement}</span><kbd className="ml-auto whitespace-nowrap font-mono text-[11px] text-slate-400">{shortcuts.fibonacciRetracement}</kbd>
-              </button>
-              <RectangleToolOption shortcut={shortcuts.rectangle} onArm={() => armDrawing(DRAWING_TYPE_RECTANGLE)} />
-              <TextToolOption onArm={() => armDrawing(DRAWING_TYPE_TEXT)} />
-              <ArrowToolOptions onArm={type => void armDrawing(type)} />
-            </Popover.Content>
-          </Popover.Portal>
-        </Popover.Root>
-        <Button type="button" variant={drawingObjectsOpen ? "secondary" : "ghost"} size="sm" className="h-8" aria-pressed={drawingObjectsOpen} title={`${copy.marketReplay.drawingObjectsHint}\n${copy.marketReplay.drawingDeleteShortcutHint(shortcuts.deleteDrawing)}`} onClick={() => setDrawingObjectsOpen((current) => !current)}>
-          <ListTree className="h-4 w-4" />{copy.marketReplay.drawingObjects}
-        </Button>
-        <Button type="button" variant={measurementArmed ? "secondary" : "ghost"} size="sm" className="h-8" aria-pressed={measurementArmed} aria-label={copy.marketReplay.measureHint} onClick={() => { setDrawingTool(null); setMeasurementArmed((current) => !current); }}>
-          <Ruler className="h-4 w-4" />{copy.marketReplay.measure}
-        </Button>
         <ChartVisibilityMenu value={chartVisibility} onChange={changeChartVisibility} />
         <Button type="button" variant={settingsDialog === "candlesticks" ? "secondary" : "ghost"} size="sm" className="h-8" onClick={() => { setCandlestickStyleDraft({ ...candlestickStyle }); setSettingsDialog("candlesticks"); }}>
           <Palette className="h-4 w-4" />{copy.marketReplay.candlestickStyle}
@@ -529,11 +507,17 @@ export function HistoricalReplayClient({
           <Settings2 className="h-4 w-4" />{copy.marketReplay.indicators}
         </Button>
       </div>
-      <div className="relative min-h-0 flex-1" aria-busy={windowLoading || drawingBusy}>
+      <div className="flex min-h-0 flex-1">
+        <ReplayDrawingToolbar cursorMode={cursorMode} onCursorChange={mode => void selectCursor(mode)} drawingTool={drawingTool} drawingDisabled={!drawingsLoaded || drawingBusy}
+          onArmDrawing={tool => void armDrawing(tool)} measurementArmed={measurementArmed}
+          onToggleMeasurement={() => { setDrawingTool(null); setMeasurementArmed(current => !current); }}
+          drawingObjectsOpen={drawingObjectsOpen} onToggleDrawingObjects={() => setDrawingObjectsOpen(current => !current)} />
+      <div className="relative min-h-0 min-w-0 flex-1" aria-busy={windowLoading || drawingBusy}>
         {drawingError ? <Alert className="absolute left-3 top-3 z-50 w-auto border-red-200 bg-red-50" role="alert"><AlertTitle>{copy.marketReplay.drawingSyncErrorTitle}</AlertTitle><AlertDescription>{drawingError}</AlertDescription></Alert> : null}
         {windowLoading ? <div className="absolute left-3 top-3 z-50 flex items-center gap-2 rounded-md border bg-white px-3 py-2 text-xs text-slate-600" role="status"><Loader2 className="h-4 w-4 animate-spin" aria-hidden="true" />{copy.marketReplay.loading}</div> : null}
         {windowError ? <Alert className="absolute left-3 top-3 z-50 w-auto border-red-200 bg-red-50" role="alert"><AlertTitle>{copy.common.error}</AlertTitle><AlertDescription>{windowError}</AlertDescription></Alert> : null}
         <ReplayChart
+          cursorMode={cursorMode}
           datasetId={dataset.id}
           priceTickSize={dataset.priceTickSize}
           bars={bars}
@@ -608,6 +592,7 @@ export function HistoricalReplayClient({
           {drawingBusy ? <p role="status" className="border-t px-3 py-2 text-xs text-slate-500">{copy.marketReplay.drawingSaving}</p> : null}
           {!drawingsLoaded && !drawingBusy ? <Button type="button" variant="outline" className="m-3" onClick={() => void drawingState.refresh()}>{copy.marketReplay.drawingRetry}</Button> : null}
         </aside> : null}
+      </div>
       </div>
     </div>
 

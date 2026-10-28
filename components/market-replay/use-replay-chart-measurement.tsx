@@ -10,8 +10,8 @@ export function useReplayChartMeasurement(core: ReturnType<typeof useReplayChart
   const {
     containerRef, interactionRef, chartRef, candleRef, barsRef, measurementArmedRef,
     onMeasurementArmedChangeRef, drawingToolRef, setContextMenu, measurement, setMeasurement, measurementRef,
-    drawingDraftRef, drawingDraftCoordinateRef, drawingPreviewRef, hasVolume, syncDrawingPrimitive, setChartCursor,
-    priceTickSize, displayIntervalSeconds, measurementArmed, drawingTool,
+    drawingDraftRef, drawingDraftCoordinateRef, drawingPreviewRef, hasVolume, syncDrawingPrimitive, setChartCursor, restoreCrosshair,
+    priceTickSize, displayIntervalSeconds, measurementArmed, drawingTool, cursorMode,
   } = core;
   useEffect(() => {
     if (drawingTool) {
@@ -78,11 +78,11 @@ export function useReplayChartMeasurement(core: ReturnType<typeof useReplayChart
     };
     const clearMeasurement = (disarm: boolean) => {
       commitMeasurement(null);
-      setCrosshairVisible(true);
       if (disarm) {
         measurementArmedRef.current = false;
         onMeasurementArmedChangeRef.current(false);
       }
+      restoreCrosshair();
       setChartCursor(disarm ? "" : "crosshair");
     };
     const resolvePoint = (point: MeasurementPoint) => {
@@ -219,26 +219,28 @@ export function useReplayChartMeasurement(core: ReturnType<typeof useReplayChart
         // eslint-disable-next-line react-hooks/exhaustive-deps
         onMeasurementArmedChangeRef.current(false);
       }
-      setCrosshairVisible(true);
+      // Restore only the chart captured by this listener, not a replacement chart.
+      // eslint-disable-next-line react-hooks/exhaustive-deps
+      if (chartRef.current === chart) restoreCrosshair();
       setChartCursor("");
     };
-  }, [displayIntervalSeconds, hasVolume, priceTickSize, setChartCursor, barsRef, candleRef, chartRef, containerRef, drawingDraftRef, drawingPreviewRef, drawingToolRef, interactionRef, measurementArmedRef, measurementRef, onMeasurementArmedChangeRef, setContextMenu, setMeasurement]);
+  }, [displayIntervalSeconds, hasVolume, priceTickSize, restoreCrosshair, setChartCursor, barsRef, candleRef, chartRef, containerRef, drawingDraftRef, drawingPreviewRef, drawingToolRef, interactionRef, measurementArmedRef, measurementRef, onMeasurementArmedChangeRef, setContextMenu, setMeasurement]);
 
   useEffect(() => {
     if (measurementArmed || !measurementRef.current) return;
     measurementRef.current = null;
     setMeasurement(null);
-    chartRef.current?.applyOptions({
-      crosshair: {
-        vertLine: { visible: true, labelVisible: true },
-        horzLine: { visible: true, labelVisible: true },
-      },
-    });
+    restoreCrosshair();
     setChartCursor("");
-  }, [measurementArmed, setChartCursor, chartRef, measurementRef, setMeasurement]);
+  }, [measurementArmed, restoreCrosshair, setChartCursor, measurementRef, setMeasurement]);
 
   useEffect(() => {
-    if (!measurement) setChartCursor(measurementArmed ? "crosshair" : "");
-  }, [measurement, measurementArmed, setChartCursor]);
+    if (!measurement) setChartCursor(measurementArmed || drawingTool ? "crosshair" : "");
+  }, [measurement, measurementArmed, drawingTool, setChartCursor]);
+
+  useEffect(() => {
+    restoreCrosshair();
+    if (!drawingTool && !measurementArmed && !measurement) setChartCursor("");
+  }, [cursorMode, drawingTool, measurementArmed, measurement, restoreCrosshair, setChartCursor]);
 
 }
