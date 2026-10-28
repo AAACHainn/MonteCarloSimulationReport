@@ -1,5 +1,7 @@
 "use client";
-import { isArrowDrawing, type ArrowDrawing } from "@/lib/market-replay/chart-drawings";
+import { DEFAULT_ABCD_STYLE, isArrowDrawing, type AbcdDrawing, type ArrowDrawing } from "@/lib/market-replay/chart-drawings";
+import { AbcdPrimitive, type AbcdPreview } from "@/lib/market-replay/abcd-primitive";
+import type { AbcdDraft } from "@/lib/market-replay/abcd-interaction";
 import { ArrowPrimitive, type ArrowDragPreview } from "@/lib/market-replay/arrow-primitive";
 
 import { captureReplayViewport, isReplayRangeFollowing, latestReplayLogicalIndex, type ReplayViewportMode } from "@/lib/market-replay/chart-range";
@@ -29,7 +31,7 @@ export function useReplayChartCore({
   datasetId, dataRevision = "", priceTickSize, bars, warmupBars, displayUtcOffsetMinutes, displayIntervalSeconds, measurementArmed, cursorMode = "crosshair",
   candlestickStyle, gridVisible = true, onToggleGrid,
   onMeasurementArmedChange, drawingTool, onDrawingToolChange, trendLineDraftStyle, fibonacciDraftStyle, rectangleDraftStyle, drawings, selectedDrawingId,
-  onSelectedDrawingIdChange, onCreateDrawing, onUpdateDrawing, onDeleteDrawing, onPlaceText, onPlaceArrow, drawingApiRef,
+  onSelectedDrawingIdChange, onCreateDrawing, onUpdateDrawing, onDeleteDrawing, onPlaceText, onPlaceArrow, onCreateAbcd, abcdDraftStyle = DEFAULT_ABCD_STYLE, drawingApiRef,
   onOpenDrawingStyle, viewportApiRef, viewportSnapshot = null, currentSourceSequence, liveWindow = true, emaEnabled, emaIndicators, abrEnabled, abrLength, volumeVisible,
   displaySession, barCountSession, barCountConfig, paperSnapshot,
   tradeAnnotations, tradeAnnotationsTruncated, focusSequence = null, onFocusApplied,
@@ -65,6 +67,11 @@ export function useReplayChartCore({
   const textPrimitiveRef = useRef<TextDrawingPrimitive | null>(null);
   const arrowPrimitiveRef = useRef<ArrowPrimitive | null>(null);
   const arrowDragRef = useRef<ArrowDragPreview | null>(null);
+  const abcdPrimitiveRef = useRef<AbcdPrimitive | null>(null);
+  const abcdDraftRef = useRef<AbcdDraft | null>(null);
+  const abcdPreviewRef = useRef<AbcdPreview | null>(null);
+  const abcdDraftStyleRef = useRef(abcdDraftStyle); abcdDraftStyleRef.current = abcdDraftStyle;
+  const onCreateAbcdRef = useRef(onCreateAbcd); onCreateAbcdRef.current = onCreateAbcd;
   const onPlaceArrowRef = useRef(onPlaceArrow); onPlaceArrowRef.current = onPlaceArrow;
   const textEditRef = useRef<TextEditPreview | null>(null);
   const textClicks = useRef<ReturnType<typeof createTextClickBridge> | null>(null);
@@ -149,15 +156,16 @@ export function useReplayChartCore({
   const drawingToolRef = useRef(drawingTool);
   const drawingsRef = useRef(drawings);
   const drawingGroups = useMemo(() => {
-    const trend: TrendLineDrawing[] = [], fibonacci: FibonacciRetracementDrawing[] = [], rectangle: RectangleDrawing[] = [], text: TextDrawing[] = [], arrow: ArrowDrawing[] = [];
+    const trend: TrendLineDrawing[] = [], fibonacci: FibonacciRetracementDrawing[] = [], rectangle: RectangleDrawing[] = [], text: TextDrawing[] = [], arrow: ArrowDrawing[] = [], abcd: AbcdDrawing[] = [];
     for (const drawing of drawings) {
       if (drawing.type === DRAWING_TYPE_RECTANGLE) rectangle.push(drawing);
       else if (drawing.type === DRAWING_TYPE_TREND_LINE) trend.push(drawing);
       else if (drawing.type === DRAWING_TYPE_FIB_RETRACEMENT) fibonacci.push(drawing);
       else if (drawing.type === DRAWING_TYPE_TEXT) text.push(drawing);
       else if (isArrowDrawing(drawing)) arrow.push(drawing);
+      else if (drawing.type === "AB_CD") abcd.push(drawing);
     }
-    return { trend, fibonacci, rectangle, text, arrow };
+    return { trend, fibonacci, rectangle, text, arrow, abcd };
   }, [drawings]);
   const drawingGroupsRef = useRef(drawingGroups);
   drawingGroupsRef.current = drawingGroups;
@@ -284,6 +292,10 @@ export function useReplayChartCore({
         selectedDrawingId: selectedDrawingIdRef.current, edit: textEditRef.current, drag: textDragRef.current });
       arrowPrimitiveRef.current?.setDrawings({ drawings: drawingGroupsRef.current.arrow, timeline,
         selectedDrawingId: selectedDrawingIdRef.current, preview: arrowDragRef.current });
+      abcdPrimitiveRef.current?.setDrawings({ drawings: drawingGroupsRef.current.abcd, timeline,
+        selectedDrawingId: selectedDrawingIdRef.current, preview: abcdPreviewRef.current,
+        draft: drawingToolRef.current === "AB_CD" ? abcdDraftRef.current : null,
+        draftStyle: abcdDraftStyleRef.current, priceTickSize: priceTickSizeRef.current });
       const position = textPositionRef.current;
       if (position) {
         const chart = chartRef.current, series = candleRef.current, host = interactionRef.current;
@@ -325,8 +337,9 @@ export function useReplayChartCore({
   }, []);
 
   useEffect(() => {
+    if (drawingTool !== "AB_CD") abcdDraftRef.current = null;
     syncDrawingPrimitive();
-  }, [drawings, selectedDrawingId, syncDrawingPrimitive]);
+  }, [drawingTool, drawings, selectedDrawingId, abcdDraftStyle, syncDrawingPrimitive]);
 
   const syncMeasurementCoordinates = useCallback(() => {
     const chart = chartRef.current;
@@ -483,7 +496,7 @@ export function useReplayChartCore({
     containerRef, interactionRef, orderTicketRef, orderTicketDragRef, chartRef, candleRef,
     volumeRef, priceLinesRef, lineTargetsRef, tradeAnnotationPrimitiveRef, barCountPrimitiveRef, candleCountdownPrimitiveRef,
     rectanglePrimitiveRef, trendLinePrimitiveRef, fibonacciPrimitiveRef, textPrimitiveRef, textEditRef, textClicks,
-    arrowPrimitiveRef, arrowDragRef, onPlaceArrowRef,
+    arrowPrimitiveRef, arrowDragRef, onPlaceArrowRef, abcdPrimitiveRef, abcdDraftRef, abcdPreviewRef, onCreateAbcdRef,
     textPositionRef, textDragRef, onPlaceTextRef, lastDataRef, lastDataRevisionRef, lastHiddenAfterRef,
     lastDataIntervalRef, lastDataSessionRef, displaySessionRef, barsRef, timelineBarsRef, projectionBars,
     projectionBarsRef, drawingTimelineRef, drawingScopeRef, drawingFrameRef, drawingSessionRef, requestedDrawingSessionRef,

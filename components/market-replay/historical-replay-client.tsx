@@ -1,6 +1,7 @@
 "use client";
 import { ArrowSettingsDialog } from "./arrow-controls";
 import { useArrowPreferences } from "./use-arrow-preferences";
+import { useAbcdPreferences } from "./use-abcd-preferences";
 import { isArrowDrawing } from "@/lib/market-replay/chart-drawings";
 import { useReplayFetch, useReplaySession } from "./replay-session-context";
 
@@ -16,6 +17,7 @@ import { DisplayIntervalControls } from "@/components/market-replay/display-inte
 import { useReplayPreferences } from "@/components/market-replay/use-replay-preferences";
 import { useHistoricalDrawings } from "./use-historical-drawings";
 import { RectangleSettingsDialog } from "./rectangle-controls";
+import { AbcdSettingsDialog } from "./abcd-settings-dialog";
 import { LineSettingsDialog, cloneLineDrawingStyle, type LineDrawingStyle } from "./line-settings-dialog";
 import { hasVisibleReplayDialog, isReplayShortcutInputTarget, replayDrawingShortcutKey } from "@/lib/market-replay/keyboard-shortcuts";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
@@ -117,6 +119,7 @@ export function HistoricalReplayClient({
   const [rectangleStyleId, setRectangleStyleId] = useState<string | null>(null);
   const [arrowStyleId, setArrowStyleId] = useState<string | null>(null);
   const { arrowPreferences, setArrowPreferences } = useArrowPreferences();
+  const { abcdPreferences, setAbcdPreferences } = useAbcdPreferences();
   const [styleDrawingId, setStyleDrawingId] = useState<string | null>(null);
   const [styleDraft, setStyleDraft] = useState<LineDrawingStyle | null>(null);
   const [selectedDrawingId, setSelectedDrawingId] = useState<string | null>(null);
@@ -534,6 +537,12 @@ export function HistoricalReplayClient({
           trendLineDraftStyle={defaultTrendLineStyle}
           fibonacciDraftStyle={defaultFibonacciStyle}
           rectangleDraftStyle={defaultRectangleStyle}
+          abcdDraftStyle={abcdPreferences.defaultStyle}
+          onCreateAbcd={async geometry => {
+            const style = cloneLineDrawingStyle(abcdPreferences.defaultStyle) as FibonacciRetracementStyle;
+            const drawing = await drawingState.create({ datasetId: dataset.id, type: "AB_CD", geometry, style });
+            if (drawing) setSelectedDrawingId(drawing.id);
+          }}
           onPlaceArrow={async (type, anchor) => {
             const drawing = await drawingState.create({ datasetId: dataset.id, type, geometry: { anchor }, style: { ...arrowPreferences[type].defaultStyle } });
             if (drawing) setSelectedDrawingId(drawing.id);
@@ -627,7 +636,16 @@ export function HistoricalReplayClient({
     })()}
     {(() => {
       const drawing = drawings.find(item => item.id === styleDrawingId);
-      return drawing && !isArrowDrawing(drawing) && drawing.type !== DRAWING_TYPE_RECTANGLE && drawing.type !== DRAWING_TYPE_TEXT && styleDraft ? <LineSettingsDialog key={drawing.id}
+      if (drawing?.type === "AB_CD" && styleDraft && "levels" in styleDraft) return <AbcdSettingsDialog key={drawing.id}
+        draft={styleDraft} onDraftChange={setStyleDraft} templates={abcdPreferences.templates}
+        onTemplatesChange={templates => setAbcdPreferences(current => ({ ...current, templates }))}
+        onClose={() => { setStyleDrawingId(null); setStyleDraft(null); }}
+        onSave={async style => {
+          if (!await drawingState.update(drawing.id, { style })) return false;
+          setAbcdPreferences(current => ({ ...current, defaultStyle: style }));
+          return true;
+        }} />;
+      return drawing && !isArrowDrawing(drawing) && drawing.type !== "AB_CD" && drawing.type !== DRAWING_TYPE_RECTANGLE && drawing.type !== DRAWING_TYPE_TEXT && styleDraft ? <LineSettingsDialog key={drawing.id}
         drawing={drawing} draft={styleDraft} onDraftChange={setStyleDraft}
         templates={drawing.type === DRAWING_TYPE_FIB_RETRACEMENT ? fibonacciTemplates : trendLineTemplates}
         onTemplatesChange={templates => {

@@ -23,6 +23,7 @@ export function useReplayShortcuts() {
     trendLine: copy.marketReplay.trendLineShortcut(drawingModifier),
     rectangle: copy.marketReplay.rectangleShortcut,
     fibonacciRetracement: copy.marketReplay.fibonacciRetracementShortcut(drawingModifier),
+    abcd: copy.marketReplay.abcdShortcut(drawingModifier),
     deleteDrawing: isMac ? copy.marketReplay.shortcutBackspace : copy.marketReplay.shortcutDelete,
     playbackAria: `${ariaModifier}+ArrowDown`,
     nextBarAria: `${ariaModifier}+ArrowRight`,

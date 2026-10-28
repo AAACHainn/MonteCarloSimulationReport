@@ -1,5 +1,6 @@
 "use client";
 import { useArrowPreferences } from "./use-arrow-preferences";
+import { useAbcdPreferences } from "./use-abcd-preferences";
 
 import { type AnnotationCoverage } from "@/lib/market-replay/advance-display";
 import { dateTimeLocalValue } from "@/lib/market-replay/start-time";
@@ -156,6 +157,7 @@ export function useReplayCore({ dataset: initialDataset, initialJournalFocus = n
   const [rectangleStyleId, setRectangleStyleId] = useState<string | null>(null);
   const [arrowStyleId, setArrowStyleId] = useState<string | null>(null);
   const { arrowPreferences, setArrowPreferences } = useArrowPreferences();
+  const { abcdPreferences, setAbcdPreferences } = useAbcdPreferences();
   const [styleDrawingId, setStyleDrawingId] = useState<string | null>(null);
   const [styleDraft, setStyleDraft] = useState<TrendLineStyle | FibonacciRetracementStyle | null>(null);
   const [pendingDrawingIds, setPendingDrawingIds] = useState<Set<string>>(() => new Set());
@@ -339,7 +341,7 @@ export function useReplayCore({ dataset: initialDataset, initialJournalFocus = n
     checkResolverRef, gateSeenRef, measurementArmed, setMeasurementArmed, drawingToolOpen, setDrawingToolOpen,
     drawingTool, setDrawingTool, drawings, setDrawings, clearingDrawings, setClearingDrawings,
     clearingDrawingsRef, drawingError, setDrawingError, selectedDrawingId, setSelectedDrawingId, drawingObjectsOpen,
-    setDrawingObjectsOpen, rectangleStyleId, setRectangleStyleId, arrowStyleId, setArrowStyleId, arrowPreferences, setArrowPreferences, styleDrawingId, setStyleDrawingId, styleDraft,
+    setDrawingObjectsOpen, rectangleStyleId, setRectangleStyleId, arrowStyleId, setArrowStyleId, arrowPreferences, setArrowPreferences, abcdPreferences, setAbcdPreferences, styleDrawingId, setStyleDrawingId, styleDraft,
     setStyleDraft, pendingDrawingIds, setPendingDrawingIds, candlestickStyle, setCandlestickStyle, emaEnabled,
     setEmaEnabled, emaIndicators, setEmaIndicators, emaSettingsLoaded, abrEnabled, setAbrEnabled,
     abrLength, setAbrLength, abrSettingsLoaded, gridVisible, setGridVisible, volumeVisible,

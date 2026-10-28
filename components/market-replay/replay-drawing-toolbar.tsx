@@ -2,10 +2,10 @@
 
 import { useId, useState, type ReactNode } from "react";
 import * as Popover from "@radix-ui/react-popover";
-import { ArrowBigDown, ArrowBigUp, ListTree, Maximize, Minimize, Ruler, Square, Type } from "lucide-react";
+import { ArrowBigDown, ArrowBigUp, ListTree, Maximize, Minimize, Ruler, Square, Type, Waypoints } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { copy } from "@/lib/i18n";
-import { DRAWING_TYPE_ARROW_DOWN, DRAWING_TYPE_ARROW_UP, DRAWING_TYPE_FIB_RETRACEMENT,
+import { DRAWING_TYPE_ABCD, DRAWING_TYPE_ARROW_DOWN, DRAWING_TYPE_ARROW_UP, DRAWING_TYPE_FIB_RETRACEMENT,
   DRAWING_TYPE_RECTANGLE, DRAWING_TYPE_TEXT, DRAWING_TYPE_TREND_LINE, type DrawingTool } from "@/lib/market-replay/chart-drawings";
 import { useReplayShortcuts } from "./use-replay-shortcuts";
 import { ReplayCursorMenu } from "./replay-cursor-menu";
@@ -49,6 +49,7 @@ export function ReplayDrawingToolbar({ cursorMode, onCursorChange, drawingTool, 
     { type: DRAWING_TYPE_ARROW_UP, label: copy.marketReplay.arrowUp, icon: <ArrowBigUp className="h-[18px] w-[18px]" aria-hidden="true" /> },
     { type: DRAWING_TYPE_ARROW_DOWN, label: copy.marketReplay.arrowDown, icon: <ArrowBigDown className="h-[18px] w-[18px]" aria-hidden="true" /> },
     { type: DRAWING_TYPE_FIB_RETRACEMENT, label: copy.marketReplay.fibonacciRetracement, hint: shortcuts.fibonacciRetracement, shortcut: "Alt+F", icon: <FibonacciToolIcon /> },
+    { type: DRAWING_TYPE_ABCD, label: copy.marketReplay.abcd, hint: shortcuts.abcd, shortcut: "Alt+W", icon: <Waypoints className="h-[18px] w-[18px]" aria-hidden="true" /> },
     { type: DRAWING_TYPE_RECTANGLE, label: copy.marketReplay.rectangle, hint: shortcuts.rectangle, shortcut: "Shift+R", icon: <Square className="h-[18px] w-[18px]" aria-hidden="true" /> },
     { type: DRAWING_TYPE_TEXT, label: copy.marketReplay.textTool, hint: copy.marketReplay.textShortcut, shortcut: "Shift+T", icon: <Type className="h-[18px] w-[18px]" aria-hidden="true" /> },
   ];

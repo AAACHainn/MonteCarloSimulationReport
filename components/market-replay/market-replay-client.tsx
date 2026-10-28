@@ -1,5 +1,5 @@
 "use client";
-import { ArrowBigDown, ArrowBigUp } from "lucide-react";
+import { ArrowBigDown, ArrowBigUp, Waypoints } from "lucide-react";
 import { ArrowSettingsDialog } from "./arrow-controls";
 import { isArrowDrawing } from "@/lib/market-replay/chart-drawings";
 
@@ -31,6 +31,7 @@ import { ChartVisibilityMenu } from "@/components/market-replay/chart-visibility
 import { PaperAccountStrip, PaperTradingPanel } from "@/components/market-replay/paper-trading-panel";
 import { ReplayPlaybackBar } from "@/components/market-replay/replay-playback-bar";
 import { RectangleSettingsDialog } from "./rectangle-controls";
+import { AbcdSettingsDialog } from "./abcd-settings-dialog";
 import { LineSettingsDialog } from "./line-settings-dialog";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { Button } from "@/components/ui/button";
@@ -88,7 +89,7 @@ export function MarketReplayClient({ dataset: initialDataset, initialJournalFocu
     candleCountdownEnabled, setCandleCountdownEnabled, barCountConfig, setBarCountConfig, chartVisibility, defaultRectangleStyle,
     setDefaultRectangleStyle, rectangleTemplates, setRectangleTemplates, arrowStyleId, setArrowStyleId, arrowPreferences, setArrowPreferences, setDefaultTextStyle, textTemplates, setTextTemplates,
     defaultTrendLineStyle, setDefaultTrendLineStyle, trendLineTemplates, setTrendLineTemplates, defaultFibonacciStyle, setDefaultFibonacciStyle,
-    fibonacciTemplates, setFibonacciTemplates, displayUtcOffsetMinutes, setDisplayUtcOffsetMinutes, textDrawing, drawingWriteScope,
+    fibonacciTemplates, setFibonacciTemplates, abcdPreferences, setAbcdPreferences, displayUtcOffsetMinutes, setDisplayUtcOffsetMinutes, textDrawing, drawingWriteScope,
     drawingsLive, visibleBarCountConfig, chartMarketSession,
   } = core;
   const {
@@ -302,6 +303,8 @@ export function MarketReplayClient({ dataset: initialDataset, initialJournalFocu
             onDrawingToolChange={setDrawingTool}
             onPlaceText={textDrawing.place} drawingApiRef={textDrawing.apiRef}
             onPlaceArrow={(type, anchor) => void createDrawing(type, { anchor })}
+            onCreateAbcd={geometry => void createDrawing("AB_CD", geometry)}
+            abcdDraftStyle={abcdPreferences.defaultStyle}
             trendLineDraftStyle={defaultTrendLineStyle}
             fibonacciDraftStyle={defaultFibonacciStyle}
             rectangleDraftStyle={defaultRectangleStyle}
@@ -386,7 +389,7 @@ export function MarketReplayClient({ dataset: initialDataset, initialJournalFocu
                         }
                       }}
                     >
-                      {isArrowDrawing(drawing) ? (drawing.type === "ARROW_UP"
+                      {drawing.type === "AB_CD" ? <Waypoints className="h-4 w-4 shrink-0" style={{ color: drawingColor }} aria-hidden="true" /> : isArrowDrawing(drawing) ? (drawing.type === "ARROW_UP"
                         ? <ArrowBigUp className="h-4 w-4 shrink-0" style={{ color: drawingColor }} aria-hidden="true" />
                         : <ArrowBigDown className="h-4 w-4 shrink-0" style={{ color: drawingColor }} aria-hidden="true" />)
                         : drawing.type === DRAWING_TYPE_RECTANGLE ? <Square className="h-4 w-4 shrink-0" style={{ color: drawingColor }} aria-hidden="true" /> : drawing.type === DRAWING_TYPE_TREND_LINE
@@ -394,7 +397,7 @@ export function MarketReplayClient({ dataset: initialDataset, initialJournalFocu
                         : drawing.type === DRAWING_TYPE_TEXT ? <TextIcon className="h-4 w-4 shrink-0" style={{ color: drawingColor }} aria-hidden="true" />
                         : <span className="flex h-4 w-4 shrink-0 items-center justify-center font-mono text-[9px] font-bold" style={{ color: drawingColor }}>Fib</span>}
                       <span className="min-w-0 flex-1 truncate font-medium">{drawingObjectName(drawing, index + 1)}</span>
-                      {isArrowDrawing(drawing) || drawing.type === DRAWING_TYPE_RECTANGLE || drawing.type === DRAWING_TYPE_TEXT ? <Button type="button" variant="ghost" size="icon" disabled={pending}
+                      {drawing.type === "AB_CD" || isArrowDrawing(drawing) || drawing.type === DRAWING_TYPE_RECTANGLE || drawing.type === DRAWING_TYPE_TEXT ? <Button type="button" variant="ghost" size="icon" disabled={pending}
                         data-text-settings={drawing.id} aria-label={drawingSettingsLabel(drawing)} onClick={event => { event.stopPropagation(); openDrawingStyle(drawing.id); }}>
                         <Settings2 className="h-4 w-4" aria-hidden="true" />
                       </Button> : null}
@@ -596,7 +599,16 @@ export function MarketReplayClient({ dataset: initialDataset, initialJournalFocu
       </Dialog>
       {(() => {
         const drawing = drawings.find(item => item.id === styleDrawingId);
-        return drawing && !isArrowDrawing(drawing) && drawing.type !== DRAWING_TYPE_RECTANGLE && drawing.type !== DRAWING_TYPE_TEXT && styleDraft ? <LineSettingsDialog key={drawing.id}
+        if (drawing?.type === "AB_CD" && styleDraft && "levels" in styleDraft) return <AbcdSettingsDialog key={drawing.id}
+          draft={styleDraft} onDraftChange={setStyleDraft} templates={abcdPreferences.templates}
+          onTemplatesChange={templates => setAbcdPreferences(current => ({ ...current, templates }))}
+          onClose={() => { setStyleDrawingId(null); setStyleDraft(null); }}
+          onSave={async style => {
+            if (!await updateDrawing(drawing.id, { style })) return false;
+            setAbcdPreferences(current => ({ ...current, defaultStyle: style }));
+            return true;
+          }} />;
+        return drawing && !isArrowDrawing(drawing) && drawing.type !== "AB_CD" && drawing.type !== DRAWING_TYPE_RECTANGLE && drawing.type !== DRAWING_TYPE_TEXT && styleDraft ? <LineSettingsDialog key={drawing.id}
           drawing={drawing} draft={styleDraft} onDraftChange={setStyleDraft}
           templates={drawing.type === DRAWING_TYPE_FIB_RETRACEMENT ? fibonacciTemplates : trendLineTemplates}
           onTemplatesChange={templates => {

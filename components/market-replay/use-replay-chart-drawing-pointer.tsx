@@ -1,5 +1,6 @@
 "use client";
-import { isArrowDrawing, isArrowDrawingType, type ArrowGeometry } from "@/lib/market-replay/chart-drawings";
+import { isArrowDrawing, isArrowDrawingType, type AbcdGeometry, type ArrowGeometry } from "@/lib/market-replay/chart-drawings";
+import { advanceAbcdDraft, moveAbcdGeometry, previewAbcdDraft, type AbcdCoordinates, type AbcdHitPart } from "@/lib/market-replay/abcd-interaction";
 
 import { useEffect } from "react";
 import { anchorForLogicalIndex, DRAWING_TYPE_FIB_RETRACEMENT, DRAWING_TYPE_TREND_LINE, DRAWING_TYPE_RECTANGLE, DRAWING_TYPE_TEXT, type TextGeometry, isValidRectangleGeometry, snapScreenPointTo45, type DrawingAnchor, type MarketDrawing, type TrendLineGeometry } from "@/lib/market-replay/chart-drawings";
@@ -14,7 +15,8 @@ export function useReplayChartDrawingPointer(core: ReturnType<typeof useReplayCh
   const {
     visibilityScope, containerRef, interactionRef, chartRef, candleRef, lineTargetsRef,
     rectanglePrimitiveRef, trendLinePrimitiveRef, fibonacciPrimitiveRef, textPrimitiveRef, textEditRef, textClicks,
-    textDragRef, onPlaceTextRef, arrowPrimitiveRef, arrowDragRef, onPlaceArrowRef, barsRef, drawingTimelineRef, drawingSessionRef, measurementArmedRef,
+    textDragRef, onPlaceTextRef, arrowPrimitiveRef, arrowDragRef, onPlaceArrowRef,
+    abcdPrimitiveRef, abcdDraftRef, abcdPreviewRef, onCreateAbcdRef, barsRef, drawingTimelineRef, drawingSessionRef, measurementArmedRef,
     drawingToolRef, drawingsRef, drawingGroupsRef, selectedDrawingIdRef, onDrawingToolChangeRef, onSelectedDrawingIdChangeRef,
     onCreateDrawingRef, onUpdateDrawingRef, onDeleteDrawingRef, onOpenDrawingStyleRef, displayIntervalSecondsRef, sourceIntervalSecondsRef,
     setContextMenu, drawingDraftRef, drawingDraftCoordinateRef, drawingPreviewRef, syncDrawingPrimitive,
@@ -40,10 +42,12 @@ export function useReplayChartDrawingPointer(core: ReturnType<typeof useReplayCh
     let textDragging: { id: string; clientX: number; clientY: number; timeStamp: number; geometry: TextGeometry; x: number; y: number; moved: boolean } | null = null;
     let capturedPointer: number | null = null;
     let arrowDragging: { id: string; clientX: number; clientY: number; geometry: ArrowGeometry; x: number; y: number; moved: boolean } | null = null;
+    let abcdDragging: { id: string; clientX: number; clientY: number; geometry: AbcdGeometry; coordinates: AbcdCoordinates; part: AbcdHitPart } | null = null;
+    let abcdReleaseFrame: number | null = null;
     let hoveredText: string | null = null;
     const hoverText = (id: string | null) => {
       textPrimitiveRef.current?.setHovered(id);
-      if (hoveredText !== id) { hoveredText = id; if (!dragging && !textDragging && !arrowDragging) setChartCursor(id ? "pointer" : ""); }
+      if (hoveredText !== id) { hoveredText = id; if (!dragging && !textDragging && !arrowDragging && !abcdDragging) setChartCursor(id ? "pointer" : ""); }
     };
 
     const pointAtCoordinate = (x: number, y: number, requireInside: boolean): PositionedAnchor | null => {
@@ -99,7 +103,8 @@ export function useReplayChartDrawingPointer(core: ReturnType<typeof useReplayCh
       const rectangle = rectanglePrimitiveRef.current?.hitTestAt(point) ?? null;
       const text = textPrimitiveRef.current?.hitTestAt(point) ?? null;
       const arrow = arrowPrimitiveRef.current?.hitTestAt(point) ?? null;
-      return [trend, fibonacci, rectangle, text, arrow].filter(item => item !== null)
+      const abcd = abcdPrimitiveRef.current?.hitTestAt(point) ?? null;
+      return [trend, fibonacci, rectangle, text, arrow, abcd].filter(item => item !== null)
         .sort((a, b) => b.priority - a.priority || Number(b.part === "text") - Number(a.part === "text") || a.distance - b.distance)[0] ?? null;
     };
     const drawingCoordinates = (drawing: MarketDrawing) => (
@@ -119,6 +124,17 @@ export function useReplayChartDrawingPointer(core: ReturnType<typeof useReplayCh
         const initial = pointAt(event.clientX, event.clientY);
         if (!initial) return;
         stopEvent(event);
+        if (activeTool === "AB_CD") {
+          clearPointerFrame();
+          if (!abcdDraftRef.current) { drawingDraftRef.current = null; drawingDraftCoordinateRef.current = null; }
+          const next = advanceAbcdDraft(abcdDraftRef.current, initial.anchor);
+          abcdDraftRef.current = next.draft;
+          if (next.complete) {
+            drawingToolRef.current = null; onDrawingToolChangeRef.current(null);
+            onCreateAbcdRef.current?.(next.complete); setChartCursor("");
+          } else { onSelectedDrawingIdChangeRef.current(null); setChartCursor("crosshair"); }
+          syncDrawingPrimitive(); return;
+        }
         if (isArrowDrawingType(activeTool)) {
           commitDraft(null, null); drawingToolRef.current = null; onDrawingToolChangeRef.current(null);
           onPlaceArrowRef.current?.(activeTool, initial.anchor); setChartCursor(""); return;
@@ -177,6 +193,19 @@ export function useReplayChartDrawingPointer(core: ReturnType<typeof useReplayCh
         })) return;
       const id = hit.drawingId;
       const drawing = drawingsRef.current.find((item) => item.id === id);
+      if (drawing?.type === "AB_CD") {
+        const coordinates = abcdPrimitiveRef.current?.getDrawingCoordinates(id);
+        if (!coordinates || id.startsWith("temporary-")) return;
+        if ([...lineTargetsRef.current.values()].some(target => {
+          const y = series.priceToCoordinate(target.price); return y !== null && Math.abs(Number(y) - (event.clientY - rect.top)) <= 8;
+        })) return;
+        if (abcdReleaseFrame !== null) { cancelAnimationFrame(abcdReleaseFrame); abcdReleaseFrame = null; }
+        abcdPreviewRef.current = null;
+        stopEvent(event); onSelectedDrawingIdChangeRef.current(id); selectedDrawingIdRef.current = id;
+        abcdDragging = { id, clientX: event.clientX, clientY: event.clientY, geometry: drawing.geometry, coordinates, part: hit.part as AbcdHitPart };
+        capturedPointer = event.pointerId; interaction.setPointerCapture(event.pointerId);
+        chart.applyOptions({ handleScroll: false }); setChartCursor(hit.part === "line" ? "move" : "crosshair"); return;
+      }
       if (drawing && isArrowDrawing(drawing)) {
         const coordinate = arrowPrimitiveRef.current?.getDrawingCoordinates(id);
         if (!coordinate || id.startsWith("temporary-")) return;
@@ -223,6 +252,20 @@ export function useReplayChartDrawingPointer(core: ReturnType<typeof useReplayCh
     };
 
     const processDrawingMove = (event: PointerEvent) => {
+      if (abcdDragging) {
+        stopEvent(event);
+        const dx = event.clientX - abcdDragging.clientX, dy = event.clientY - abcdDragging.clientY;
+        if (Math.hypot(dx, dy) < 3 && !abcdPreviewRef.current) return;
+        const geometry = moveAbcdGeometry(abcdDragging.geometry, abcdDragging.coordinates, abcdDragging.part, dx, dy,
+          point => pointAtCoordinate(point.x, point.y, false));
+        if (geometry) { abcdPreviewRef.current = { id: abcdDragging.id, geometry }; syncDrawingPrimitive(); }
+        return;
+      }
+      if (drawingToolRef.current === "AB_CD" && abcdDraftRef.current) {
+        const point = pointAt(event.clientX, event.clientY);
+        if (point) { stopEvent(event); abcdDraftRef.current = previewAbcdDraft(abcdDraftRef.current, point.anchor); syncDrawingPrimitive(); }
+        return;
+      }
       if (arrowDragging) {
         stopEvent(event);
         const dx = event.clientX - arrowDragging.clientX, dy = event.clientY - arrowDragging.clientY;
@@ -335,7 +378,7 @@ export function useReplayChartDrawingPointer(core: ReturnType<typeof useReplayCh
       pendingPointer = null;
     };
     const move = (event: PointerEvent) => {
-      const active = dragging || textDragging || arrowDragging || drawingToolRef.current && drawingDraftRef.current;
+      const active = dragging || textDragging || arrowDragging || abcdDragging || drawingToolRef.current && (drawingDraftRef.current || abcdDraftRef.current);
       if (!active && !drawingGroupsRef.current.text.length) return;
       if (!active && (textEditRef.current?.inline || !interaction.contains(event.target as Node))) { hoverText(null); return; }
       if (active) stopEvent(event);
@@ -348,6 +391,16 @@ export function useReplayChartDrawingPointer(core: ReturnType<typeof useReplayCh
       });
     };
     const finish = (event: PointerEvent) => {
+      if (abcdDragging) {
+        const moved = pendingPointer !== null || event.clientX !== abcdDragging.clientX || event.clientY !== abcdDragging.clientY;
+        clearPointerFrame(); if (moved) processDrawingMove(event); stopEvent(event);
+        const preview = abcdPreviewRef.current;
+        if (preview && JSON.stringify(preview.geometry) !== JSON.stringify(abcdDragging.geometry)) onUpdateDrawingRef.current(preview.id, preview.geometry);
+        abcdDragging = null;
+        abcdReleaseFrame = requestAnimationFrame(() => { abcdReleaseFrame = null; abcdPreviewRef.current = null; syncDrawingPrimitive(); });
+        if (interaction.hasPointerCapture(event.pointerId)) interaction.releasePointerCapture(event.pointerId);
+        capturedPointer = null; chart.applyOptions({ handleScroll: true }); setChartCursor(""); return;
+      }
       if (arrowDragging) {
         const moved = pendingPointer !== null || event.clientX !== arrowDragging.clientX || event.clientY !== arrowDragging.clientY;
         clearPointerFrame(); if (moved) processDrawingMove(event); stopEvent(event);
@@ -396,13 +449,15 @@ export function useReplayChartDrawingPointer(core: ReturnType<typeof useReplayCh
       dragging = null;
       textDragging = null; textDragRef.current = null;
       arrowDragging = null; arrowDragRef.current = null;
+      abcdDragging = null; abcdPreviewRef.current = null;
+      if (abcdReleaseFrame !== null) { cancelAnimationFrame(abcdReleaseFrame); abcdReleaseFrame = null; }
       commitPreview(null);
       if (capturedPointer !== null && interaction.hasPointerCapture(capturedPointer)) interaction.releasePointerCapture(capturedPointer);
       capturedPointer = null;
       chart.applyOptions({ handleScroll: true });
       setChartCursor(drawingToolRef.current ? "crosshair" : "");
     };
-    const leave = () => { if (!dragging && !textDragging && !arrowDragging) hoverText(null); };
+    const leave = () => { if (!dragging && !textDragging && !arrowDragging && !abcdDragging) hoverText(null); };
     const doubleClick = (event: MouseEvent) => {
       textClicks.current!.clear();
       if ((event.target as HTMLElement).closest("[data-text-editor]")) return;
@@ -417,14 +472,16 @@ export function useReplayChartDrawingPointer(core: ReturnType<typeof useReplayCh
     };
     const key = (event: KeyboardEvent) => {
       if (event.defaultPrevented || event.isComposing || hasVisibleReplayDialog() || isReplayShortcutInputTarget(event.target)) return;
-      if (event.key === "Escape" && (dragging || textDragging || arrowDragging)) {
+      if (event.key === "Escape" && (dragging || textDragging || arrowDragging || abcdDragging)) {
         stopEvent(event);
         cancelDrag();
         return;
       }
-      if (event.key === "Escape" && (drawingToolRef.current || drawingDraftRef.current)) {
+      if (event.key === "Escape" && (drawingToolRef.current || drawingDraftRef.current || abcdDraftRef.current)) {
         stopEvent(event);
         commitDraft(null, null);
+        abcdDraftRef.current = null;
+        syncDrawingPrimitive();
         drawingToolRef.current = null;
         onDrawingToolChangeRef.current(null);
         setChartCursor("");
@@ -455,6 +512,8 @@ export function useReplayChartDrawingPointer(core: ReturnType<typeof useReplayCh
       clearPointerFrame();
       textDragRef.current = null;
       arrowDragRef.current = null;
+      abcdDraftRef.current = null; abcdPreviewRef.current = null;
+      if (abcdReleaseFrame !== null) cancelAnimationFrame(abcdReleaseFrame);
       if (capturedPointer !== null && interaction.hasPointerCapture(capturedPointer)) interaction.releasePointerCapture(capturedPointer);
       // eslint-disable-next-line react-hooks/exhaustive-deps
       if (chartRef.current === chart) { chart.applyOptions({ handleScroll: true }); commitPreview(null); }
@@ -467,6 +526,6 @@ export function useReplayChartDrawingPointer(core: ReturnType<typeof useReplayCh
       interaction.removeEventListener("dblclick", doubleClick, true);
       window.removeEventListener("keydown", key, true);
     };
-  }, [arrowPrimitiveRef, arrowDragRef, onPlaceArrowRef, priceTickSize, setChartCursor, syncDrawingPrimitive, visibilityScope, barsRef, candleRef, chartRef, containerRef, displayIntervalSecondsRef, drawingDraftCoordinateRef, drawingDraftRef, drawingGroupsRef, drawingPreviewRef, drawingSessionRef, drawingTimelineRef, drawingToolRef, drawingsRef, fibonacciPrimitiveRef, interactionRef, lineTargetsRef, measurementArmedRef, onCreateDrawingRef, onDeleteDrawingRef, onDrawingToolChangeRef, onOpenDrawingStyleRef, onPlaceTextRef, onSelectedDrawingIdChangeRef, onUpdateDrawingRef, rectanglePrimitiveRef, selectedDrawingIdRef, setContextMenu, sourceIntervalSecondsRef, textClicks, textDragRef, textEditRef, textPrimitiveRef, trendLinePrimitiveRef]);
+  }, [abcdPrimitiveRef, abcdDraftRef, abcdPreviewRef, onCreateAbcdRef, arrowPrimitiveRef, arrowDragRef, onPlaceArrowRef, priceTickSize, setChartCursor, syncDrawingPrimitive, visibilityScope, barsRef, candleRef, chartRef, containerRef, displayIntervalSecondsRef, drawingDraftCoordinateRef, drawingDraftRef, drawingGroupsRef, drawingPreviewRef, drawingSessionRef, drawingTimelineRef, drawingToolRef, drawingsRef, fibonacciPrimitiveRef, interactionRef, lineTargetsRef, measurementArmedRef, onCreateDrawingRef, onDeleteDrawingRef, onDrawingToolChangeRef, onOpenDrawingStyleRef, onPlaceTextRef, onSelectedDrawingIdChangeRef, onUpdateDrawingRef, rectanglePrimitiveRef, selectedDrawingIdRef, setContextMenu, sourceIntervalSecondsRef, textClicks, textDragRef, textEditRef, textPrimitiveRef, trendLinePrimitiveRef]);
 
 }

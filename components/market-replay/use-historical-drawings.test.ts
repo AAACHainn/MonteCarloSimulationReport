@@ -1,7 +1,7 @@
 import { webcrypto } from "node:crypto";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { useHistoricalDrawings } from "./use-historical-drawings";
-import { DEFAULT_RECTANGLE_STYLE, DEFAULT_TEXT_STYLE, DEFAULT_ARROW_STYLES, type MarketDrawing, type TextDrawing } from "@/lib/market-replay/chart-drawings";
+import { DEFAULT_RECTANGLE_STYLE, DEFAULT_TEXT_STYLE, DEFAULT_ARROW_STYLES, DEFAULT_ABCD_STYLE, type MarketDrawing, type TextDrawing } from "@/lib/market-replay/chart-drawings";
 
 // Keep state/ref slots across explicit renders; exercise network and storage behavior without adding a DOM dependency.
 const hooks = vi.hoisted(() => ({ index: 0, slots: [] as unknown[], effects: [] as Array<() => () => void> }));
@@ -58,6 +58,24 @@ function harness() {
 }
 
 describe("historical drawing persistence", () => {
+  it("persists AB=CD geometry and styles, skips unchanged saves and restores failed deletion", async () => {
+    const app = harness(); await app.ready();
+    const geometry = { a: original.geometry.start, b: original.geometry.end,
+      c: { timestamp: "2026-10-01T00:02:00.000Z", sourceSequence: 2, price: 100.5 } };
+    const saved = await app.render().create({ datasetId: "dataset", type: "AB_CD", geometry, style: DEFAULT_ABCD_STYLE });
+    expect(saved?.type).toBe("AB_CD");
+    const nextGeometry = { ...geometry, c: { ...geometry.c, price: 102 } };
+    const style = { ...DEFAULT_ABCD_STYLE, singleColor: "#123456", showPrices: true };
+    expect(await app.render().update(saved!.id, { geometry: nextGeometry, style })).toBe(true);
+    const writes = fetcher.mock.calls.length;
+    expect(await app.render().update(saved!.id, { geometry: nextGeometry, style })).toBe(true);
+    expect(fetcher.mock.calls.length).toBe(writes);
+    await app.render().refresh();
+    expect(app.render().drawings.find(item => item.id === saved!.id)).toMatchObject({ geometry: nextGeometry, style });
+    fetcher.mockResolvedValueOnce(json({ error: "offline" }, 503));
+    expect(await app.render().remove(saved!.id)).toBe(false); expect(app.render().drawings.some(item => item.id === saved!.id)).toBe(true);
+    expect(await app.render().remove(saved!.id)).toBe(true); expect(app.render().drawings).toEqual([original]); app.cleanup();
+  });
   it.each(["ARROW_UP", "ARROW_DOWN"] as const)("creates, moves, styles and deletes %s through the shared backend workflow", async type => {
     const app = harness(); await app.ready();
     const geometry = { anchor: original.geometry.start };

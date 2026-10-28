@@ -11,13 +11,14 @@ export const DRAWING_TYPE_RECTANGLE = "RECTANGLE" as const;
 export const DRAWING_TYPE_TEXT = "TEXT" as const;
 export const DRAWING_TYPE_ARROW_UP = "ARROW_UP" as const;
 export const DRAWING_TYPE_ARROW_DOWN = "ARROW_DOWN" as const;
+export const DRAWING_TYPE_ABCD = "AB_CD" as const;
 export const TREND_LINE_STYLES = ["SOLID", "DASHED", "DOTTED"] as const;
-export const DRAWING_TYPES = [DRAWING_TYPE_TREND_LINE, DRAWING_TYPE_FIB_RETRACEMENT, DRAWING_TYPE_RECTANGLE, DRAWING_TYPE_TEXT, DRAWING_TYPE_ARROW_UP, DRAWING_TYPE_ARROW_DOWN] as const;
+export const DRAWING_TYPES = [DRAWING_TYPE_TREND_LINE, DRAWING_TYPE_FIB_RETRACEMENT, DRAWING_TYPE_RECTANGLE, DRAWING_TYPE_TEXT, DRAWING_TYPE_ARROW_UP, DRAWING_TYPE_ARROW_DOWN, DRAWING_TYPE_ABCD] as const;
 
 export type DrawingType = (typeof DRAWING_TYPES)[number];
 export type DrawingTool = DrawingType;
 export type ArrowDrawingType = typeof DRAWING_TYPE_ARROW_UP | typeof DRAWING_TYPE_ARROW_DOWN;
-export type TwoPointDrawingTool = Exclude<DrawingTool, "TEXT" | ArrowDrawingType>;
+export type TwoPointDrawingTool = Exclude<DrawingTool, "TEXT" | ArrowDrawingType | typeof DRAWING_TYPE_ABCD>;
 export function isArrowDrawingType(type: string): type is ArrowDrawingType {
   return type === DRAWING_TYPE_ARROW_UP || type === DRAWING_TYPE_ARROW_DOWN;
 }
@@ -46,6 +47,16 @@ export type TrendLineGeometry = {
   start: DrawingAnchor;
   end: DrawingAnchor;
 };
+
+export type AbcdGeometry = { a: DrawingAnchor; b: DrawingAnchor; c: DrawingAnchor };
+export type AbcdDrawing = Omit<FibonacciRetracementDrawing, "type" | "geometry"> & { type: typeof DRAWING_TYPE_ABCD; geometry: AbcdGeometry };
+export function abcdPriceAtLevel(geometry: AbcdGeometry, level = 1) {
+  return geometry.c.price + (geometry.b.price - geometry.a.price) * level;
+}
+export function isValidAbcdGeometry(geometry: AbcdGeometry) {
+  return geometry.a.price !== geometry.b.price && Date.parse(geometry.b.timestamp) !== Date.parse(geometry.c.timestamp)
+    && Number.isFinite(abcdPriceAtLevel(geometry, -10)) && Number.isFinite(abcdPriceAtLevel(geometry, 10));
+}
 
 export type TrendLineStyle = {
   color: string;
@@ -129,8 +140,8 @@ export const DEFAULT_TEXT_STYLE: TextDrawingStyle = {
 };
 export function normalizeDrawingText(text: string) { return text.replace(/\r\n?/g, "\n"); }
 export type TwoPointDrawing = TrendLineDrawing | FibonacciRetracementDrawing | RectangleDrawing;
-export type MarketDrawing = TwoPointDrawing | TextDrawing | ArrowDrawing;
-export type DrawingGeometry = TrendLineGeometry | TextGeometry | ArrowGeometry;
+export type MarketDrawing = TwoPointDrawing | TextDrawing | ArrowDrawing | AbcdDrawing;
+export type DrawingGeometry = TrendLineGeometry | TextGeometry | ArrowGeometry | AbcdGeometry;
 export type MarketDrawingStyle = TrendLineStyle | FibonacciRetracementStyle | RectangleStyle | TextDrawingStyle | ArrowStyle;
 type NewDrawing<T> = T extends MarketDrawing ? Omit<T, "id" | "createdAt" | "updatedAt"> : never;
 export type NewMarketDrawing = NewDrawing<MarketDrawing>;
@@ -195,12 +206,20 @@ export const DEFAULT_FIBONACCI_RETRACEMENT_STYLE: FibonacciRetracementStyle = {
   ],
 };
 
+export const DEFAULT_ABCD_STYLE: FibonacciRetracementStyle = {
+  width: 1, lineStyle: "SOLID", singleColor: "#2962FF", showPrices: false, showLevels: false,
+  levels: [{ value: 0, enabled: true, color: "#2962FF" }, { value: 1, enabled: true, color: "#2962FF" }],
+};
+
 const finiteNumber = z.number().finite();
 const drawingAnchorSchema = z.object({
   timestamp: z.string().datetime({ offset: true }),
   sourceSequence: z.number().int().nonnegative().nullable(),
   price: finiteNumber,
 }).strict();
+
+export const abcdGeometrySchema = z.object({ a: drawingAnchorSchema, b: drawingAnchorSchema, c: drawingAnchorSchema })
+  .strict().refine(isValidAbcdGeometry);
 
 export const arrowGeometrySchema = z.object({ anchor: drawingAnchorSchema }).strict();
 export const arrowStyleSchema = z.object({ color: z.string().regex(/^#[0-9a-f]{6}$/i) }).strict();
@@ -320,6 +339,8 @@ export const fibonacciRetracementPreferencesSchema = z.object({
 }).strict();
 
 export const createMarketDrawingSchema = z.discriminatedUnion("type", [
+  z.object({ type: z.literal(DRAWING_TYPE_ABCD), geometry: abcdGeometrySchema,
+    style: fibonacciRetracementStyleSchema.default(DEFAULT_ABCD_STYLE) }).strict(),
   z.object({ type: z.literal(DRAWING_TYPE_ARROW_UP), geometry: arrowGeometrySchema,
     style: arrowStyleSchema.default(DEFAULT_ARROW_STYLES.ARROW_UP) }).strict(),
   z.object({ type: z.literal(DRAWING_TYPE_ARROW_DOWN), geometry: arrowGeometrySchema,
@@ -344,7 +365,7 @@ export const createMarketDrawingSchema = z.discriminatedUnion("type", [
 ]);
 
 export const updateMarketDrawingSchema = z.object({
-  geometry: z.union([trendLineGeometrySchema, textGeometrySchema, arrowGeometrySchema]).optional(),
+  geometry: z.union([trendLineGeometrySchema, textGeometrySchema, arrowGeometrySchema, abcdGeometrySchema]).optional(),
   style: z.union([trendLineStyleSchema, fibonacciRetracementStyleSchema, rectangleStyleSchema, textDrawingStyleSchema, arrowStyleSchema]).optional(),
 }).strict().refine((value) => value.geometry !== undefined || value.style !== undefined);
 
@@ -365,6 +386,8 @@ export function serializeMarketDrawing(record: StoredDrawing): MarketDrawing {
     createdAt: record.createdAt.toISOString(),
     updatedAt: record.updatedAt.toISOString(),
   };
+  if (record.type === DRAWING_TYPE_ABCD) return { ...base, type: DRAWING_TYPE_ABCD,
+    geometry: abcdGeometrySchema.parse(JSON.parse(record.geometry)), style: fibonacciRetracementStyleSchema.parse(JSON.parse(record.style)) };
   if (isArrowDrawingType(record.type)) return { ...base, type: record.type,
     geometry: arrowGeometrySchema.parse(JSON.parse(record.geometry)), style: arrowStyleSchema.parse(JSON.parse(record.style)) };
   if (record.type === DRAWING_TYPE_TEXT) return { ...base, type: DRAWING_TYPE_TEXT,
@@ -410,6 +433,12 @@ export function parseFibonacciRetracementPreferences(value: string | null): Fibo
   return { defaultStyle: DEFAULT_FIBONACCI_RETRACEMENT_STYLE, templates: [] };
 }
 
+export function parseAbcdPreferences(value: string | null): FibonacciRetracementPreferences {
+  try { const parsed = fibonacciRetracementPreferencesSchema.safeParse(value ? JSON.parse(value) : null); if (parsed.success) return parsed.data; }
+  catch { /* Invalid or unavailable storage uses independent AB=CD defaults. */ }
+  return { defaultStyle: { ...DEFAULT_ABCD_STYLE, levels: DEFAULT_ABCD_STYLE.levels.map(level => ({ ...level })) }, templates: [] };
+}
+
 export function drawingStyleMatchesType(type: DrawingType, style: MarketDrawingStyle) {
   if (isArrowDrawingType(type)) return arrowStyleSchema.safeParse(style).success;
   if (type === DRAWING_TYPE_TEXT) return textDrawingStyleSchema.safeParse(style).success;
@@ -421,6 +450,7 @@ export function drawingStyleMatchesType(type: DrawingType, style: MarketDrawingS
 
 export function drawingGeometryMatchesType(type: string, geometry: DrawingGeometry) {
   if (!DRAWING_TYPES.includes(type as DrawingType)) return false;
+  if (type === DRAWING_TYPE_ABCD) return abcdGeometrySchema.safeParse(geometry).success;
   if (isArrowDrawingType(type)) return arrowGeometrySchema.safeParse(geometry).success;
   if (type === DRAWING_TYPE_TEXT) return textGeometrySchema.safeParse(geometry).success;
   const result = trendLineGeometrySchema.safeParse(geometry);
