@@ -13,6 +13,7 @@ import { createReplaySession, archiveReplaySession, deleteReplaySession, restart
 import { loadReplayScope, loadPropRoundScope, runWithReplayScope } from "@/lib/replay-sessions/scope";
 import { resetPropAccount, listPropRounds } from "./rounds";
 import { GET as journalGET } from "@/app/api/market-datasets/[id]/paper-journal/route";
+import { GET as annotationsGET } from "@/app/api/market-datasets/[id]/paper-journal/annotations/route";
 import { POST as resetPOST } from "@/app/api/replay-sessions/[sessionId]/prop-practice/reset/route";
 import { pruneReplayResults } from "@/lib/replay-sessions/prune-results";
 import { PATCH as entryPATCH } from "@/app/api/market-datasets/[id]/paper-journal/entries/[entryId]/route";
@@ -52,11 +53,11 @@ function request(s: Created, method: string, body: unknown) {
 async function scoped<T>(s: Created, work: () => Promise<T>) { return runWithReplayScope(await loadReplayScope(s.id), work); }
 async function snapshot(s: Created) { return scoped(s, () => getPaperSessionSnapshot("prop")); }
 function rules(): PropRules { const r = structuredClone(defaultPropRules); r.name = "Practice"; r.evaluation.risk = { initialCapital: 1000, drawdown: 900, mode: "STATIC", capOffset: null }; r.funded.risk = { ...r.evaluation.risk }; r.evaluation.target = 1; r.evaluation.minTradingDays = null; r.evaluation.consistency = null; r.payout = { minimum: 1, fraction: 1, maximum: null, buffer: null, traderShare: 0.9, permanentFloorOffset: null }; return r; }
-async function create(r?: PropRules) {
+async function create(r?: PropRules, accountConfig = config) {
   const template = r ? await savePropTemplate(r) : null;
   const s = await createReplaySession("prop", { name: "Session", mode: "TRAINING", timestamp: times[0], playbackRate: 1, displayIntervalSeconds: 60, displaySession: "ETH" });
   expect(await snapshot(s)).toBeNull();
-  const response = await accountPOST(request(s, "POST", template ? { ...config, accountCategory: "PROP_PRACTICE", propTemplateVersionId: template.versions[0].id } : config), ctx);
+  const response = await accountPOST(request(s, "POST", template ? { ...accountConfig, accountCategory: "PROP_PRACTICE", propTemplateVersionId: template.versions[0].id } : accountConfig), ctx);
   expect(response.status, JSON.stringify(await response.clone().json())).toBe(201);
   expect((await response.json()).snapshot.propAccount != null).toBe(!!template);
   return s;
@@ -271,17 +272,29 @@ describe("prop orchestration versus original flow", () => {
     const retry = await advancePOST(request(s, "POST", stopped.body), ctx); expect((await retry.json()).currentSequence).toBe(1);
     await advance(s); expect((await snapshot(s))!.session.lastProcessedSequence).toBe(2);
   });
-  it("pauses a failed round after the entire source result without archiving the session, retaining position and protection with retry receipt", async () => {
+  it("flattens a failed evaluation at the failing source close, cancels protection and exposes one journal annotation", async () => {
     const r = rules(); r.evaluation.risk.drawdown = 0.01;
     const standard = await create(), s = await create(r);
+    await prisma.replaySession.update({ where: { id: s.id }, data: { trainingGate: JSON.stringify({ ...defaultTrainingGate(), lossStreak: 1 }) } });
     for (const item of [standard, s]) { await advance(item); await order(item, "BUY", 1, { stopLoss: 50, takeProfit: 300 }); }
     await advance(standard);
     // Intrabar win here; make next complete close lose enough through original price model.
     await prisma.marketBar.update({ where: { datasetId_sequence: { datasetId: "prop", sequence: 1 } }, data: { close: 109 } });
     const failed = await advance(s, 5);
     expect(failed.data.currentSequence).toBe(1); expect((await loadReplayScope(s.id)).status).toBe("ACTIVE");
-    const snap = await snapshot(s); expect(snap!.session.netQuantity).toBe(1); expect(snap!.activeOrders).toHaveLength(2); expect(snap!.recentFills).toHaveLength(1);
-    const retry = await advancePOST(request(s, "POST", failed.body), ctx); expect(retry.status).toBe(200); expect((await retry.json()).currentSequence).toBe(1);
+    const snap = await snapshot(s); expect(snap!.session.netQuantity).toBe(0); expect(snap!.activeOrders).toHaveLength(0); expect(snap!.recentFills).toHaveLength(2); expect(snap!.openLots).toHaveLength(0);
+    const slippedExit = 109 * (1 - config.slippageBps / 10_000);
+    const closing = snap!.recentFills.find(fill => fill.side === "SELL" && fill.sequence === 1)!;
+    expect(closing).toMatchObject({ side: "SELL", quantity: 1 });
+    expect(closing.price).toBeCloseTo(slippedExit, 10);
+    expect(snap!.session.trainingGate).toMatchObject({ lossStreak: 0, active: true, activationCount: 1, source: "LOSS_STREAK", activatedAtSequence: 1 });
+    const journal = await journalGET(new Request(`http://localhost/api/test?replaySessionId=${s.id}&scope=current`), ctx);
+    expect(journal.status).toBe(200); const journalData = await journal.json(); expect(journalData.items).toHaveLength(1);
+    expect(journalData.items[0]).toMatchObject({ openedSequence: 1, closedSequence: 1 });
+    expect(journalData.items[0].exitPrice).toBeCloseTo(slippedExit, 10);
+    const annotations = await annotationsGET(new Request(`http://localhost/api/test?replaySessionId=${s.id}&fromSequence=1&toSequence=1`), ctx);
+    expect(annotations.status).toBe(200); expect((await annotations.json()).items).toHaveLength(1);
+    const retry = await advancePOST(request(s, "POST", failed.body), ctx); expect(retry.status).toBe(200); expect(await retry.json()).toEqual(failed.data);
     await prisma.marketBar.update({ where: { datasetId_sequence: { datasetId: "prop", sequence: 1 } }, data: { close: 120 } });
   });
   it.each(["source", "sync", "display"])("restarts a failed funded round at evaluation after %s advancement, preserving history, receipts, gate and original execution", async mode => {
@@ -292,6 +305,7 @@ describe("prop orchestration versus original flow", () => {
     await order(s, "BUY"); await advance(s); await order(s, "SELL", 1, { executeAtCurrentClose: true });
     await scoped(s, async () => confirmPropPayout({ expectedVersion: (await loadReplayScope(s.id)).version, requestId: randomUUID(), amount: 5 }));
     await advance(s); await order(s, "SELL", 1, { stopLoss: 300, takeProfit: 50 });
+    await order(s, "SELL", 1, { type: "LIMIT", price: 500 }); // A pending entry must be cancelled with protection on failure.
     const progress = await prisma.replayProgress.findUniqueOrThrow({ where: { replaySessionId: s.id } });
     const before = (await snapshot(s))!;
     const body = mode === "sync" ? { requestId: randomUUID(), generation: progress.generation, confirmedSequence: progress.currentSequence,
@@ -304,7 +318,10 @@ describe("prop orchestration versus original flow", () => {
     expect(response.status, JSON.stringify(receipt)).toBe(200); expect(receipt).toMatchObject({ currentSequence: 6, propStopped: true });
     const failed = (await snapshot(s))!;
     expect(failed.propAccount!.state).toMatchObject({ phase: "FUNDED", result: "FAILED", payoutCount: 1, totalReceived: 4.5 });
-    expect(failed.session.netQuantity).toBe(-1); expect(failed.activeOrders).toHaveLength(2); expect(failed.openLots).toHaveLength(1);
+    expect(failed.session.netQuantity).toBe(0); expect(failed.activeOrders).toHaveLength(0); expect(failed.openLots).toHaveLength(0);
+    expect(failed.recentFills.filter(fill => fill.sequence === 6 && fill.side === "SELL")).toHaveLength(1);
+    expect(failed.recentFills.filter(fill => fill.sequence === 6 && fill.side === "BUY" && fill.reason === "CLOSE")).toHaveLength(1);
+    expect(failed.session.lastProcessedSequence).toBe(6);
     const retry = await handler(request(s, "POST", body), ctx); expect(retry.status).toBe(200); expect(await retry.json()).toEqual(receipt);
     const gate = { ...defaultTrainingGate(), autoEnabled: false, lossStreak: 1, completedCount: 3 };
     await prisma.replaySession.update({ where: { id: s.id }, data: { trainingGate: JSON.stringify(gate), riskPreferences: JSON.stringify({ riskMode: "FIXED", riskAmount: 123, targetR: 2 }) } });
@@ -324,14 +341,14 @@ describe("prop orchestration versus original flow", () => {
     const oldScope = await loadPropRoundScope(current, 1);
     expect((await runWithReplayScope(oldScope, () => getPaperSessionSnapshot("prop")))!.propAccount).toEqual(failed.propAccount);
     const history = await journalGET(new Request(`http://localhost/api/test?replaySessionId=${s.id}&propRound=0&scope=history`), ctx);
-    expect(history.status).toBe(200); const historyData = await history.json(); expect(historyData.items).toHaveLength(2);
+    expect(history.status).toBe(200); const historyData = await history.json(); expect(historyData.items).toHaveLength(3);
     const entry = historyData.items[0]; expect(entry.propRoundNumber).toBe(1);
     for (const number of [0, 1]) {
       const updatedEntry = await entryPATCH(new Request(`http://localhost/api/test?replaySessionId=${s.id}&propRound=${number}`, { method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ review: `round ${number}` }) }), { params: Promise.resolve({ id: "prop", entryId: entry.id }) });
       expect(updatedEntry.status, JSON.stringify(await updatedEntry.clone().json())).toBe(200);
     }
     const exported = await exportDataGET(new Request(`http://localhost/api/test?replaySessionId=${s.id}&propRound=1`), { params: Promise.resolve({ id: "prop", sessionId: entry.journalSessionId }) });
-    expect(exported.status).toBe(200); const exportedData = await exported.json(); expect(exportedData.entries).toHaveLength(2); expect(exportedData.endSequence).toBe(6);
+    expect(exported.status).toBe(200); const exportedData = await exported.json(); expect(exportedData.entries).toHaveLength(3); expect(exportedData.endSequence).toBe(6);
     await expect(scoped(s, () => resetPropAccount({ ...input, expectedVersion: input.expectedVersion + 1 }))).rejects.toMatchObject({ code: "SESSION_CONFLICT" });
     await scoped(s, () => sqliteWriteTransaction(prisma, tx => pruneReplayResults(tx, s.id)));
     expect(await prisma.paperTradingSession.findUnique({ where: { id: oldAccount.id } })).not.toBeNull();
@@ -347,6 +364,104 @@ describe("prop orchestration versus original flow", () => {
     expect(await prisma.propPracticeRound.count({ where: { replaySessionId: s.id } })).toBe(0);
     expect(await prisma.paperTradingSession.findUnique({ where: { id: oldAccount.id } })).toBeNull();
   });
+  it.each(["fill", "journal", "event"] as const)("rolls back failure liquidation and retry receipt together when %s persistence fails", async target => {
+    const r = rules(); r.evaluation.risk.drawdown = 0.01;
+    const s = await create(r); await advance(s); await order(s, "BUY", 1, { stopLoss: 50, takeProfit: 300 });
+    await prisma.marketBar.update({ where: { datasetId_sequence: { datasetId: "prop", sequence: 1 } }, data: { close: 109 } });
+    const expectedFailureLog = vi.spyOn(console, "error").mockImplementation(() => undefined);
+    try {
+      const before = (await snapshot(s))!;
+      const progressBefore = await prisma.replayProgress.findUniqueOrThrow({ where: { replaySessionId: s.id } });
+      const trigger = target === "fill" ? "BEFORE INSERT ON PaperFill WHEN NEW.reason='CLOSE'"
+        : target === "journal" ? "BEFORE INSERT ON ReplayJournalEntry" : "BEFORE INSERT ON PropPracticeEvent WHEN NEW.type='FAILED'";
+      const body = { count: 5, expectedVersion: before.session.version, expectedCurrentSequence: 0, requestId: randomUUID() };
+      await prisma.$executeRawUnsafe(`CREATE TRIGGER reject_failure_write ${trigger} BEGIN SELECT RAISE(ABORT, 'failure write rejected'); END`);
+      try {
+        const response = await advancePOST(request(s, "POST", body), ctx);
+        expect(response.status).toBeGreaterThanOrEqual(400);
+      } finally { await prisma.$executeRawUnsafe("DROP TRIGGER reject_failure_write"); }
+      expect(await snapshot(s)).toEqual(before);
+      expect(await prisma.replayProgress.findUniqueOrThrow({ where: { replaySessionId: s.id } })).toEqual(progressBefore);
+      expect(await prisma.propPracticeEvent.count({ where: { replaySessionId: s.id, type: "FAILED" } })).toBe(0);
+      const retried = await advancePOST(request(s, "POST", body), ctx);
+      expect(retried.status).toBe(200);
+      const receipt = await retried.json();
+      expect(receipt.currentSequence).toBe(1);
+      expect((await snapshot(s))!.session.netQuantity).toBe(0);
+      const retryAgain = await advancePOST(request(s, "POST", body), ctx);
+      expect(await retryAgain.json()).toEqual(receipt);
+      expect((await snapshot(s))!.recentFills).toHaveLength(2);
+      expect(expectedFailureLog).toHaveBeenCalled();
+    } finally {
+      expectedFailureLog.mockRestore();
+      await prisma.marketBar.update({ where: { datasetId_sequence: { datasetId: "prop", sequence: 1 } }, data: { close: 120 } });
+    }
+  });
+  it("does not add a second close when a protective order already flattened the position on the failing source candle", async () => {
+    const r = rules(); r.evaluation.risk.drawdown = 0.01;
+    const s = await create(r); await advance(s); await order(s, "BUY", 1, { stopLoss: 109, takeProfit: 300 });
+    await prisma.marketBar.update({ where: { datasetId_sequence: { datasetId: "prop", sequence: 1 } }, data: { close: 109 } });
+    const result = await advance(s, 5);
+    expect(result.data.currentSequence).toBe(1);
+    const failed = (await snapshot(s))!;
+    expect(failed.propAccount!.state.result).toBe("FAILED");
+    expect(failed.session.netQuantity).toBe(0); expect(failed.openLots).toHaveLength(0);
+    expect(failed.recentFills.filter(fill => fill.sequence === 1 && fill.side === "SELL")).toHaveLength(1);
+    expect(failed.activeOrders).toHaveLength(0);
+    await prisma.marketBar.update({ where: { datasetId_sequence: { datasetId: "prop", sequence: 1 } }, data: { close: 120 } });
+  });
+  it("fails on current-price partial-close fees and liquidates only the remaining quantity", async () => {
+    const r = rules(); r.evaluation.risk.drawdown = 0.15;
+    const s = await create(r, { ...config, commissionBps: 5, slippageBps: 0 });
+    await prisma.marketBar.update({ where: { datasetId_sequence: { datasetId: "prop", sequence: 1 } }, data: { close: 110 } });
+    try {
+      await advance(s); await order(s, "BUY", 2); await advance(s);
+      const beforeClose = (await snapshot(s))!;
+      expect(beforeClose.session.netQuantity).toBe(2);
+      expect(beforeClose.propAccount!.state.result).toBeNull();
+      const partial = await orderPOST(request(s, "POST", { side: "SELL", quantity: 1, type: "MARKET", reduceOnly: true, executeAtCurrentClose: true, expectedVersion: beforeClose.session.version }), ctx);
+      expect(partial.status, JSON.stringify(await partial.clone().json())).toBe(201);
+      const failed = (await snapshot(s))!;
+      expect(failed.propAccount!.state.result).toBe("FAILED");
+      expect(failed.propAccount!.state.failure!.equity).toBeCloseTo(999.835);
+      expect(failed.session.netQuantity).toBe(0); expect(failed.openLots).toHaveLength(0);
+      expect(failed.recentFills.filter(fill => fill.sequence === 1 && fill.side === "SELL").map(fill => fill.quantity)).toEqual([1, 1]);
+      expect(failed.session.totalFees).toBeCloseTo(0.22);
+      expect(failed.propAccount!.state.last).toMatchObject({ flat: true, pending: 0, unrealized: 0 });
+      expect(failed.activeOrders).toHaveLength(0);
+      expect(failed.stats.journalEntryCount).toBe(2);
+    } finally {
+      await prisma.marketBar.update({ where: { datasetId_sequence: { datasetId: "prop", sequence: 1 } }, data: { close: 120 } });
+    }
+  });
+  it("liquidates on the previous revealed close when a new day raises the EOD floor above open equity", async () => {
+    const r = rules(); r.evaluation.target = 500;
+    r.evaluation.risk = { initialCapital: 1000, drawdown: 10, mode: "EOD_BALANCE", capOffset: null };
+    const s = await create(r, { ...config, commissionBps: 0, slippageBps: 0 });
+    await advance(s); await order(s, "BUY"); await advance(s);
+    await order(s, "SELL", 1, { executeAtCurrentClose: true }); // Realize 10 on day 1, floor rises to 1000.
+    await order(s, "BUY"); await advance(s);
+    await order(s, "SELL", 1, { executeAtCurrentClose: true }); // Another realized 10 on day 2.
+    await order(s, "SELL"); await advance(s); // Short 130, close 140: equity 1010, floor still 1000.
+    await prisma.marketBar.update({ where: { datasetId_sequence: { datasetId: "prop", sequence: 4 } }, data: { high: 145, close: 140 } });
+    try {
+      await advance(s);
+      const held = (await snapshot(s))!;
+      expect(held.propAccount!.state.result).toBeNull();
+      expect(held.session.netQuantity).toBe(-1);
+      const moved = await advance(s, 3); // Preparing day 3 raises the floor to 1010; do not execute source 5.
+      expect(moved.data).toMatchObject({ currentSequence: 4, propStopped: true });
+      const failed = (await snapshot(s))!;
+      expect(failed.propAccount!.state.failure).toMatchObject({ sequence: 4, equity: 1010, floor: 1010, phase: "EVALUATION" });
+      expect(failed.session.lastProcessedSequence).toBe(4);
+      expect(failed.session.netQuantity).toBe(0); expect(failed.openLots).toHaveLength(0); expect(failed.activeOrders).toHaveLength(0);
+      expect(failed.recentFills.filter(fill => fill.sequence === 4 && fill.side === "BUY")).toHaveLength(1);
+      expect(failed.recentFills.some(fill => fill.sequence >= 5)).toBe(false);
+      expect(failed.propAccount!.state.last).toMatchObject({ sequence: 4, unrealized: 0, flat: true, pending: 0 });
+    } finally {
+      await prisma.marketBar.update({ where: { datasetId_sequence: { datasetId: "prop", sequence: 4 } }, data: { high: 155, close: 150 } });
+    }
+  });
   it("retains three consecutive failed rounds, supports an archived legacy failure, and never resumes old pending orders", async () => {
     const id = "prop-multiple-rounds", timestamps = Array.from({ length: 6 }, (_, index) => new Date(Date.UTC(2026, 9, 1, 12, index)).toISOString());
     await prisma.marketDataset.create({ data: { id, name: id, symbol: "TEST", timeframe: "1m", timezone: "UTC", sourceIntervalSeconds: 60, barCount: 6, startTime: new Date(timestamps[0]), endTime: new Date(timestamps[5]) } });
@@ -358,6 +473,8 @@ describe("prop orchestration versus original flow", () => {
     expect((await accountPOST(request(s, "POST", { ...config, accountCategory: "PROP_PRACTICE", propTemplateVersionId: template.versions[0].id }), context)).status).toBe(201);
     let snap = (await read())!;
     expect((await advancePOST(request(s, "POST", { count: 1, expectedVersion: snap.session.version, expectedCurrentSequence: -1 }), context)).status).toBe(200);
+    // Permit three losses before activation so this retention scenario also verifies cross-round loss accounting.
+    await prisma.replaySession.update({ where: { id: s.id }, data: { trainingGate: JSON.stringify({ ...defaultTrainingGate(), lossThreshold: 4 }) } });
     const projections: string[] = [];
     for (let number = 1; number <= 3; number++) {
       snap = (await read())!;
@@ -372,8 +489,9 @@ describe("prop orchestration versus original flow", () => {
       s = { ...s, activeProjectionId: next.projectionId };
     }
     const counts = await Promise.all(projections.map(projectionId => prisma.paperTradingSession.findUniqueOrThrow({ where: { projectionId }, include: { orders: { where: { status: "PENDING" } }, fills: true } })));
-    expect(counts.map(account => account.fills.length)).toEqual([1, 1, 1]); expect(counts.map(account => account.orders.length)).toEqual([2, 2, 2]);
+    expect(counts.map(account => account.fills.length)).toEqual([2, 2, 2]); expect(counts.map(account => account.orders.length)).toEqual([0, 0, 0]);
     expect((await scoped(s, listPropRounds)).map(round => round.result)).toEqual(["FAILED", "FAILED", "FAILED"]);
+    expect((await read())!.session.trainingGate).toMatchObject({ autoEnabled: true, lossThreshold: 4, lossStreak: 3, active: false });
   });
   it("rejects reset without failure and rolls back every round write on persistence failure", async () => {
     const s = await create(rules()), scope = await loadReplayScope(s.id);

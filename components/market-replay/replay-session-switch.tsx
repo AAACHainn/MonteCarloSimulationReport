@@ -42,13 +42,14 @@ export function ReplaySessionSwitch({ beforeSwitch, disabled = false }: { before
   }
   const visibleSessions = [current, ...sessions.filter(session => session.id !== current.id && (!selectedUser.selectedId || session.userId === selectedUser.selectedId))];
   return <div className="flex min-w-0 flex-wrap items-center gap-2" aria-busy={busy}>
-    <Badge>{current.mode === "TRAINING" ? copy.replaySessions.training : copy.replaySessions.liveReplay}</Badge>
-    <Select value={current.id} disabled={busy || entry.busy || disabled} onValueChange={(id) => void navigate(id)}>
-      <SelectTrigger aria-label={copy.replaySessions.switch} className="h-8 w-56 [&>span]:truncate [&>span]:whitespace-nowrap"><SelectValue /></SelectTrigger>
-      <SelectContent>{visibleSessions.map((session) => <SelectItem key={session.id} value={session.id}>{session.name} · {session.mode === "TRAINING" ? copy.replaySessions.training : copy.replaySessions.liveReplay}</SelectItem>)}</SelectContent>
-    </Select>
+    <Badge className={current.mode === "TRAINING" ? "border-blue-200 bg-blue-50 text-blue-700" : undefined}>{current.mode === "TRAINING" ? copy.replaySessions.training : copy.replaySessions.liveReplay}</Badge>
+    <div className="border-l border-slate-200 pl-2">
+      <Select value={current.id} disabled={busy || entry.busy || disabled} onValueChange={(id) => void navigate(id)}>
+        <SelectTrigger aria-label={copy.replaySessions.switch} className="h-8 w-56 [&>span]:truncate [&>span]:whitespace-nowrap"><SelectValue /></SelectTrigger>
+        <SelectContent>{visibleSessions.map((session) => <SelectItem key={session.id} value={session.id}>{session.name} · {session.mode === "TRAINING" ? copy.replaySessions.training : copy.replaySessions.liveReplay}</SelectItem>)}</SelectContent>
+      </Select>
+    </div>
     <Button size="sm" variant="ghost" onClick={() => void navigate()} disabled={busy || entry.busy || disabled}><List className="h-4 w-4" aria-hidden="true" />{copy.replaySessions.allSessions}</Button>
-    <span className="whitespace-nowrap text-xs text-slate-500">{busy ? copy.replaySessions.switching : copy.replaySessions.source}</span>
     {entry.ui}
     {error ? <span role="alert" className="max-w-lg text-xs text-red-600">{error}</span> : null}
   </div>;

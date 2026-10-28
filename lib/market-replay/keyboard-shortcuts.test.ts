@@ -2,6 +2,20 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import { hasVisibleReplayDialog, replayDrawingShortcutKey } from "./keyboard-shortcuts";
 
 afterEach(() => vi.unstubAllGlobals());
+describe("AB=CD shortcut", () => {
+  const key = { key: "w", code: "KeyW", altKey: true, ctrlKey: false, metaKey: false, shiftKey: false, isComposing: false, defaultPrevented: false };
+  it("uses Alt+W, physical Option+W and the unidentified-key fallback", () => {
+    expect(replayDrawingShortcutKey(key)).toBe("AB_CD");
+    expect(replayDrawingShortcutKey({ ...key, key: "∑" })).toBe("AB_CD");
+    expect(replayDrawingShortcutKey({ ...key, key: "W", code: "Unidentified" })).toBe("AB_CD");
+  });
+  it("ignores ordinary typing, additional modifiers, composition and handled events", () => {
+    expect(replayDrawingShortcutKey({ ...key, altKey: false })).toBeNull();
+    for (const flag of ["ctrlKey", "metaKey", "shiftKey", "isComposing", "defaultPrevented"]) {
+      expect(replayDrawingShortcutKey({ ...key, [flag]: true })).toBeNull();
+    }
+  });
+});
 describe("rectangle shortcut", () => {
   const key = { key: "R", code: "KeyR", altKey: false, ctrlKey: false, metaKey: false, shiftKey: true, isComposing: false, defaultPrevented: false };
   it("uses Shift + R with physical keys and unidentified keyboards", () => {

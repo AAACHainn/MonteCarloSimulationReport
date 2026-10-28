@@ -1,5 +1,6 @@
 "use client";
 import { useArrowPreferences } from "./use-arrow-preferences";
+import { useAbcdPreferences } from "./use-abcd-preferences";
 
 import { type AnnotationCoverage } from "@/lib/market-replay/advance-display";
 import { dateTimeLocalValue } from "@/lib/market-replay/start-time";
@@ -15,7 +16,7 @@ import type { ReplayChartDisplay } from "./replay-client-shared";
 import { useCallback, useEffect, useMemo, useRef, useState, useId } from "react";
 import type { CandlestickStyle } from "@/lib/market-replay/candlestick-style";
 import { useReplayShortcuts } from "@/components/market-replay/use-replay-shortcuts";
-import { createReplayStepShortcut } from "@/lib/market-replay/keyboard-shortcuts";
+import { createReplayStepShortcut, hasVisibleReplayDialog } from "@/lib/market-replay/keyboard-shortcuts";
 import { type DateTimePickerHandle } from "@/components/ui/date-time-picker";
 import { useTextDrawingEditor } from "./use-text-drawing-editor";
 import { useDrawingScopeGuard } from "./use-drawing-scope-guard";
@@ -95,7 +96,7 @@ export function useReplayCore({ dataset: initialDataset, initialJournalFocus = n
   const [startError, setStartError] = useState<string | null>(null);
   const [saveStatus, setSaveStatus] = useState<ReplaySaveStatus>("idle");
   const [confirmAction, setConfirmAction] = useState<"reset" | "paper-clear" | null>(null);
-  const [settingsDialog, setSettingsDialog] = useState<"candlesticks" | "indicators" | "paper" | "trade" | null>(null);
+  const [settingsDialog, setSettingsDialog] = useState<"candlesticks" | "indicators" | "paper" | null>(null);
   const [candlestickStyleDraft, setCandlestickStyleDraft] = useState<CandlestickStyle | null>(null);
   const [emaError, setEmaError] = useState<string | null>(null);
   const [abrError, setAbrError] = useState<string | null>(null);
@@ -156,6 +157,7 @@ export function useReplayCore({ dataset: initialDataset, initialJournalFocus = n
   const [rectangleStyleId, setRectangleStyleId] = useState<string | null>(null);
   const [arrowStyleId, setArrowStyleId] = useState<string | null>(null);
   const { arrowPreferences, setArrowPreferences } = useArrowPreferences();
+  const { abcdPreferences, setAbcdPreferences } = useAbcdPreferences();
   const [styleDrawingId, setStyleDrawingId] = useState<string | null>(null);
   const [styleDraft, setStyleDraft] = useState<TrendLineStyle | FibonacciRetracementStyle | null>(null);
   const [pendingDrawingIds, setPendingDrawingIds] = useState<Set<string>>(() => new Set());
@@ -173,7 +175,8 @@ export function useReplayCore({ dataset: initialDataset, initialJournalFocus = n
       if (
         event.key !== "Escape" || event.defaultPrevented || event.isComposing
         || drawingTool || selectedDrawingId || measurementArmed || draftActive
-        || document.querySelector("[role='dialog'], [role='alertdialog'], [role='menu'], [role='listbox'], [data-context-menu], [data-radix-popper-content-wrapper]")
+        || hasVisibleReplayDialog()
+        || document.querySelector("[role='menu'], [role='listbox'], [data-context-menu], [data-radix-popper-content-wrapper]")
       ) return;
       event.preventDefault();
       setWebFullscreen(false);
@@ -338,7 +341,7 @@ export function useReplayCore({ dataset: initialDataset, initialJournalFocus = n
     checkResolverRef, gateSeenRef, measurementArmed, setMeasurementArmed, drawingToolOpen, setDrawingToolOpen,
     drawingTool, setDrawingTool, drawings, setDrawings, clearingDrawings, setClearingDrawings,
     clearingDrawingsRef, drawingError, setDrawingError, selectedDrawingId, setSelectedDrawingId, drawingObjectsOpen,
-    setDrawingObjectsOpen, rectangleStyleId, setRectangleStyleId, arrowStyleId, setArrowStyleId, arrowPreferences, setArrowPreferences, styleDrawingId, setStyleDrawingId, styleDraft,
+    setDrawingObjectsOpen, rectangleStyleId, setRectangleStyleId, arrowStyleId, setArrowStyleId, arrowPreferences, setArrowPreferences, abcdPreferences, setAbcdPreferences, styleDrawingId, setStyleDrawingId, styleDraft,
     setStyleDraft, pendingDrawingIds, setPendingDrawingIds, candlestickStyle, setCandlestickStyle, emaEnabled,
     setEmaEnabled, emaIndicators, setEmaIndicators, emaSettingsLoaded, abrEnabled, setAbrEnabled,
     abrLength, setAbrLength, abrSettingsLoaded, gridVisible, setGridVisible, volumeVisible,

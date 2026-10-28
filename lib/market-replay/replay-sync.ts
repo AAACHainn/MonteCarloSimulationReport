@@ -210,7 +210,13 @@ export async function syncReplayToTarget(
     const actualSequence = processedBars.at(-1)?.sequence ?? (prop ? progress.currentSequence : input.targetSequence);
     if (prop && previousProp) {
       if (actualSequence === dataset.barCount - 1 && !prop.state.result && prop.state.pause === "NONE") prop.state.pause = "DATA_END";
-      await persistPropAccount(tx, prop, previousProp);
+      const liquidation = await persistPropAccount(tx, prop, previousProp);
+      if (liquidation) {
+        snapshotSession = liquidation.account;
+        snapshotGate = liquidation.trainingGate;
+        fills.push(...liquidation.fills);
+        historyChanged = true;
+      }
       previousProp = prop.state;
       await saveReplayCheckpoint(tx, actualSequence, 0, true);
     }

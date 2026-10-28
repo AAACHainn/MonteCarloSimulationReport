@@ -163,6 +163,8 @@ export function useReplayChartOrderInteractions(core: ReturnType<typeof useRepla
       const y = event.clientY - container.getBoundingClientRect().top;
       const activeDrag = dragging;
       if (!activeDrag) {
+        // The drawing tool owns the cursor until its placement is finished or cancelled.
+        if (drawingToolRef.current || drawingDraftRef.current || drawingPreviewRef.current) return;
         if (event.shiftKey || measurementArmedRef.current) {
           setChartCursor("crosshair");
           return;
@@ -200,7 +202,7 @@ export function useReplayChartOrderInteractions(core: ReturnType<typeof useRepla
         dragging = null; setChartCursor(""); syncLineActionCoordinates();
       }
     };
-    const leave = () => { if (!dragging) setChartCursor(measurementArmedRef.current ? "crosshair" : ""); };
+    const leave = () => { if (!dragging) setChartCursor(measurementArmedRef.current || drawingToolRef.current ? "crosshair" : ""); };
     interaction.addEventListener("pointerdown", down); interaction.addEventListener("pointermove", move);
     interaction.addEventListener("pointerup", finish); interaction.addEventListener("pointercancel", finish);
     interaction.addEventListener("pointerleave", leave); window.addEventListener("keydown", key);

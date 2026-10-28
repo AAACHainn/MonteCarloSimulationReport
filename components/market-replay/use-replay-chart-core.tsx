@@ -1,5 +1,7 @@
 "use client";
-import { isArrowDrawing, type ArrowDrawing } from "@/lib/market-replay/chart-drawings";
+import { DEFAULT_ABCD_STYLE, isArrowDrawing, type AbcdDrawing, type ArrowDrawing } from "@/lib/market-replay/chart-drawings";
+import { AbcdPrimitive, type AbcdPreview } from "@/lib/market-replay/abcd-primitive";
+import type { AbcdDraft } from "@/lib/market-replay/abcd-interaction";
 import { ArrowPrimitive, type ArrowDragPreview } from "@/lib/market-replay/arrow-primitive";
 
 import { captureReplayViewport, isReplayRangeFollowing, latestReplayLogicalIndex, type ReplayViewportMode } from "@/lib/market-replay/chart-range";
@@ -23,12 +25,13 @@ import { CandleCountdownPrimitive } from "@/lib/market-replay/candle-countdown-p
 import { chartBarsBeforeHiddenBoundary, type ChartHideAfter } from "@/lib/market-replay/chart-hide-after";
 import { DraftOrder, ContextMenuState, AbrTooltipState, LineTarget, LineAction, MeasurementState, DrawingDraft, DrawingSegmentCoordinate, sameLineActions } from "./replay-chart-shared";
 import type { ReplayChartProps } from "./replay-chart-shared";
+import { replayCrosshairVisible, resolveReplayCursor, type ReplayChartCursor } from "@/lib/market-replay/cursor-mode";
 
 export function useReplayChartCore({
-  datasetId, dataRevision = "", priceTickSize, bars, warmupBars, displayUtcOffsetMinutes, displayIntervalSeconds, measurementArmed,
+  datasetId, dataRevision = "", priceTickSize, bars, warmupBars, displayUtcOffsetMinutes, displayIntervalSeconds, measurementArmed, cursorMode = "crosshair",
   candlestickStyle, gridVisible = true, onToggleGrid,
   onMeasurementArmedChange, drawingTool, onDrawingToolChange, trendLineDraftStyle, fibonacciDraftStyle, rectangleDraftStyle, drawings, selectedDrawingId,
-  onSelectedDrawingIdChange, onCreateDrawing, onUpdateDrawing, onDeleteDrawing, onPlaceText, onPlaceArrow, drawingApiRef,
+  onSelectedDrawingIdChange, onCreateDrawing, onUpdateDrawing, onDeleteDrawing, onPlaceText, onPlaceArrow, onCreateAbcd, abcdDraftStyle = DEFAULT_ABCD_STYLE, drawingApiRef,
   onOpenDrawingStyle, viewportApiRef, viewportSnapshot = null, currentSourceSequence, liveWindow = true, emaEnabled, emaIndicators, abrEnabled, abrLength, volumeVisible,
   displaySession, barCountSession, barCountConfig, paperSnapshot,
   tradeAnnotations, tradeAnnotationsTruncated, focusSequence = null, onFocusApplied,
@@ -64,6 +67,11 @@ export function useReplayChartCore({
   const textPrimitiveRef = useRef<TextDrawingPrimitive | null>(null);
   const arrowPrimitiveRef = useRef<ArrowPrimitive | null>(null);
   const arrowDragRef = useRef<ArrowDragPreview | null>(null);
+  const abcdPrimitiveRef = useRef<AbcdPrimitive | null>(null);
+  const abcdDraftRef = useRef<AbcdDraft | null>(null);
+  const abcdPreviewRef = useRef<AbcdPreview | null>(null);
+  const abcdDraftStyleRef = useRef(abcdDraftStyle); abcdDraftStyleRef.current = abcdDraftStyle;
+  const onCreateAbcdRef = useRef(onCreateAbcd); onCreateAbcdRef.current = onCreateAbcd;
   const onPlaceArrowRef = useRef(onPlaceArrow); onPlaceArrowRef.current = onPlaceArrow;
   const textEditRef = useRef<TextEditPreview | null>(null);
   const textClicks = useRef<ReturnType<typeof createTextClickBridge> | null>(null);
@@ -142,19 +150,22 @@ export function useReplayChartCore({
   const fibonacciDraftStyleRef = useRef(fibonacciDraftStyle);
   fibonacciDraftStyleRef.current = fibonacciDraftStyle;
   const measurementArmedRef = useRef(measurementArmed);
+  const cursorModeRef = useRef(cursorMode);
+  cursorModeRef.current = cursorMode;
   const onMeasurementArmedChangeRef = useRef(onMeasurementArmedChange);
   const drawingToolRef = useRef(drawingTool);
   const drawingsRef = useRef(drawings);
   const drawingGroups = useMemo(() => {
-    const trend: TrendLineDrawing[] = [], fibonacci: FibonacciRetracementDrawing[] = [], rectangle: RectangleDrawing[] = [], text: TextDrawing[] = [], arrow: ArrowDrawing[] = [];
+    const trend: TrendLineDrawing[] = [], fibonacci: FibonacciRetracementDrawing[] = [], rectangle: RectangleDrawing[] = [], text: TextDrawing[] = [], arrow: ArrowDrawing[] = [], abcd: AbcdDrawing[] = [];
     for (const drawing of drawings) {
       if (drawing.type === DRAWING_TYPE_RECTANGLE) rectangle.push(drawing);
       else if (drawing.type === DRAWING_TYPE_TREND_LINE) trend.push(drawing);
       else if (drawing.type === DRAWING_TYPE_FIB_RETRACEMENT) fibonacci.push(drawing);
       else if (drawing.type === DRAWING_TYPE_TEXT) text.push(drawing);
       else if (isArrowDrawing(drawing)) arrow.push(drawing);
+      else if (drawing.type === "AB_CD") abcd.push(drawing);
     }
-    return { trend, fibonacci, rectangle, text, arrow };
+    return { trend, fibonacci, rectangle, text, arrow, abcd };
   }, [drawings]);
   const drawingGroupsRef = useRef(drawingGroups);
   drawingGroupsRef.current = drawingGroups;
@@ -281,6 +292,10 @@ export function useReplayChartCore({
         selectedDrawingId: selectedDrawingIdRef.current, edit: textEditRef.current, drag: textDragRef.current });
       arrowPrimitiveRef.current?.setDrawings({ drawings: drawingGroupsRef.current.arrow, timeline,
         selectedDrawingId: selectedDrawingIdRef.current, preview: arrowDragRef.current });
+      abcdPrimitiveRef.current?.setDrawings({ drawings: drawingGroupsRef.current.abcd, timeline,
+        selectedDrawingId: selectedDrawingIdRef.current, preview: abcdPreviewRef.current,
+        draft: drawingToolRef.current === "AB_CD" ? abcdDraftRef.current : null,
+        draftStyle: abcdDraftStyleRef.current, priceTickSize: priceTickSizeRef.current });
       const position = textPositionRef.current;
       if (position) {
         const chart = chartRef.current, series = candleRef.current, host = interactionRef.current;
@@ -306,16 +321,25 @@ export function useReplayChartCore({
     },
   }), [syncDrawingPrimitive]);
 
-  const setChartCursor = useCallback((cursor: "" | "crosshair" | "ns-resize" | "move" | "pointer") => {
+  const setChartCursor = useCallback((cursor: ReplayChartCursor) => {
     const container = containerRef.current;
     if (!container) return;
-    container.style.cursor = cursor;
-    container.querySelectorAll("canvas").forEach((canvas) => { canvas.style.cursor = cursor; });
+    const resolved = resolveReplayCursor(cursorModeRef.current, cursor);
+    container.style.cursor = resolved;
+    container.querySelectorAll("canvas").forEach((canvas) => { canvas.style.cursor = resolved; });
+  }, []);
+
+  const restoreCrosshair = useCallback(() => {
+    const visible = replayCrosshairVisible(Boolean(measurementRef.current));
+    chartRef.current?.applyOptions({ crosshair: {
+      vertLine: { visible, labelVisible: visible }, horzLine: { visible, labelVisible: visible },
+    } });
   }, []);
 
   useEffect(() => {
+    if (drawingTool !== "AB_CD") abcdDraftRef.current = null;
     syncDrawingPrimitive();
-  }, [drawings, selectedDrawingId, syncDrawingPrimitive]);
+  }, [drawingTool, drawings, selectedDrawingId, abcdDraftStyle, syncDrawingPrimitive]);
 
   const syncMeasurementCoordinates = useCallback(() => {
     const chart = chartRef.current;
@@ -338,12 +362,7 @@ export function useReplayChartCore({
       setMeasurement(null);
       measurementArmedRef.current = false;
       onMeasurementArmedChangeRef.current(false);
-      chart.applyOptions({
-        crosshair: {
-          vertLine: { visible: true, labelVisible: true },
-          horzLine: { visible: true, labelVisible: true },
-        },
-      });
+      restoreCrosshair();
       setChartCursor("");
       return;
     }
@@ -372,7 +391,7 @@ export function useReplayChartCore({
     };
     measurementRef.current = next;
     setMeasurement(next);
-  }, [setChartCursor]);
+  }, [restoreCrosshair, setChartCursor]);
 
   const syncVisibleSequenceRange = useCallback(() => {
     const chart = chartRef.current;
@@ -477,7 +496,7 @@ export function useReplayChartCore({
     containerRef, interactionRef, orderTicketRef, orderTicketDragRef, chartRef, candleRef,
     volumeRef, priceLinesRef, lineTargetsRef, tradeAnnotationPrimitiveRef, barCountPrimitiveRef, candleCountdownPrimitiveRef,
     rectanglePrimitiveRef, trendLinePrimitiveRef, fibonacciPrimitiveRef, textPrimitiveRef, textEditRef, textClicks,
-    arrowPrimitiveRef, arrowDragRef, onPlaceArrowRef,
+    arrowPrimitiveRef, arrowDragRef, onPlaceArrowRef, abcdPrimitiveRef, abcdDraftRef, abcdPreviewRef, onCreateAbcdRef,
     textPositionRef, textDragRef, onPlaceTextRef, lastDataRef, lastDataRevisionRef, lastHiddenAfterRef,
     lastDataIntervalRef, lastDataSessionRef, displaySessionRef, barsRef, timelineBarsRef, projectionBars,
     projectionBarsRef, drawingTimelineRef, drawingScopeRef, drawingFrameRef, drawingSessionRef, requestedDrawingSessionRef,
@@ -490,9 +509,9 @@ export function useReplayChartCore({
     setRiskPreferences, riskSettingsOpen, setRiskSettingsOpen, defaultSaved, setDefaultSaved, draftError,
     setDraftError, lineActions, setLineActions, hasVolume, warmupBarsRef, abrLengthRef,
     latest, currentPrice, currentPriceRef, displayUtcOffsetRef, onOrderPriceChangeRef, hasPendingClose,
-    syncLineActionCoordinates, syncDrawingPrimitive, setChartCursor, syncMeasurementCoordinates, syncVisibleSequenceRange, datasetId,
+    syncLineActionCoordinates, syncDrawingPrimitive, setChartCursor, restoreCrosshair, syncMeasurementCoordinates, syncVisibleSequenceRange, datasetId,
     dataRevision, priceTickSize, bars, warmupBars, displayUtcOffsetMinutes, displayIntervalSeconds,
-    measurementArmed, candlestickStyle, gridVisible, onToggleGrid, drawingTool, trendLineDraftStyle,
+    measurementArmed, cursorMode, candlestickStyle, gridVisible, onToggleGrid, drawingTool, trendLineDraftStyle,
     fibonacciDraftStyle, rectangleDraftStyle, emaEnabled, emaIndicators, abrEnabled, abrLength,
     volumeVisible, displaySession, barCountSession, barCountConfig, paperSnapshot, tradeAnnotations,
     tradeAnnotationsTruncated, focusSequence, tradeAnnotationsVisible, candleCountdownEnabled, playbackActive, currentSourceTimestamp,

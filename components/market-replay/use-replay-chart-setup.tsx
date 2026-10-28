@@ -1,5 +1,6 @@
 "use client";
 import { ArrowPrimitive } from "@/lib/market-replay/arrow-primitive";
+import { AbcdPrimitive } from "@/lib/market-replay/abcd-primitive";
 
 import { syncPriceLine } from "@/lib/market-replay/price-lines";
 import { canUpdateReplayTail, formatChartTick, chartCandleData as candle, chartVolumeData as volume } from "@/lib/market-replay/chart-data";
@@ -30,12 +31,12 @@ export function useReplayChartSetup(core: ReturnType<typeof useReplayChartCore>)
     visibilityScope, hiddenAfter, visibleBars, visibleWarmupBars, containerRef, chartRef,
     candleRef, volumeRef, priceLinesRef, lineTargetsRef, tradeAnnotationPrimitiveRef, barCountPrimitiveRef,
     candleCountdownPrimitiveRef, rectanglePrimitiveRef, trendLinePrimitiveRef, fibonacciPrimitiveRef, textPrimitiveRef, textEditRef,
-    textPositionRef, textDragRef, arrowPrimitiveRef, arrowDragRef, lastDataRef, lastDataRevisionRef, lastHiddenAfterRef, lastDataIntervalRef,
+    textPositionRef, textDragRef, arrowPrimitiveRef, arrowDragRef, abcdPrimitiveRef, abcdDraftRef, abcdPreviewRef, lastDataRef, lastDataRevisionRef, lastHiddenAfterRef, lastDataIntervalRef,
     lastDataSessionRef, displaySessionRef, barsRef, timelineBarsRef, projectionBars, projectionBarsRef,
     drawingScopeRef, drawingFrameRef, drawingSessionRef, requestedDrawingSessionRef, onFocusAppliedRef, tradeAnnotationsRef,
     tradeAnnotationsVisibleRef, candlestickStyleRef, displayIntervalSecondsRef, requestedDisplayIntervalSecondsRef, gridVisibleRef, draft,
     setLineActions, hasVolume, currentPriceRef, displayUtcOffsetRef, syncLineActionCoordinates, syncDrawingPrimitive,
-    syncMeasurementCoordinates, syncVisibleSequenceRange, dataRevision, priceTickSize, bars,
+    syncMeasurementCoordinates, syncVisibleSequenceRange, restoreCrosshair, setChartCursor, dataRevision, priceTickSize, bars,
     displayUtcOffsetMinutes, displayIntervalSeconds, candlestickStyle, gridVisible, trendLineDraftStyle, fibonacciDraftStyle,
     rectangleDraftStyle, emaEnabled, emaIndicators, volumeVisible, displaySession, barCountSession,
     barCountConfig, paperSnapshot, tradeAnnotations, focusSequence, tradeAnnotationsVisible, candleCountdownEnabled,
@@ -64,6 +65,7 @@ export function useReplayChartSetup(core: ReturnType<typeof useReplayChartCore>)
       crosshair: { mode: CrosshairMode.Normal },
       localization: { locale: "zh-CN", timeFormatter: (time: Time) => typeof time === "number" ? formatUtcDateTime(time * 1_000, displayUtcOffsetRef.current) : String(time) },
       timeScale: {
+        borderColor: "#e2e8f0",
         timeVisible: true,
         secondsVisible: true,
         rightOffset: 4,
@@ -82,6 +84,7 @@ export function useReplayChartSetup(core: ReturnType<typeof useReplayChartCore>)
     const fibonacciPrimitive = new FibonacciRetracementPrimitive();
     const textPrimitive = new TextDrawingPrimitive();
     const arrowPrimitive = new ArrowPrimitive();
+    const abcdPrimitive = new AbcdPrimitive();
     const tradeAnnotationPrimitive = new ReplayTradeAnnotationPrimitive();
     const barCountPrimitive = new BarCountPrimitive();
     const candleCountdownPrimitive = new CandleCountdownPrimitive();
@@ -91,6 +94,7 @@ export function useReplayChartSetup(core: ReturnType<typeof useReplayChartCore>)
     candles.attachPrimitive(fibonacciPrimitive);
     candles.attachPrimitive(textPrimitive);
     candles.attachPrimitive(arrowPrimitive);
+    candles.attachPrimitive(abcdPrimitive);
     candles.attachPrimitive(tradeAnnotationPrimitive);
     candles.attachPrimitive(barCountPrimitive);
     candles.attachPrimitive(candleCountdownPrimitive);
@@ -134,11 +138,14 @@ export function useReplayChartSetup(core: ReturnType<typeof useReplayChartCore>)
     chart.timeScale().subscribeVisibleLogicalRangeChange(syncTextPosition);
     container.addEventListener("wheel", syncTextPosition, { passive: true });
     chartRef.current = chart; candleRef.current = candles; volumeRef.current = null;
+    restoreCrosshair();
+    setChartCursor("");
     rectanglePrimitiveRef.current = rectanglePrimitive;
     trendLinePrimitiveRef.current = trendLinePrimitive;
     fibonacciPrimitiveRef.current = fibonacciPrimitive;
     textPrimitiveRef.current = textPrimitive;
     arrowPrimitiveRef.current = arrowPrimitive;
+    abcdPrimitiveRef.current = abcdPrimitive;
     tradeAnnotationPrimitiveRef.current = tradeAnnotationPrimitive;
     barCountPrimitiveRef.current = barCountPrimitive;
     candleCountdownPrimitiveRef.current = candleCountdownPrimitive;
@@ -165,6 +172,8 @@ export function useReplayChartSetup(core: ReturnType<typeof useReplayChartCore>)
       candles.detachPrimitive(fibonacciPrimitive);
       candles.detachPrimitive(textPrimitive);
       candles.detachPrimitive(arrowPrimitive);
+      candles.detachPrimitive(abcdPrimitive);
+      abcdPrimitiveRef.current = null; abcdDraftRef.current = null; abcdPreviewRef.current = null;
       arrowPrimitiveRef.current = null; arrowDragRef.current = null;
       candles.detachPrimitive(tradeAnnotationPrimitive);
       candles.detachPrimitive(barCountPrimitive);
@@ -179,7 +188,7 @@ export function useReplayChartSetup(core: ReturnType<typeof useReplayChartCore>)
       chart.remove(); chartRef.current = null; candleRef.current = null; volumeRef.current = null;
       priceLines.clear(); lineTargets.clear(); lastDataRef.current = [];
     };
-  }, [arrowPrimitiveRef, arrowDragRef, priceTickSize, syncDrawingPrimitive, syncLineActionCoordinates, syncMeasurementCoordinates, syncVisibleSequenceRange, barCountPrimitiveRef, barsRef, candleCountdownPrimitiveRef, candleRef, candlestickStyleRef, chartRef, containerRef, displayUtcOffsetRef, drawingFrameRef, fibonacciPrimitiveRef, gridVisibleRef, lastDataRef, lineTargetsRef, priceLinesRef, rectanglePrimitiveRef, textDragRef, textEditRef, textPositionRef, textPrimitiveRef, tradeAnnotationPrimitiveRef, tradeAnnotationsRef, tradeAnnotationsVisibleRef, trendLinePrimitiveRef, volumeRef, viewportGestureRef]);
+  }, [abcdPrimitiveRef, abcdDraftRef, abcdPreviewRef, arrowPrimitiveRef, arrowDragRef, priceTickSize, restoreCrosshair, setChartCursor, syncDrawingPrimitive, syncLineActionCoordinates, syncMeasurementCoordinates, syncVisibleSequenceRange, barCountPrimitiveRef, barsRef, candleCountdownPrimitiveRef, candleRef, candlestickStyleRef, chartRef, containerRef, displayUtcOffsetRef, drawingFrameRef, fibonacciPrimitiveRef, gridVisibleRef, lastDataRef, lineTargetsRef, priceLinesRef, rectanglePrimitiveRef, textDragRef, textEditRef, textPositionRef, textPrimitiveRef, tradeAnnotationPrimitiveRef, tradeAnnotationsRef, tradeAnnotationsVisibleRef, trendLinePrimitiveRef, volumeRef, viewportGestureRef]);
 
   useEffect(() => {
     chartRef.current?.applyOptions({

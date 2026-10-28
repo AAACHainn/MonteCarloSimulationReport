@@ -168,6 +168,15 @@ export function observeProp(r: PropRules, before: PropState, observation: Observ
   return s;
 }
 
+/** Record the completed forced close while preserving the original breach evidence and failed outcome. */
+export function settlePropLiquidation(r: PropRules, before: PropState, observation: Observation): PropState {
+  if (before.result !== "FAILED" || before.last?.sequence !== observation.sequence || !observation.flat || observation.pending !== 0) {
+    throw new Error("Liquidation must complete the failed source observation.");
+  }
+  const updated = observeProp(r, { ...before, result: null }, observation);
+  return { ...updated, result: "FAILED", failure: before.failure };
+}
+
 /** EOD is final only once flat, or before the next actual day's first source candle. */
 export function settlePropDay(r: PropRules, before: PropState): PropState {
   const s = copyState(before), o = s.last;

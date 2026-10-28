@@ -14,6 +14,17 @@ export async function executeCurrentPriceClose(
   bar: MarketBarData,
   orderId: string,
 ) {
+  return (await executeCurrentPriceCloseResult(tx, account, generation, bar, orderId)).account;
+}
+
+/** Also return executions for callers composing an authoritative replay response. */
+export async function executeCurrentPriceCloseResult(
+  tx: Prisma.TransactionClient,
+  account: PaperTradingSession,
+  generation: number,
+  bar: MarketBarData,
+  orderId: string,
+) {
   account = await ensurePaperTradeStats(account, tx) as PaperTradingSession;
   if (getReplayScope()?.mode === "TRAINING") await hydrateTrainingLots(tx, account.id);
   const [orders, lots] = await Promise.all([
@@ -36,5 +47,5 @@ export async function executeCurrentPriceClose(
     where: { sessionId_sequence: { sessionId: account.id, sequence: bar.sequence } },
     create: { ...point, sessionId: account.id }, update: point,
   });
-  return updated;
+  return { account: updated, result };
 }

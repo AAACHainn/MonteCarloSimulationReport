@@ -47,7 +47,7 @@ export async function resetPropAccount(input: { expectedVersion: number; expecte
     try { state = resetPropState(propRulesSchema.parse(snapshot.rules), previous, owner.progress.currentSequence + 1); }
     catch { throw new ReplaySessionError("PROP_RESET_INVALID", 409, copy.propPractice.resetUnavailable); }
     const oldAccount = await tx.paperTradingSession.findUniqueOrThrow({ where: { projectionId: scope.projectionId } });
-    // Keep the entire old execution result, including unclosed lots and pending orders.
+    // Keep the entire old execution result, including the automatic failure close and cancelled orders.
     await tx.propPracticeRound.update({ where: { replaySessionId_number: { replaySessionId: scope.id, number: prop.roundNumber } },
       data: { state: prop.state, trainingGate: owner.trainingGate, endSequence: owner.progress.currentSequence, endedAt: new Date() } });
     await tx.replayProjection.update({ where: { id: scope.projectionId }, data: { status: `ROUND_${prop.roundNumber}` } });

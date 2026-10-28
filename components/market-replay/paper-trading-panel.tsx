@@ -33,6 +33,7 @@ type OrderInput = {
 };
 
 type Props = {
+  embedded?: boolean;
   priceTickSize: number;
   snapshot: PaperSessionSnapshot;
   currentBar: MarketBarData | null;
@@ -117,7 +118,7 @@ export function PaperAccountMetrics({ snapshot, compact = false, includeBalances
   );
 }
 
-export function PaperTradingPanel({ priceTickSize, snapshot, currentBar, busy, error, onSubmit, onCancel, onUpdate, onCancelScope }: Props) {
+export function PaperTradingPanel({ embedded = false, priceTickSize, snapshot, currentBar, busy, error, onSubmit, onCancel, onUpdate, onCancelScope }: Props) {
   const [side, setSide] = useState<PaperSide>("BUY");
   const [type, setType] = useState<PaperOrderType>("MARKET");
   const [inputQuantity, setInputQuantity] = useState(1);
@@ -125,9 +126,9 @@ export function PaperTradingPanel({ priceTickSize, snapshot, currentBar, busy, e
 
   const quantity = Math.abs(snapshot.session.netQuantity);
   return (
-    <Card className="h-fit">
-      <CardHeader className="pb-3"><CardTitle className="text-lg">{copy.paperTrading.title}</CardTitle><CardDescription>{copy.paperTrading.nextOpenHint}</CardDescription></CardHeader>
-      <CardContent className="space-y-4">
+    <Card className={embedded ? "h-fit border-0 shadow-none" : "h-fit"}>
+      <CardHeader className={embedded ? "px-0 pb-3 pt-0" : "pb-3"}>{!embedded ? <CardTitle className="text-lg">{copy.paperTrading.title}</CardTitle> : null}<CardDescription>{copy.paperTrading.nextOpenHint}</CardDescription></CardHeader>
+      <CardContent className={embedded ? "space-y-4 px-0 pb-0" : "space-y-4"}>
         <form className="space-y-3" onSubmit={(event) => {
           event.preventDefault(); const data = new FormData(event.currentTarget);
           const price = optionalNumber(data.get("price")); const stopLoss = optionalNumber(data.get("stopLoss")); const takeProfit = optionalNumber(data.get("takeProfit"));
@@ -144,16 +145,16 @@ export function PaperTradingPanel({ priceTickSize, snapshot, currentBar, busy, e
         </form>
         {quantity > 0 ? <div className="grid grid-cols-2 gap-2 border-t pt-3"><Button type="button" variant="outline" disabled={busy} onClick={() => void onSubmit({ side: snapshot.session.netQuantity > 0 ? "SELL" : "BUY", type: "MARKET", quantity, price: null, stopLoss: null, takeProfit: null, reduceOnly: true })}>{copy.paperTrading.closePosition}</Button><Button type="button" variant="outline" disabled={busy} onClick={() => void onSubmit({ side: snapshot.session.netQuantity > 0 ? "SELL" : "BUY", type: "MARKET", quantity: quantity * 2, price: null, stopLoss: null, takeProfit: null })}>{copy.paperTrading.reversePosition}</Button></div> : null}
         <div className="grid grid-cols-2 gap-2"><Button type="button" variant="ghost" size="sm" onClick={() => void onCancelScope("ALL")}>{copy.paperTrading.cancelAll}</Button><Button type="button" variant="ghost" size="sm" onClick={() => void onCancelScope("BRACKET")}>{copy.paperTrading.cancelBracket}</Button></div>
-        <ActiveOrders priceTickSize={priceTickSize} orders={snapshot.activeOrders} busy={busy} onCancel={onCancel} onUpdate={onUpdate} />
+        <ActiveOrders embedded={embedded} priceTickSize={priceTickSize} orders={snapshot.activeOrders} busy={busy} onCancel={onCancel} onUpdate={onUpdate} />
       </CardContent>
     </Card>
   );
 }
 
-function ActiveOrders({ priceTickSize, orders, busy, onCancel, onUpdate }: { priceTickSize: number; orders: PaperOrderData[]; busy: boolean; onCancel: Props["onCancel"]; onUpdate: Props["onUpdate"] }) {
+function ActiveOrders({ embedded, priceTickSize, orders, busy, onCancel, onUpdate }: { embedded: boolean; priceTickSize: number; orders: PaperOrderData[]; busy: boolean; onCancel: Props["onCancel"]; onUpdate: Props["onUpdate"] }) {
   const [openId, setOpenId] = useState<string | null>(null);
   if (!orders.length) return <p className="rounded-md border border-dashed p-3 text-xs text-slate-500">{copy.paperTrading.noOrders}</p>;
-  return <div className="space-y-2 border-t pt-3">{orders.map((order) => <div key={order.id} className="rounded-md border bg-slate-50 p-2 text-xs"><div className="flex items-center justify-between gap-2"><div><span className={order.side === "BUY" ? "font-medium text-emerald-700" : "font-medium text-red-700"}>{order.side === "BUY" ? copy.paperTrading.buy : copy.paperTrading.sell}</span> · {order.isProtective ? copy.paperTrading.protective : orderTypeLabel(order.type)} · {number(order.quantity, 8)} {order.price == null ? "" : `@ ${number(order.price, 8)}`}</div><button type="button" onClick={() => setOpenId(openId === order.id ? null : order.id)} aria-label={copy.paperTrading.edit}>{openId === order.id ? <ChevronUp className="h-4 w-4" /> : <ChevronDown className="h-4 w-4" />}</button></div>{openId === order.id ? <form className="mt-2 grid grid-cols-[1fr_1fr_auto_auto] gap-1" onSubmit={(event) => { event.preventDefault(); const data = new FormData(event.currentTarget); void onUpdate(order.id, { ...(order.isProtective ? {} : { quantity: Number(data.get("quantity")) }), ...(order.price == null ? {} : { price: snapPriceToTick(Number(data.get("price")), priceTickSize) }) }); setOpenId(null); }}>{order.isProtective ? <span /> : <Input name="quantity" type="number" step="any" defaultValue={order.quantity} className="h-8" />}{order.price == null ? <span /> : <Input name="price" type="number" step={priceTickSize} defaultValue={order.price} className="h-8" />}<Button type="submit" size="sm" disabled={busy}>{copy.paperTrading.save}</Button><Button type="button" variant="ghost" size="sm" disabled={busy} onClick={() => void onCancel(order.id)}>{copy.paperTrading.cancel}</Button></form> : null}</div>)}</div>;
+  return <div className="space-y-2 border-t pt-3">{orders.map((order) => <div key={order.id} className="rounded-md border bg-slate-50 p-2 text-xs"><div className="flex items-center justify-between gap-2"><div><span className={order.side === "BUY" ? "font-medium text-emerald-700" : "font-medium text-red-700"}>{order.side === "BUY" ? copy.paperTrading.buy : copy.paperTrading.sell}</span> · {order.isProtective ? copy.paperTrading.protective : orderTypeLabel(order.type)} · {number(order.quantity, 8)} {order.price == null ? "" : `@ ${number(order.price, 8)}`}</div><button type="button" onClick={() => setOpenId(openId === order.id ? null : order.id)} aria-label={copy.paperTrading.edit}>{openId === order.id ? <ChevronUp className="h-4 w-4" /> : <ChevronDown className="h-4 w-4" />}</button></div>{openId === order.id ? <form className={embedded ? "mt-2 grid grid-cols-2 gap-1" : "mt-2 grid grid-cols-[minmax(0,1fr)_minmax(0,1fr)_auto_auto] gap-1"} onSubmit={(event) => { event.preventDefault(); const data = new FormData(event.currentTarget); void onUpdate(order.id, { ...(order.isProtective ? {} : { quantity: Number(data.get("quantity")) }), ...(order.price == null ? {} : { price: snapPriceToTick(Number(data.get("price")), priceTickSize) }) }); setOpenId(null); }}>{order.isProtective ? <span /> : <Input name="quantity" type="number" step="any" defaultValue={order.quantity} className="h-8" />}{order.price == null ? <span /> : <Input name="price" type="number" step={priceTickSize} defaultValue={order.price} className="h-8" />}<Button type="submit" size="sm" disabled={busy}>{copy.paperTrading.save}</Button><Button type="button" variant="ghost" size="sm" disabled={busy} onClick={() => void onCancel(order.id)}>{copy.paperTrading.cancel}</Button></form> : null}</div>)}</div>;
 }
 
 export function PaperTradingDetails({ snapshot, onFocusJournalEntry }: { snapshot: PaperSessionSnapshot | null; onFocusJournalEntry?: (entry: ReplayJournalEntryData) => void }) {

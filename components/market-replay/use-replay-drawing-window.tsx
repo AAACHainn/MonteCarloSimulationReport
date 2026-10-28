@@ -1,5 +1,5 @@
 "use client";
-import { isArrowDrawing, isArrowDrawingType, type ArrowDrawingType, type ArrowGeometry } from "@/lib/market-replay/chart-drawings";
+import { isArrowDrawing, isArrowDrawingType, type AbcdGeometry, type ArrowDrawingType, type ArrowGeometry } from "@/lib/market-replay/chart-drawings";
 
 import type { ReplayViewportSnapshot } from "@/lib/market-replay/chart-range";
 import { canReuseAnnotations } from "@/lib/market-replay/advance-display";
@@ -34,7 +34,7 @@ export function useReplayDrawingWindow(core: ReturnType<typeof useReplayCore>) {
     setDrawingToolOpen, setDrawingTool, drawings, setDrawings, setClearingDrawings, clearingDrawingsRef,
     setDrawingError, setSelectedDrawingId, setDrawingObjectsOpen, setRectangleStyleId, setArrowStyleId, arrowPreferences, styleDrawingId, setStyleDrawingId,
     styleDraft, setStyleDraft, pendingDrawingIds, setPendingDrawingIds, emaSettingsLoaded, abrSettingsLoaded,
-    chartVisibility, setChartVisibility, defaultRectangleStyle, defaultTrendLineStyle, defaultFibonacciStyle, openTextDrawing,
+    chartVisibility, setChartVisibility, abcdPreferences, defaultRectangleStyle, defaultTrendLineStyle, defaultFibonacciStyle, openTextDrawing,
     finishText, discardText, requestTextSettings, drawingWriteScope, drawingScopeGuard, drawingsLive,
     indicatorWarmupCountRef, marketSession, marketCache,
     getDisplayCache, windowCache, barsRef, warmupBarsRef, playbackDisplayRef, currentSourceBarRef, viewChangingRef,
@@ -90,11 +90,12 @@ export function useReplayDrawingWindow(core: ReturnType<typeof useReplayCore>) {
   const armTrendLine = useCallback(() => armDrawing(DRAWING_TYPE_TREND_LINE), [armDrawing]);
   const armFibonacciRetracement = useCallback(() => armDrawing(DRAWING_TYPE_FIB_RETRACEMENT), [armDrawing]);
 
-  const createDrawing = useCallback(async (type: TwoPointDrawingTool | ArrowDrawingType, geometry: TrendLineGeometry | ArrowGeometry) => runDrawingWrite(drawingWriteScope, async () => {
+  const createDrawing = useCallback(async (type: TwoPointDrawingTool | ArrowDrawingType | "AB_CD", geometry: TrendLineGeometry | ArrowGeometry | AbcdGeometry) => runDrawingWrite(drawingWriteScope, async () => {
     if (clearingDrawingsRef.current) return;
     const temporaryId = createLocalDrawingId("temporary");
     const now = new Date().toISOString();
     const style = isArrowDrawingType(type) ? { ...arrowPreferences[type].defaultStyle }
+      : type === "AB_CD" ? cloneFibonacciStyle(abcdPreferences.defaultStyle)
       : type === DRAWING_TYPE_RECTANGLE ? { ...defaultRectangleStyle } : type === DRAWING_TYPE_TREND_LINE
       ? { ...defaultTrendLineStyle }
       : cloneFibonacciStyle(defaultFibonacciStyle);
@@ -122,7 +123,7 @@ export function useReplayDrawingWindow(core: ReturnType<typeof useReplayCore>) {
     } finally {
       setDrawingPending(temporaryId, false);
     }
-  }), [dataset.id, drawingWriteScope, arrowPreferences, defaultRectangleStyle, defaultFibonacciStyle, defaultTrendLineStyle, setDrawingPending, fetch, clearingDrawingsRef, setDrawingError, setDrawings, setSelectedDrawingId]);
+  }), [dataset.id, drawingWriteScope, arrowPreferences, abcdPreferences, defaultRectangleStyle, defaultFibonacciStyle, defaultTrendLineStyle, setDrawingPending, fetch, clearingDrawingsRef, setDrawingError, setDrawings, setSelectedDrawingId]);
 
   const updateDrawing = useCallback(async (
     id: string,

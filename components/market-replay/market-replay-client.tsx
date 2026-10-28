@@ -1,6 +1,6 @@
 "use client";
-import { ArrowBigDown, ArrowBigUp } from "lucide-react";
-import { ArrowSettingsDialog, ArrowToolOptions } from "./arrow-controls";
+import { ArrowBigDown, ArrowBigUp, Waypoints } from "lucide-react";
+import { ArrowSettingsDialog } from "./arrow-controls";
 import { isArrowDrawing } from "@/lib/market-replay/chart-drawings";
 
 import { UserContextHeader } from "@/components/user-growth/user-context-header";
@@ -15,10 +15,13 @@ import { ReplayCorrectionProvider } from "./replay-correction-context";
 import { ReplayCorrectionDialog } from "./replay-correction-dialog";
 import Link from "next/link";
 import { TrainingGateConfigDialog, EntryCheckDialog } from "./training-gate-dialogs";
-import { type ReactNode } from "react";
+import { useState, type ReactNode } from "react";
 import { Breadcrumbs } from "@/components/breadcrumbs";
-import { Square, BookOpen, ListTree, Loader2, Palette, RotateCcw, Ruler, Settings2, Trash2, TrendingUp, WalletCards, X } from "lucide-react";
-import * as Popover from "@radix-ui/react-popover";
+import { Square, BookOpen, ListTree, Loader2, Palette, PanelRight, RotateCcw, Settings2, Trash2, TrendingUp, WalletCards, X } from "lucide-react";
+import { ReplayDrawingToolbar } from "./replay-drawing-toolbar";
+import { ResizableTradePanel } from "./resizable-trade-panel";
+import { useReplayCursorPreference } from "./use-replay-cursor-preference";
+import type { ReplayCursorMode } from "@/lib/market-replay/cursor-mode";
 import { ReplayChart } from "@/components/market-replay/replay-chart";
 import { ReplayAutoPauseNotice } from "@/components/market-replay/replay-auto-pause-notice";
 import { IndicatorSettingsDialog } from "@/components/market-replay/indicator-settings-dialog";
@@ -27,7 +30,8 @@ import { ReplayStartDialog } from "@/components/market-replay/replay-start-dialo
 import { ChartVisibilityMenu } from "@/components/market-replay/chart-visibility-menu";
 import { PaperAccountStrip, PaperTradingPanel } from "@/components/market-replay/paper-trading-panel";
 import { ReplayPlaybackBar } from "@/components/market-replay/replay-playback-bar";
-import { RectangleSettingsDialog, RectangleToolOption } from "./rectangle-controls";
+import { RectangleSettingsDialog } from "./rectangle-controls";
+import { AbcdSettingsDialog } from "./abcd-settings-dialog";
 import { LineSettingsDialog } from "./line-settings-dialog";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { Button } from "@/components/ui/button";
@@ -42,12 +46,12 @@ import { copy } from "@/lib/i18n";
 import { formatMoney, formatNumber } from "@/lib/format";
 import { funds } from "@/lib/prop-practice/rules";
 import { Type as TextIcon } from "lucide-react";
-import { TextSettingsDialog, TextToolOption } from "./text-settings-dialog";
+import { TextSettingsDialog } from "./text-settings-dialog";
 import { runDrawingWrite } from "@/lib/market-replay/drawing-write-queue";
 import { deleteTextDrawing, persistTextDrawing } from "@/lib/market-replay/text-persistence";
 import { drawingObjectName, drawingObjectColor, drawingSettingsLabel, drawingDeleteLabel } from "@/lib/market-replay/drawing-presentation";
 import { UTC_OFFSET_OPTIONS, formatUtcOffset } from "@/lib/market-replay/display-timezone";
-import { type DisplaySession } from "@/lib/market-replay/types";
+import { formatInterval, type DisplaySession } from "@/lib/market-replay/types";
 import { DRAWING_TYPE_FIB_RETRACEMENT, DRAWING_TYPE_TREND_LINE, DRAWING_TYPE_RECTANGLE, DRAWING_TYPE_TEXT, type FibonacciRetracementStyle, type TrendLineStyle } from "@/lib/market-replay/chart-drawings";
 import { cloneFibonacciStyle, formatDatasetTime } from "./replay-client-shared";
 import type { JournalFocus } from "./replay-client-shared";
@@ -58,6 +62,8 @@ import { useReplayEngine } from "./use-replay-engine";
 import { useReplayActions } from "./use-replay-actions";
 
 export function MarketReplayClient({ dataset: initialDataset, initialJournalFocus = null }: { dataset: MarketDatasetSummary; initialJournalFocus?: JournalFocus | null }) {
+  const [cursorMode, setCursorMode] = useReplayCursorPreference();
+  const [tradePanelOpen, setTradePanelOpen] = useState(false);
   const core = useReplayCore({ dataset: initialDataset, initialJournalFocus });
   const drawingWindow = useReplayDrawingWindow(core);
   const engine = useReplayEngine(core, drawingWindow);
@@ -65,7 +71,7 @@ export function MarketReplayClient({ dataset: initialDataset, initialJournalFocu
   const {
     fetch, replaySession, dateDialogOpen, setDateDialogOpen, dateDialogOpening, dateDialogMinimum,
     dateForwarding, forwardProgress, cancelForwardRef, correctionTarget, setCorrectionTarget, correctionPending,
-    setCorrectionPending, dataset, retrying, shortcuts, webFullscreen, setWebFullscreen,
+    setCorrectionPending, dataset, retrying, webFullscreen, setWebFullscreen,
     bars, chartDataRevision, chartDisplay, chartViewportRef, chartWindowDetachedRef, warmupBars, currentSourceBar, isLoading, loadError,
     setLoadError, replay, autoPauseEvent, restorePlayback, dismissAutoPause, wantsPlayback,
     startPickerRef, startValue, setStartValue, startDialogOpen, startDialogValue, setStartDialogValue,
@@ -74,7 +80,7 @@ export function MarketReplayClient({ dataset: initialDataset, initialJournalFocu
     repairInterval, setRepairInterval, paperSnapshot, tradeAnnotations, tradeAnnotationsTruncated, paperBusy,
     paperError, growthNotice, growthNoticeKey, journalReview, chartFocusSequence, setChartFocusSequence, reviewReturning, draftActive,
     setDraftActive, gateDialogOpen, setGateDialogOpen, gateBusy, gateError, checkingOrder,
-    entryCheckDraft, setEntryCheckDraft, measurementArmed, setMeasurementArmed, drawingToolOpen, setDrawingToolOpen,
+    entryCheckDraft, setEntryCheckDraft, measurementArmed, setMeasurementArmed,
     drawingTool, setDrawingTool, drawings, setDrawings, clearingDrawings, drawingError,
     selectedDrawingId, setSelectedDrawingId, drawingObjectsOpen, setDrawingObjectsOpen, rectangleStyleId, setRectangleStyleId,
     styleDrawingId, setStyleDrawingId, styleDraft, setStyleDraft, pendingDrawingIds, candlestickStyle,
@@ -83,11 +89,11 @@ export function MarketReplayClient({ dataset: initialDataset, initialJournalFocu
     candleCountdownEnabled, setCandleCountdownEnabled, barCountConfig, setBarCountConfig, chartVisibility, defaultRectangleStyle,
     setDefaultRectangleStyle, rectangleTemplates, setRectangleTemplates, arrowStyleId, setArrowStyleId, arrowPreferences, setArrowPreferences, setDefaultTextStyle, textTemplates, setTextTemplates,
     defaultTrendLineStyle, setDefaultTrendLineStyle, trendLineTemplates, setTrendLineTemplates, defaultFibonacciStyle, setDefaultFibonacciStyle,
-    fibonacciTemplates, setFibonacciTemplates, displayUtcOffsetMinutes, setDisplayUtcOffsetMinutes, textDrawing, drawingWriteScope,
+    fibonacciTemplates, setFibonacciTemplates, abcdPreferences, setAbcdPreferences, displayUtcOffsetMinutes, setDisplayUtcOffsetMinutes, textDrawing, drawingWriteScope,
     drawingsLive, visibleBarCountConfig, chartMarketSession,
   } = core;
   const {
-    armDrawing, changeChartVisibility, armTrendLine, armFibonacciRetracement, createDrawing, updateDrawing,
+    armDrawing, changeChartVisibility, createDrawing, updateDrawing,
     deleteDrawing, clearDrawings, openDrawingStyle, visibleDrawings, handleVisibleSequenceRange,
   } = drawingWindow;
   const {
@@ -101,15 +107,31 @@ export function MarketReplayClient({ dataset: initialDataset, initialJournalFocu
     gateButton, gateNoticeBlock, updatePaperOrder, cancelPaperOrder, cancelPaperScope, closePaperPosition,
     currentBar, revealedCount, replayCount, statusText,
   } = actions;
+  async function selectCursor(mode: ReplayCursorMode) {
+    if (!await textDrawing.beforeExit()) return;
+    setDrawingTool(null);
+    setMeasurementArmed(false);
+    setSelectedDrawingId(null);
+    setCursorMode(mode);
+  }
   function wrapWorkspace(content: ReactNode) {
     return <div className="flex h-full min-h-0 flex-col gap-2">
-      <header className="shrink-0" data-replay-workspace-header>
-        <UserContextHeader session={replaySession ?? undefined} growthNotice={growthNotice} growthNoticeKey={growthNoticeKey}>{!webFullscreen && <Breadcrumbs items={[{ label: copy.marketReplay.title, href: "/market-replay" }, { label: dataset.name }]} />}</UserContextHeader>
-        {!webFullscreen && <div className="mt-1 flex flex-wrap items-center gap-4">
-          <h1 className="shrink-0 text-xl font-semibold tracking-tight text-slate-950">{copy.marketReplay.replayTitle(dataset.symbol, dataset.timeframe)}</h1>
-          <p className="min-w-0 truncate text-xs text-slate-500">{dataset.name} · {dataset.timezone}</p>
-          <div className="ml-auto flex min-w-0 flex-wrap items-center gap-2">{gateButton}<ReplaySessionSwitch beforeSwitch={prepareSessionSwitch} disabled={isLoading || Boolean(loadError) || !replay || Boolean(checkingOrder)} /></div>
-        </div>}
+      <header className={webFullscreen ? "hidden" : "shrink-0 rounded-lg border bg-white px-4 py-3 shadow-sm"} data-replay-workspace-header>
+        <UserContextHeader className="items-center" session={replaySession ?? undefined} growthNotice={growthNotice} growthNoticeKey={growthNoticeKey}>
+          <div className="flex min-w-0 flex-wrap items-center justify-between gap-x-5 gap-y-2">
+            <div className="min-w-0">
+              <Breadcrumbs className="text-xs" items={[{ label: copy.marketReplay.title, href: "/market-replay" }, { label: dataset.name }]} />
+              <div className="mt-1 flex min-w-0 items-center gap-3">
+                <h1 className="shrink-0 text-xl font-semibold tracking-tight text-slate-950">{dataset.symbol}</h1>
+                <p className="min-w-0 truncate border-l border-slate-200 pl-3 text-xs text-slate-500">{copy.marketReplay.sourcePeriod} {dataset.sourceIntervalSeconds !== null ? formatInterval(dataset.sourceIntervalSeconds) : copy.common.dash} · {dataset.timezone}</p>
+              </div>
+            </div>
+            <div className="ml-auto flex min-w-0 flex-wrap items-center gap-2">
+              <ReplaySessionSwitch beforeSwitch={prepareSessionSwitch} disabled={isLoading || Boolean(loadError) || !replay || Boolean(checkingOrder)} />
+              {gateButton}
+            </div>
+          </div>
+        </UserContextHeader>
       </header>
       {!webFullscreen ? gateNoticeBlock : null}
       {gateDialogOpen ? <TrainingGateConfigDialog gate={currentGate} busy={gateBusy} error={gateError} onClose={() => setGateDialogOpen(false)} onSave={saveGateConfig} /> : null}
@@ -183,8 +205,8 @@ export function MarketReplayClient({ dataset: initialDataset, initialJournalFocu
         {webFullscreen ? gateNoticeBlock : null}
         {paperSnapshot?.propAccount?.state.result === "FAILED" ? <Alert role="alert" className="flex shrink-0 items-center justify-between gap-3 rounded-none border-x-0 border-t-0 border-amber-200 bg-amber-50 py-2 text-amber-800"><AlertDescription>{copy.propPractice.roundFailed}</AlertDescription><Button size="sm" variant="outline" onClick={() => setSettingsDialog("paper")}>{copy.propPractice.reset}</Button></Alert> : null}
         {replaySession?.mode === "LIVE_REPLAY" ? <ReplayCorrectionDialog target={correctionTarget} displayUtcOffsetMinutes={displayUtcOffsetMinutes} beforeCreate={prepareSessionSwitch} onClose={() => setCorrectionTarget(null)} onPendingChange={setCorrectionPending} /> : null}
-        <div className="flex h-12 shrink-0 items-center gap-2 overflow-x-auto border-b px-3 [&>*]:shrink-0">
-          {webFullscreen ? gateButton : null}
+        <div className="flex h-12 shrink-0 items-center gap-2 border-b px-3">
+          <div className="flex min-w-0 flex-1 items-center gap-2 overflow-x-auto [&>*]:shrink-0">
           <DisplayIntervalControls
             value={replay.displayIntervalSeconds}
             sourceIntervalSeconds={dataset.sourceIntervalSeconds}
@@ -217,81 +239,6 @@ export function MarketReplayClient({ dataset: initialDataset, initialJournalFocu
             </SelectContent>
           </Select>
           <div className="mx-1 h-5 w-px bg-slate-200" />
-          <Popover.Root open={drawingToolOpen} onOpenChange={setDrawingToolOpen}>
-            <Popover.Trigger asChild>
-              <Button
-                type="button"
-                variant={drawingTool ? "secondary" : "ghost"}
-                size="sm"
-                className="h-8"
-                aria-pressed={Boolean(drawingTool)}
-                aria-label={copy.marketReplay.drawingToolsHint}
-              >
-                <TrendingUp className="h-4 w-4" />
-                <span className="hidden xl:inline">{copy.marketReplay.drawingTools}</span>
-              </Button>
-            </Popover.Trigger>
-            <Popover.Portal>
-              <Popover.Content
-                side="bottom"
-                align="start"
-                sideOffset={6}
-                collisionPadding={8}
-                className="z-[80] w-64 rounded-lg border border-slate-200 bg-white p-1.5 shadow-xl"
-              >
-                <button
-                  type="button"
-                  className="flex w-full items-center gap-3 rounded-md px-3 py-2 text-left text-sm text-slate-700 hover:bg-slate-100 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-600"
-                  onClick={armTrendLine}
-                  aria-keyshortcuts="Alt+t"
-                >
-                  <TrendingUp className="h-4 w-4 text-slate-600" />
-                  <span className="font-medium">{copy.marketReplay.trendLine}</span>
-                  <kbd className="ml-auto whitespace-nowrap font-mono text-[11px] text-slate-400">{shortcuts.trendLine}</kbd>
-                </button>
-                <button
-                  type="button"
-                  className="flex w-full items-center gap-3 rounded-md px-3 py-2 text-left text-sm text-slate-700 hover:bg-slate-100 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-600"
-                  onClick={armFibonacciRetracement}
-                  aria-keyshortcuts="Alt+f"
-                >
-                  <span className="flex h-4 w-4 items-center justify-center font-mono text-[10px] font-bold text-slate-600">Fib</span>
-                  <span className="font-medium">{copy.marketReplay.fibonacciRetracement}</span>
-                  <kbd className="ml-auto whitespace-nowrap font-mono text-[11px] text-slate-400">{shortcuts.fibonacciRetracement}</kbd>
-                </button>
-                <RectangleToolOption shortcut={shortcuts.rectangle} onArm={() => armDrawing(DRAWING_TYPE_RECTANGLE)} />
-              <TextToolOption onArm={() => armDrawing(DRAWING_TYPE_TEXT)} />
-              <ArrowToolOptions onArm={type => void armDrawing(type)} />
-              </Popover.Content>
-            </Popover.Portal>
-          </Popover.Root>
-          <Button
-            type="button"
-            variant={drawingObjectsOpen ? "secondary" : "ghost"}
-            size="sm"
-            className="h-8"
-            aria-pressed={drawingObjectsOpen}
-            title={`${copy.marketReplay.drawingObjectsHint}\n${copy.marketReplay.drawingDeleteShortcutHint(shortcuts.deleteDrawing)}`}
-            onClick={() => setDrawingObjectsOpen((current) => !current)}
-          >
-            <ListTree className="h-4 w-4" />
-            <span className="hidden xl:inline">{copy.marketReplay.drawingObjects}</span>
-          </Button>
-          <Button
-            type="button"
-            variant={measurementArmed ? "secondary" : "ghost"}
-            size="sm"
-            className="group relative h-8"
-            aria-pressed={measurementArmed}
-            aria-label={copy.marketReplay.measureHint}
-            onClick={() => setMeasurementArmed((current) => !current)}
-          >
-            <Ruler className="h-4 w-4" />
-            <span className="hidden xl:inline">{copy.marketReplay.measure}</span>
-            <span className="pointer-events-none absolute left-1/2 top-full z-50 mt-2 hidden -translate-x-1/2 rounded-md border border-slate-700 bg-slate-950 px-2.5 py-1.5 text-xs font-normal text-white shadow-lg group-hover:block group-focus-visible:block">
-              {copy.marketReplay.measureHint}
-            </span>
-          </Button>
           <ChartVisibilityMenu value={chartVisibility} onChange={changeChartVisibility} />
           <Button
             type="button"
@@ -308,21 +255,32 @@ export function MarketReplayClient({ dataset: initialDataset, initialJournalFocu
           </Button>
           <Button type="button" variant="ghost" size="sm" className="h-8" onClick={() => setSettingsDialog("indicators")}><Settings2 className="h-4 w-4" />{copy.marketReplay.indicators}</Button>
           <Button type="button" variant="ghost" size="sm" className="h-8" onClick={() => setSettingsDialog("paper")}><WalletCards className="h-4 w-4" />{copy.marketReplay.accountSettings}</Button>
-          <Button type="button" variant="ghost" size="sm" className="h-8" onClick={() => setSettingsDialog("trade")}><TrendingUp className="h-4 w-4" />{copy.paperTrading.title}</Button>
           <Button asChild type="button" variant="ghost" size="sm" className="h-8"><Link href={`/market-replay/${dataset.id}/trade-history?sessionId=${encodeURIComponent(replaySession?.id ?? "")}`}><BookOpen className="h-4 w-4" />{copy.paperTrading.openJournalHistory}</Link></Button>
           {paperSnapshot ? <div className="flex shrink-0 items-center gap-2 whitespace-nowrap px-2"><span className="text-xs tabular-nums text-slate-500">{copy.propPractice.balance} <strong className="font-medium text-slate-800">{formatMoney(paperSnapshot.propAccount ? funds(paperSnapshot.propAccount.state).balance : paperSnapshot.stats.balance, paperSnapshot.session.currency)}</strong></span>{paperSnapshot.propAccount ? <PropAccountStatusBadge runtime={paperSnapshot.propAccount} /> : null}</div> : null}
           <div className="ml-auto flex items-center gap-1">
             <Button type="button" variant="ghost" size="sm" className="h-8" disabled={draftActive} title={draftActive ? copy.paperTrading.draftLockedReplay : undefined} onClick={() => requestConfirmation("reset")}><RotateCcw className="h-4 w-4" /><span className="hidden xl:inline">{copy.marketReplay.reset}</span></Button>
             <Button type="button" variant="ghost" size="sm" className="h-8" disabled={draftActive} title={draftActive ? copy.paperTrading.draftLockedReplay : undefined} onClick={openStartDialog}><span className="hidden xl:inline">{copy.marketReplay.chooseNewStart}</span><span className="xl:hidden">{copy.marketReplay.startAt}</span></Button>
           </div>
+          </div>
+          <div className="mx-1 h-5 w-px shrink-0 bg-slate-200" aria-hidden="true" />
+          <Button type="button" variant="ghost" size="sm" className={tradePanelOpen ? "h-8 shrink-0 bg-blue-50 text-blue-700 hover:bg-blue-100 hover:text-blue-700" : "h-8 shrink-0"} aria-expanded={tradePanelOpen} disabled={Boolean(checkingOrder)}
+            aria-controls={tradePanelOpen ? "replay-trade-panel" : undefined} onClick={() => setTradePanelOpen(current => !current)}>
+            <PanelRight className="h-4 w-4" aria-hidden="true" />{copy.paperTrading.panelTitle}
+          </Button>
         </div>
-        <div className="relative min-h-0 flex-1">
+        <div className="flex min-h-0 flex-1">
+          <ReplayDrawingToolbar cursorMode={cursorMode} onCursorChange={mode => void selectCursor(mode)} drawingTool={drawingTool} onArmDrawing={tool => void armDrawing(tool)}
+            measurementArmed={measurementArmed} onToggleMeasurement={() => setMeasurementArmed(current => !current)}
+            drawingObjectsOpen={drawingObjectsOpen} onToggleDrawingObjects={() => setDrawingObjectsOpen(current => !current)}
+            webFullscreen={webFullscreen} onToggleWebFullscreen={() => setWebFullscreen(current => !current)} />
+        <div className="relative min-h-0 min-w-0 flex-1">
           {autoPauseEvent ? (
             <div className="pointer-events-none absolute inset-x-3 top-3 z-[60]">
               <ReplayAutoPauseNotice event={autoPauseEvent} onDismiss={dismissAutoPause} />
             </div>
           ) : null}
           <ReplayChart
+            cursorMode={cursorMode}
             datasetId={dataset.id}
             dataRevision={chartDataRevision}
             priceTickSize={dataset.priceTickSize}
@@ -345,6 +303,8 @@ export function MarketReplayClient({ dataset: initialDataset, initialJournalFocu
             onDrawingToolChange={setDrawingTool}
             onPlaceText={textDrawing.place} drawingApiRef={textDrawing.apiRef}
             onPlaceArrow={(type, anchor) => void createDrawing(type, { anchor })}
+            onCreateAbcd={geometry => void createDrawing("AB_CD", geometry)}
+            abcdDraftStyle={abcdPreferences.defaultStyle}
             trendLineDraftStyle={defaultTrendLineStyle}
             fibonacciDraftStyle={defaultFibonacciStyle}
             rectangleDraftStyle={defaultRectangleStyle}
@@ -429,7 +389,7 @@ export function MarketReplayClient({ dataset: initialDataset, initialJournalFocu
                         }
                       }}
                     >
-                      {isArrowDrawing(drawing) ? (drawing.type === "ARROW_UP"
+                      {drawing.type === "AB_CD" ? <Waypoints className="h-4 w-4 shrink-0" style={{ color: drawingColor }} aria-hidden="true" /> : isArrowDrawing(drawing) ? (drawing.type === "ARROW_UP"
                         ? <ArrowBigUp className="h-4 w-4 shrink-0" style={{ color: drawingColor }} aria-hidden="true" />
                         : <ArrowBigDown className="h-4 w-4 shrink-0" style={{ color: drawingColor }} aria-hidden="true" />)
                         : drawing.type === DRAWING_TYPE_RECTANGLE ? <Square className="h-4 w-4 shrink-0" style={{ color: drawingColor }} aria-hidden="true" /> : drawing.type === DRAWING_TYPE_TREND_LINE
@@ -437,7 +397,7 @@ export function MarketReplayClient({ dataset: initialDataset, initialJournalFocu
                         : drawing.type === DRAWING_TYPE_TEXT ? <TextIcon className="h-4 w-4 shrink-0" style={{ color: drawingColor }} aria-hidden="true" />
                         : <span className="flex h-4 w-4 shrink-0 items-center justify-center font-mono text-[9px] font-bold" style={{ color: drawingColor }}>Fib</span>}
                       <span className="min-w-0 flex-1 truncate font-medium">{drawingObjectName(drawing, index + 1)}</span>
-                      {isArrowDrawing(drawing) || drawing.type === DRAWING_TYPE_RECTANGLE || drawing.type === DRAWING_TYPE_TEXT ? <Button type="button" variant="ghost" size="icon" disabled={pending}
+                      {drawing.type === "AB_CD" || isArrowDrawing(drawing) || drawing.type === DRAWING_TYPE_RECTANGLE || drawing.type === DRAWING_TYPE_TEXT ? <Button type="button" variant="ghost" size="icon" disabled={pending}
                         data-text-settings={drawing.id} aria-label={drawingSettingsLabel(drawing)} onClick={event => { event.stopPropagation(); openDrawingStyle(drawing.id); }}>
                         <Settings2 className="h-4 w-4" aria-hidden="true" />
                       </Button> : null}
@@ -460,6 +420,13 @@ export function MarketReplayClient({ dataset: initialDataset, initialJournalFocu
             </aside>
           ) : null}
         </div>
+        {tradePanelOpen ? <ResizableTradePanel checking={Boolean(checkingOrder)} onClose={() => setTradePanelOpen(false)}>
+          {paperSnapshot ? journalReview ? null : <PaperTradingPanel embedded priceTickSize={dataset.priceTickSize} snapshot={paperSnapshot} currentBar={currentBar} busy={paperBusy || correctionPending || dateForwarding} error={paperError} onSubmit={submitPaperOrder} onCancel={cancelPaperOrder} onUpdate={updatePaperOrder} onCancelScope={cancelPaperScope} /> : <div className="space-y-4">
+            <Alert><AlertDescription>{copy.marketReplay.tradeAccountRequired}</AlertDescription></Alert>
+            <div className="flex justify-end border-t pt-4"><Button type="button" onClick={() => { setTradePanelOpen(false); setSettingsDialog("paper"); }}>{copy.marketReplay.createAccountAction}</Button></div>
+          </div>}
+        </ResizableTradePanel> : null}
+        </div>
         <ReplayPlaybackBar
           onLocateDate={() => { void openDateDialog(); }}
           dateForwarding={dateForwarding}
@@ -476,8 +443,6 @@ export function MarketReplayClient({ dataset: initialDataset, initialJournalFocu
           statusText={statusText}
           retrying={retrying}
           playbackRequested={replay.status === "playing" || (retrying && wantsPlayback())}
-          webFullscreen={webFullscreen}
-          onToggleWebFullscreen={() => setWebFullscreen((current) => !current)}
           onToggle={togglePlayback}
           onNext={() => void revealNextBar()}
           onSpeedChange={changeSpeed}
@@ -632,15 +597,18 @@ export function MarketReplayClient({ dataset: initialDataset, initialJournalFocu
           {paperSnapshot && !journalReview ? <div className="flex justify-end border-t pt-4"><Button type="button" variant="ghost" className="text-red-600" onClick={() => requestConfirmation("paper-clear")}><Trash2 className="h-4 w-4" />{copy.paperTrading.resetAccount}</Button></div> : null}
         </div>
       </Dialog>
-      <Dialog open={settingsDialog === "trade" && !checkingOrder} keepMounted={settingsDialog === "trade"} title={copy.paperTrading.title} className="max-w-2xl" onClose={() => setSettingsDialog(null)}>
-        {paperSnapshot ? journalReview ? null : <PaperTradingPanel priceTickSize={dataset.priceTickSize} snapshot={paperSnapshot} currentBar={currentBar} busy={paperBusy || correctionPending || dateForwarding} error={paperError} onSubmit={submitPaperOrder} onCancel={cancelPaperOrder} onUpdate={updatePaperOrder} onCancelScope={cancelPaperScope} /> : <div className="space-y-4">
-          <Alert><AlertDescription>{copy.marketReplay.tradeAccountRequired}</AlertDescription></Alert>
-          <div className="flex justify-end border-t pt-4"><Button type="button" onClick={() => setSettingsDialog("paper")}>{copy.marketReplay.createAccountAction}</Button></div>
-        </div>}
-      </Dialog>
       {(() => {
         const drawing = drawings.find(item => item.id === styleDrawingId);
-        return drawing && !isArrowDrawing(drawing) && drawing.type !== DRAWING_TYPE_RECTANGLE && drawing.type !== DRAWING_TYPE_TEXT && styleDraft ? <LineSettingsDialog key={drawing.id}
+        if (drawing?.type === "AB_CD" && styleDraft && "levels" in styleDraft) return <AbcdSettingsDialog key={drawing.id}
+          draft={styleDraft} onDraftChange={setStyleDraft} templates={abcdPreferences.templates}
+          onTemplatesChange={templates => setAbcdPreferences(current => ({ ...current, templates }))}
+          onClose={() => { setStyleDrawingId(null); setStyleDraft(null); }}
+          onSave={async style => {
+            if (!await updateDrawing(drawing.id, { style })) return false;
+            setAbcdPreferences(current => ({ ...current, defaultStyle: style }));
+            return true;
+          }} />;
+        return drawing && !isArrowDrawing(drawing) && drawing.type !== "AB_CD" && drawing.type !== DRAWING_TYPE_RECTANGLE && drawing.type !== DRAWING_TYPE_TEXT && styleDraft ? <LineSettingsDialog key={drawing.id}
           drawing={drawing} draft={styleDraft} onDraftChange={setStyleDraft}
           templates={drawing.type === DRAWING_TYPE_FIB_RETRACEMENT ? fibonacciTemplates : trendLineTemplates}
           onTemplatesChange={templates => {

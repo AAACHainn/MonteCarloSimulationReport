@@ -1,5 +1,5 @@
 import { type Ref } from "react";
-import type { ArrowDrawingType } from "@/lib/market-replay/chart-drawings";
+import type { AbcdGeometry, ArrowDrawingType } from "@/lib/market-replay/chart-drawings";
 import type { ReplayViewportApi, ReplayViewportSnapshot } from "@/lib/market-replay/chart-range";
 import type { OrderSubmitResult } from "@/lib/paper-trading/types";
 import type { AggregatedMarketBarData, BarCountIndicatorConfig, DisplaySession, EmaIndicatorConfig, TradingSessionConfig } from "@/lib/market-replay/types";
@@ -167,6 +167,7 @@ export function bracketPriceLineTitle(reference: PriceRReference | null, price: 
 
 
 export type ReplayChartProps = {
+  cursorMode?: import("@/lib/market-replay/cursor-mode").ReplayCursorMode;
   datasetId: string;
   dataRevision?: string;
   priceTickSize: number;
@@ -190,6 +191,7 @@ export type ReplayChartProps = {
   onDrawingToolChange: (tool: DrawingTool | null) => void;
   trendLineDraftStyle: TrendLineDrawing["style"];
   fibonacciDraftStyle: FibonacciRetracementStyle;
+  abcdDraftStyle?: FibonacciRetracementStyle;
   drawings: MarketDrawing[];
   selectedDrawingId: string | null;
   onSelectedDrawingIdChange: (id: string | null) => void;
@@ -197,6 +199,7 @@ export type ReplayChartProps = {
   onUpdateDrawing: (id: string, geometry: DrawingGeometry) => void;
   onPlaceText?: (anchor: DrawingAnchor) => void;
   onPlaceArrow?: (type: ArrowDrawingType, anchor: DrawingAnchor) => void;
+  onCreateAbcd?: (geometry: AbcdGeometry) => void;
   drawingApiRef?: Ref<TextDrawingApi>;
   onDeleteDrawing: (id: string) => void;
   onOpenDrawingStyle: (id: string, inlineText?: boolean) => void;

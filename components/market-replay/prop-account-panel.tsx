@@ -152,7 +152,7 @@ export function PropAccountPanel({ sessionId, runtime, tradingSnapshot, busy: ex
         </div>
         {tradingSnapshot ? <div className="border-t pt-3"><PaperAccountMetrics snapshot={tradingSnapshot} compact includeBalances={false} metrics={currentStage(state).metrics ?? null} extraItems={summaryItems} /></div> : <div className="grid grid-cols-4 gap-4 border-t pt-3 text-sm tabular-nums">{summaryItems.map(([label, value]) => <div key={label}><p className="text-xs text-slate-500">{label}</p><p className="font-medium">{value}</p></div>)}</div>}
         <p className={!state.result && state.pause === "NONE" ? "text-xs text-slate-500" : "text-xs text-amber-800"}>{t.pause}: {state.result === "FAILED" ? t.roundFailed : state.result ? t.roundStopped : t[state.pause]}</p>
-        {state.result ? <p className="text-xs text-amber-800">{t.roundFinishedHint}</p> : null}
+        {state.result ? <p className="text-xs text-amber-800">{state.result === "FAILED" ? t.roundFailureFinishedHint : t.roundFinishedHint}</p> : null}
         {state.failure ? <p className="text-xs text-red-700">{t.failure}: {state.failure.sequence} / {money(state.failure.equity)} / {money(state.failure.floor)} · {state.failure.phase === "EVALUATION" ? t.evaluation : t.funded}</p> : null}
         {state.phase === "EVALUATION" ? <div className="grid grid-cols-2 gap-4 border-t pt-3 text-sm tabular-nums">
           <div><p className="text-xs text-slate-500">{t.requiredProfit}</p><p className="mt-1 font-medium">{money(progress.requiredProfit)}</p></div>

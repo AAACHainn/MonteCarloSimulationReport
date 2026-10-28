@@ -9,7 +9,7 @@ import { isClosingOrder, type TrainingGateMode } from "@/lib/paper-trading/train
 import type { GateApprovalInput, PaperOrderInput, OrderSubmitResult } from "@/lib/paper-trading/types";
 import { retainEntryCheckDraft } from "@/lib/paper-trading/entry-check-draft";
 import { startTransition, useCallback } from "react";
-import { Loader2, X } from "lucide-react";
+import { LayoutGrid, Loader2, X } from "lucide-react";
 import { DEFAULT_REPLAY_MAX_VISIBLE_BARS } from "@/lib/market-replay/chart-range";
 import { Button } from "@/components/ui/button";
 import { copy } from "@/lib/i18n";
@@ -513,7 +513,7 @@ export function useReplayActions(core: ReturnType<typeof useReplayCore>, drawing
     finally { setGateBusy(false); }
   }
   const currentGate = paperSnapshot?.session.trainingGate ?? gateSettings;
-  const gateButton = replaySession?.mode === "TRAINING" ? <Button variant="outline" size="sm" className="h-10 md:h-9" title={copy.trainingGate.autoStatus(currentGate.autoEnabled, currentGate.lossThreshold, currentGate.lossStreak)} disabled={gateBusy || isLoading || Boolean(loadError) || !replay || Boolean(checkingOrder) || Boolean(journalReview)} onClick={() => void openGateConfig()}>{gateBusy ? <Loader2 className="h-4 w-4 animate-spin" /> : null}{currentGate.active ? copy.trainingGate.remaining(currentGate.targetCount - currentGate.completedCount) : copy.trainingGate.title}</Button> : null;
+  const gateButton = replaySession?.mode === "TRAINING" ? <Button variant="outline" size="sm" className="h-10 text-slate-700 md:h-9" title={copy.trainingGate.autoStatus(currentGate.autoEnabled, currentGate.lossThreshold, currentGate.lossStreak)} disabled={gateBusy || isLoading || Boolean(loadError) || !replay || Boolean(checkingOrder) || Boolean(journalReview)} onClick={() => void openGateConfig()}>{gateBusy ? <Loader2 className="h-4 w-4 animate-spin" aria-hidden="true" /> : <LayoutGrid className="h-4 w-4 text-slate-500" aria-hidden="true" />}{currentGate.active ? copy.trainingGate.remaining(currentGate.targetCount - currentGate.completedCount) : copy.trainingGate.title}</Button> : null;
 
   const gateNoticeBlock = gateNotice ? <div className="flex shrink-0 items-center justify-between gap-2 rounded-md border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-800" role="status"><span>{gateNotice}</span><Button variant="ghost" size="icon" aria-label={copy.common.cancel} onClick={() => setGateNotice(null)}><X className="h-4 w-4" /></Button></div> : null;
 
