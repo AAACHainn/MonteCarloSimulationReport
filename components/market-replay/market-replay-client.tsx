@@ -15,10 +15,11 @@ import { ReplayCorrectionProvider } from "./replay-correction-context";
 import { ReplayCorrectionDialog } from "./replay-correction-dialog";
 import Link from "next/link";
 import { TrainingGateConfigDialog, EntryCheckDialog } from "./training-gate-dialogs";
-import { type ReactNode } from "react";
+import { useState, type ReactNode } from "react";
 import { Breadcrumbs } from "@/components/breadcrumbs";
-import { Square, BookOpen, ListTree, Loader2, Palette, RotateCcw, Settings2, Trash2, TrendingUp, WalletCards, X } from "lucide-react";
+import { Square, BookOpen, ListTree, Loader2, Palette, PanelRight, RotateCcw, Settings2, Trash2, TrendingUp, WalletCards, X } from "lucide-react";
 import { ReplayDrawingToolbar } from "./replay-drawing-toolbar";
+import { ResizableTradePanel } from "./resizable-trade-panel";
 import { useReplayCursorPreference } from "./use-replay-cursor-preference";
 import type { ReplayCursorMode } from "@/lib/market-replay/cursor-mode";
 import { ReplayChart } from "@/components/market-replay/replay-chart";
@@ -61,6 +62,7 @@ import { useReplayActions } from "./use-replay-actions";
 
 export function MarketReplayClient({ dataset: initialDataset, initialJournalFocus = null }: { dataset: MarketDatasetSummary; initialJournalFocus?: JournalFocus | null }) {
   const [cursorMode, setCursorMode] = useReplayCursorPreference();
+  const [tradePanelOpen, setTradePanelOpen] = useState(false);
   const core = useReplayCore({ dataset: initialDataset, initialJournalFocus });
   const drawingWindow = useReplayDrawingWindow(core);
   const engine = useReplayEngine(core, drawingWindow);
@@ -202,7 +204,8 @@ export function MarketReplayClient({ dataset: initialDataset, initialJournalFocu
         {webFullscreen ? gateNoticeBlock : null}
         {paperSnapshot?.propAccount?.state.result === "FAILED" ? <Alert role="alert" className="flex shrink-0 items-center justify-between gap-3 rounded-none border-x-0 border-t-0 border-amber-200 bg-amber-50 py-2 text-amber-800"><AlertDescription>{copy.propPractice.roundFailed}</AlertDescription><Button size="sm" variant="outline" onClick={() => setSettingsDialog("paper")}>{copy.propPractice.reset}</Button></Alert> : null}
         {replaySession?.mode === "LIVE_REPLAY" ? <ReplayCorrectionDialog target={correctionTarget} displayUtcOffsetMinutes={displayUtcOffsetMinutes} beforeCreate={prepareSessionSwitch} onClose={() => setCorrectionTarget(null)} onPendingChange={setCorrectionPending} /> : null}
-        <div className="flex h-12 shrink-0 items-center gap-2 overflow-x-auto border-b px-3 [&>*]:shrink-0">
+        <div className="flex h-12 shrink-0 items-center gap-2 border-b px-3">
+          <div className="flex min-w-0 flex-1 items-center gap-2 overflow-x-auto [&>*]:shrink-0">
           <DisplayIntervalControls
             value={replay.displayIntervalSeconds}
             sourceIntervalSeconds={dataset.sourceIntervalSeconds}
@@ -251,13 +254,18 @@ export function MarketReplayClient({ dataset: initialDataset, initialJournalFocu
           </Button>
           <Button type="button" variant="ghost" size="sm" className="h-8" onClick={() => setSettingsDialog("indicators")}><Settings2 className="h-4 w-4" />{copy.marketReplay.indicators}</Button>
           <Button type="button" variant="ghost" size="sm" className="h-8" onClick={() => setSettingsDialog("paper")}><WalletCards className="h-4 w-4" />{copy.marketReplay.accountSettings}</Button>
-          <Button type="button" variant="ghost" size="sm" className="h-8" onClick={() => setSettingsDialog("trade")}><TrendingUp className="h-4 w-4" />{copy.paperTrading.title}</Button>
           <Button asChild type="button" variant="ghost" size="sm" className="h-8"><Link href={`/market-replay/${dataset.id}/trade-history?sessionId=${encodeURIComponent(replaySession?.id ?? "")}`}><BookOpen className="h-4 w-4" />{copy.paperTrading.openJournalHistory}</Link></Button>
           {paperSnapshot ? <div className="flex shrink-0 items-center gap-2 whitespace-nowrap px-2"><span className="text-xs tabular-nums text-slate-500">{copy.propPractice.balance} <strong className="font-medium text-slate-800">{formatMoney(paperSnapshot.propAccount ? funds(paperSnapshot.propAccount.state).balance : paperSnapshot.stats.balance, paperSnapshot.session.currency)}</strong></span>{paperSnapshot.propAccount ? <PropAccountStatusBadge runtime={paperSnapshot.propAccount} /> : null}</div> : null}
           <div className="ml-auto flex items-center gap-1">
             <Button type="button" variant="ghost" size="sm" className="h-8" disabled={draftActive} title={draftActive ? copy.paperTrading.draftLockedReplay : undefined} onClick={() => requestConfirmation("reset")}><RotateCcw className="h-4 w-4" /><span className="hidden xl:inline">{copy.marketReplay.reset}</span></Button>
             <Button type="button" variant="ghost" size="sm" className="h-8" disabled={draftActive} title={draftActive ? copy.paperTrading.draftLockedReplay : undefined} onClick={openStartDialog}><span className="hidden xl:inline">{copy.marketReplay.chooseNewStart}</span><span className="xl:hidden">{copy.marketReplay.startAt}</span></Button>
           </div>
+          </div>
+          <div className="mx-1 h-5 w-px shrink-0 bg-slate-200" aria-hidden="true" />
+          <Button type="button" variant="ghost" size="sm" className={tradePanelOpen ? "h-8 shrink-0 bg-blue-50 text-blue-700 hover:bg-blue-100 hover:text-blue-700" : "h-8 shrink-0"} aria-expanded={tradePanelOpen} disabled={Boolean(checkingOrder)}
+            aria-controls={tradePanelOpen ? "replay-trade-panel" : undefined} onClick={() => setTradePanelOpen(current => !current)}>
+            <PanelRight className="h-4 w-4" aria-hidden="true" />{copy.paperTrading.panelTitle}
+          </Button>
         </div>
         <div className="flex min-h-0 flex-1">
           <ReplayDrawingToolbar cursorMode={cursorMode} onCursorChange={mode => void selectCursor(mode)} drawingTool={drawingTool} onArmDrawing={tool => void armDrawing(tool)}
@@ -409,6 +417,12 @@ export function MarketReplayClient({ dataset: initialDataset, initialJournalFocu
             </aside>
           ) : null}
         </div>
+        {tradePanelOpen ? <ResizableTradePanel checking={Boolean(checkingOrder)} onClose={() => setTradePanelOpen(false)}>
+          {paperSnapshot ? journalReview ? null : <PaperTradingPanel embedded priceTickSize={dataset.priceTickSize} snapshot={paperSnapshot} currentBar={currentBar} busy={paperBusy || correctionPending || dateForwarding} error={paperError} onSubmit={submitPaperOrder} onCancel={cancelPaperOrder} onUpdate={updatePaperOrder} onCancelScope={cancelPaperScope} /> : <div className="space-y-4">
+            <Alert><AlertDescription>{copy.marketReplay.tradeAccountRequired}</AlertDescription></Alert>
+            <div className="flex justify-end border-t pt-4"><Button type="button" onClick={() => { setTradePanelOpen(false); setSettingsDialog("paper"); }}>{copy.marketReplay.createAccountAction}</Button></div>
+          </div>}
+        </ResizableTradePanel> : null}
         </div>
         <ReplayPlaybackBar
           onLocateDate={() => { void openDateDialog(); }}
@@ -579,12 +593,6 @@ export function MarketReplayClient({ dataset: initialDataset, initialJournalFocu
           {!paperSnapshot && !journalReview ? <PaperAccountCreateForm busy={paperBusy || correctionPending || dateForwarding} error={paperError} onCreate={createPaperAccount} /> : null}
           {paperSnapshot && !journalReview ? <div className="flex justify-end border-t pt-4"><Button type="button" variant="ghost" className="text-red-600" onClick={() => requestConfirmation("paper-clear")}><Trash2 className="h-4 w-4" />{copy.paperTrading.resetAccount}</Button></div> : null}
         </div>
-      </Dialog>
-      <Dialog open={settingsDialog === "trade" && !checkingOrder} keepMounted={settingsDialog === "trade"} title={copy.paperTrading.title} className="max-w-2xl" onClose={() => setSettingsDialog(null)}>
-        {paperSnapshot ? journalReview ? null : <PaperTradingPanel priceTickSize={dataset.priceTickSize} snapshot={paperSnapshot} currentBar={currentBar} busy={paperBusy || correctionPending || dateForwarding} error={paperError} onSubmit={submitPaperOrder} onCancel={cancelPaperOrder} onUpdate={updatePaperOrder} onCancelScope={cancelPaperScope} /> : <div className="space-y-4">
-          <Alert><AlertDescription>{copy.marketReplay.tradeAccountRequired}</AlertDescription></Alert>
-          <div className="flex justify-end border-t pt-4"><Button type="button" onClick={() => setSettingsDialog("paper")}>{copy.marketReplay.createAccountAction}</Button></div>
-        </div>}
       </Dialog>
       {(() => {
         const drawing = drawings.find(item => item.id === styleDrawingId);

@@ -64,6 +64,7 @@ export function useReplayChartSetup(core: ReturnType<typeof useReplayChartCore>)
       crosshair: { mode: CrosshairMode.Normal },
       localization: { locale: "zh-CN", timeFormatter: (time: Time) => typeof time === "number" ? formatUtcDateTime(time * 1_000, displayUtcOffsetRef.current) : String(time) },
       timeScale: {
+        borderColor: "#e2e8f0",
         timeVisible: true,
         secondsVisible: true,
         rightOffset: 4,

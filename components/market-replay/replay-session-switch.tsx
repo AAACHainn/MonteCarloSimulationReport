@@ -50,7 +50,6 @@ export function ReplaySessionSwitch({ beforeSwitch, disabled = false }: { before
       </Select>
     </div>
     <Button size="sm" variant="ghost" onClick={() => void navigate()} disabled={busy || entry.busy || disabled}><List className="h-4 w-4" aria-hidden="true" />{copy.replaySessions.allSessions}</Button>
-    <span className="whitespace-nowrap text-xs text-slate-500">{busy ? copy.replaySessions.switching : copy.replaySessions.source}</span>
     {entry.ui}
     {error ? <span role="alert" className="max-w-lg text-xs text-red-600">{error}</span> : null}
   </div>;

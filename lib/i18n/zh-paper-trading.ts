@@ -4,6 +4,10 @@ import { MIN_JOURNAL_TABLE_LEFT_GAP } from "../market-replay/journal-column-widt
 export const zhPaperTrading = {
     paperTrading: {
       title: "交易",
+      panelTitle: "交易面板",
+      closeTradePanel: "关闭交易面板",
+      resizeTradePanel: "调整交易面板宽度",
+      resizeTradePanelHint: "拖动边界调整宽度；方向键调整，Home / End 跳至最小 / 最大宽度。",
       enable: "启用模拟交易",
       setupDescription: "创建与当前会话绑定的模拟账户。账户参数创建后固定；重新开始会归档旧会话并保留已有记录。",
       initialCapital: "初始资金",

@@ -64,7 +64,7 @@ export default async function MarketReplayDetailPage({ params, searchParams }: {
   }
   const focusedEntry = journalEntry ? (await withReplayJournalDisplayNumbers([journalEntry], selected.activeProjectionId))[0] : null;
   return (
-    <div className="market-replay-page relative left-1/2 flex h-[calc(100dvh-4.3125rem-var(--app-notice-height,0px))] w-[calc(100vw-2rem)] max-w-none -translate-x-1/2 flex-col gap-2 overflow-hidden sm:w-[calc(100vw-3rem)]">
+    <div className="market-replay-page relative -my-6 left-1/2 flex h-[calc(100dvh-1rem-var(--app-notice-height,0px))] w-[calc(100vw-1rem)] max-w-none -translate-x-1/2 flex-col gap-2 overflow-hidden">
       <div className="min-h-0 flex-1"><ReplaySessionGate key={`${selected.id}:${selected.activeProjectionId}:${selected.status}`} session={selected}><ReplaySessionProvider session={selected} includeCurrentChart><MarketReplayClient key={`${serialized.id}:${selected.id}:${selected.activeProjectionId}`} dataset={serialized} initialJournalFocus={focusedEntry ? { sequence: focusedEntry.openedSequence, no: focusedEntry.accountNo, globalNo: focusedEntry.no } : null} /></ReplaySessionProvider></ReplaySessionGate></div>
     </div>
   );
