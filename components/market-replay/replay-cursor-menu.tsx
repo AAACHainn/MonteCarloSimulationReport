@@ -6,14 +6,15 @@ import { Check, Crosshair, MousePointer2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { copy } from "@/lib/i18n";
 import type { ReplayCursorMode } from "@/lib/market-replay/cursor-mode";
+import { replayToolButtonColors } from "./replay-toolbar-icons";
 
 export function ReplayCursorMenu({ value, onChange }: { value: ReplayCursorMode; onChange: (value: ReplayCursorMode) => void }) {
   const [open, setOpen] = useState(false);
   const selected = value === "pointer" ? copy.marketReplay.cursorPointer : copy.marketReplay.cursorCrosshair;
   return <Popover.Root open={open} onOpenChange={setOpen}>
     <Popover.Trigger asChild>
-      <Button type="button" variant="ghost" size="icon" className="h-9 w-9 shrink-0" aria-label={copy.marketReplay.cursorCurrent(selected)} title={copy.marketReplay.cursorCurrent(selected)}>
-        {value === "pointer" ? <MousePointer2 className="h-4 w-4" aria-hidden="true" /> : <Crosshair className="h-4 w-4" aria-hidden="true" />}
+      <Button type="button" variant="ghost" size="icon" className={`h-9 w-9 shrink-0 ${replayToolButtonColors}`} aria-label={copy.marketReplay.cursorCurrent(selected)} title={copy.marketReplay.cursorCurrent(selected)}>
+        {value === "pointer" ? <MousePointer2 className="h-[18px] w-[18px]" aria-hidden="true" /> : <Crosshair className="h-[18px] w-[18px]" aria-hidden="true" />}
       </Button>
     </Popover.Trigger>
     <Popover.Portal>
