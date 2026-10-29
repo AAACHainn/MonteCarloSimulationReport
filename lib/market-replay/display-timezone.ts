@@ -5,6 +5,8 @@ export const UTC_OFFSET_OPTIONS = [
 
 type TimestampValue = string | number | Date;
 
+const weekdayFormatter = new Intl.DateTimeFormat("zh-CN", { weekday: "short", timeZone: "UTC" });
+
 type UtcDateParts = {
   year: string;
   month: string;
@@ -46,6 +48,12 @@ export function utcDateParts(value: TimestampValue, offsetMinutes: number): UtcD
 export function formatUtcDateTime(value: TimestampValue, offsetMinutes: number) {
   const parts = utcDateParts(value, offsetMinutes);
   return `${parts.year}/${parts.month}/${parts.day} ${parts.hour}:${parts.minute}:${parts.second}`;
+}
+
+/** Keep the crosshair weekday on the same calendar day as the chart's displayed timestamp. */
+export function formatUtcDateTimeWithWeekday(value: TimestampValue, offsetMinutes: number) {
+  const shifted = new Date(new Date(value).getTime() + offsetMinutes * 60_000);
+  return `${weekdayFormatter.format(shifted)} ${formatUtcDateTime(value, offsetMinutes)}`;
 }
 
 export function utcOffsetDateTimeLocalValue(value: TimestampValue, offsetMinutes: number) {

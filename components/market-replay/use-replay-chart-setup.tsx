@@ -13,7 +13,7 @@ import { RectanglePrimitive } from "@/lib/market-replay/rectangle-primitive";
 import { TrendLinePrimitive } from "@/lib/market-replay/trend-line-primitive";
 import { FibonacciRetracementPrimitive } from "@/lib/market-replay/fibonacci-retracement-primitive";
 import { TextDrawingPrimitive } from "@/lib/market-replay/text-drawing-primitive";
-import { formatUtcDateTime } from "@/lib/market-replay/display-timezone";
+import { formatUtcDateTimeWithWeekday } from "@/lib/market-replay/display-timezone";
 import { priceDecimalsForTick, snapPriceToTick } from "@/lib/market-replay/price-ticks";
 import { ReplayTradeAnnotationPrimitive } from "@/lib/market-replay/trade-annotation-primitive";
 import { BarCountPrimitive } from "@/lib/market-replay/bar-count-primitive";
@@ -63,7 +63,7 @@ export function useReplayChartSetup(core: ReturnType<typeof useReplayChartCore>)
       layout: { background: { type: ColorType.Solid, color: "#fff" }, textColor: "#475569", attributionLogo: true, panes: { separatorColor: "#e2e8f0", separatorHoverColor: "#cbd5e1" } },
       grid: { vertLines: { color: "#f1f5f9", visible: gridVisibleRef.current }, horzLines: { color: "#f1f5f9", visible: gridVisibleRef.current } },
       crosshair: { mode: CrosshairMode.Normal },
-      localization: { locale: "zh-CN", timeFormatter: (time: Time) => typeof time === "number" ? formatUtcDateTime(time * 1_000, displayUtcOffsetRef.current) : String(time) },
+      localization: { locale: "zh-CN", timeFormatter: (time: Time) => typeof time === "number" ? formatUtcDateTimeWithWeekday(time * 1_000, displayUtcOffsetRef.current) : String(time) },
       timeScale: {
         borderColor: "#e2e8f0",
         timeVisible: true,
@@ -230,7 +230,7 @@ export function useReplayChartSetup(core: ReturnType<typeof useReplayChartCore>)
     chartRef.current?.applyOptions({
       localization: {
         locale: "zh-CN",
-        timeFormatter: (time: Time) => typeof time === "number" ? formatUtcDateTime(time * 1_000, displayUtcOffsetMinutes) : String(time),
+        timeFormatter: (time: Time) => typeof time === "number" ? formatUtcDateTimeWithWeekday(time * 1_000, displayUtcOffsetMinutes) : String(time),
       },
       timeScale: {
         tickMarkFormatter: (time: Time, tickMarkType: TickMarkType) => formatChartTick(time, tickMarkType, displayUtcOffsetMinutes),

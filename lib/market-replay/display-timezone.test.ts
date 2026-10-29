@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import {
   UTC_OFFSET_OPTIONS,
   formatUtcDateTime,
+  formatUtcDateTimeWithWeekday,
   formatUtcOffset,
   isSupportedUtcOffsetMinutes,
   utcDateParts,
@@ -28,6 +29,26 @@ describe("market replay display timezone", () => {
     expect(utcDateParts(timestamp, 600)).toMatchObject({ hour: "22", minute: "34", day: "05" });
   });
 
+  it("prefixes the crosshair timestamp with the weekday in the example date", () => {
+    const timestamp = "2022-01-28T10:30:00.000Z";
+    expect(formatUtcDateTimeWithWeekday(timestamp, 0)).toBe("周五 2022/01/28 10:30:00");
+    expect(formatUtcDateTimeWithWeekday(new Date(timestamp), 0)).toBe("周五 2022/01/28 10:30:00");
+    expect(formatUtcDateTimeWithWeekday(new Date(timestamp).getTime(), 0)).toBe("周五 2022/01/28 10:30:00");
+  });
+
+  it.each(["周日", "周一", "周二", "周三", "周四", "周五", "周六"])("formats the complete week, including %s", (weekday) => {
+    const day = ["周日", "周一", "周二", "周三", "周四", "周五", "周六"].indexOf(weekday);
+    expect(formatUtcDateTimeWithWeekday(Date.UTC(2022, 0, 23 + day), 0)).toBe(`${weekday} 2022/01/${23 + day} 00:00:00`);
+  });
+
+  it.each([
+    ["2022-01-28T23:30:00.000Z", 480, "周六 2022/01/29 07:30:00"],
+    ["2022-01-28T00:30:00.000Z", -300, "周四 2022/01/27 19:30:00"],
+    ["2021-12-31T23:30:00.000Z", 60, "周六 2022/01/01 00:30:00"],
+    ["2024-02-29T23:30:00.000Z", 60, "周五 2024/03/01 00:30:00"],
+  ])("keeps weekday and date aligned across offset boundaries for %s (%s minutes)", (timestamp, offset, expected) => {
+    expect(formatUtcDateTimeWithWeekday(timestamp, offset)).toBe(expected);
+  });
   it("derives an initial fixed UTC offset from an imported IANA timezone", () => {
     expect(utcOffsetMinutesForTimezone("2026-09-05T00:00:00.000Z", "Asia/Shanghai")).toBe(480);
     expect(utcOffsetMinutesForTimezone("2026-01-15T12:00:00.000Z", "America/New_York")).toBe(-300);
