@@ -13,7 +13,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { Line, LineChart, ResponsiveContainer, Tooltip, XAxis, YAxis } from "recharts";
 import { PaperJournalTable } from "@/components/market-replay/paper-journal-table";
 import { copy } from "@/lib/i18n";
-import { formatNumber } from "@/lib/format";
+import { formatMoney, formatNumber } from "@/lib/format";
 import type { StageMetrics } from "@/lib/prop-practice/stage-metrics";
 import { snapPriceToTick } from "@/lib/market-replay/price-ticks";
 import type { MarketBarData } from "@/lib/market-replay/types";
@@ -88,12 +88,13 @@ function fillReasonLabel(reason: PaperSessionSnapshot["recentFills"][number]["re
   return labels[reason];
 }
 
-export function PaperAccountStrip({ snapshot, compact = false }: { snapshot: PaperSessionSnapshot | null; compact?: boolean }) {
+export function PaperAccountStrip({ snapshot, compact = false, overview = false }: { snapshot: PaperSessionSnapshot | null; compact?: boolean; overview?: boolean }) {
   if (!snapshot || snapshot.propAccount) return null;
+  if (overview) return <div className="space-y-4"><h3 className="text-base font-semibold text-slate-950">{copy.propPractice.standard}</h3><div className="flex items-baseline justify-between gap-2"><h4 className="text-sm font-semibold text-slate-950">{copy.propPractice.tradingOverview}</h4><p className="text-xs text-slate-500">{copy.propPractice.currentSessionData}</p></div><PaperAccountMetrics snapshot={snapshot} compact={compact} tiles /></div>;
   return <Card><CardContent className="p-4"><PaperAccountMetrics snapshot={snapshot} compact={compact} /></CardContent></Card>;
 }
 
-export function PaperAccountMetrics({ snapshot, compact = false, includeBalances = true, extraItems = [], metrics }: { snapshot: PaperSessionSnapshot | null; compact?: boolean; includeBalances?: boolean; extraItems?: [string, string][]; metrics?: Pick<StageMetrics, "realizedPnl" | "totalFees" | "maxDrawdown"> | null }) {
+export function PaperAccountMetrics({ snapshot, compact = false, includeBalances = true, extraItems = [], metrics, tiles = false }: { snapshot: PaperSessionSnapshot | null; compact?: boolean; includeBalances?: boolean; extraItems?: [string, string][]; metrics?: Pick<StageMetrics, "realizedPnl" | "totalFees" | "maxDrawdown"> | null; tiles?: boolean }) {
   if (!snapshot) return null;
   const { session, stats } = snapshot;
   const display = metrics === undefined ? session : metrics;
@@ -103,17 +104,17 @@ export function PaperAccountMetrics({ snapshot, compact = false, includeBalances
       [copy.paperTrading.balance, `${number(stats.balance)} ${session.currency}`],
       [copy.paperTrading.equity, `${number(stats.equity)} ${session.currency}`],
     ] : []),
-    [copy.paperTrading.realizedPnl, display ? number(display.realizedPnl) : copy.common.dash],
-    [copy.paperTrading.unrealizedPnl, number(stats.unrealizedPnl)],
+    [copy.paperTrading.realizedPnl, display ? tiles ? formatMoney(display.realizedPnl, session.currency) : number(display.realizedPnl) : copy.common.dash],
+    [copy.paperTrading.unrealizedPnl, tiles ? formatMoney(stats.unrealizedPnl, session.currency) : number(stats.unrealizedPnl)],
     [copy.paperTrading.netPosition, `${position} ${number(Math.abs(session.netQuantity), 8)}`],
     [copy.paperTrading.averagePrice, session.averageEntryPrice == null ? "—" : number(session.averageEntryPrice, 8)],
-    [copy.paperTrading.fees, display ? number(display.totalFees) : copy.common.dash],
+    [copy.paperTrading.fees, display ? tiles ? formatMoney(display.totalFees, session.currency) : number(display.totalFees) : copy.common.dash],
     [copy.paperTrading.maxDrawdown, display ? `${number(display.maxDrawdown * 100)}%` : copy.common.dash],
     ...extraItems,
   ];
   return (
-    <div className={compact ? "grid grid-cols-4 gap-4 text-sm tabular-nums" : "grid gap-3 text-sm sm:grid-cols-2 lg:grid-cols-4 xl:grid-cols-8"}>
-      {items.map(([label, value]) => <div key={label}><p className="text-xs text-slate-500">{label}</p><p className="font-medium text-slate-950">{value}</p></div>)}
+    <div className={tiles ? "grid grid-cols-2 gap-px overflow-hidden rounded-md border bg-border text-sm tabular-nums sm:grid-cols-4" : compact ? "grid grid-cols-4 gap-4 text-sm tabular-nums" : "grid gap-3 text-sm sm:grid-cols-2 lg:grid-cols-4 xl:grid-cols-8"}>
+      {items.map(([label, value]) => <div key={label} className={tiles ? "min-w-0 bg-white p-3" : undefined}><p className="text-xs text-slate-500">{label}</p><p className={tiles ? "mt-1 break-words font-medium text-slate-950" : "font-medium text-slate-950"}>{value}</p></div>)}
     </div>
   );
 }
