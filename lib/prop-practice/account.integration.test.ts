@@ -163,7 +163,7 @@ describe("prop orchestration versus original flow", () => {
     const s = await createReplaySession("prop", { name: "Late account", mode: "TRAINING", timestamp: times[0], playbackRate: 1, displayIntervalSeconds: 60, displaySession: "ETH" });
     await prisma.replayProgress.update({ where: { replaySessionId: s.id }, data: { currentSequence: 3 } });
     await prisma.replayProjection.update({ where: { id: s.activeProjectionId }, data: { currentSequence: 3 } });
-    const gate = JSON.stringify({ ...defaultTrainingGate(), lossThreshold: 4 });
+    const gate = JSON.stringify({ ...defaultTrainingGate(), autoEnabled: true, lossThreshold: 4 });
     await prisma.replaySession.update({ where: { id: s.id }, data: { trainingGate: gate, riskPreferences: "{\"riskAmount\":20}" } });
     const template = await savePropTemplate(rules());
     const response = await accountPOST(request(s, "POST", { ...config, accountCategory: "PROP_PRACTICE", propTemplateVersionId: template.versions[0].id }), ctx);
@@ -218,7 +218,7 @@ describe("prop orchestration versus original flow", () => {
     const r = rules(); r.evaluation.target = 1e8;
     const a = await create(), b = await create(r);
     for (const s of [a, b]) {
-      await prisma.replaySession.update({ where: { id: s.id }, data: { trainingGate: JSON.stringify({ ...defaultTrainingGate(), lossThreshold: 1, nextMode: "PLAN", tradeCount: 1 }) } });
+      await prisma.replaySession.update({ where: { id: s.id }, data: { trainingGate: JSON.stringify({ ...defaultTrainingGate(), autoEnabled: true, lossThreshold: 1, nextMode: "PLAN", tradeCount: 1 }) } });
       await advance(s); await order(s, "SELL"); await advance(s);
       await order(s, "SELL", 1, { type: "LIMIT", price: 200 });
       await order(s, "BUY", 1, { executeAtCurrentClose: true });
@@ -275,7 +275,7 @@ describe("prop orchestration versus original flow", () => {
   it("flattens a failed evaluation at the failing source close, cancels protection and exposes one journal annotation", async () => {
     const r = rules(); r.evaluation.risk.drawdown = 0.01;
     const standard = await create(), s = await create(r);
-    await prisma.replaySession.update({ where: { id: s.id }, data: { trainingGate: JSON.stringify({ ...defaultTrainingGate(), lossStreak: 1 }) } });
+    await prisma.replaySession.update({ where: { id: s.id }, data: { trainingGate: JSON.stringify({ ...defaultTrainingGate(), autoEnabled: true, lossStreak: 1 }) } });
     for (const item of [standard, s]) { await advance(item); await order(item, "BUY", 1, { stopLoss: 50, takeProfit: 300 }); }
     await advance(standard);
     // Intrabar win here; make next complete close lose enough through original price model.
@@ -474,7 +474,7 @@ describe("prop orchestration versus original flow", () => {
     let snap = (await read())!;
     expect((await advancePOST(request(s, "POST", { count: 1, expectedVersion: snap.session.version, expectedCurrentSequence: -1 }), context)).status).toBe(200);
     // Permit three losses before activation so this retention scenario also verifies cross-round loss accounting.
-    await prisma.replaySession.update({ where: { id: s.id }, data: { trainingGate: JSON.stringify({ ...defaultTrainingGate(), lossThreshold: 4 }) } });
+    await prisma.replaySession.update({ where: { id: s.id }, data: { trainingGate: JSON.stringify({ ...defaultTrainingGate(), autoEnabled: true, lossThreshold: 4 }) } });
     const projections: string[] = [];
     for (let number = 1; number <= 3; number++) {
       snap = (await read())!;

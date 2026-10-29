@@ -7,50 +7,19 @@ import Image from "next/image";
 import { Dialog } from "@/components/ui/dialog";
 import { Button } from "@/components/ui/button";
 import { Label } from "@/components/ui/label";
-import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
 import { CheckboxField } from "@/components/ui/checkbox-field";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { copy } from "@/lib/i18n";
 import { formatNumber } from "@/lib/format";
-import { type TrainingGateMode, type TrainingGateState } from "@/lib/paper-trading/training-gate";
+import { type TrainingGateMode } from "@/lib/paper-trading/training-gate";
 import type { GateApprovalInput, PaperOrderInput } from "@/lib/paper-trading/types";
 import type { PlanEntryDraft } from "@/lib/paper-trading/entry-check-draft";
 import type { ManagedStrategy } from "@/components/master-data/strategy-manager";
 import { reconcileEntryCheckApproval } from "@/lib/paper-trading/entry-check-draft";
 import { MARKET_CONTEXT_DECISIONS, decisionStepForContext, previousDecisionStep, type MarketContextDecisionStep } from "@/lib/paper-trading/market-context-decision";
 
-export function TrainingGateConfigDialog({ gate, busy, error, onClose, onSave }: {
-  gate: TrainingGateState; busy: boolean; error: string | null; onClose: () => void;
-  onSave: (config: { tradeCount: number; autoEnabled: boolean; lossThreshold: number; nextMode: TrainingGateMode }, start: boolean) => Promise<void>;
-}) {
-  const [count, setCount] = useState(String(gate.tradeCount));
-  const [autoEnabled, setAutoEnabled] = useState(gate.autoEnabled);
-  const [threshold, setThreshold] = useState(String(gate.lossThreshold));
-  const [nextMode, setNextMode] = useState<TrainingGateMode>(gate.nextMode);
-  const number = Number(count);
-  const thresholdNumber = Number(threshold);
-  const validCount = Number.isInteger(number) && number > 0 && number <= 2147483647;
-  const validThreshold = Number.isInteger(thresholdNumber) && thresholdNumber > 0 && thresholdNumber <= 2147483647;
-  const valid = validCount && (!autoEnabled || validThreshold);
-  const config = { tradeCount: number, autoEnabled, lossThreshold: validThreshold ? thresholdNumber : gate.lossThreshold, nextMode };
-  return <Dialog open title={copy.trainingGate.title} description={copy.trainingGate.description} onClose={() => { if (!busy) onClose(); }}>
-    <div className="space-y-4" aria-busy={busy}>
-      {gate.active ? <div className="space-y-2 rounded-md border border-amber-200 bg-amber-50 p-3 text-sm text-amber-800"><p>{gate.source === "LOSS_STREAK" ? copy.trainingGate.automatic : copy.trainingGate.manual} · {copy.trainingGate.activeMode}：{copy.trainingGate.modes[gate.activeMode ?? "CHECKLIST"]}</p><p className="tabular-nums">{copy.trainingGate.progress(gate.completedCount, gate.targetCount)}</p><p>{copy.trainingGate.locked}</p>{gate.cancelledOrderCount ? <p>{copy.trainingGate.cancelled(gate.cancelledOrderCount)}</p> : null}</div> : null}
-      <p className="text-xs tabular-nums text-slate-600">{copy.trainingGate.autoStatus(gate.autoEnabled, gate.lossThreshold, gate.lossStreak)}</p>
-      <div className="space-y-2"><Label htmlFor="gate-trade-count">{copy.trainingGate.tradeCount}</Label><Input id="gate-trade-count" type="number" min={1} max={2147483647} step={1} value={count} disabled={busy || gate.active} onChange={(event) => setCount(event.target.value)} aria-describedby="gate-count-hint" /><p id="gate-count-hint" className="text-xs text-slate-500">{copy.trainingGate.countHint}</p></div>
-      <div className="space-y-2"><Label htmlFor="gate-next-mode">{copy.trainingGate.nextMode}</Label><Select value={nextMode} onValueChange={(value) => setNextMode(value as TrainingGateMode)} disabled={busy || gate.active}><SelectTrigger id="gate-next-mode"><SelectValue /></SelectTrigger><SelectContent><SelectItem value="CHECKLIST">{copy.trainingGate.modes.CHECKLIST}</SelectItem><SelectItem value="PLAN">{copy.trainingGate.modes.PLAN}</SelectItem></SelectContent></Select></div>
-      <CheckboxField checked={autoEnabled} disabled={busy || gate.active} onChange={setAutoEnabled}>{copy.trainingGate.autoEnabled}</CheckboxField>
-      <div className="space-y-2"><Label htmlFor="gate-loss-threshold">{copy.trainingGate.lossThreshold}</Label><Input id="gate-loss-threshold" type="number" min={1} max={2147483647} step={1} value={threshold} disabled={busy || gate.active || !autoEnabled} onChange={(event) => setThreshold(event.target.value)} aria-describedby="gate-loss-hint" /><p id="gate-loss-hint" className="text-xs text-slate-500">{copy.trainingGate.lossThresholdHint}</p></div>
-      {!valid ? <p className="text-sm text-red-600" role="alert">{!validCount ? copy.trainingGate.invalidCount : copy.trainingGate.invalidThreshold}</p> : null}
-      {error ? <p className="text-sm text-red-600" role="alert">{error}</p> : null}
-      <div className="flex flex-wrap justify-end gap-2 border-t pt-4">
-        <Button variant="outline" disabled={busy} onClick={onClose}>{copy.common.cancel}</Button>
-        {!gate.active ? <><Button variant="outline" disabled={busy || !valid} onClick={() => void onSave(config, false)}>{copy.trainingGate.save}</Button><Button disabled={busy || !valid} onClick={() => void onSave(config, true)}>{busy ? <Loader2 className="h-4 w-4 animate-spin" /> : null}{copy.trainingGate.start}</Button></> : null}
-      </div>
-    </div>
-  </Dialog>;
-}
+export { TrainingGateConfigDialog } from "./training-gate-config-dialog";
 
 type ChecklistApproval = Extract<GateApprovalInput, { strategyId: string }>;
 type PlanApproval = Extract<GateApprovalInput, { mode: "PLAN" }>;

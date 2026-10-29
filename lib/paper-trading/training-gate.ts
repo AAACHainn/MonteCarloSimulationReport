@@ -35,7 +35,7 @@ export type TrainingGateState = {
   cancelledOrderCount: number;
 };
 export function defaultTrainingGate(): TrainingGateState {
-  return { tradeCount: 10, autoEnabled: true, lossThreshold: 2, nextMode: "CHECKLIST", activeMode: null,
+  return { tradeCount: 10, autoEnabled: false, lossThreshold: 2, nextMode: "PLAN", activeMode: null,
     active: false, targetCount: 0, completedCount: 0, lossStreak: 0,
     activationCount: 0, source: null, activatedAtSequence: null, cancelledOrderCount: 0 };
 }

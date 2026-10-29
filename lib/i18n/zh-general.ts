@@ -15,6 +15,12 @@ export const zhStart = {
       description: "开启后，每个新入场订单须完成本轮选择的检查模式。按实际入场成交计数，完成前不能手动关闭。",
       modes: { CHECKLIST: "策略清单", PLAN: "交易计划" },
       nextMode: "下一轮关卡模式", activeMode: "本轮模式",
+      configuration: "关卡配置", configurationHint: "设置下一轮关卡",
+      automation: "自动开启", automationHint: "连续亏损达到设定笔数时触发",
+      autoEnabledHint: "关闭自动开启后仍可手动开启。",
+      autoStatusLabel: "自动开启状态",
+      autoStatusValue: (enabled: boolean, threshold: number, streak: number) => enabled
+        ? `开 · 连亏 ${streak} / ${threshold}` : "关",
       autoEnabled: "连续亏损时自动开启", lossThreshold: "连续亏损触发笔数",
       lossThresholdHint: "默认 2 笔；关闭自动开启后仍可手动开启。修改开关或阈值后，从下一笔结算重新计数。",
       invalidThreshold: "请输入有效的正整数亏损笔数。",

@@ -9,6 +9,7 @@ vi.mock("@/lib/db", async () => {
   return { prisma: createDatabaseClient({ datasourceUrl: `file:${join(tmpdir(), `training-gate-${randomUUID()}.db`)}` }, { allowCreate: true }), replayDatabaseQueryCount: () => null };
 });
 import { prisma } from "@/lib/db";
+import { defaultTrainingGate, type TrainingGateMode } from "@/lib/paper-trading/training-gate";
 import { createReplaySession, restartReplaySession } from "./service";
 import { loadReplayScope, runWithReplayScope } from "./scope";
 import { POST as accountPOST } from "@/app/api/market-datasets/[id]/paper-session/route";
@@ -38,11 +39,15 @@ beforeAll(async () => {
 }, 30000);
 afterAll(async () => { await prisma.$disconnect(); if (databaseFile.includes("training-gate-")) rmSync(databaseFile, { force: true }); });
 const base = Date.UTC(2026, 9, 14);
-async function setup(mode: "TRAINING" | "LIVE_REPLAY" = "TRAINING", prices = [100, 100, 99, 105], commissionBps = 0) {
+async function setup(mode: "TRAINING" | "LIVE_REPLAY" = "TRAINING", prices = [100, 100, 99, 105], commissionBps = 0, gateConfig: { autoEnabled: boolean; nextMode: TrainingGateMode } | null = { autoEnabled: true, nextMode: "CHECKLIST" }) {
   const id = `gate-market-${++serial}`;
   await prisma.marketDataset.create({ data: { id, name: id, symbol: "QA", timeframe: "1m", timezone: "UTC", sourceIntervalSeconds: 60, barCount: 50, startTime: new Date(base), endTime: new Date(base + 49 * 60000) } });
   await prisma.marketBar.createMany({ data: Array.from({ length: 50 }, (_, sequence) => ({ datasetId: id, sequence, timestamp: new Date(base + sequence * 60000), open: prices[sequence] ?? 100, high: prices[sequence] ?? 100, low: prices[sequence] ?? 100, close: prices[sequence] ?? 100 })) });
   const session = await createReplaySession(id, { name: id, mode, timestamp: new Date(base).toISOString(), playbackRate: 100, displayIntervalSeconds: 60, displaySession: "ETH" });
+  // Existing scenarios explicitly enable automatic checklist gates; null exercises untouched defaults.
+  if (mode === "TRAINING" && gateConfig) await prisma.replaySession.update({
+    where: { id: session.id }, data: { trainingGate: JSON.stringify({ ...defaultTrainingGate(), ...gateConfig }) },
+  });
   const account = await accountPOST(await req(session.id, "POST", { initialCapital: 10000, currency: "USD", commissionBps, slippageBps: 0 }), ctx(id));
   expect(account.status).toBe(201);
   await advance(session.id);
@@ -76,6 +81,22 @@ async function place(sessionId: string, input: Record<string, unknown> = {}) {
 const approval = (s: { id: string; checklistVersion: number }, checkedItemIds = ["trend", "risk"]) => ({ strategyId: s.id, checklistVersion: s.checklistVersion, checkedItemIds });
 
 describe("training gate APIs and persistence", () => {
+  it("reads new defaults without rewriting stored config and does not activate after two losses", async () => {
+    const session = await setup("TRAINING", [100, 100, 100, 100, 100], 10, null);
+    const before = await prisma.replaySession.findUniqueOrThrow({ where: { id: session.id }, select: { trainingGate: true } });
+    const read = await gateGET(await req(session.id, "GET"), { params: Promise.resolve({ sessionId: session.id }) });
+    expect((await read.json()).gate).toMatchObject({ autoEnabled: false, nextMode: "PLAN", active: false });
+    expect(await prisma.replaySession.findUniqueOrThrow({ where: { id: session.id }, select: { trainingGate: true } })).toEqual(before);
+    for (let index = 0; index < 2; index++) {
+      expect((await place(session.id)).status).toBe(201);
+      await advance(session.id);
+      expect((await place(session.id, { side: "SELL", reduceOnly: true, executeAtCurrentClose: true })).status).toBe(201);
+    }
+    expect((await snapshot(session.id)).session.trainingGate).toMatchObject({ active: false, lossStreak: 0 });
+    expect((await start(session.id, 2)).status).toBe(200);
+    expect((await snapshot(session.id)).session.trainingGate).toMatchObject({ active: true, activeMode: "PLAN" });
+  });
+
   it("settles consecutive losses and cancels unchecked entries immediately while paused", async () => {
     const session = await setup("TRAINING", [100, 100, 100, 100, 100], 10);
     for (let index = 0; index < 2; index += 1) {
