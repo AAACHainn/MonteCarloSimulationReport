@@ -24,6 +24,33 @@ export const DEFAULT_CANDLESTICK_STYLE: CandlestickStyle = {
   wickDownColor: "#DC2626",
 };
 
+type CandlestickColors = Pick<CandlestickStyle,
+  "upColor" | "downColor" | "borderUpColor" | "borderDownColor" | "wickUpColor" | "wickDownColor">;
+
+function solidColors(upColor: string, downColor: string): CandlestickColors {
+  return { upColor, downColor, borderUpColor: upColor, borderDownColor: downColor, wickUpColor: upColor, wickDownColor: downColor };
+}
+
+// Chart sequence colors shared by the preset thumbnails, preview and live chart.
+export const CANDLESTICK_COLOR_PRESETS = [
+  { id: "monochrome", colors: { ...solidColors("#334155", "#334155"), upColor: "#FFFFFF" } },
+  { id: "green-up", colors: solidColors("#26A69A", "#EF5350") },
+  { id: "red-up", colors: solidColors("#E53935", "#26A69A") },
+  { id: "purple-gold", colors: solidColors("#7C3AED", "#B45309") },
+] as const;
+
+export type CandlestickColorPreset = typeof CANDLESTICK_COLOR_PRESETS[number];
+
+export function applyCandlestickColorPreset(style: CandlestickStyle, preset: CandlestickColorPreset): CandlestickStyle {
+  return { ...style, ...preset.colors };
+}
+
+export function matchingCandlestickColorPreset(style: CandlestickStyle): CandlestickColorPreset | undefined {
+  return CANDLESTICK_COLOR_PRESETS.find(preset => (
+    Object.entries(preset.colors).every(([key, value]) => style[key as keyof CandlestickColors].toUpperCase() === value)
+  ));
+}
+
 const color = z.string().regex(/^#[0-9a-f]{6}$/i);
 
 export const candlestickStyleSchema = z.object({

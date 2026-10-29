@@ -24,6 +24,7 @@ import { useReplayCursorPreference } from "./use-replay-cursor-preference";
 import type { ReplayCursorMode } from "@/lib/market-replay/cursor-mode";
 import { ReplayChart } from "@/components/market-replay/replay-chart";
 import { ReplayAutoPauseNotice } from "@/components/market-replay/replay-auto-pause-notice";
+import { CandlestickSettingsDialog } from "./candlestick-settings-dialog";
 import { IndicatorSettingsDialog } from "@/components/market-replay/indicator-settings-dialog";
 import { DisplayIntervalControls } from "@/components/market-replay/display-interval-controls";
 import { ReplayStartDialog } from "@/components/market-replay/replay-start-dialog";
@@ -488,79 +489,17 @@ export function MarketReplayClient({ dataset: initialDataset, initialJournalFocu
           templates={rectangleTemplates} onTemplatesChange={setRectangleTemplates} onClose={() => setRectangleStyleId(null)}
           onSave={async style => { const saved = await updateDrawing(drawing.id, { style }); if (saved) setDefaultRectangleStyle({ ...style }); return saved; }} /> : null;
       })()}
-      <Dialog
+      <CandlestickSettingsDialog
         open={settingsDialog === "candlesticks"}
-        title={copy.marketReplay.candlestickSettings}
-        description={copy.marketReplay.candlestickSettingsDescription}
-        className="max-w-md"
-        onClose={() => {
+        draft={candlestickStyleDraft}
+        onDraftChange={setCandlestickStyleDraft}
+        onClose={() => { setCandlestickStyleDraft(null); setSettingsDialog(null); }}
+        onConfirm={style => {
+          setCandlestickStyle(style);
           setCandlestickStyleDraft(null);
           setSettingsDialog(null);
         }}
-      >
-        {candlestickStyleDraft ? (
-          <div className="space-y-5">
-            <div className="grid grid-cols-[7rem_1fr_1fr] items-center gap-3 px-1 text-center text-xs font-medium text-slate-500">
-              <span />
-              <span>{copy.marketReplay.bullishCandle}</span>
-              <span>{copy.marketReplay.bearishCandle}</span>
-            </div>
-            <div className="space-y-2">
-              {([
-                { visible: "bodyVisible", up: "upColor", down: "downColor", label: copy.marketReplay.candleBody },
-                { visible: "borderVisible", up: "borderUpColor", down: "borderDownColor", label: copy.marketReplay.candleBorder },
-                { visible: "wickVisible", up: "wickUpColor", down: "wickDownColor", label: copy.marketReplay.candleWick },
-              ] as const).map((row) => (
-                <div key={row.visible} className="grid grid-cols-[7rem_1fr_1fr] items-center gap-3 rounded-md border px-3 py-2.5">
-                  <label className="flex items-center gap-2 text-sm font-medium text-slate-700">
-                    <input
-                      type="checkbox"
-                      checked={candlestickStyleDraft[row.visible]}
-                      onChange={(event) => setCandlestickStyleDraft((current) => current ? {
-                        ...current,
-                        [row.visible]: event.target.checked,
-                      } : current)}
-                      className="h-4 w-4 rounded border-slate-300"
-                    />
-                    {row.label}
-                  </label>
-                  <Input
-                    type="color"
-                    value={candlestickStyleDraft[row.up]}
-                    aria-label={copy.marketReplay.candlestickColorLabel(row.label, copy.marketReplay.bullishCandle)}
-                    onChange={(event) => setCandlestickStyleDraft((current) => current ? {
-                      ...current,
-                      [row.up]: event.target.value.toUpperCase(),
-                    } : current)}
-                    className="mx-auto h-9 w-12 cursor-pointer p-1"
-                  />
-                  <Input
-                    type="color"
-                    value={candlestickStyleDraft[row.down]}
-                    aria-label={copy.marketReplay.candlestickColorLabel(row.label, copy.marketReplay.bearishCandle)}
-                    onChange={(event) => setCandlestickStyleDraft((current) => current ? {
-                      ...current,
-                      [row.down]: event.target.value.toUpperCase(),
-                    } : current)}
-                    className="mx-auto h-9 w-12 cursor-pointer p-1"
-                  />
-                </div>
-              ))}
-            </div>
-            <div className="flex justify-end gap-2 border-t pt-4">
-              <Button type="button" variant="outline" onClick={() => {
-                setCandlestickStyleDraft(null);
-                setSettingsDialog(null);
-              }}>{copy.marketReplay.drawingCancel}</Button>
-              <Button type="button" onClick={() => {
-                setCandlestickStyle({ ...candlestickStyleDraft });
-                setCandlestickStyleDraft(null);
-                setSettingsDialog(null);
-              }}>{copy.marketReplay.drawingConfirm}</Button>
-            </div>
-          </div>
-        ) : null}
-      </Dialog>
+      />
 
       <IndicatorSettingsDialog
         open={settingsDialog === "indicators"}
