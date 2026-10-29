@@ -61,7 +61,7 @@ export function ProfileView({ profile, selected, state, onRetry, onSwitch, onEdi
     <section className={cn(styles.identity, "overflow-hidden rounded-lg border px-6 pb-6 pt-7", profile.realm === "foundation" && styles.breakthrough)} aria-label={t.realm}>
       <svg viewBox="0 0 380 100" className={styles.mountains} fill="none" aria-hidden="true"><path d="M0 99 60 55 85 71 142 12 195 77 237 46 287 82 330 34 380 99M67 99 142 36 182 82 203 70 230 99" stroke="currentColor" strokeWidth="1" /></svg>
       <div className="relative flex flex-wrap items-start gap-5">
-        <UserAvatar avatar={profile.user.avatar} size="profile" />
+        <UserAvatar avatar={profile.user.avatar} realm={profile.growthPending ? undefined : profile.realm} size="profile" />
         <div className="min-w-0 flex-1 basis-72"><p className="mb-2 text-xs text-slate-600">{t.viewing}</p>
           <div className="flex flex-wrap items-center gap-3"><h1 className="max-w-full break-words text-3xl font-semibold tracking-tight text-slate-950">{profile.user.nickname}</h1><RealmBadge realm={profile.realm} className="px-3 py-1"><h2 ref={realmRef} tabIndex={-1} className={cn(styles.realm, "rounded-sm text-xl font-semibold focus-visible:ring-2 focus-visible:ring-ring")}>{profile.user.realmLabel}</h2></RealmBadge>
             {profile.realm === "foundation" || ready ? <Badge className={cn(styles.gold, "gap-1 border-current")}><Sparkles className="h-3 w-3" aria-hidden="true" />{profile.realm === "foundation" ? t.achieved : t.ready}</Badge> : profile.layer === 12 ? <span className="text-sm text-slate-600">{xpMet ? t.experienceMet : t.preparing}</span> : null}

@@ -1,10 +1,12 @@
 "use client";
 import { useReplaySession } from "./replay-session-context";
 import { eligibilityLabel } from "@/components/user-growth/ownership-context";
-import { useState } from "react";
+import { useState, type ReactNode } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
+import { BookOpen, Clock3, FileText, Info, List, WalletCards } from "lucide-react";
 import { Button } from "@/components/ui/button";
+import { Badge } from "@/components/ui/badge";
 import { Dialog } from "@/components/ui/dialog";
 import { ConfirmDialog } from "@/components/ui/confirm-dialog";
 import { Input } from "@/components/ui/input";
@@ -61,8 +63,8 @@ function RuleSnapshotCards({ snapshot }: { snapshot: PropRuntime["snapshot"] }) 
   </div>;
 }
 
-export function PropAccountPanel({ sessionId, runtime, tradingSnapshot, busy: externalBusy, onBeforeOpen, onChanged, readOnly = false }: {
-  sessionId: string; runtime: PropRuntime; tradingSnapshot?: PaperSessionSnapshot | null; busy?: boolean; onBeforeOpen?: () => Promise<void>; onChanged?: () => Promise<unknown>; readOnly?: boolean;
+export function PropAccountPanel({ sessionId, runtime, tradingSnapshot, busy: externalBusy, onBeforeOpen, onChanged, readOnly = false, overview = false, archiveAction }: {
+  sessionId: string; runtime: PropRuntime; tradingSnapshot?: PaperSessionSnapshot | null; busy?: boolean; onBeforeOpen?: () => Promise<void>; onChanged?: () => Promise<unknown>; readOnly?: boolean; overview?: boolean; archiveAction?: ReactNode;
 }) {
   const router = useRouter();
   const replaySession = useReplaySession();
@@ -135,42 +137,54 @@ export function PropAccountPanel({ sessionId, runtime, tradingSnapshot, busy: ex
       setPromotionConfirmation(null); setPromotionSuccess(true); await reload(); await onChanged?.();
     } catch (e) { setError(e instanceof Error ? e.message : t.requestFailed); } finally { setBusy(false); }
   }
+  const evaluationBadge = state.result === "FAILED" ? { label: t.evaluationFailed, style: "border-red-200 bg-red-50 text-red-700" }
+    : state.result === "STOPPED" ? { label: t.evaluationStopped, style: "border-slate-200 bg-slate-100 text-slate-600" }
+    : state.pause !== "NONE" ? { label: t.PAUSED, style: "border-amber-200 bg-amber-50 text-amber-800" }
+    : progress.eligible ? { label: t.evaluationQualified, style: "border-emerald-200 bg-emerald-50 text-emerald-700" }
+    : { label: t.evaluation, style: "border-blue-200 bg-blue-50 text-blue-700" };
   const summaryItems: [string, string][] = [[t.profit, money(f.profit)], [t.totalReceived, money(state.totalReceived)]];
   const viewTitle = { rules: t.rules, payout: t.payout, history: t.dailyLedger, events: t.events }[view];
   const requested = confirmation?.amount ?? Number(amount), received = Math.round(requested * snapshot.rules.payout.traderShare * 100) / 100;
   const confirmationDescription = `${t.requested}: ${money(requested)} · ${t.received}: ${money(received)} · ${t.balanceAfter}: ${money(preview.balance - requested)} · ${t.floorAfter}: ${money(preview.floorAfter)}。${t.payoutHint}`;
   return <>
-    <Card>
-      <CardHeader className="flex-row items-center justify-between gap-3 space-y-0 pb-3">
-        <CardTitle>{snapshot.rules.name} · {t.roundLabel(current.roundNumber ?? 1)} · {propResultLabel(state, currency, formatMoney)}</CardTitle>
+    <Card className={overview ? "border-0 shadow-none" : undefined}>
+      <CardHeader className={overview ? "flex-row flex-wrap items-center justify-between gap-3 space-y-0 px-0 pb-4 pt-0" : "flex-row items-center justify-between gap-3 space-y-0 pb-3"}>
+        {overview ? <><div className="flex min-w-0 items-center gap-3"><span className="rounded-md bg-blue-50 p-2 text-blue-700"><WalletCards className="h-5 w-5" aria-hidden="true" /></span><div className="min-w-0"><CardTitle className="break-words">{snapshot.rules.name}</CardTitle><p className="mt-1 text-xs text-slate-500">{t.title} · {t.roundLabel(current.roundNumber ?? 1)}</p></div></div><Badge className="shrink-0">{propResultLabel(state, currency, formatMoney)}</Badge></> : <CardTitle>{snapshot.rules.name} · {t.roundLabel(current.roundNumber ?? 1)} · {propResultLabel(state, currency, formatMoney)}</CardTitle>}
       </CardHeader>
-      <CardContent className="space-y-3">
+      <CardContent className={overview ? "space-y-4 px-0 pb-0" : "space-y-3"}>
         {!open && !promotionConfirmation && error ? <Alert role="alert" className="border-red-200 bg-red-50"><AlertDescription>{error}</AlertDescription></Alert> : null}
         {promotionSuccess ? <Alert role="status" aria-live="polite" className="border-emerald-200 bg-emerald-50"><AlertDescription>{t.promotionSuccess}</AlertDescription></Alert> : null}
-        <div className="grid grid-cols-4 gap-4 text-sm tabular-nums">
+        {overview ? <div className={state.phase === "EVALUATION" ? "grid gap-3 md:grid-cols-2" : "grid gap-3"}>
+          <Card className="bg-slate-50 shadow-none"><CardHeader className="p-4 pb-2"><div className="flex flex-wrap items-center justify-between gap-2"><CardTitle>{t.riskSpace}</CardTitle><span className="text-xs text-slate-500">{t.riskFormula}</span></div></CardHeader><CardContent className="space-y-3 px-4 pb-4"><div><p className="text-2xl font-semibold tabular-nums text-slate-950">{money(f.equity - f.floor)}</p><p className="text-xs text-slate-500">{t.remainingRisk}</p></div><div className="grid grid-cols-2 gap-3 text-sm tabular-nums"><div><p className="text-xs text-slate-500">{t.floor}</p><p className="mt-1 font-medium">{money(f.floor)}</p></div><div className="text-right"><p className="text-xs text-slate-500">{t.equity}</p><p className="mt-1 font-medium">{money(f.equity)}</p></div></div><div className="border-t pt-3 text-xs text-slate-500">{t.balance} <strong className="font-medium tabular-nums text-slate-700">{money(f.balance)}</strong></div></CardContent></Card>
+          {state.phase === "EVALUATION" ? <Card className="shadow-none"><CardHeader className="p-4 pb-2"><div className="flex items-center justify-between gap-2"><CardTitle>{t.progress}</CardTitle><Badge className={evaluationBadge.style}>{t.roundLabel(current.roundNumber ?? 1)} · {evaluationBadge.label}</Badge></div></CardHeader><CardContent className="space-y-3 px-4 pb-4 text-sm tabular-nums"><div className="grid grid-cols-2 gap-3"><div><p className="text-xs text-slate-500">{t.profit}</p><p className="mt-1 font-medium">{money(progress.net)}</p></div><div><p className="text-xs text-slate-500">{t.requiredProfit}</p><p className="mt-1 font-medium">{money(progress.requiredProfit)}</p></div></div><div role="progressbar" aria-label={t.profitProgress} aria-valuemin={0} aria-valuemax={progress.requiredProfit} aria-valuenow={Math.max(0, Math.min(progress.net, progress.requiredProfit))} aria-valuetext={`${money(progress.net)} / ${money(progress.requiredProfit)}`} className="h-2 overflow-hidden rounded-full bg-slate-100"><div className="h-full rounded-full bg-blue-600" style={{ width: `${progress.requiredProfit > 0 ? Math.max(0, Math.min(100, progress.net / progress.requiredProfit * 100)) : 0}%` }} /></div><div className="border-t pt-3"><span className="text-xs text-slate-500">{t.tradingDays}</span><p className="mt-1 font-medium">{progress.tradingDays} / {snapshot.rules.evaluation.minTradingDays ?? copy.common.dash}</p></div></CardContent></Card> : null}
+        </div> : <div className="grid grid-cols-4 gap-4 text-sm tabular-nums">
           {[[t.balance, f.balance], [t.equity, f.equity], [t.floor, f.floor], [t.remainingRisk, f.equity - f.floor]].map(([label, value]) => <div key={label}><p className="text-xs text-slate-500">{label}</p><p className="mt-1 font-medium text-slate-950">{money(Number(value))}</p></div>)}
-        </div>
-        {tradingSnapshot ? <div className="border-t pt-3"><PaperAccountMetrics snapshot={tradingSnapshot} compact includeBalances={false} metrics={currentStage(state).metrics ?? null} extraItems={summaryItems} /></div> : <div className="grid grid-cols-4 gap-4 border-t pt-3 text-sm tabular-nums">{summaryItems.map(([label, value]) => <div key={label}><p className="text-xs text-slate-500">{label}</p><p className="font-medium">{value}</p></div>)}</div>}
+        </div>}
+        {overview ? <div className="flex flex-wrap items-baseline justify-between gap-2"><h3 className="text-base font-semibold text-slate-950">{t.tradingOverview}</h3><p className="text-xs text-slate-500">{t.currentRoundData}</p></div> : null}
+        {tradingSnapshot ? <div className={overview ? undefined : "border-t pt-3"}><PaperAccountMetrics snapshot={tradingSnapshot} compact includeBalances={false} metrics={currentStage(state).metrics ?? null} extraItems={summaryItems} tiles={overview} /></div> : <div className="grid grid-cols-4 gap-4 border-t pt-3 text-sm tabular-nums">{summaryItems.map(([label, value]) => <div key={label}><p className="text-xs text-slate-500">{label}</p><p className="font-medium">{value}</p></div>)}</div>}
         <p className={!state.result && state.pause === "NONE" ? "text-xs text-slate-500" : "text-xs text-amber-800"}>{t.pause}: {state.result === "FAILED" ? t.roundFailed : state.result ? t.roundStopped : t[state.pause]}</p>
         {state.result ? <p className="text-xs text-amber-800">{state.result === "FAILED" ? t.roundFailureFinishedHint : t.roundFinishedHint}</p> : null}
         {state.failure ? <p className="text-xs text-red-700">{t.failure}: {state.failure.sequence} / {money(state.failure.equity)} / {money(state.failure.floor)} · {state.failure.phase === "EVALUATION" ? t.evaluation : t.funded}</p> : null}
-        {state.phase === "EVALUATION" ? <div className="grid grid-cols-2 gap-4 border-t pt-3 text-sm tabular-nums">
+        {state.phase === "EVALUATION" && !overview ? <div className="grid grid-cols-2 gap-4 border-t pt-3 text-sm tabular-nums">
           <div><p className="text-xs text-slate-500">{t.requiredProfit}</p><p className="mt-1 font-medium">{money(progress.requiredProfit)}</p></div>
           <div><p className="text-xs text-slate-500">{t.tradingDays}</p><p className="mt-1 font-medium">{progress.tradingDays} / {snapshot.rules.evaluation.minTradingDays ?? copy.common.dash}</p></div>
         </div> : null}
-        {state.phase === "EVALUATION" && !state.result ? <p id="prop-promotion-hint" className="text-xs text-slate-500">{t.promotionHint}</p> : null}
+        {state.phase === "EVALUATION" && !state.result ? overview ? <Alert className="flex items-start gap-2 bg-slate-50 p-3"><Info className="mt-0.5 h-4 w-4 shrink-0 text-slate-500" aria-hidden="true" /><AlertDescription id="prop-promotion-hint" className="text-xs text-slate-600"><strong className="mr-2 font-medium text-slate-800">{t.promotionConditions}</strong>{t.promotionHint}</AlertDescription></Alert> : <p id="prop-promotion-hint" className="text-xs text-slate-500">{t.promotionHint}</p> : null}
         {state.phase === "FUNDED" && preview.qualification.requiredDays !== null ? <div className="border-t pt-3">
           <div className="grid grid-cols-2 gap-4 text-sm tabular-nums">
             <div><p className="text-xs text-slate-500">{t.qualifiedDays}</p><p className="mt-1 font-medium">{formatInteger(preview.qualification.qualifyingDays)} / {formatInteger(preview.qualification.requiredDays)}</p></div>
             <div><p className="text-xs text-slate-500">{t.qualifyingProfit}</p><p className="mt-1 font-medium">{money(preview.qualification.qualifyingProfit!)}</p></div>
           </div><p className="mt-2 text-xs text-slate-500">{t.qualifyingHint}</p>
         </div> : null}
-        <div className="flex flex-wrap justify-end gap-2 border-t pt-4">
-          {tradingSnapshot ? <Button asChild variant="outline"><Link href={`/market-replay/${tradingSnapshot.session.datasetId}/trade-history?sessionId=${encodeURIComponent(sessionId)}&propRound=0`}>{t.rounds}</Link></Button> : null}
-          <Button variant="outline" disabled={busy || externalBusy} onClick={() => void begin("rules")}>{t.rules}</Button>
-          <Button variant="outline" disabled={busy || externalBusy} onClick={() => void begin("history")}>{t.dailyLedger}</Button>
-          <Button variant="outline" disabled={busy || externalBusy} onClick={() => void begin("events")}>{t.events}</Button>
+        <div className="flex flex-wrap items-center justify-between gap-3 border-t pt-4">
+          {archiveAction}
+          <div className="ml-auto flex flex-wrap justify-end gap-2">
+          {tradingSnapshot ? <Button asChild variant="outline"><Link href={`/market-replay/${tradingSnapshot.session.datasetId}/trade-history?sessionId=${encodeURIComponent(sessionId)}&propRound=0`}>{overview ? <Clock3 className="h-4 w-4" aria-hidden="true" /> : null}{t.rounds}</Link></Button> : null}
+          <Button variant="outline" disabled={busy || externalBusy} onClick={() => void begin("rules")}>{overview ? <FileText className="h-4 w-4" aria-hidden="true" /> : null}{t.rules}</Button>
+          <Button variant="outline" disabled={busy || externalBusy} onClick={() => void begin("history")}>{overview ? <BookOpen className="h-4 w-4" aria-hidden="true" /> : null}{t.dailyLedger}</Button>
+          <Button variant="outline" disabled={busy || externalBusy} onClick={() => void begin("events")}>{overview ? <List className="h-4 w-4" aria-hidden="true" /> : null}{t.events}</Button>
           {!readOnly && state.result === "FAILED" ? <Button disabled={busy || externalBusy} onClick={() => void beginReset()}>{t.reset}</Button> : state.phase === "EVALUATION" && !state.result ? <Button disabled={readOnly || busy || externalBusy || !progress.eligible} aria-describedby="prop-promotion-hint" onClick={() => void beginPromotion()}>{t.promote}</Button> : <Button disabled={readOnly || busy || externalBusy || !!state.result} onClick={() => void begin("payout")}>{t.payout}</Button>}
+          </div>
         </div>
       </CardContent>
     </Card>
