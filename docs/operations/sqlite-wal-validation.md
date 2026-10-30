@@ -1,5 +1,7 @@
 # SQLite 提交优化：隔离验证
 
+> 状态：2026-10-18 的历史试验与本机接入记录，不是当前部署指南。版本、性能数字、FULL 配置示例和命令只适用于所述场景；当前安装、WAL / NORMAL / FULL 选择及回退统一见[升级指南](upgrade.md)。不照搬本机路径、旧依赖试验或数据库状态。
+
 第一阶段验证数据库提交优化，未切换默认应用驱动或正式数据库日志模式。验证日期：2026-10-18。随后按用户要求接入本机试用，见下方“本机接入”；生产部署仍以 [升级指南](upgrade.md) 为入口。
 
 ## 版本来源与候选组合
@@ -51,6 +53,8 @@ SQLite 3.51.3 修复了本次讨论的 WAL-reset 问题，better-sqlite3 12.8.0 
 
 ## 复现
 
+> 复现仅限明确的隔离测试库；下列命令不用于核验或迁移当前业务库。目标环境仍须先按升级指南确认数据库路径与备份。
+
 先按根项目锁文件安装依赖；不需要修改 .env，不需要修改源数据库配置。备份副本检查使用 Node 22.16+ 或 Node 24+ 的 node:sqlite backup API；本次实际使用 Node 24.15.0。
 
 从项目根目录逐条执行：
@@ -79,6 +83,8 @@ corepack pnpm exec node scripts/sqlite-wal/check-copy.mjs --source prisma/dev.db
 
 ## 本机接入（2026-10-18）
 
+> 本节记录当时采用 WAL + FULL 的本机方案，不要求所有当前安装改为 FULL。当前连接工厂也支持明确配置的 WAL + NORMAL，适用边界见升级指南；不得将下面的环境设置直接覆盖到现有安装。
+
 根依赖固定 Prisma / 适配器 6.19.3、better-sqlite3 12.8.0，覆盖策略记录在 pnpm-workspace.yaml。lib/sqlite-client.mjs 供 lib/db.ts、独立 worker 和初始化脚本共同使用：相对 DATABASE_URL 仍以 prisma/ 为基准，日期保留 Unix 毫秒，每条实际连接检查 SQLite 3.51.3、外键、日志模式和 FULL。应用运行时拒绝悄悄新建不存在的数据库，并阻止把 WAL 库误交给旧 native 引擎写入。
 
 在已停止写入、完成数据库/配置/storage/导入文件备份并核对真实库之后，将本机 .env 设置为：
@@ -106,6 +112,8 @@ corepack pnpm start
 db:runtime 必须报告 SQLite 3.51.3、journalMode=wal、synchronous=2、foreignKeys=1。服务器第一次连接会记录 sqlite-runtime 日志，确认页面/API 的实际连接也使用相同配置。run.mjs 现在复用正式连接工厂执行回归，初始化和 worker 继承同一套驱动标志，不依赖试验用的全局替换去修改真实服务。
 
 ### 本机回到原提交方式
+
+> 历史回退记录。实际回退应按当前升级指南重新核对驱动、日志模式、备份及新增数据，不能仅凭本节命令判定可安全回退。
 
 先停止本项目服务和 worker，并备份试用后新增的数据。若要保留试用期间的交易，使用新驱动在离线状态转换回 DELETE，不能直接用旧备份覆盖新交易：
 

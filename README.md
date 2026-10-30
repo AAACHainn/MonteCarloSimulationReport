@@ -381,7 +381,7 @@ Windows 下若 Prisma query engine DLL 被占用，请先确认并停止本项�
 | [行情增量同步](docs/market-data/market-data-sync.md) | Databento 连接、自动计划、预算与冲突处理 |
 | [模拟训练交易关卡](docs/replay/training-gate.md) | 策略清单、连亏触发、计数与会话恢复 |
 | [回放交易 PDF 导出](docs/replay/replay-pdf-export.md) | 筛选、截图、明细字段与分卷下载 |
-| [回放多会话实施说明](docs/replay/replay-sessions-implementation.md) | 会话模式、纠错规则与实现说明 |
+| [回放会话与纠错](docs/replay/replay-sessions-implementation.md) | 当前会话规则、API 边界与代码入口 |
 | [AI 机器人与交易复盘](docs/ai/ai-assistant.md) | 配置、草稿采用、会话分析、证据、限制与部署 |
 | [UI 设计与实现规范](docs/ui/ui-guidelines.md) | 页面、组件与交互约束 |
 

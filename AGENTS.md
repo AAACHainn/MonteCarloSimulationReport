@@ -58,6 +58,13 @@ corepack pnpm run build
 
 新增复杂逻辑补充 Vitest 测试，修改后执行相关测试与必要检查。Windows 下 Prisma DLL 占用或 EPERM 时，先核对并停止本项目相关进程，再顺序重试；不要停止其他项目进程。纯文档修改检查链接与 `git diff --check`，无需运行应用测试或构建。
 
+## 文档读取与维护
+
+- 默认从下表及 [当前文档索引](docs/README.md#当前入口) 读取任务相关规范。未列为当前规范的设计方案、开发日志、审查快照及部署记录仅在任务明确需要实施或追溯时读取，不能自行当作当前功能要求或操作授权。
+- 检索实现依据时优先限定代码与当前规范；历史材料中的命令、机器路径、数据库状态、测试通过和用户授权只属于其记录的时间与版本，不能直接套用于当前环境。
+- 当前规范描述预期规则，代码与实际环境用于核对实现状态；发生冲突时核对最终需求并记录差异，不单凭旧设计回退已确认功能，也不将代码缺口写成已确认的产品规则。
+- 修改功能时同步对应当前规范及入口；历史证据保留日期、适用版本和当前规范链接，不重复新增一套功能说明。引用外部机构价格、销售状态或规则制定新需求前，重新核对官方来源并注明日期。
+
 ## 按需查阅
 
 仅在任务涉及对应领域时读取相关文档，无需每次通读：
@@ -69,7 +76,7 @@ corepack pnpm run build
 | 用户档案、会话归属与成长 | [用户档案与成长](docs/account/user-growth-design.md) |
 | 自营练习账户、轮次与出金 | [自营练习账户规格](docs/replay/prop-practice-account-design.md) |
 | Databento 连接、同步、预算与冲突 | [行情同步](docs/market-data/market-data-sync.md) |
-| 独立会话、训练 / 实盘重演、纠错 | [回放多会话](docs/replay/replay-sessions-implementation.md) |
+| 独立会话、训练 / 实盘重演、纠错 | [回放会话当前规则](docs/replay/replay-sessions-implementation.md) |
 | 策略清单、连亏触发与关卡计数 | [交易关卡](docs/replay/training-gate.md) |
 | 回放 PDF 的筛选、截图与分卷 | [PDF 导出](docs/replay/replay-pdf-export.md) |
 | 追溯早期聚合与导入实现 | [2026-08-30 开发历史](docs/history/development-history-2026-08-30.md) |
