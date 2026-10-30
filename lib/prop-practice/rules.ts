@@ -207,7 +207,8 @@ export function preparePropDay(r: PropRules, before: PropState, day: string): { 
   if (s.pause === "DATA_END") s.pause = "NONE";
   return { state: s, stop: s.pause === "BOUNDARY" };
 }
-export function payoutPreview(r: PropRules, s: PropState) {
+/** Amount-only preview shared by eligibility and explanations; never settles or mutates a day. */
+export function payoutAmountPreview(r: PropRules, s: PropState) {
   const f = funds(s), st = currentStage(s), p = r.payout;
   const floorAfter = Math.max(f.floor, p.permanentFloorOffset === null ? -Infinity : st.initialCapital + p.permanentFloorOffset);
   const remaining = Math.max(0, f.profit - st.grossPayout);
@@ -217,9 +218,13 @@ export function payoutPreview(r: PropRules, s: PropState) {
   // A valid cent amount such as 0.29 must not lose a cent to multiplication's
   // binary representation. Genuine sub-cent limits still round strictly down.
   const maximum = Math.max(0, hasMoneyPrecision(limit) ? limit : Math.floor(limit * 100) / 100);
+  return { ...f, floorAfter, remaining, limits, maximum };
+}
+export function payoutPreview(r: PropRules, s: PropState) {
+  const amount = payoutAmountPreview(r, s);
   const available = s.phase === "FUNDED" && !s.result && ["NONE", "DATA_END"].includes(s.pause) && !!s.last && s.last.flat && s.last.pending === 0;
   const qualification = payoutQualification(r, s);
-  return { ...f, floorAfter, remaining, limits, maximum, qualification, eligible: available && qualification.passed && maximum >= p.minimum };
+  return { ...amount, qualification, eligible: available && qualification.passed && amount.maximum >= r.payout.minimum };
 }
 export function applyPayout(r: PropRules, before: PropState, amount: number) {
   const preview = payoutPreview(r, before);

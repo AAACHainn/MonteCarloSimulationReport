@@ -25,13 +25,14 @@ function readiness({ runtime: { state, snapshot }, preview }: Props) {
   return { label: t.payoutPending, note, tone: "text-amber-800" };
 }
 
-export function PropFundedBadges({ runtime: { state, snapshot } }: Pick<Props, "runtime">) {
-  const status = state.result === "FAILED" ? { label: t.fundedFailed, style: "border-red-200 bg-red-50 text-red-700" }
-    : state.result === "STOPPED" ? { label: t.fundedStopped, style: "border-slate-200 bg-slate-100 text-slate-600" }
+export function PropAccountBadges({ runtime: { state, snapshot } }: Pick<Props, "runtime">) {
+  const isEvaluation = state.phase === "EVALUATION";
+  const status = state.result === "FAILED" ? { label: isEvaluation ? t.evaluationFailed : t.fundedFailed, style: "border-red-200 bg-red-50 text-red-700" }
+    : state.result === "STOPPED" ? { label: isEvaluation ? t.evaluationStopped : t.fundedStopped, style: "border-slate-200 bg-slate-100 text-slate-600" }
     : state.pause === "NONE" ? { label: t.NONE, style: "border-emerald-200 bg-emerald-50 text-emerald-700" }
     : { label: state.pause === "PAYOUT_DAY" ? t.payoutDayPaused : state.pause === "DATA_END" ? t.DATA_END : t.payoutPaused, style: "border-amber-200 bg-amber-50 text-amber-800" };
   return <div className="flex flex-wrap items-center justify-end gap-2">
-    <Badge className="border-amber-200 bg-amber-50 text-amber-800">{t.fundedStage}</Badge>
+    <Badge className={isEvaluation ? "border-blue-200 bg-blue-50 text-blue-700" : "border-amber-200 bg-amber-50 text-amber-800"}>{isEvaluation ? t.evaluationStage : t.fundedStage}</Badge>
     <Badge className={status.style}><span className="mr-1.5 h-1.5 w-1.5 rounded-full bg-current" aria-hidden="true" />{status.label}</Badge>
     {state.result && state.totalReceived > 0 ? <Badge className="border-emerald-200 bg-emerald-50 text-emerald-700">{t.successPayout(formatMoney(state.totalReceived, snapshot.currency))}</Badge> : null}
   </div>;

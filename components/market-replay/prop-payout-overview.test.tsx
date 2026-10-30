@@ -3,7 +3,7 @@ import { renderToStaticMarkup } from "react-dom/server";
 import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
 import { applyPayout, defaultPropRules, initialPropState, payoutPreview } from "@/lib/prop-practice/rules";
 import type { PropRuntime } from "@/lib/prop-practice/service";
-import { PropFundedBadges, PropPayoutReadiness } from "./prop-payout-overview";
+import { PropAccountBadges, PropPayoutReadiness } from "./prop-payout-overview";
 import { PropPayoutForm, PropPayoutReceipt } from "./prop-payout-form";
 
 beforeAll(() => vi.stubGlobal("React", React));
@@ -59,9 +59,19 @@ describe("funded account UI uses the existing payout preview", () => {
     expect(overview(runtime)).toContain("需空仓且无挂单");
     runtime.state.result = "FAILED"; runtime.state.totalReceived = 900;
     expect(overview(runtime)).toContain("本轮已结束");
-    const badges = renderToStaticMarkup(<PropFundedBadges runtime={runtime} />);
+    const badges = renderToStaticMarkup(<PropAccountBadges runtime={runtime} />);
     expect(badges).toContain("出金失败");
     expect(badges).toContain("成功出金 900.00 USDT");
+    const evaluation = funded();
+    evaluation.state.phase = "EVALUATION"; evaluation.state.stages[0].kind = "EVALUATION";
+    const evaluationBadges = renderToStaticMarkup(<PropAccountBadges runtime={evaluation} />);
+    expect(evaluationBadges).toContain("考核阶段");
+    expect(evaluationBadges).toContain("bg-blue-50");
+    expect(evaluationBadges).not.toContain("出金阶段");
+    evaluation.state.result = "FAILED";
+    const failedEvaluation = renderToStaticMarkup(<PropAccountBadges runtime={evaluation} />);
+    expect(failedEvaluation).toContain("考核未通过");
+    expect(failedEvaluation).not.toContain("出金失败");
   });
   it("uses configured amounts and share for application details and confirmation", () => {
     const runtime = funded(5000, 5), preview = payoutPreview(runtime.snapshot.rules, runtime.state);
