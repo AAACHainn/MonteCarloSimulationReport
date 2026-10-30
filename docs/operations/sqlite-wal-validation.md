@@ -15,7 +15,7 @@
 | 日期存储 | Unix 毫秒 | 显式 unixepoch-ms |
 | 提交配置 | DELETE + FULL | 分别测试 DELETE + FULL、WAL + FULL |
 
-候选版本写在 [独立包清单](../../scripts/sqlite-wal/candidate-package.json) 和 [独立锁文件](../../scripts/sqlite-wal/candidate-lock.yaml)，不改变根项目依赖。
+候选版本写在 [独立包清单](../../scripts/benchmarks/sqlite-wal/candidate-package.json) 和 [独立锁文件](../../scripts/benchmarks/sqlite-wal/candidate-lock.yaml)，不改变根项目依赖。
 
 SQLite 3.51.3 修复了本次讨论的 WAL-reset 问题，better-sqlite3 12.8.0 发布说明确认内置该版本。依据：[SQLite WAL 说明](https://www.sqlite.org/wal.html#walreset)、[驱动发布说明](https://github.com/WiseLibs/better-sqlite3/releases/tag/v12.8.0)。
 
@@ -54,7 +54,7 @@ SQLite 3.51.3 修复了本次讨论的 WAL-reset 问题，better-sqlite3 12.8.0 
 
 ## 实验复现的历史入口
 
-该试验的候选包、锁文件、基准与副本核对程序保留在 [scripts/sqlite-wal/](../../scripts/sqlite-wal/)。原命令和候选环境步骤属于当时版本，可从本文件 Git 历史追溯；不在历史结果中继续维护安装、切换或业务库备份操作流程。
+该试验的候选包、锁文件、基准与副本核对程序保留在 [scripts/benchmarks/sqlite-wal/](../../scripts/benchmarks/sqlite-wal/)。原命令和候选环境步骤属于当时版本，可从本文件 Git 历史追溯；不在历史结果中继续维护安装、切换或业务库备份操作流程。
 
 此处保留实验方法与性能数据，不代表当前平台/Node ABI 可直接复现。实际数据库路径、驱动、持久性和备份/回退选择以[升级指南](upgrade.md)为准。
 

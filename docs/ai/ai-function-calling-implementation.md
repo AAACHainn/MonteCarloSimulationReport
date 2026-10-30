@@ -27,7 +27,7 @@
 
 界面复用现有 Select、Input、CheckboxField、Dialog；新增固定文案集中到 `copy`。资料读取记录采用原生 details/summary 默认折叠，与思考分开，不展示参数 JSON 或费用。使用隔离升级副本及无头 Chrome 检查 375/1280/1440/1920px 的设置、读取记录与周期选择，横向溢出检查通过，键盘展开/收起与 Escape 通过；没有改动无关旧界面。未触发真实端点的拉取、连接测试或聊天。
 
-数据库使用 String 保存 JSON。新增迁移与 `scripts/init-sqlite.mjs` 同步；实际库无 Prisma 迁移历史，沿升级指南的初始化路径先备份、副本演练，再升级。备份包含 SQLite 一致性快照、环境和现有存储，位于被 Git 忽略的 `tmp/ai-function-calling/backup-20261016`。不提交数据库、环境、截图、日志或构建产物。
+数据库使用 String 保存 JSON。新增迁移与 `scripts/database/init-sqlite.mjs` 同步；实际库无 Prisma 迁移历史，沿升级指南的初始化路径先备份、副本演练，再升级。备份包含 SQLite 一致性快照、环境和现有存储，位于被 Git 忽略的 `tmp/ai-function-calling/backup-20261016`。不提交数据库、环境、截图、日志或构建产物。
 
 升级演练及正式库升级均逐表核对原有 45 张表的原字段内容摘要，没有变化；SQLite integrity_check 为 ok，foreign_key_check 无记录。另在全新隔离库通过 38 份 Prisma 迁移链，覆盖两种安装路径。原主密钥及环境文件保持原值。
 

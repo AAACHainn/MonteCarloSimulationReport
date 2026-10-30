@@ -24,7 +24,7 @@ let png: Buffer, directory: string;
 beforeAll(async () => {
   directory = await mkdtemp(join(tmpdir(), "avatar-storage-")); vi.stubEnv("USER_AVATAR_DIR", directory);
   const file = (await prisma.$queryRawUnsafe<Array<{ file: string }>>("PRAGMA database_list"))[0].file;
-  execFileSync(process.execPath, ["scripts/init-sqlite.mjs"], { env: { ...process.env, DATABASE_URL: `file:${file}` }, stdio: "pipe" });
+  execFileSync(process.execPath, ["scripts/database/init-sqlite.mjs"], { env: { ...process.env, DATABASE_URL: `file:${file}` }, stdio: "pipe" });
   png = await sharp({ create: { width: 160, height: 80, channels: 3, background: "cyan" } }).withMetadata().png().toBuffer();
 }, 30000);
 afterAll(async () => { await prisma.$disconnect(); vi.unstubAllEnvs(); });

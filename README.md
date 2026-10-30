@@ -140,7 +140,7 @@ docker compose down
 | `SQLITE_SYNCHRONOUS` | 示例 `FULL`；一键安装默认 `NORMAL` | NORMAL 仅支持 better-sqlite3 + WAL；FULL 更重视已提交事务的持久性 |
 | `MARKET_DATA_ENCRYPTION_KEY` | 示例为空；一键安装自动生成 | 行情连接使用的 32 字节 Base64 加密主密钥，配置后须跨重启与升级保留 |
 | `MARKET_DATA_SYNC_ENABLED` | `1` | 行情同步任务处理与调度开关；设为 `0` 关闭，数据集仍需单独启用同步 |
-| `AI_ENCRYPTION_KEY` | 示例为空；一键安装自动生成 | 独立 AI 凭据加密主密钥；手动安装可运行 `node scripts/setup-ai-key.mjs` 生成一次并保留 |
+| `AI_ENCRYPTION_KEY` | 示例为空；一键安装自动生成 | 独立 AI 凭据加密主密钥；手动安装可运行 `node scripts/tools/setup-ai-key.mjs` 生成一次并保留 |
 | `USER_AVATAR_DIR` | 默认 `storage/user-avatars/` | 上传头像的持久化目录，须与数据库一起备份 |
 | `APP_PORT` | `3001` | Compose 的宿主机端口；本地 Node 开发默认使用 `3000` |
 
@@ -161,7 +161,7 @@ corepack pnpm start
 
 **数据库最低兼容基线为 `v1.0` tag。** `v0.2 → v1.0` 使用该 tag 中的旧升级脚本及同版本文档；v1.0 之前的数据库须先升级并验收到 v1.0，不能直接交给后续版本升级。
 
-当前代码的 Prisma schema 和迁移集合仍与 v1.0 相同，`db:upgrade` 仍指向旧的 `scripts/upgrade-sqlite.mjs`；新的后续升级入口尚未实现。v1.0 之后首次发生数据库变更时，须提供新的统一入口，仅接受已核验的 v1.0 及后续数据库。旧入口在新入口验证并完成调用方切换后移除，历史实现由 v1.0 tag 保留。基线与脚本状态见[升级指南](docs/operations/upgrade.md)。
+当前代码的 Prisma schema 和迁移集合仍与 v1.0 相同，`db:upgrade` 仍指向旧的 `scripts/database/upgrade-sqlite.mjs`；新的后续升级入口尚未实现。v1.0 之后首次发生数据库变更时，须提供新的统一入口，仅接受已核验的 v1.0 及后续数据库。旧入口在新入口验证并完成调用方切换后移除，历史实现由 v1.0 tag 保留。基线与脚本状态见[升级指南](docs/operations/upgrade.md)。
 
 本地 Node 安装按以下顺序操作，每条命令成功后再继续：
 
@@ -352,11 +352,14 @@ lib/
   trade-journal/        交易记录、标签与备份
   i18n.ts               简体中文文案
 prisma/                 数据模型与迁移
-scripts/                数据库初始化与升级、后台 worker 与专项验证
+scripts/                按 workers、database、acceptance、benchmarks、tools 分类的脚本
+tests/fixtures/         测试辅助进程与验收数据准备
 public/templates/       CSV 模板
 install.bat             Windows 全新安装、环境配置与生产启动
 docs/                   按主题分类的文档与目录索引
 ```
+
+脚本用途与调用维护说明见[脚本目录](scripts/README.md)。数据库升级入口仅调整了文件位置，版本边界仍以[升级指南](docs/operations/upgrade.md)为准。
 
 代码改动按影响范围运行相关测试及必要检查，提交前完成适用的验证：
 

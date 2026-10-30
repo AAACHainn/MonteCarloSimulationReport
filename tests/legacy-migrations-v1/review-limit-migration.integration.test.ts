@@ -11,7 +11,7 @@ const prisma = new PrismaClient({ datasourceUrl: `file:${databaseFile}` });
 const originalReview = "入场依据：\n  顺势交易 😀\n";
 
 function initialize() {
-  execFileSync(process.execPath, ["scripts/init-sqlite.mjs"], {
+  execFileSync(process.execPath, ["scripts/database/init-sqlite.mjs"], {
     env: { ...process.env, DATABASE_URL: `file:${databaseFile}` }, stdio: "pipe",
   });
 }

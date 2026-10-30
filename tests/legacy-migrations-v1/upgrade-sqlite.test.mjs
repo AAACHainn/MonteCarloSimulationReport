@@ -5,7 +5,7 @@ import { copyFileSync, cpSync, existsSync, mkdirSync, mkdtempSync, readFileSync,
 import { tmpdir } from "node:os";
 import { basename, join } from "node:path";
 import { randomUUID } from "node:crypto";
-import { cleanupRehearsal, fingerprint, identifyMigration, upgradeDatabase } from "../../scripts/upgrade-sqlite.mjs";
+import { cleanupRehearsal, fingerprint, identifyMigration, upgradeDatabase } from "../../scripts/database/upgrade-sqlite.mjs";
 
 const directory = mkdtempSync(join(tmpdir(), "db-upgrade-tests-"));
 const base = join(directory, "base.db");
@@ -29,7 +29,7 @@ function preProp(file) {
   });
 }
 beforeAll(() => {
-  execFileSync(process.execPath, ["scripts/init-sqlite.mjs"], { cwd: root, env: childEnv(base), stdio: "pipe", windowsHide: true });
+  execFileSync(process.execPath, ["scripts/database/init-sqlite.mjs"], { cwd: root, env: childEnv(base), stdio: "pipe", windowsHide: true });
   inspect(base, db => {
     db.exec(`INSERT INTO MarketDataset(id,name,symbol,timeframe,timezone,barCount,startTime,endTime,updatedAt) VALUES ('data','本机行情','ES','1m','UTC',1,1000,1000,1000);
       INSERT INTO MarketBar(datasetId,sequence,timestamp,open,high,low,close,volume) VALUES ('data',0,1000,100,110,90,105,10);
@@ -236,9 +236,9 @@ describe("repeatable offline SQLite upgrade", () => {
   }, 30000);
 
   it("exposes help and rejects unattended use without an explicit database confirmation", () => {
-    const output = execFileSync(process.execPath, ["scripts/upgrade-sqlite.mjs", "--help"], { cwd: root, env: childEnv(base), encoding: "utf8", stdio: "pipe", windowsHide: true });
+    const output = execFileSync(process.execPath, ["scripts/database/upgrade-sqlite.mjs", "--help"], { cwd: root, env: childEnv(base), encoding: "utf8", stdio: "pipe", windowsHide: true });
     expect(output).toContain("--expect-database");
-    expect(() => execFileSync(process.execPath, ["scripts/upgrade-sqlite.mjs"], { cwd: root, env: childEnv(base), stdio: "pipe", windowsHide: true })).toThrow();
+    expect(() => execFileSync(process.execPath, ["scripts/database/upgrade-sqlite.mjs"], { cwd: root, env: childEnv(base), stdio: "pipe", windowsHide: true })).toThrow();
     expect(existsSync(base + ".upgrade.lock")).toBe(false);
   });
 
@@ -256,14 +256,14 @@ describe("repeatable offline SQLite upgrade", () => {
   }, 30000);
 
   it.each([
-    ["scripts/init-sqlite.mjs", "rehearsal.log"],
-    ["scripts/init-sqlite.mjs", "rehearsal-repeat.log"],
+    ["scripts/database/init-sqlite.mjs", "rehearsal.log"],
+    ["scripts/database/init-sqlite.mjs", "rehearsal-repeat.log"],
     ["lib/sqlite-client.mjs", "rehearsal.log"],
     ["lib/sqlite-client.mjs", "rehearsal-repeat.log"],
   ])("rejects changes to %s after %s before formal writes", async (changed, stage) => {
     const code = mkdtempSync(join(directory, "code-"));
-    mkdirSync(join(code, "scripts")); mkdirSync(join(code, "lib")); mkdirSync(join(code, "prisma"));
-    for (const name of ["scripts/upgrade-sqlite.mjs", "scripts/upgrade-sqlite-worker.mjs", "scripts/upgrade-sqlite-progress.mjs", "scripts/init-sqlite.mjs", "lib/sqlite-client.mjs", "package.json", "pnpm-lock.yaml", "pnpm-workspace.yaml", "prisma/schema.prisma"]) copyFileSync(join(root, name), join(code, name));
+    mkdirSync(join(code, "scripts", "database"), { recursive: true }); mkdirSync(join(code, "lib")); mkdirSync(join(code, "prisma"));
+    for (const name of ["scripts/database/upgrade-sqlite.mjs", "scripts/database/upgrade-sqlite-worker.mjs", "scripts/database/upgrade-sqlite-progress.mjs", "scripts/database/init-sqlite.mjs", "lib/sqlite-client.mjs", "package.json", "pnpm-lock.yaml", "pnpm-workspace.yaml", "prisma/schema.prisma"]) copyFileSync(join(root, name), join(code, name));
     cpSync(join(root, "prisma/migrations"), join(code, "prisma/migrations"), { recursive: true });
     symlinkSync(join(root, "node_modules"), join(code, "node_modules"), "junction");
     const file = fixture(), before = inspect(file, fingerprint);

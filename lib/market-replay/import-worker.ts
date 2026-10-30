@@ -4,7 +4,7 @@ import { join } from "node:path";
 export const MARKET_IMPORT_WORKER_HEAP_MB = 1_024;
 
 export function startMarketImportWorker(jobId: string) {
-  const workerPath = join(process.cwd(), "scripts", "market-import-worker.ts");
+  const workerPath = join(process.cwd(), "scripts", "workers", "market-import-worker.ts");
   const child = spawn(process.execPath, [
     `--max-old-space-size=${MARKET_IMPORT_WORKER_HEAP_MB}`,
     "--import",

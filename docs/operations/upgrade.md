@@ -32,7 +32,9 @@
 4. 切换 package 命令、安装脚本、Docker 启动流程、测试及 README 等所有调用方后，从主线移除已无引用的旧入口与专用实现；历史实现由 `v1.0` tag 保存，无需长期改名保留。仍被新安装或其他功能依赖的初始化脚本、公共模块须先替换或拆分，不能一并删去。任何文件移除须逐个明确路径，禁止批量删除。
 5. 已发布的 Prisma 迁移 SQL 和校验和继续保留。移除旧升级编排不等于删除历史迁移；迁移历史压缩或重新基线化须另有经过验证的接续方案。
 
-**实施状态（2026-10-30 核对）：尚未实现或切换新入口，也未移除旧脚本。** 当前 schema 与迁移集合相对 v1.0 tag 尚无变更；现有 `db:upgrade` 仍指向 `scripts/upgrade-sqlite.mjs`。已达 v1.0 且仅更新当前代码时无需重复执行旧兼容迁移；低于 v1.0 的库须使用该 tag 的完整代码和文档升级至基线。不得把此规则当作新入口已经可用或数据库已经验收的证明。新入口实施后须同步更新本状态、具体命令和验证记录。
+**实施状态（2026-10-30 核对）：尚未实现或切换新入口，也未移除旧脚本。** 当前 schema 与迁移集合相对 v1.0 tag 尚无变更；现有 `db:upgrade` 仍指向 `scripts/database/upgrade-sqlite.mjs`。已达 v1.0 且仅更新当前代码时无需重复执行旧兼容迁移；低于 v1.0 的库须使用该 tag 的完整代码和文档升级至基线。不得把此规则当作新入口已经可用或数据库已经验收的证明。新入口实施后须同步更新本状态、具体命令和验证记录。
+
+当前工作树的维护脚本集中在 `scripts/database/`，后台业务任务在 `scripts/workers/`；本次仅调整位置与调用引用，版本支持边界不变。`v1.0` tag 内的脚本仍保持该 tag 原目录，旧安装须使用 tag 的完整代码及同版本指南，不能将当前分类后的路径直接套用到历史版本。
 
 ### 历史迁移测试
 
@@ -133,7 +135,7 @@ corepack pnpm prisma generate
 
 ### 旧升级入口（仅用于升级到 v1.0）：离线升级编排
 
-> 旧入口：`scripts/upgrade-sqlite.mjs`。仅用于目标为 v1.0 的旧库升级，不代表后续升级入口已经实现。
+> v1.0 tag 内的旧入口为 `scripts/upgrade-sqlite.mjs`；当前工作树中保留的实现移至 `scripts/database/upgrade-sqlite.mjs`。仅用于目标为 v1.0 的旧库升级，不代表后续升级入口已经实现。
 
 在 v1.0 tag 环境安装依赖并生成相应 Prisma Client 后，可以使用该版本的编排入口；它复用原迁移 SQL 或 `init-sqlite.mjs`，不另建迁移实现，也不自动构建或启动服务：
 
@@ -180,7 +182,7 @@ corepack pnpm run db:upgrade --status --report-dir "D:/实际备份目录/本次
 
 数据库及核对成功时 `report.status` 和 `databaseStatus` 为 `SUCCESS`，`cleanup.status` 单独为 `COMPLETE`、`PARTIAL` 或 `FAILED`，列出已删除、原本不存在、剩余文件及错误。演练文件被占用或路径异常时，升级仍报告成功并警告“清理未完成，无需重跑升级”，保留剩余文件供人工处理。最终报告或锁释放失败则为 `FINALIZATION_FAILED`，保留 `databaseStatus: SUCCESS`，同样不应重跑数据库升级。CLI 只有在 Worker 返回结果并退出后才打印最终成功。
 
-CLI 界面是 UI 规范的范围例外：规范以桌面浏览器为主，原生 Node ESM 维护命令无法直接加载 TypeScript 的 `lib/i18n.ts` / `lib/format.ts`，因此新增进度文案及数字格式集中于 `scripts/upgrade-sqlite-progress.mjs`，使用简体中文和普通字符日志；验证覆盖格式、重定向、背压、同步阻塞心跳、状态只读及取消生命周期，不改动网页组件。
+CLI 界面是 UI 规范的范围例外：规范以桌面浏览器为主，原生 Node ESM 维护命令无法直接加载 TypeScript 的 `lib/i18n.ts` / `lib/format.ts`，因此新增进度文案及数字格式集中于 `scripts/database/upgrade-sqlite-progress.mjs`，使用简体中文和普通字符日志；验证覆盖格式、重定向、背压、同步阻塞心跳、状态只读及取消生命周期，不改动网页组件。
 
 **保守的数据保护限制：** 统一入口只自动放行不改变原有行与字段的升级，可添加表和列。旧版本升级涉及物理 ID 转换、旧结果清理、历史字段回填或删除旧派生摘要时，原脚本即使正常执行，也可能在演练的原数据核对处停止；这是保护门，不提供忽略校验的强制开关。应保留演练报告，按本文旧迁移说明确认具体转换，再采用经过单独核验的原路径处理，不能因失败直接改走另一迁移方式。
 
@@ -346,7 +348,7 @@ NORMAL 仅支持上述驱动与日志模式组合，不提供 OFF 配置。按�
 
 ### AI 配置
 
-AI 使用独立的 `AI_ENCRYPTION_KEY`，保留原行情主密钥不变。本地可运行 `node scripts/setup-ai-key.mjs` 生成一次并保存在 `.env`，随后重启服务；已有有效配置不覆盖。备份更新后的环境配置、数据库及 `storage/ai/`，普通业务导出不包含密钥。详见 [AI 机器人说明](../ai/ai-assistant.md)。
+AI 使用独立的 `AI_ENCRYPTION_KEY`，保留原行情主密钥不变。本地可运行 `node scripts/tools/setup-ai-key.mjs` 生成一次并保存在 `.env`，随后重启服务；已有有效配置不覆盖。备份更新后的环境配置、数据库及 `storage/ai/`，普通业务导出不包含密钥。详见 [AI 机器人说明](../ai/ai-assistant.md)。
 
 AI 普通聊天在窗口内运行，会话分析依赖独立 worker。升级前停止或等待这些活动任务；中断任务需要用户显式继续，不能自动重复未知计费状态的步骤。
 
@@ -394,9 +396,9 @@ services:
     command: ["./node_modules/.bin/next", "start", "--hostname", "0.0.0.0"]
 ~~~
 
-生产顺序为：准备/验证新镜像 → 停止旧服务及 worker → 备份 → 保持原日志模式完成副本演练及正式迁移 → 用新镜像的一次性诊断进程在原数据卷核对 WAL → 用覆盖配置启动服务。一次性进程应使用同一 Compose 项目、卷和环境，且覆盖 `command` 为 `node scripts/sqlite-runtime.mjs --integrity`；不启动第二个应用，不用空卷代替原生产卷。最终按第 6 节验证后再恢复使用。
+生产顺序为：准备/验证新镜像 → 停止旧服务及 worker → 备份 → 保持原日志模式完成副本演练及正式迁移 → 用新镜像的一次性诊断进程在原数据卷核对 WAL → 用覆盖配置启动服务。一次性进程应使用同一 Compose 项目、卷和环境，且覆盖 `command` 为 `node scripts/database/sqlite-runtime.mjs --integrity`；不启动第二个应用，不用空卷代替原生产卷。最终按第 6 节验证后再恢复使用。
 
-在干净源码构建目录可用 `docker build -f Dockerfile.prod -t <目标镜像标签> .` 生成镜像，并用 `docker run --rm --entrypoint node <目标镜像标签> scripts/setup-sqlite-driver.mjs` 检查镜像内原生模块。部署时同时指定 `-f compose.prod.yaml -f <覆盖文件路径>`，先运行 `docker compose ... config --quiet` 检查配置，再按上述顺序执行一次性命令及 `up -d`；镜像自检不挂正式数据卷。保留原项目名，覆盖文件、镜像配置和卷路径都纳入部署记录。
+在干净源码构建目录可用 `docker build -f Dockerfile.prod -t <目标镜像标签> .` 生成镜像，并用 `docker run --rm --entrypoint node <目标镜像标签> scripts/database/setup-sqlite-driver.mjs` 检查镜像内原生模块。部署时同时指定 `-f compose.prod.yaml -f <覆盖文件路径>`，先运行 `docker compose ... config --quiet` 检查配置，再按上述顺序执行一次性命令及 `up -d`；镜像自检不挂正式数据卷。保留原项目名，覆盖文件、镜像配置和卷路径都纳入部署记录。
 
 ## 6. 升级验收
 
@@ -410,7 +412,7 @@ services:
 - 对 WAL 目标环境补充长时间播放、自动 checkpoint、独立 worker 与跨进程锁、异常退出后恢复验证；本机短时基准不能替代目标磁盘和镜像验收。
 - 生产 start 页面/API 正常，错误日志无缺表、缺列、密钥解密失败和 worker 文件缺失；报告最终提交、迁移方式、备份位置、验收结果及未完成项。
 
-`scripts/verify-replay-migration.mjs` 是开发时的专项核对脚本，硬编码读取本机 `tmp/replay-migration-baseline.json` 与 `prisma/dev.db`。它不是可直接移植的通用升级命令；另一台机器通常没有这个临时基线，不能将执行失败当作数据损坏，或将未执行当作已经验证。
+`scripts/acceptance/verify-replay-migration.mjs` 是开发时的专项核对脚本，硬编码读取本机 `tmp/replay-migration-baseline.json` 与 `prisma/dev.db`。它不是可直接移植的通用升级命令；另一台机器通常没有这个临时基线，不能将执行失败当作数据损坏，或将未执行当作已经验证。
 
 不使用 computer use 进行本次升级验收；通过 CLI、隔离测试和只读 API 核对，实际界面由用户试用。不要把开发文档中的旧验收结果当成目标机器已经完成验收。
 

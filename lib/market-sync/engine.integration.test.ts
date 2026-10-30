@@ -21,7 +21,7 @@ import { SyncError } from "./security";
 let databaseFile = "";
 beforeAll(async () => {
   const rows = await prisma.$queryRawUnsafe<Array<{ file: string }>>("PRAGMA database_list"); databaseFile = rows[0].file;
-  execFileSync(process.execPath, ["scripts/init-sqlite.mjs"], { env: { ...process.env, DATABASE_URL: `file:${databaseFile}` }, stdio: "pipe" });
+  execFileSync(process.execPath, ["scripts/database/init-sqlite.mjs"], { env: { ...process.env, DATABASE_URL: `file:${databaseFile}` }, stdio: "pipe" });
   process.env.MARKET_DATA_ENCRYPTION_KEY = Buffer.alloc(32, 3).toString("base64");
   await saveConnection({ apiKey: "mock-databento-api-key" });
   await prisma.marketDataConnection.update({ where: { id: "databento" }, data: { status: "CONNECTED" } });

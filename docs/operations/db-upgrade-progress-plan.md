@@ -17,7 +17,7 @@
 
 ## 2. 改造前没有进度的原因
 
-入口为 [upgrade-sqlite.mjs](../../scripts/upgrade-sqlite.mjs)：
+入口为 [upgrade-sqlite.mjs](../../scripts/database/upgrade-sqlite.mjs)：
 
 - `fingerprint()` 在同步迭代器中读取每张表，只有全部完成后才返回。当时成功路径约有 7 轮指纹扫描，包含基线、副本全字段、副本原字段、重复演练、正式库写入前复核、正式结果及正式库原字段。
 - `checkIntegrity()` 使用同步 SQLite PRAGMA，执行期间没有行级回调。
@@ -118,7 +118,7 @@ startedAt, stepStartedAt, lastWorkProgressAt, heartbeatAt
 
 ## 7. 实施入口
 
-核心、Worker 与显示分别位于 [升级编排](../../scripts/upgrade-sqlite.mjs)、[Worker](../../scripts/upgrade-sqlite-worker.mjs)、[进度记录](../../scripts/upgrade-sqlite-progress.mjs)。没有新增结构迁移或运行时依赖。它们属于旧兼容入口；后续新链路只按升级指南设计，不因本方案存在而继续追加旧兼容逻辑。
+核心、Worker 与显示分别位于 [升级编排](../../scripts/database/upgrade-sqlite.mjs)、[Worker](../../scripts/database/upgrade-sqlite-worker.mjs)、[进度记录](../../scripts/database/upgrade-sqlite-progress.mjs)。没有新增结构迁移或运行时依赖。它们属于旧兼容入口；后续新链路只按升级指南设计，不因本方案存在而继续追加旧兼容逻辑。
 
 ## 8. 验收
 

@@ -27,13 +27,13 @@
 
 行情读取数统计各 findMany 返回行数，包括重复读取，不含已揭示当前价的单行查询。RTH 优化主要减少读取量和对象分配，SQL 数量未减少；这组测量未计入浏览器移除的整窗请求收益。
 
-[复现程序](../../scripts/benchmark-replay-special-cases.ts) 与 [Vitest 配置](../../scripts/benchmark-replay-special-cases.config.ts) 专供显式基准，不由普通测试自动执行：
+[复现程序](../../scripts/benchmarks/benchmark-replay-special-cases.ts) 与 [Vitest 配置](../../scripts/benchmarks/benchmark-replay-special-cases.config.ts) 专供显式基准，不由普通测试自动执行：
 
 ~~~powershell
 $env:SQLITE_DRIVER = "better-sqlite3"
 $env:SQLITE_JOURNAL_MODE = "wal"
 $env:MARKET_DATA_SYNC_ENABLED = "0"
-corepack pnpm exec node node_modules/vitest/vitest.mjs run --config scripts/benchmark-replay-special-cases.config.ts --maxWorkers=1 --minWorkers=1
+corepack pnpm exec node node_modules/vitest/vitest.mjs run --config scripts/benchmarks/benchmark-replay-special-cases.config.ts --maxWorkers=1 --minWorkers=1
 ~~~
 
 默认报告位于 tmp/replay-special-benchmark-current.json；本次前后报告分别为 tmp/replay-special-benchmark-before-step4.json 与 tmp/replay-special-benchmark-after-step4.json，均按已有规则忽略。

@@ -22,7 +22,7 @@ let file = "";
 const timestamp = "2026-10-01T00:00:00.000Z";
 beforeAll(async () => {
   file = (await prisma.$queryRawUnsafe<Array<{ file: string }>>("PRAGMA database_list"))[0].file;
-  execFileSync(process.execPath, ["scripts/init-sqlite.mjs"], { env: { ...process.env, DATABASE_URL: `file:${file}` }, stdio: "pipe" });
+  execFileSync(process.execPath, ["scripts/database/init-sqlite.mjs"], { env: { ...process.env, DATABASE_URL: `file:${file}` }, stdio: "pipe" });
   await prisma.marketDataset.create({ data: { id: "shared", name: "Shared", symbol: "TEST", timeframe: "1m", timezone: "UTC", sourceIntervalSeconds: 60, barCount: 3, startTime: new Date(timestamp), endTime: new Date(Date.parse(timestamp) + 120_000) } });
   await prisma.marketBar.createMany({ data: [0, 1, 2].map(sequence => ({ datasetId: "shared", sequence, timestamp: new Date(Date.parse(timestamp) + sequence * 60000), open: 100, high: 102, low: 99, close: 101 })) });
 }, 30000);

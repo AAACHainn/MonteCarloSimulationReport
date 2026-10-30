@@ -17,7 +17,7 @@
 - 行情聚合复用 `lib/market-replay/aggregation.ts`；模拟撮合放在 `lib/paper-trading/`，会话与纠错放在 `lib/replay-sessions/`。不要在组件或 API 中复制业务规则。
 - 模拟配置与限制以 `lib/validations.ts` 为准；行情与回放限制以 `lib/market-replay/types.ts` 为准，保留计算量和资源上限校验。
 - SQLite 中 `SimulationRun` 的 `config`、`summary`、`samplePaths`、`percentileCurves` 使用 String 保存 JSON；改为 Prisma Json 前必须验证迁移与 engine 兼容性。持久化 `samplePaths` 最多 100 条。
-- 修改数据库结构时同步 Prisma schema、增量迁移、新安装流程和适用的升级入口，遵守下节版本基线。旧 `scripts/init-sqlite.mjs` 不维护 Prisma 迁移历史，不与迁移命令混用来跳过错误。
+- 修改数据库结构时同步 Prisma schema、增量迁移、新安装流程和适用的升级入口，遵守下节版本基线。旧 `scripts/database/init-sqlite.mjs` 不维护 Prisma 迁移历史，不与迁移命令混用来跳过错误。
 - 浏览器与共享代码必须兼容普通 HTTP（含局域网 IP / 域名访问），不能假定处于 HTTPS 安全上下文。生成 UUID 一律使用 `lib/uuid.ts` 的 `createUuid()`（`import { createUuid } from "@/lib/uuid"`），禁止直接访问或解构 `crypto.randomUUID`、`window.crypto.randomUUID`、`globalThis.crypto.randomUUID`，也不在业务代码重复实现回退。统一封装已提供 `getRandomValues` 回退，不用 `Math.random()` 或时间戳代替 UUID；纯服务端可使用 `import { randomUUID } from "node:crypto"`。
 - 新增依赖安全上下文的浏览器 API 时，先检查能力并提供适合 HTTP 的兼容方案；相关验证至少覆盖 `crypto.randomUUID` 不可用的环境。不能仅凭 `http://localhost` 通过就认定普通 HTTP 可用；UUID 直接访问由 ESLint 阻止，例外仅限统一封装。
 

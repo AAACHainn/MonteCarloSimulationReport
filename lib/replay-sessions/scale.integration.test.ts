@@ -22,7 +22,7 @@ const origin = Date.UTC(2026, 0, 1);
 const sourceCount = 20_000_000;
 beforeAll(async () => {
   databaseFile = (await prisma.$queryRawUnsafe<Array<{ file: string }>>("PRAGMA database_list"))[0].file;
-  execFileSync(process.execPath, ["scripts/init-sqlite.mjs"], { env: { ...process.env, DATABASE_URL: `file:${databaseFile}` }, stdio: "pipe" });
+  execFileSync(process.execPath, ["scripts/database/init-sqlite.mjs"], { env: { ...process.env, DATABASE_URL: `file:${databaseFile}` }, stdio: "pipe" });
   await prisma.marketDataset.create({ data: { id: "virtual", name: "20M logical source", symbol: "TEST", timeframe: "1s", timezone: "UTC", sourceIntervalSeconds: 1,
     barCount: sourceCount, startTime: new Date(origin), endTime: new Date(origin + (sourceCount - 1) * 1000) } });
   await prisma.marketBar.create({ data: { datasetId: "virtual", sequence: 0, timestamp: new Date(origin), open: 100, high: 101, low: 99, close: 100 } });

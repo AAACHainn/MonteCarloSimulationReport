@@ -98,7 +98,7 @@ const context = (id: string) => ({ params: Promise.resolve({ id }) });
 beforeAll(async () => {
   const files = await prisma.$queryRawUnsafe<Array<{ file: string }>>("PRAGMA database_list");
   databaseFile = files[0].file;
-  execFileSync(process.execPath, ["scripts/init-sqlite.mjs"], {
+  execFileSync(process.execPath, ["scripts/database/init-sqlite.mjs"], {
     env: { ...process.env, DATABASE_URL: `file:${databaseFile}` }, stdio: "pipe",
   });
 }, 30_000);

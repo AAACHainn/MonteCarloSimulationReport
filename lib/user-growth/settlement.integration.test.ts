@@ -30,7 +30,7 @@ let file = "", userNo = 0;
 const times = ["2026-10-01T23:58:00Z", "2026-10-01T23:59:00Z", "2026-10-02T00:00:00Z", "2026-10-02T00:01:00Z", "2026-10-02T23:59:00Z", "2026-10-03T00:00:00Z", "2026-10-03T23:59:00Z", "2026-10-04T00:00:00Z"];
 beforeAll(async () => {
   file = (await prisma.$queryRawUnsafe<Array<{ file: string }>>("PRAGMA database_list"))[0].file;
-  execFileSync(process.execPath, ["scripts/init-sqlite.mjs"], { env: { ...process.env, DATABASE_URL: `file:${file}` }, stdio: "pipe" });
+  execFileSync(process.execPath, ["scripts/database/init-sqlite.mjs"], { env: { ...process.env, DATABASE_URL: `file:${file}` }, stdio: "pipe" });
   await prisma.marketDataset.create({ data: { id: "growth", name: "Growth", symbol: "TEST", timeframe: "1m", timezone: "UTC", sourceIntervalSeconds: 60, barCount: times.length, startTime: new Date(times[0]), endTime: new Date(times.at(-1)!) } });
   await prisma.marketBar.createMany({ data: times.map((timestamp, sequence) => ({ datasetId: "growth", sequence, timestamp: new Date(timestamp), open: 100 + sequence * 10, high: 115 + sequence * 10, low: 95 + sequence * 10, close: 110 + sequence * 10 })) });
 }, 30000);

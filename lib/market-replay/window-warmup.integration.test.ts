@@ -25,7 +25,7 @@ import type { AggregatedMarketBarData } from "./types";
 let databaseFile = "";
 beforeAll(async () => {
   databaseFile = (await prisma.$queryRawUnsafe<Array<{ file: string }>>("PRAGMA database_list"))[0].file;
-  execFileSync(process.execPath, ["scripts/init-sqlite.mjs"], { env: { ...process.env, DATABASE_URL: `file:${databaseFile}` }, stdio: "pipe" });
+  execFileSync(process.execPath, ["scripts/database/init-sqlite.mjs"], { env: { ...process.env, DATABASE_URL: `file:${databaseFile}` }, stdio: "pipe" });
   await prisma.marketDataset.create({ data: { id: "warmup", name: "warmup", symbol: "TEST", timeframe: "1s", timezone: "UTC",
     sourceIntervalSeconds: 1, barEmissionMode: "DENSE", barCount: 100_000, startTime: new Date(0), endTime: new Date(99_999_000) } });
   for (let offset = 0; offset < 100_000; offset += 1000) {

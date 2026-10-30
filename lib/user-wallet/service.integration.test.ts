@@ -30,7 +30,7 @@ let userNumber = 0;
 
 beforeAll(async () => {
   databaseFile = (await prisma.$queryRawUnsafe<Array<{ file: string }>>("PRAGMA database_list"))[0].file;
-  execFileSync(process.execPath, ["scripts/init-sqlite.mjs"], {
+  execFileSync(process.execPath, ["scripts/database/init-sqlite.mjs"], {
     env: { ...process.env, DATABASE_URL: `file:${databaseFile}` },
     stdio: "pipe",
   });

@@ -119,7 +119,7 @@ export async function retryRun(id: string, overrides?: Partial<AiLimits>) {
   });
 }
 export function startAnalysisWorker(id: string) {
-  const child = spawn(process.execPath, ["--import", "tsx", join(process.cwd(), "scripts", "ai-analysis-worker.ts"), id], {
+  const child = spawn(process.execPath, ["--import", "tsx", join(process.cwd(), "scripts", "workers", "ai-analysis-worker.ts"), id], {
     cwd: process.cwd(), env: process.env, detached: false, stdio: "ignore", windowsHide: true,
   });
   child.on("error", () => { void cancelRun(id); }); child.unref();

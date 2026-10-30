@@ -63,7 +63,7 @@
 ### 数据库与验证状态
 
 - Prisma 迁移：`prisma/migrations/20260830120000_add_market_aggregation/migration.sql`。
-- `scripts/init-sqlite.mjs` 已同步新表、新字段和索引，本地 `prisma/dev.db` 已执行初始化。
+- `scripts/database/init-sqlite.mjs` 已同步新表、新字段和索引，本地 `prisma/dev.db` 已执行初始化。
 - 当前验证结果：
   - `corepack pnpm lint`：通过。
   - `corepack pnpm test`：18 个测试文件、126 项测试通过。

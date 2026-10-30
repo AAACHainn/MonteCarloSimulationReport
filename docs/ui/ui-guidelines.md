@@ -56,7 +56,7 @@
 - 控件使用 `rounded-md`，卡片和主要容器使用 `rounded-lg`。除特殊浮层外，不新增更大的圆角风格。
 - 普通卡片使用 `shadow-sm` 或无阴影；菜单、弹窗和浮动面板可使用 `shadow-lg`、`shadow-xl` 或 `shadow-2xl`。禁止用重阴影装饰普通内容区。
 - 图标默认尺寸：按钮和行内操作为 `h-4 w-4`，卡片或区块图标为 `h-5 w-5`。图标必须来自 `lucide-react`，不混用其他图标风格。
-- 品牌标识使用独立的 `app/icon.svg`（回放环与 K 线），复用全局主色与白色；Header 以 28px 展示，favicon 的 ICO 从该 SVG 派生（更新后运行 `node scripts/generate-brand-icons.mjs`）。品牌标识不作为业务操作图标，旁边已有产品名称时应隐藏其辅助技术描述。
+- 品牌标识使用独立的 `app/icon.svg`（回放环与 K 线），复用全局主色与白色；Header 以 28px 展示，favicon 的 ICO 从该 SVG 派生（更新后运行 `node scripts/tools/generate-brand-icons.mjs`）。品牌标识不作为业务操作图标，旁边已有产品名称时应隐藏其辅助技术描述。
 
 ## 3. 页面结构
 

@@ -22,7 +22,7 @@ import { PATCH as datasetPATCH } from "@/app/api/market-datasets/[id]/route";
 let file = "";
 beforeAll(async () => {
   file = (await prisma.$queryRawUnsafe<Array<{ file: string }>>("PRAGMA database_list"))[0].file;
-  execFileSync(process.execPath, ["scripts/init-sqlite.mjs"], { env: { ...process.env, DATABASE_URL: `file:${file}` }, stdio: "pipe" });
+  execFileSync(process.execPath, ["scripts/database/init-sqlite.mjs"], { env: { ...process.env, DATABASE_URL: `file:${file}` }, stdio: "pipe" });
 }, 30000);
 afterAll(async () => { await prisma.$disconnect(); if (file.includes("aggregation-integration-")) rmSync(file, { force: true }); });
 async function seed(id: string, source: number, count: number) {

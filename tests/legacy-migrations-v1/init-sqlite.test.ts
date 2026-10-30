@@ -10,7 +10,7 @@ describe("SQLite initialization compatibility", () => {
   it("removes the obsolete ReplayProgress.intervalMs column without losing progress", async () => {
     const databaseFile = join(tmpdir(), `legacy-replay-${randomUUID()}.db`);
     const databaseUrl = `file:${databaseFile}`;
-    const initialize = () => execFileSync(process.execPath, ["scripts/init-sqlite.mjs"], {
+    const initialize = () => execFileSync(process.execPath, ["scripts/database/init-sqlite.mjs"], {
       env: { ...process.env, DATABASE_URL: databaseUrl },
       stdio: "pipe",
     });

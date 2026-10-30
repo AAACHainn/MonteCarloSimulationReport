@@ -19,7 +19,7 @@ AI 所用迁移 `20261016090000_add_ai_tool_execution` 与 `20261016100000_add_a
 为本地服务配置一次独立的 AI 加密主密钥：
 
 ~~~powershell
-node scripts/setup-ai-key.mjs
+node scripts/tools/setup-ai-key.mjs
 ~~~
 
 脚本将随机主密钥写入被 Git 忽略的本地 `.env`，不输出密钥。已有有效配置保持原样，无效配置报错并保留；重启服务后生效。它不替换原行情加密主密钥。

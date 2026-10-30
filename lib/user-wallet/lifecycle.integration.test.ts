@@ -37,7 +37,7 @@ const times = ["2026-10-01T23:58:00Z", "2026-10-01T23:59:00Z", "2026-10-02T00:00
 
 beforeAll(async () => {
   databaseFile = (await prisma.$queryRawUnsafe<Array<{ file: string }>>("PRAGMA database_list"))[0].file;
-  execFileSync(process.execPath, ["scripts/init-sqlite.mjs"], { env: { ...process.env, DATABASE_URL: `file:${databaseFile}` }, stdio: "pipe" });
+  execFileSync(process.execPath, ["scripts/database/init-sqlite.mjs"], { env: { ...process.env, DATABASE_URL: `file:${databaseFile}` }, stdio: "pipe" });
   await prisma.marketDataset.create({ data: {
     id: datasetId, name: "Wallet lifecycle fixture", symbol: "TEST", timeframe: "1m", timezone: "UTC", sourceIntervalSeconds: 60,
     barCount: times.length, startTime: new Date(times[0]), endTime: new Date(times.at(-1)!),

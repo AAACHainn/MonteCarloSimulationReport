@@ -18,7 +18,7 @@
 
 新增、移动或改变文档用途时，同时维护顶部状态、适用范围、当前规范链接及索引。标题变化检查原章节链接，必要时保留显式锚点兼容旧引用。
 
-提交前执行 `corepack pnpm docs:check` 和 `git diff --check`。`corepack pnpm lint` 已先执行文档检查，失败返回非零退出码。脚本与回归用例见[检查入口](../scripts/check-docs.mjs)和[检查测试](../scripts/check-docs.test.mjs)。
+提交前执行 `corepack pnpm docs:check` 和 `git diff --check`。`corepack pnpm lint` 已先执行文档检查，失败返回非零退出码。脚本与回归用例见[检查入口](../scripts/tools/check-docs.mjs)和[检查测试](../scripts/tools/check-docs.test.mjs)。
 
 - 范围为根目录 AGENTS / README 与 `docs/` 下全部 Markdown；检查本地文件、图片、内联/引用式链接、Markdown 章节及显式 HTML 锚点，并核对路径大小写。
 - 检查顶部分类、索引分区与覆盖、历史/计划指向当前规范的关系；代码示例里的假链接与假标题不作为真实目标。
@@ -26,6 +26,8 @@
 - 检查不执行命令、不访问数据库、不联网检查外链，也不判断功能语义是否正确。评审仍需对照代码和已确认需求核对规则，不以检查通过代替应用测试、实际环境或浏览器验收。
 
 ## 当前入口
+
+开发辅助脚本、后台任务及验收工具的目录用途见[脚本目录](../scripts/README.md)。
 
 每类规则在所属专题维护完整定义，README 只保留用法摘要。表中的实现依据用于核对实际行为；代码缺口不能自动覆盖已确认需求。使用说明与技术契约分工互补，历史实施记录不再承担当前规则入口。
 

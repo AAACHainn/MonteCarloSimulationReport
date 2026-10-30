@@ -5,13 +5,13 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { randomUUID } from "node:crypto";
 import { beforeAll, describe, expect, it } from "vitest";
-import { checkIntegrity, fingerprint } from "../../scripts/upgrade-sqlite.mjs";
+import { checkIntegrity, fingerprint } from "../../scripts/database/upgrade-sqlite.mjs";
 
 const directory = mkdtempSync(join(tmpdir(), "user-profiles-migration-"));
 const base = join(directory, "fresh.db");
 const sql = readFileSync("prisma/migrations/20261025120000_user_profiles/migration.sql", "utf8");
 const env = file => ({ ...process.env, DATABASE_URL: `file:${file.replaceAll("\\", "/")}`, SQLITE_DRIVER: "better-sqlite3", SQLITE_JOURNAL_MODE: "wal", SQLITE_SYNCHRONOUS: "FULL", MARKET_DATA_SYNC_ENABLED: "0" });
-const init = file => execFileSync(process.execPath, ["scripts/init-sqlite.mjs"], { env: env(file), windowsHide: true, stdio: "pipe" });
+const init = file => execFileSync(process.execPath, ["scripts/database/init-sqlite.mjs"], { env: env(file), windowsHide: true, stdio: "pipe" });
 const columns = db => db.pragma('table_info("ReplaySession")').map(column => column.name);
 function fixture(beforeUsers = false) {
   const file = join(directory, `${randomUUID()}.db`); copyFileSync(base, file);

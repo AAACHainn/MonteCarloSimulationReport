@@ -63,7 +63,7 @@ corepack pnpm run benchmark:drawing-projection
 corepack pnpm run benchmark:drawing-projection D:/path/to/existing.db
 ```
 
-[测量脚本](../../scripts/benchmark-drawing-projection.ts)。原始结果保存在被 Git 忽略的 `tmp/trend-line-diagnosis/projection-after.json`；诊断基线为同目录 `projection-baseline.json`。合成场景使用 16 / 50 / 200 条绘图和 300 / 1,200 根窗口，端点向两侧最多延伸 200 天。
+[测量脚本](../../scripts/benchmarks/benchmark-drawing-projection.ts)。原始结果保存在被 Git 忽略的 `tmp/trend-line-diagnosis/projection-after.json`；诊断基线为同目录 `projection-baseline.json`。合成场景使用 16 / 50 / 200 条绘图和 300 / 1,200 根窗口，端点向两侧最多延伸 200 天。
 
 ## 浏览器与交互
 

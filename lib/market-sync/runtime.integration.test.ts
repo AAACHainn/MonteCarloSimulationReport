@@ -17,7 +17,7 @@ import { defaultSchedule } from "./types";
 let databaseFile = "";
 beforeAll(async () => {
   const rows = await prisma.$queryRawUnsafe<Array<{ file: string }>>("PRAGMA database_list"); databaseFile = rows[0].file;
-  execFileSync(process.execPath, ["scripts/init-sqlite.mjs"], { env: { ...process.env, DATABASE_URL: `file:${databaseFile}` }, stdio: "pipe" });
+  execFileSync(process.execPath, ["scripts/database/init-sqlite.mjs"], { env: { ...process.env, DATABASE_URL: `file:${databaseFile}` }, stdio: "pipe" });
 });
 afterAll(async () => {
   const globals = globalThis as unknown as { marketSyncRuntime?: { stop: () => void } }; globals.marketSyncRuntime?.stop(); delete globals.marketSyncRuntime;

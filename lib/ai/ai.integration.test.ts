@@ -42,7 +42,7 @@ let file = "", sessionId = "", projectionId = "", entryId = "";
 const base = new Date("2026-10-01T00:00:00Z");
 beforeAll(async () => {
   file = (await prisma.$queryRawUnsafe<Array<{ file: string }>>("PRAGMA database_list"))[0].file;
-  execFileSync(process.execPath, ["scripts/init-sqlite.mjs"], { env: { ...process.env, DATABASE_URL: "file:" + file }, stdio: "pipe" });
+  execFileSync(process.execPath, ["scripts/database/init-sqlite.mjs"], { env: { ...process.env, DATABASE_URL: "file:" + file }, stdio: "pipe" });
   vi.stubEnv("AI_ENCRYPTION_KEY", Buffer.alloc(32, 7).toString("base64"));
   await prisma.marketDataset.create({ data: { id: "market", name: "test", symbol: "TEST", timeframe: "1m", timezone: "UTC", sourceIntervalSeconds: 60, barCount: 10, startTime: base, endTime: new Date(+base + 540000) } });
   await prisma.marketBar.createMany({ data: Array.from({ length: 10 }, (_, sequence) => ({
@@ -726,7 +726,7 @@ describe("C: complete-session program scheduling with final tool verification", 
     for (const chart of context.charts) await saveAsset(png, context.id, chart.hash);
     const before = (await prisma.replayJournalEntry.findUniqueOrThrow({ where: { id: entryId } })).review;
     const run = await makeRun(context.id, "sessionReview", "tools-v1");
-    const child = spawn(process.execPath, ["--import", "tsx", "scripts/ai-analysis-worker.ts", run.id], { env: { ...process.env, DATABASE_URL: "file:" + file, MARKET_DATA_SYNC_ENABLED: "0" }, windowsHide: true, stdio: "ignore" });
+    const child = spawn(process.execPath, ["--import", "tsx", "scripts/workers/ai-analysis-worker.ts", run.id], { env: { ...process.env, DATABASE_URL: "file:" + file, MARKET_DATA_SYNC_ENABLED: "0" }, windowsHide: true, stdio: "ignore" });
     const timeout = setTimeout(() => child.kill(), 20000);
     try {
       const code = await new Promise<number | null>((resolve, reject) => { child.on("exit", resolve); child.on("error", reject); });
@@ -1185,7 +1185,7 @@ describe("run lifecycle and session analysis", () => {
     expect(await prisma.aiAnalysis.count({ where: { runId: run.id } })).toBe(0);
     const before = await prisma.replayJournalEntry.findUniqueOrThrow({ where: { id: entryId } });
     const reports = await prisma.aiAnalysis.count();
-    execFileSync(process.execPath, ["scripts/init-sqlite.mjs"], { env: { ...process.env, DATABASE_URL: "file:" + file }, stdio: "pipe" });
+    execFileSync(process.execPath, ["scripts/database/init-sqlite.mjs"], { env: { ...process.env, DATABASE_URL: "file:" + file }, stdio: "pipe" });
     const after = await prisma.replayJournalEntry.findFirstOrThrow({ where: { logicalKey: before.logicalKey, projectionId } });
     expect(after.review).toBe(before.review); entryId = after.id;
     expect(await prisma.aiAnalysis.count()).toBe(reports);
