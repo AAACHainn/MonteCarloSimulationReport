@@ -366,7 +366,7 @@ corepack pnpm test
 corepack pnpm run build
 ```
 
-纯文档修改检查文件链接、章节锚点和 `git diff --check`，无需运行应用测试或构建。
+纯文档修改执行 `corepack pnpm docs:check` 和 `git diff --check`，无需运行应用测试或构建。`lint` 自动先执行同一文档检查；检查范围与功能变更的同步维护要求见[持续维护说明](docs/README.md#持续维护)。
 
 Windows 下若 Prisma query engine DLL 被占用，请先确认并停止本项目的开发服务及关联 Node 进程，再重新构建。
 

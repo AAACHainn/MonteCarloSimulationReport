@@ -11,7 +11,8 @@
     "preview:user-growth": "node scripts/preview-user-growth.mjs",
     "build": "prisma generate && next build",
     "start": "next start",
-    "lint": "eslint .",
+    "docs:check": "node scripts/check-docs.mjs",
+    "lint": "node scripts/check-docs.mjs && eslint .",
     "test": "vitest run",
     "benchmark:drawing-projection": "node --import tsx scripts/benchmark-drawing-projection.ts",
     "benchmark:rectangle-drawings": "node --import tsx scripts/benchmark-rectangle-drawings.ts",
@@ -67,8 +68,10 @@
     "eslint-config-next": "^15.3.5",
     "postcss": "^8.4.49",
     "prisma": "6.19.3",
+    "remark-parse": "11.0.0",
     "tailwindcss": "^3.4.17",
     "typescript": "^5.7.2",
+    "unified": "11.0.0",
     "vitest": "^2.1.8"
   }
 }
