@@ -492,6 +492,21 @@ describe("prop orchestration versus original flow", () => {
     expect(counts.map(account => account.fills.length)).toEqual([2, 2, 2]); expect(counts.map(account => account.orders.length)).toEqual([0, 0, 0]);
     expect((await scoped(s, listPropRounds)).map(round => round.result)).toEqual(["FAILED", "FAILED", "FAILED"]);
     expect((await read())!.session.trainingGate).toMatchObject({ autoEnabled: true, lossThreshold: 4, lossStreak: 3, active: false });
+    // PDF snapshots must match the complete filtered table scope, across pages and rounds.
+    for (const number of [0, 1, 2, 3]) {
+      const query = `replaySessionId=${s.id}&propRound=${number}&scope=history&results=L`;
+      const table = await (await journalGET(new Request(`http://localhost/api/test?${query}`), context)).json();
+      expect(table.items).toHaveLength(number === 0 ? 3 : 1);
+      const exported = await exportDataGET(new Request(`http://localhost/api/test?${query}&page=2&take=1`), {
+        params: Promise.resolve({ id, sessionId: table.items[0].journalSessionId }),
+      });
+      expect(exported.status).toBe(200);
+      const pdf = await exported.json();
+      expect(pdf.entries.map((entry: { id: string; no: number; propRoundNumber: number }) => [entry.id, entry.no, entry.propRoundNumber]))
+        .toEqual(table.items.map((entry: { id: string; no: number; propRoundNumber: number }) => [entry.id, entry.no, entry.propRoundNumber]));
+      expect(pdf.summary).toEqual(table.summary);
+      expect(pdf.session.totalCount).toBe(number === 0 ? 3 : 1);
+    }
   });
   it("rejects reset without failure and rolls back every round write on persistence failure", async () => {
     const s = await create(rules()), scope = await loadReplayScope(s.id);
