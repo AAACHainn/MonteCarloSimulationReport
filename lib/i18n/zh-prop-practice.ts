@@ -1,5 +1,6 @@
 export const propPractice = {
     overviewDescription: "查看当前会话的账户资金、风险与考核进度。",
+    remainingProfit: "距达标还需净利润", remainingProfitHint: "随一致性要求动态调整",
     riskSpace: "风险空间", riskFormula: "账户权益 − 亏损底线", profitProgress: "净利润进度", tradingOverview: "交易概况", currentRoundData: "当前会话 · 本轮数据", currentSessionData: "当前会话", promotionConditions: "转为出金账户的条件",
     reset: "重新考核", resetReload: "重新加载并确认", resetTitle: "确认开始新一轮考核",
     resetDescription: "保留本轮全部成交、持仓、挂单、复盘和出金历史，按原规则开启空仓的新一轮考核。行情不回退，从下一根源 K 继续；交易关卡和风险金额偏好保留。",
