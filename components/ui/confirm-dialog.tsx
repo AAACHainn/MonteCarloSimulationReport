@@ -1,6 +1,6 @@
 "use client";
 
-import { useRef } from "react";
+import { useRef, type ReactNode } from "react";
 import { createPortal } from "react-dom";
 import { useDialogLifecycle } from "@/components/ui/use-dialog-lifecycle";
 import { AlertTriangle, Loader2, X } from "lucide-react";
@@ -12,6 +12,7 @@ type ConfirmDialogProps = {
   open: boolean;
   title: string;
   description: string;
+  children?: ReactNode;
   confirmLabel?: string;
   cancelLabel?: string;
   confirmVariant?: "default" | "destructive";
@@ -28,6 +29,7 @@ export function ConfirmDialog({
   open,
   title,
   description,
+  children,
   confirmLabel = copy.common.confirm,
   cancelLabel = copy.common.cancel,
   confirmVariant = "destructive",
@@ -69,6 +71,7 @@ export function ConfirmDialog({
             <p id={descriptionId} className="mt-1 text-sm leading-6 text-slate-600">
               {description}
             </p>
+            {children}
             {error ? <p className="mt-2 text-sm text-red-700" role="alert">{error}</p> : null}
           </div>
           <button
