@@ -4,11 +4,11 @@
 
 | 类别 | 文档 |
 | --- | --- |
-| 用户档案与成长 | [用户档案与修仙成长设计（未实施，含建议参数）](account/user-growth-design.md)、[分阶段开发计划](account/user-growth-implementation-plan.md) |
+| 用户档案、成长与资金 | [用户档案与成长设计](account/user-growth-design.md)、[用户资金实施记录](account/user-wallet-progress.md)、[资金存取实施记录](account/user-wallet-transfers-progress.md) |
 | AI 机器人 | [使用与配置](ai/ai-assistant.md)、[图表图片](ai/ai-chart-images.md)、[自动交互历史](ai/ai-assistant-interaction.md)、[Function Calling 设计摘要](ai/ai-function-calling-design.md)、[实施记录](ai/ai-function-calling-implementation.md)、[复盘规划历史](ai/ai-review-version-plan.md) |
-| 图表绘图 | [矩形绘图](charting/rectangle-drawing.md)、[会话绘图持久化](charting/archived-drawings.md)、[趋势线性能结果](charting/trend-line-performance-results.md) |
+| 图表绘图 | [矩形](charting/rectangle-drawing.md)、[文字](charting/text-drawing.md)、[AB=CD](charting/abcd-drawing.md)、[箭头](charting/arrow-drawing.md)、[会话绘图持久化](charting/archived-drawings.md)、[趋势线性能结果](charting/trend-line-performance-results.md) |
 | 行情数据 | [行情同步](market-data/market-data-sync.md)、[时间聚合与查询](market-data/time-aggregation.md) |
-| 回放与交易 | [多会话与纠错](replay/replay-sessions-implementation.md)、[交易关卡](replay/training-gate.md)、[PDF 导出](replay/replay-pdf-export.md)、[空仓快速推进](replay/flat-replay-advance.md)、[普通推进优化](replay/replay-performance-optimizations.md)、[特殊场景等待](replay/replay-special-waits.md) |
+| 回放与交易 | [多会话与纠错](replay/replay-sessions-implementation.md)、[自营练习账户规格](replay/prop-practice-account-design.md)、[交易关卡](replay/training-gate.md)、[PDF 导出](replay/replay-pdf-export.md)、[空仓快速推进](replay/flat-replay-advance.md)、[普通推进优化](replay/replay-performance-optimizations.md)、[特殊场景等待](replay/replay-special-waits.md) |
 | 安装与运维 | [升级、备份与部署](operations/upgrade.md)、[SQLite WAL 验证](operations/sqlite-wal-validation.md) |
 | UI 规范 | [UI 开发规范](ui/ui-guidelines.md) |
 | 开发历史 | [开发日志与提交索引](logs/README.md)、[2026-08-30 开发历史](history/development-history-2026-08-30.md) |
