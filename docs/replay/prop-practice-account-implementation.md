@@ -40,42 +40,15 @@
 
 日期：2026-10-23。需求依据：[设计文档](prop-practice-account-design.md)。本记录描述实际实施，不改变设计文档的规则。未提交、推送或部署。
 
-## 功能与代码入口
+## 首版实施定位
 
-| 范围 | 主要文件 |
-| --- | --- |
-| 模板校验、阶段与日终账本、风险线、考核条件、提款公式 | `lib/prop-practice/rules.ts` |
-| 复用聚合时段的账户交易日归属、DST 与跨界检查 | `lib/prop-practice/trading-day.ts` |
-| 事务、不可变模板版本、操作后观察、提款幂等与事件 | `lib/prop-practice/service.ts` |
-| 账户结果主标识 | `lib/prop-practice/result-label.ts` |
-| 创建、重新开始、主动归档及原账户原子初始化 | `lib/replay-sessions/service.ts` |
-| 每根完整源 K 结果观察、跨日前结算、真实停止序号及回执 | `lib/market-replay/replay-sync.ts` |
-| 当前价格平仓、挂单变更后的编排接入 | 原 `paper-session/orders` API；原订单规则不变 |
-| 自营快进回退至逐源路径 | `lib/market-replay/flat-advance.ts` |
-| 模板页面、会话创建、账户规则/出金对话框、归档详情 | `app/prop-practice-templates/`、`components/market-replay/prop-template-manager.tsx`、`prop-account-panel.tsx`、`replay-sessions-dashboard.tsx`、`app/market-replay/[id]/page.tsx` |
-| 播放暂停、批量提前停止及日期快进停止 | `components/market-replay/use-replay-engine.tsx`、`use-replay-actions.tsx` |
-| 固定文案 | `lib/i18n.ts`、`lib/i18n/zh-prop-practice.ts` |
-| 新接口 | `/api/prop-practice-templates`、`/api/replay-sessions/[sessionId]/prop-practice` |
+首版将模板风险规则、日终状态与提款账本放在独立自营模块，复用原撮合、数量、费用和关卡算法。后续模板编辑、账户轮次及失败平仓已改变部分首版行为；当前规则与代码职责统一见顶部的自营账户规格，不再在本记录维护第二份入口表。
 
-- 模板保存、复制、编辑生成版本、停用；旧会话保留不可变规则、账号成本、币种、原账户配置和源交易时段快照。
-- 默认模拟保留原创建流程；自营会话固定训练，同一会话完成考核和出金。考核通过只建立自营阶段资金与 rawNet 锚点，原交易账户与关卡不重建。
-- 阶段、日记录保存在独立自营状态 JSON 中；提款与事件使用独立表。两个阶段仅支持静态与日终余额追踪，没有每日损失失败线。
-- 源 K 全部处理后才观察风险；新交易日首根执行前先结算上一日。日末有仓保持待结算，原入口同根平仓后的费用和净利仍属于同一天。
-- 晋级、失败和提款均与原事务提交；阶段/提款暂停保留行情推进能力。批量响应返回实际已完成源序号，浏览器不保留未执行的预计算图表部分，也不会在晋级后自动继续日期快进。
-- 提款预览只读；确认重新验证版本、余额、持仓、挂单与额度。申请额、规则分成、实得和证据同时落库；相同幂等键返回原记录，不重复扣款。提款暂停至下一实际交易日，剩余利润可继续申请。
-- 原交易日志与导出保持原口径，原余额/权益明确标为原模拟账本；自营账本另外提供 JSON 导出。
+## 历史数据库核对
 
-## 数据库与备份
+2026-10-23 首版增加 `20261023120000_prop_practice`。当时沿原无 Prisma 历史的初始化路径升级，停写后一致性备份记录为 `tmp/prop-practice-backup-20261023/stopped-consistent.db`。两个隔离副本分别演练初始化与迁移 SQL，49 张原表行数和原字段指纹一致；实际升级后再次核对，8 个旧会话保持 STANDARD。
 
-- 核实本机实际库为 `D:\code\codex\MonteCarloSimulationReport\prisma\dev.db`，日志模式 DELETE，无 `_prisma_migrations`，原有 8 个会话。
-- 停止已核实属于本项目的 `next start`，保留原密钥和环境；通过 SQLite backup API 建立停写后的一致性备份。
-- 备份目录：`tmp/prop-practice-backup-20261023/`。恢复用数据库为 `stopped-consistent.db`；另保存 `environment.backup` 和 `storage/`。备份与截图均在忽略目录中，不加入 Git。
-- 新增迁移 `prisma/migrations/20261023120000_prop_practice/migration.sql`，新增 5 张自营表，并为 `ReplaySession` 增加默认 STANDARD 的账户类别列；只作增量修改，不重建原会话表。
-- `scripts/init-sqlite.mjs` 同步识别该迁移并幂等补齐结构。本机沿用原初始化路径执行 `corepack pnpm run db:init-sqlite`，没有混用 Prisma migrate、重置数据库或伪造迁移基线。
-- 初始化脚本与迁移 SQL 分别在停写备份的两个隔离副本演练；原有 49 张表的行数和全部原字段 SHA-256 均一致，完整性为 `ok`，外键检查为空。
-- 正式库升级后再次以只读方式完成同样的逐表校验，全部通过；8 个旧会话均为 STANDARD，没有补造自营记录。
-- 可复核报告：备份目录中的 `rehearsal-init-verified.db.report.json`、`rehearsal-migration.db.report.json`、`stopped-consistent.db.verify.report.json`。
-- 复核工具为 `scripts/verify-prop-practice-upgrade.mjs`：默认只对新建隔离副本演练；显式 `verify` 模式只读比较既有目标库。
+该记录不授权重跑旧初始化。v1.0 之前的升级只使用对应 tag 的完整代码与文档；后续升级、密钥和回退保护统一见升级指南。
 
 ## 验证与复用证据
 

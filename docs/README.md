@@ -33,11 +33,15 @@
 
 以下内容不进入默认实现依据；其中的阶段目标不自动成为待开发需求，命令、授权、服务状态和验证结果只对应注明的版本。外部调研需要使用时先重新核查官方资料。
 
+2026-10-30 精简历史材料时，移除了重复的启动/手动验收步骤、临时服务交接和已撤回方案的操作细节，保留决策理由、版本范围及必要验证证据。需要追溯精简前完整正文时，按原文档路径查看 Git 提交 `0716f3e`；不能从旧正文直接恢复操作授权。
+
+旧数据库的 `v0.2 → v1.0` 升级仍使用 `v1.0` tag 的完整代码与同版本指南；当前升级入口及后续兼容边界只在[升级指南](operations/upgrade.md)维护。历史审查中的 AR-04 等未解决限制继续由当前专题跟踪，不因精简记录而标记修复。
+
 ### 设计与计划
 
 | 类别 | 文档与当前入口 |
 | --- | --- |
-| 用户成长分阶段方案 | [成长阶段计划](account/user-growth-implementation-plan.md)；当前规范见[用户档案与成长](account/user-growth-design.md) |
+| 用户成长分阶段方案 | [五阶段实施顺序与交付摘要](account/user-growth-implementation-plan.md)；当前规范见[用户档案与成长](account/user-growth-design.md) |
 | 聚合排队与写入冲突方案 | [聚合排队方案](operations/aggregation-lock-repair-plan.md)；当前规范见[时间聚合与查询](market-data/time-aggregation.md) |
 | 旧升级入口交互方案 | [升级进度方案](operations/db-upgrade-progress-plan.md)；当前操作及版本边界见[升级指南](operations/upgrade.md) |
 
@@ -47,7 +51,7 @@
 | --- | --- |
 | 成长阶段交付 | [第一阶段](account/user-growth-stage-1-progress.md)、[第二阶段](account/user-growth-stage-2-progress.md)、[第三、四阶段](account/user-growth-stage-3-4-progress.md)、[第五阶段](account/user-growth-stage-5-progress.md) |
 | 成长资源与界面记录 | [头像资源](account/user-growth-avatar-assets.md)、[头像弹窗经验条](account/user-growth-menu-experience-2026-10-26.md)、[规则弹窗](account/user-growth-rules-dialog-2026-10-26.md)、[界面微调](account/user-growth-ui-polish-2026-10-26.md)、[代码审核修复](account/user-growth-review-2026-10-26.md) |
-| 资金实施与验收 | [钱包首版](account/user-wallet-progress.md)、[资金存取历史验收](account/user-wallet-transfers-progress.md#验收环境与步骤) |
+| 资金实施与验收 | [钱包首版](account/user-wallet-progress.md)、[资金存取历史验收](account/user-wallet-transfers-progress.md#历史交付与验收2026-10-26) |
 | 历史数据库操作 | [2026-10-26 正式升级记录](account/user-growth-formal-upgrade-2026-10-26.md)、[历史归属移除记录](account/user-growth-history-removal-2026-10-26.md)；当前操作统一使用升级指南 |
 | AI 历史 | [自动交互](ai/ai-assistant-interaction.md)、[Function Calling 设计](ai/ai-function-calling-design.md)、[实施记录](ai/ai-function-calling-implementation.md)、[复盘规划](ai/ai-review-version-plan.md) |
 | 回放设计与实施 | [交易关卡深化设计快照](replay/training-gate-v2-requirements.md)、[自营账户开发日志](replay/prop-practice-account-development-log.md)、[自营账户分阶段实施](replay/prop-practice-account-implementation.md)；当前规则见上方对应规范 |

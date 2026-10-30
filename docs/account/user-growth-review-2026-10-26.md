@@ -48,35 +48,12 @@
 
 所有回归均使用 mock 或 UUID 命名临时 SQLite 与临时头像目录。审核和测试不对正式库创建用户、交易、归属、出金或删除数据。正式数据验证、长期压力和真实设备提交故障不由这些自动测试代替。
 
-## 后续运行与验收
+## 历史部署核对
 
-修复不需要再次升级数据库。继续任务时重新核对端口与进程，原 3000 服务已结束；仅停止本轮自建 3104 验收服务，未停止其他项目进程。按升级指南在重建前重新建立当前正式库的一致性备份，并备份 `.env`、storage 和导入附件，未以旧验收备份覆盖正式库。
-
-本轮备份位于忽略目录 `tmp/user-growth-review/deploy-backups/2026-10-26T01-16-00-498Z-bb96204f-74e6-4469-aada-7cd0a71abd4e/`，使用 SQLite backup API 包含已提交 WAL；备份可读且行数匹配。保留原数据库、WAL/SHM、环境及加密密钥。
-
-启动前只读核对正式库与本轮备份：schema、环境字节及加密密钥未变；MarketDataset、ReplaySession、UserProfile、UserGrowth、UserGrowthFact、UserRealmRecord、Trade、ReplayJournalEntry 八表全字段记录一致，行数分别为 3、10、0、0、0、0、1,481、51。完整性 ok、外键 0，仍为 WAL。证据在忽略目录 `before-restart-check.json`。
-
-关闭 3104 后以最终构建启动正式 3000，明确指向 `prisma/dev.db` 和 `storage/user-avatars/`；运行日志核对 SQLite 3.51.3 / wal / synchronous:1 / NORMAL。正式入口：[用户档案](http://localhost:3000/users)、[回放工作台](http://localhost:3000/market-replay)。验收期间进程覆盖 `MARKET_DATA_SYNC_ENABLED=0`，`.env` 原值不变，未触发付费下载。
-
-tester 最终只读 GET 核对：`/api/users` 200 / 0 用户；`/api/user-sessions?page=1` 200 / 10 项、total 10；`/api/market-datasets` 200 / 3 个；`/users` 200 / 无验收横幅。没有向正式实例发送写请求。远程 main 再次核对仍为上述 a70ac5f，`git diff --check` 对该远程 base 通过。
-
-如服务已结束，在项目目录使用以下启动；无需重跑迁移。浏览器刷新以获得新构建。用户验收确认后可在没有临时同步覆盖的新终端按原配置恢复同步。
-
-```powershell
-$env:MARKET_DATA_SYNC_ENABLED = "0"
-corepack pnpm start --hostname 0.0.0.0 --port 3000
-```
+两项修复无需新迁移。当时重建前重新备份数据库、配置及附件，未用旧验收库覆盖正式数据；备份记录位于忽略目录 `tmp/user-growth-review/deploy-backups/2026-10-26T01-16-00-498Z-bb96204f-74e6-4469-aada-7cd0a71abd4e/`。旧端口和启动步骤不再作为操作入口；本机只读检查不代表当前部署状态或真实设备故障验收。
 
 ## 本轮界面复验
 
 隔离 `tmp/user-growth-stage5/acceptance.db` 的 3104 生产入口实际验证：全部用户直接进入有归属的旧自营轮次交易日志，先显示归属确认；取消不挂载日志，确认后进入指定旧轮次且没有刷新循环。日志内选择另一归属者会话，确认前 URL 和日志保持原样；取消保留全部用户选择，确认后自动切换归属者并导航。菜单绑定会话归属，隐藏切换用户；全局品牌及导航保留，头像不重复。
 
 1440px 及 1280×720 验证紧凑顶部、确认与菜单；1280 下页面无横向溢出。最终构建另在 1920×1080 查看旧轮次日志，顶部和账户历史布局正常，页面 clientWidth 与 scrollWidth 均 1905，没有页面横向溢出。沿用共享紧凑 UserContextHeader 和 ConfirmDialog，无新增主题例外；修仙视觉仍限此前获准用户模块。最终确认截图 `tmp/user-growth-review/entry-confirm-final-1280.png`；核验结束恢复默认视口并关闭自建标签与临时服务。未在正式数据上进行交易或故障注入，也未重跑各尺寸全部操作矩阵。
-
-## 手动验收
-
-1. 在“全部用户”状态，从成长来源或直接地址进入有归属会话的交易日志，应先提示归属；取消保持选择，确认后切换到归属者。
-2. 在日志内选择另一用户会话，取消应保持原地址和日志；确认才导航，顶部头像跟随目标会话且没有切换用户入口。
-3. 旧自营轮次日志应正常打开，不能刷新循环。头像普通保存和昵称冲突处理保持原行为；不确定提交分支由隔离集成测试验证，不在正式实例制造故障。
-
-正式库没有预置验收用户，验证新用户及成长请使用自己创建的档案与新会话；旧会话历史归属不补算经验。当前状态：待用户验证，未提交或推送。
