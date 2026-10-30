@@ -1,5 +1,8 @@
 # 行情聚合重构：历史交接摘要
 
+> 文档状态：历史记录。适用范围：2026-10-20 的审查前交接摘要；问题处置及验证仅代表记录时点，当前已知限制在专题规范维护。
+> 当前规范：[时间聚合与查询](../market-data/time-aggregation.md)、[升级指南](../operations/upgrade.md)。
+
 编写日期：2026-10-20。本文是原独立审查前的交接材料，不是当前实现或部署状态说明。最终规则见[时间聚合说明](../market-data/time-aggregation.md)、[空仓快速推进](../replay/flat-replay-advance.md)与[升级指南](../operations/upgrade.md)；审查问题及后续处置见[独立审查快照](architecture-review-2026-10-20.md)和[修复报告](fix-report-2026-10-20.md)。
 
 ## 审查范围与关键决定

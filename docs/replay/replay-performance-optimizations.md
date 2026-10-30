@@ -1,5 +1,8 @@
 # 普通推进事务与浏览器重复工作优化
 
+> 文档状态：历史记录。适用范围：2026-10-18 的普通推进优化与本机验证；当时的 WAL 配置与性能结果不作为当前部署指令。
+> 当前规范：[回放会话与纠错](replay-sessions-implementation.md)、[时间聚合与查询](../market-data/time-aggregation.md)、[升级指南](../operations/upgrade.md)。
+
 2026-10-18，接续 [SQLite 提交优化](../operations/sqlite-wal-validation.md) 的本机 WAL + FULL 试用。此次不修改数据库结构、撮合规则、源周期推进、权益采样策略或界面布局。
 
 ## 实施范围

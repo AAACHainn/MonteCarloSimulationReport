@@ -1,5 +1,8 @@
 # AI Function Calling：历史设计摘要
 
+> 文档状态：历史记录。适用范围：2026-10-16 的 Function Calling 首版设计；旧能力限制、阶段目标与验证不能作为当前规则或自动待办。
+> 当前规范：[AI 机器人说明](ai-assistant.md)、[图表图片工具](ai-chart-images.md)。
+
 日期：2026-10-16。本文压缩首版设计中的稳定边界与统计口径，作为历史决策记录。A—C 首版实现及当时验证见[实施记录](ai-function-calling-implementation.md)；当前聊天、配置和限制以[AI 机器人说明](ai-assistant.md)为准，图表图片以[AI 图表图片工具](ai-chart-images.md)为准。这里的历史设计或验证不代表本轮重新验证。
 
 ## 协议与安全边界

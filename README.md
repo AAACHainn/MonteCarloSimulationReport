@@ -1,5 +1,7 @@
 # 交易训练工作台
 
+> 文档状态：当前规范。适用范围：项目功能、安装与使用入口；运维操作须同时遵守升级指南。
+
 **Trading Practice Workbench** · 回放训练 · 交易复盘 · 风险分析
 
 ![Next.js 15](https://img.shields.io/badge/Next.js-15-000000?logo=nextdotjs)

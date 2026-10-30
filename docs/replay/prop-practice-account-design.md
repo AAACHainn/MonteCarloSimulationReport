@@ -1,5 +1,7 @@
 # 期货自营练习账户：当前功能规格
 
+> 文档状态：当前规范。适用范围：当前自营练习账户规则与明确列出的实现缺口；历史验证不表示本轮复测。
+
 更新日期：2026-10-30。本文说明当前生效的功能规则、交互和数据边界，供后续开发与验收使用；失败平仓及用户钱包扣费说明已按现有实现核对，已知实现缺口见第 10 节。本次仅修正文档，不代表重新完成了全部测试或浏览器验收。
 
 相关文档：[开发日志与决策记录](prop-practice-account-development-log.md)、[分阶段实施与验证记录](prop-practice-account-implementation.md)、[账户模式调研](../research/prop-firm-account-models-2026-10-23.md)、[现有会话机制](replay-sessions-implementation.md)、[桌面 UI 规范](../ui/ui-guidelines.md)。

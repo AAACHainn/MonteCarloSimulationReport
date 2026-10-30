@@ -1,5 +1,8 @@
 # AI 复盘规划：历史决策
 
+> 文档状态：历史记录。适用范围：2026-10-15 的 AI 复盘规划与决策；旧能力限制、阶段目标与验证不能作为当前规则或自动待办。
+> 当前规范：[AI 机器人说明](ai-assistant.md)、[图表图片工具](ai-chart-images.md)。
+
 更新日期：2026-10-15。本文记录 AI 复盘实施前的产品范围与附件适配决定。当前功能、配置、验证范围及限制以 [AI 机器人说明](ai-assistant.md) 为准；首版工具实现见 [Function Calling 实施记录](ai-function-calling-implementation.md)，图表图片行为见 [AI 图表图片工具](ai-chart-images.md)。
 
 ## 保留的用户需求
