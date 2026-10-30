@@ -10,20 +10,24 @@
 - **设计与计划**：用于理解实施思路和范围；下列三份方案已有实施记录，不自动作为新待办，也不沿用当时的阶段授权。
 - **历史记录**：用于追溯指定日期或版本，不作为当前行为或运行状态依据。需要实施时转到其顶部链接的当前规范，外部调研须重新核查官方资料。
 
-从搜索结果直接进入文档也先读顶部标识，不按文件名判断权威性。资金存取文档仅“验收反馈与当前行为”“实现和统计边界”属于当前规范；绘图等专题中的历史验收数字、机器环境与命令仍按历史记录处理。未列入当前入口且缺少标识的材料，先核实用途再采用。
+从搜索结果直接进入文档也先读顶部标识，不按文件名判断权威性。用户资金文档的“当前规则”至“实现依据”维护完整资金约束，“历史交付与验收”仅供追溯；绘图等专题中的历史验收数字、机器环境与命令仍按历史记录处理。未列入当前入口且缺少标识的材料，先核实用途再采用。
 
 ## 当前入口
 
-| 类别 | 文档 |
-| --- | --- |
-| 用户档案、成长与资金 | [用户档案与成长](account/user-growth-design.md)、[用户资金用法](../README.md#用户资金)、[资金存取规则](account/user-wallet-transfers-progress.md#验收反馈与当前行为) |
-| AI 机器人 | [使用与配置](ai/ai-assistant.md)、[图表图片](ai/ai-chart-images.md) |
-| 图表绘图 | [矩形](charting/rectangle-drawing.md)、[文字](charting/text-drawing.md)、[自动保存契约](charting/text-autosave-design.md)、[AB=CD](charting/abcd-drawing.md)、[箭头](charting/arrow-drawing.md)、[会话绘图持久化](charting/archived-drawings.md) |
-| 行情数据 | [行情同步](market-data/market-data-sync.md)、[时间聚合与查询](market-data/time-aggregation.md) |
-| 回放与交易 | [会话与纠错当前规则](replay/replay-sessions-implementation.md)、[自营练习账户规格](replay/prop-practice-account-design.md)、[交易关卡](replay/training-gate.md)、[PDF 导出](replay/replay-pdf-export.md)、[空仓快速推进](replay/flat-replay-advance.md) |
-| 蒙特卡洛 | [使用与计算口径](../README.md#蒙特卡洛风险分析)、[参数与计算量限制](../lib/validations.ts) |
-| 安装与运维 | [升级、备份与部署](operations/upgrade.md) |
-| UI 规范 | [UI 开发规范](ui/ui-guidelines.md) |
+每类规则在所属专题维护完整定义，README 只保留用法摘要。表中的实现依据用于核对实际行为；代码缺口不能自动覆盖已确认需求。使用说明与技术契约分工互补，历史实施记录不再承担当前规则入口。
+
+| 类别 | 当前规范及职责 | 主要实现依据 |
+| --- | --- | --- |
+| 用户档案与成长 | [归属、经验及突破规则](account/user-growth-design.md) | [成长规则与参数](../lib/user-growth/rules.ts)、[原子结算](../lib/user-growth/settlement.ts) |
+| 用户资金 | [初始发放、账本、存取及删除结算](account/user-wallet-transfers-progress.md#当前规则) | [钱包服务](../lib/user-wallet/service.ts)、[资金存取](../lib/user-wallet/transfers.ts) |
+| AI 机器人 | [使用、配置与统计口径](ai/ai-assistant.md)；[取图、展示及截图契约](ai/ai-chart-images.md) | [工具注册](../lib/ai/tools.ts)、[上限](../lib/ai/limits.ts)、[图片契约](../lib/ai/chart-images-contract.ts) |
+| 图表绘图 | [矩形](charting/rectangle-drawing.md)、[文字用法与数据](charting/text-drawing.md)、[文字保存状态机](charting/text-autosave-design.md)、[AB=CD](charting/abcd-drawing.md)、[箭头](charting/arrow-drawing.md)；跨工具保存规则见[会话绘图持久化](charting/archived-drawings.md) | [类型、样式与校验](../lib/market-replay/chart-drawings.ts)、[快捷键](../lib/market-replay/keyboard-shortcuts.ts)、[文字自动保存](../lib/market-replay/text-autosave.ts) |
+| 行情数据 | [增量同步与预算](market-data/market-data-sync.md)；[时间聚合、质量与查询](market-data/time-aggregation.md) | [同步引擎](../lib/market-sync/engine.ts)、[调度](../lib/market-sync/runtime.ts)、[聚合任务](../lib/market-replay/aggregation-jobs.ts) |
+| 回放与交易 | [会话与纠错](replay/replay-sessions-implementation.md)；[自营账户](replay/prop-practice-account-design.md)；[交易关卡](replay/training-gate.md)；[空仓推进](replay/flat-replay-advance.md) | [会话服务](../lib/replay-sessions/service.ts)、[自营规则](../lib/prop-practice/rules.ts)、[关卡状态](../lib/paper-trading/training-gate.ts)、[空仓推进](../lib/market-replay/flat-advance.ts) |
+| PDF 导出 | [筛选、截图、分卷及任务生命周期](replay/replay-pdf-export.md) | [共享上限](../lib/paper-trading/pdf-types.ts)、[规划](../lib/paper-trading/pdf-planner.ts)、[任务管理](../components/market-replay/pdf-export-provider.tsx) |
+| 蒙特卡洛 | [使用与计算口径](../README.md#蒙特卡洛风险分析) | [参数与计算量限制](../lib/validations.ts)、[模拟算法](../lib/monte-carlo/simulate.ts) |
+| 安装与运维 | [升级、备份与部署](operations/upgrade.md)；数据库操作只从此入口选择路径 | [命令定义](../package.json)、[结构](../prisma/schema.prisma)、[迁移目录](../prisma/migrations/) |
+| UI 规范 | [唯一 UI 规范](ui/ui-guidelines.md)，约束新增与修改部分 | [基础组件](../components/ui/)、[全局样式](../app/globals.css)、[格式](../lib/format.ts) |
 
 ## 方案与历史材料
 
