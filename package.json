@@ -14,6 +14,7 @@
     "docs:check": "node scripts/check-docs.mjs",
     "lint": "node scripts/check-docs.mjs && eslint .",
     "test": "vitest run",
+    "test:legacy-migrations": "vitest run --config tests/legacy-migrations-v1/vitest.config.ts",
     "benchmark:drawing-projection": "node --import tsx scripts/benchmark-drawing-projection.ts",
     "benchmark:rectangle-drawings": "node --import tsx scripts/benchmark-rectangle-drawings.ts",
     "benchmark:text-drawings": "node --import tsx scripts/benchmark-text-drawings.ts",

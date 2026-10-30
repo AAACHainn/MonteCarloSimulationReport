@@ -5,7 +5,7 @@ import { copyFileSync, cpSync, existsSync, mkdirSync, mkdtempSync, readFileSync,
 import { tmpdir } from "node:os";
 import { basename, join } from "node:path";
 import { randomUUID } from "node:crypto";
-import { cleanupRehearsal, fingerprint, identifyMigration, upgradeDatabase } from "./upgrade-sqlite.mjs";
+import { cleanupRehearsal, fingerprint, identifyMigration, upgradeDatabase } from "../../scripts/upgrade-sqlite.mjs";
 
 const directory = mkdtempSync(join(tmpdir(), "db-upgrade-tests-"));
 const base = join(directory, "base.db");

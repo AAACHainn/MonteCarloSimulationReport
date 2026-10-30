@@ -1,6 +1,6 @@
 import { execFileSync } from "node:child_process";
 import { randomUUID } from "node:crypto";
-import { readFileSync, unlinkSync } from "node:fs";
+import { unlinkSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { PrismaClient } from "@prisma/client";
@@ -52,33 +52,6 @@ async function checkLimit() {
   await prisma.replayJournalEntry.update({ where: { id: "entry-1" }, data: { review: originalReview } });
 }
 
-describe("review length SQLite compatibility", () => {
+describe("current review length SQLite constraint", () => {
   it("enforces the 2000-character limit in a newly initialized database", checkLimit);
-
-  it.each(["migration", "initializer"])("upgrades the old constraint without losing content or relations (%s)", async (method) => {
-    await prisma.$transaction([
-      prisma.$executeRawUnsafe(`ALTER TABLE "ReplayJournalEntry" ADD COLUMN "review_legacy" TEXT NOT NULL DEFAULT '' CHECK(length("review_legacy") <= 300)`),
-      prisma.$executeRawUnsafe(`UPDATE "ReplayJournalEntry" SET "review_legacy" = "review"`),
-      prisma.$executeRawUnsafe(`ALTER TABLE "ReplayJournalEntry" DROP COLUMN "review"`),
-      prisma.$executeRawUnsafe(`ALTER TABLE "ReplayJournalEntry" RENAME COLUMN "review_legacy" TO "review"`),
-    ]);
-    if (method === "initializer") {
-      initialize();
-      initialize(); // The fallback initializer must remain safe to run again.
-    } else {
-      const statements = readFileSync("prisma/migrations/20261010120000_expand_replay_journal_review/migration.sql", "utf8")
-        .replace(/^--.*$/gm, "").split(";").map((statement) => statement.trim())
-        .filter((statement) => statement && statement !== "BEGIN TRANSACTION" && statement !== "COMMIT");
-      await prisma.$transaction(statements.map((statement) => prisma.$executeRawUnsafe(statement)));
-    }
-    const saved = await prisma.replayJournalEntry.findUniqueOrThrow({
-      where: { id: "entry-1" }, include: { setupOption: true, tradeReasons: true, journalSession: true },
-    });
-    expect(saved.review).toBe(originalReview);
-    expect(saved.journalSession.id).toBe("session-1");
-    expect(saved.setupOption?.id).toBe("setup-1");
-    expect(saved.tradeReasons.map((reason) => reason.id)).toEqual(["reason-1"]);
-    expect(await prisma.$queryRawUnsafe(`PRAGMA foreign_key_check`)).toEqual([]);
-    await checkLimit();
-  }, 30000);
 });
