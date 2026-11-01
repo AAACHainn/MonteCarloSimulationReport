@@ -38,5 +38,8 @@ Thumbs.db
 
 /tmp/
 
+# Local portable packaging tools and notes (not versioned)
+/scripts/portable/
+
 # Machine-specific deployment notes
 /docs/production-upgrade-2026-10-14.md
