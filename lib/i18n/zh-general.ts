@@ -392,6 +392,7 @@ export const zhEnd = {
       journalDatasetUploadForbidden: "交易日志生成的数据集不能通过 CSV 覆盖。",
     },
     common: {
+      pagination: { page: (page: string, total: string) => `第 ${page} / ${total} 页`, previous: "上一页", next: "下一页" },
       databaseBusy: "数据库暂时繁忙，内容尚未保存，请稍后重试。",
       databaseUncertain: "操作结果尚未确认，请先核对当前状态再重试。",
       none: "无",

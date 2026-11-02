@@ -4,6 +4,7 @@ import { copy } from "@/lib/i18n";
 import { defaultPropRules, initialPropState, payoutPreview } from "@/lib/prop-practice/rules";
 import type { PropRuntime } from "@/lib/prop-practice/service";
 import { PropAccountPanel } from "./prop-account-panel";
+import { PropDailyLedger } from "./prop-daily-ledger";
 
 const rt = vi.hoisted(() => ({ index: 0, slots: [] as unknown[], effects: [] as Array<() => void> }));
 vi.mock("react", async () => {
@@ -216,6 +217,12 @@ describe("prop account payout navigation", () => {
       await settleAsync();
       nodes = render();
       expect(nodes.find(node => node.type === "dialog")?.props.title).toBe(title);
+      if (label === copy.propPractice.dailyLedger) {
+        const ledger = nodes.find(node => node.type === PropDailyLedger)!;
+        expect(ledger.props.stages).toBe(base.state.stages);
+        expect(ledger.props.timeZone).toBe("America/Los_Angeles");
+        expect(ledger.props.currency).toBe("USD");
+      }
     }
     expect(getCount).toBe(3);
     expect(postCount).toBe(0);

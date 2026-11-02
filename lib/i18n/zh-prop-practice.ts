@@ -59,6 +59,8 @@ export const propPractice = {
 
     qualifyingHint: "仅统计出金阶段已结算、有成交且日净利润达到门槛的交易日；每次成功出金后重新累计，出金当日不计入下一轮。",
     dailyLedger: "日终账本",
+    dailyLedgerSummary: (total: string, size: string) => `共 ${total} 条，按交易日从新到旧排列，每页 ${size} 条`,
+    dailyLedgerPagination: "日终账本分页", noDailyLedger: "尚无日终账本记录。",
     rulesSnapshotHint: "账户创建时保存的模板规则与配置，后续模板修改不影响此快照。",
     createAccountTitle: "创建账户", createPracticeAccount: "创建自营公司账户",
     createAccountHint: "选择本会话使用的账户，创建后开始记账。",

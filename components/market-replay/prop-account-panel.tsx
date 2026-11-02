@@ -13,7 +13,7 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Alert, AlertDescription } from "@/components/ui/alert";
 import { Card, CardHeader, CardTitle, CardContent } from "@/components/ui/card";
-import { Table, TableHeader, TableHead, TableRow, TableBody, TableCell } from "@/components/ui/table";
+import { Table, TableRow, TableBody, TableCell } from "@/components/ui/table";
 import { copy } from "@/lib/i18n";
 import { formatMoney, formatNumber, formatInteger } from "@/lib/format";
 import { createUuid } from "@/lib/uuid";
@@ -25,6 +25,7 @@ import { PaperAccountMetrics } from "./paper-trading-panel";
 import { PropAccountBadges, PropPayoutReadiness } from "./prop-payout-overview";
 import { PropPayoutForm, PropPayoutReceipt } from "./prop-payout-form";
 import { PropPayoutHistory } from "./prop-payout-history";
+import { PropDailyLedger } from "./prop-daily-ledger";
 const t = copy.propPractice;
 type AccountView = "rules" | "payout" | "payouts" | "history" | "events";
 type AccountData = NonNullable<Awaited<ReturnType<typeof readPropAccount>>>;
@@ -230,7 +231,7 @@ export function PropAccountPanel({ sessionId, runtime, tradingSnapshot, busy: ex
           <form className="space-y-4" onSubmit={e => { e.preventDefault(); if (preview.eligible) { setError(null); setConfirmation({ amount: Number(amount), requestId: createUuid(), version }); } }}><div className="space-y-2"><Label htmlFor="prop-payout-amount">{t.requested}</Label><Input id="prop-payout-amount" type="number" step="0.01" min={snapshot.rules.payout.minimum} max={preview.maximum} required value={amount} onChange={e => setAmount(e.target.value)} disabled={busy || !preview.eligible} /></div><p className="text-xs tabular-nums">{t.received}: {money(received)} · {t.balanceAfter}: {money(preview.balance - Number(amount))} · {t.floorAfter}: {money(preview.floorAfter)}</p>{!preview.eligible ? <p className="text-xs text-amber-800">{t.previewUnavailable}</p> : null}<div className="flex flex-wrap justify-end gap-2 border-t pt-4">{payoutHistoryAction}<Button disabled={busy || !preview.eligible || sessionStatus !== "ACTIVE" || !data} type="submit">{t.payout}</Button></div></form>
         </CardContent></Card> : null}
         {view === "rules" ? <RuleSnapshotCards snapshot={snapshot} /> : null}
-        {view === "history" ? <Table><TableHeader><TableRow><TableHead>{t.day}</TableHead><TableHead>{t.pause}</TableHead><TableHead className="text-right">{t.dayProfit}</TableHead><TableHead className="text-right">{t.balance}</TableHead></TableRow></TableHeader><TableBody>{state.stages.flatMap(st => st.days.map(day => <TableRow key={st.kind + day.day}><TableCell>{new Date(day.day).toLocaleString("zh-CN", { timeZone: snapshot.calendar.session.timezone })} · {st.kind === "EVALUATION" ? t.evaluation : t.funded}</TableCell><TableCell>{day.stageEnded && !day.settled ? t.stageEnded : day.settled ? t.settled : t.pendingSettlement}</TableCell><TableCell className="text-right tabular-nums">{money(day.endRawNet - day.startRawNet)}</TableCell><TableCell className="text-right tabular-nums">{money(day.balance)}</TableCell></TableRow>))}</TableBody></Table> : null}
+        {view === "history" ? <PropDailyLedger key={`${sessionId}:${current.roundNumber ?? 1}`} stages={state.stages} currency={currency} timeZone={snapshot.calendar.session.timezone} busy={busy} /> : null}
         {view === "payouts" && data ? <PropPayoutHistory key={`${sessionId}:${current.roundNumber ?? 1}`} payouts={data.payouts} currency={currency} timeZone={snapshot.calendar.session.timezone} busy={busy} /> : null}
         {view === "events" ? <Card><CardHeader><CardTitle>{t.events}</CardTitle></CardHeader><CardContent>{data?.events.length ? <ul className="space-y-2 text-sm">{data.events.map(e => <li key={e.id}>{e.type in t ? String(t[e.type as keyof typeof t]) : e.type}</li>)}</ul> : <p className="text-sm text-slate-500">{t.noEvents}</p>}</CardContent></Card> : null}
 

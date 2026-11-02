@@ -3,6 +3,7 @@ import { renderToStaticMarkup } from "react-dom/server";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { copy } from "@/lib/i18n";
 import { PropPayoutHistory, formatPayoutTradingDay } from "./prop-payout-history";
+import { TablePagination } from "@/components/ui/table-pagination";
 
 const hooks = vi.hoisted(() => ({ index: 0, slots: [] as unknown[] }));
 vi.mock("react", async () => {
@@ -28,6 +29,7 @@ function all(node: unknown): Element[] {
   if (node == null || typeof node !== "object") return [];
   if (Array.isArray(node)) return node.flatMap(all);
   const element = node as Element;
+  if (element.type === TablePagination) return all(TablePagination(element.props as React.ComponentProps<typeof TablePagination>));
   return [element, ...all(element.props?.children)];
 }
 function textOf(node: unknown): string {

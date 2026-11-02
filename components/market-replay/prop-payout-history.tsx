@@ -1,7 +1,7 @@
 "use client";
 
 import { useMemo, useState } from "react";
-import { Button } from "@/components/ui/button";
+import { TablePagination } from "@/components/ui/table-pagination";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { copy, defaultLocale } from "@/lib/i18n";
 import { formatInteger, formatMoney } from "@/lib/format";
@@ -44,12 +44,6 @@ export function PropPayoutHistory({ payouts, currency, timeZone, busy = false }:
         </TableRow>)}</TableBody>
       </Table>
     </div> : <p className="rounded-md border bg-slate-50 p-5 text-sm text-slate-500">{t.noPayouts}</p>}
-    {sorted.length > PAGE_SIZE ? <nav aria-label={t.payoutHistoryPagination} className="flex flex-wrap items-center justify-between gap-3 border-t pt-4">
-      <p className="text-xs tabular-nums text-slate-600">{t.payoutHistoryPage(formatInteger(page), formatInteger(totalPages))}</p>
-      <div className="flex gap-2">
-        <Button type="button" variant="outline" disabled={busy || page <= 1} onClick={() => setPage(page - 1)}>{t.payoutHistoryPrevious}</Button>
-        <Button type="button" variant="outline" disabled={busy || page >= totalPages} onClick={() => setPage(page + 1)}>{t.payoutHistoryNext}</Button>
-      </div>
-    </nav> : null}
+    {sorted.length > PAGE_SIZE ? <TablePagination page={page} totalPages={totalPages} onPageChange={setPage} label={t.payoutHistoryPagination} busy={busy} /> : null}
   </section>;
 }
