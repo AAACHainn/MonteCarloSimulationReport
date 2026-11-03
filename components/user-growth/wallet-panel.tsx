@@ -1,5 +1,6 @@
 "use client";
 import { useEffect, useId, useState } from "react";
+import Link from "next/link";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -63,7 +64,7 @@ export function WalletPanel({ userId }: { userId: string }) {
   }
   const feedback = <>{loading && <p role="status" className="text-sm text-slate-600">{t.loading}</p>}{error && <p role="alert" className="text-sm text-red-700">{error}<Button variant="outline" className="ml-2" onClick={() => setRevision(n => n + 1)} disabled={loading || busy}>{t.retry}</Button></p>}</>;
   return <>
-    <Card aria-busy={loading}><CardHeader><div className="flex flex-wrap items-center justify-between gap-3"><CardTitle>{t.title}</CardTitle><div className="flex gap-2"><Button variant="outline" onClick={() => setView("accounts")}>{t.accounts}</Button><Button variant="outline" onClick={() => setView("ledger")}>{t.ledger}</Button></div></div><CardDescription>{t.hint}</CardDescription></CardHeader><CardContent className="space-y-3">
+    <Card aria-busy={loading}><CardHeader><div className="flex flex-wrap items-center justify-between gap-3"><CardTitle>{t.title}</CardTitle><div className="flex flex-wrap gap-2"><Button variant="outline" onClick={() => setView("accounts")}>{t.accounts}</Button><Button variant="outline" onClick={() => setView("ledger")}>{t.ledger}</Button><Button asChild variant="outline"><Link href={`/users/${encodeURIComponent(userId)}/prop-statistics`} prefetch={false}>{copy.propPractice.statistics.entry}</Link></Button></div></div><CardDescription>{t.hint}</CardDescription></CardHeader><CardContent className="space-y-3">
       <div className="grid gap-4 sm:grid-cols-2">{[[t.available, data?.available], [t.held, data?.held]].map(([label, amount]) => <div key={label}><p className="text-sm text-slate-600">{label}</p><p className="mt-1 font-mono text-xl font-semibold tabular-nums">{typeof amount === "number" ? money(amount) : copy.common.dash}</p></div>)}</div>
       {!view && feedback}{status && <p role="status" className="text-sm text-emerald-700">{status}</p>}
     </CardContent></Card>
