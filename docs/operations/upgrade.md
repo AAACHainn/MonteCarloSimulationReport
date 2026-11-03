@@ -354,7 +354,13 @@ AI 普通聊天在窗口内运行，会话分析依赖独立 worker。升级前�
 
 ### 本地 Node 的 start 模式
 
-直接使用已完成兼容验证的 Node，不依赖本机临时备份中的运行时。开发模式运行 `corepack pnpm dev`；生产模式先在关闭行情同步、指向演练副本的终端完成检查与构建：
+直接使用已完成兼容验证的 Node，不依赖本机临时备份中的运行时。普通开发模式运行 `corepack pnpm dev`，默认使用 Turbopack 并写入 `.next-dev/`；`corepack pnpm run build` 默认使用 Turbopack 写入 `.next/`，`corepack pnpm start` 只运行已有的生产构建。此配置不改变数据库结构，无需为切换构建工具执行数据库升级。
+
+当前 Next.js 15.5 的 Turbopack 开发模式已稳定，生产构建仍处于 beta。遇到构建或热更新兼容问题时，先停止当前服务，再使用 `corepack pnpm dev:webpack` 回退开发模式，或使用 `corepack pnpm run build:webpack` 重新构建后运行 `corepack pnpm start`。回退继续使用各模式对应的目录，无需删除数据库或构建目录。
+
+验收 / 预览环境的 `USER_GROWTH_*` 标志保留原优先级及子目录名称：开发阶段使用 `.next-dev/user-growth-*`，生产构建及启动阶段使用 `.next/user-growth-*`；同一实例的构建和启动须保持相同标志。开发 Compose 的缓存卷也挂载到 `/app/.next-dev`。Turbopack 工作区根目录显式设为本项目目录，避免因上级目录存在其他 lockfile 而扫描项目外的路径；当前项目不依赖仓库外的源码或依赖。
+
+目录隔离不隔离数据库、上传文件、环境变量或端口，也不免除 Prisma Client 生成时的 DLL 占用限制。日常使用同一数据库时仍须先停止当前服务再切换模式。生产模式先在关闭行情同步、指向演练副本的终端完成检查与构建：
 
 ```powershell
 corepack pnpm lint
@@ -368,7 +374,7 @@ corepack pnpm run build
 corepack pnpm start
 ```
 
-新代码必须重新构建，重启旧 `.next` 不会获得全部改动；重启后刷新已打开的回放页面。从开发模式切换到生产模式时，先停止开发服务，再重新构建并运行 `start`。测试和构建不要与操作正式库的服务并发；Windows 下 Prisma DLL 占用时确认并停止本项目相关进程后重试。隔离库试运行必须使用另一端口和数据库，避免覆盖或混用正式实例。
+新代码必须重新构建，重启旧 `.next` 不会获得全部改动；重启后刷新已打开的回放页面，并验收回放、图表、模拟交易及所使用的后台任务。构建工具切换不代表这些运行时功能自动加速，实际体验须单独核对。从开发模式切换到生产模式时，先停止开发服务，再重新构建并运行 `start`。测试和构建不要与操作正式库的服务并发；Windows 下 Prisma DLL 占用时确认并停止本项目相关进程后重试。隔离库试运行必须使用另一端口和数据库，避免覆盖或混用正式实例。
 
 ### Docker 部署的额外检查
 

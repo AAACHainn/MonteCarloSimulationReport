@@ -1,6 +1,7 @@
 node_modules
 .market-imports/
 .next/
+.next-dev/
 .vercel/
 .open-next/
 .output/

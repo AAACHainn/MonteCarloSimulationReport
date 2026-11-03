@@ -1,5 +1,6 @@
 .git
 .next
+.next-dev
 node_modules
 .pnpm-store
 .env*

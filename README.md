@@ -98,7 +98,7 @@ corepack pnpm start
    corepack pnpm prisma migrate deploy
    ```
 
-3. 启动开发服务：
+3. 启动开发服务（默认使用 Turbopack，开发产物写入 `.next-dev/`）：
 
    ```bash
    corepack pnpm dev
@@ -152,6 +152,18 @@ docker compose down
 corepack pnpm run build
 corepack pnpm start
 ```
+
+开发与生产使用独立的构建目录，命令如下：
+
+| 用途 | 命令 | 构建目录 |
+| --- | --- | --- |
+| Turbopack 开发 / 热更新 | `corepack pnpm dev` | `.next-dev/` |
+| Turbopack 生产构建 | `corepack pnpm run build` | `.next/` |
+| 启动已有生产构建 | `corepack pnpm start` | `.next/` |
+| Webpack 开发回退 | `corepack pnpm dev:webpack` | `.next-dev/` |
+| Webpack 生产构建回退 | `corepack pnpm run build:webpack`，完成后运行 `corepack pnpm start` | `.next/` |
+
+当前 Next.js 15.5 的 Turbopack 生产构建仍处于 beta；遇到兼容问题可使用上述回退命令。目录隔离只隔离构建产物，两个模式默认仍使用同一数据库和端口；切换前停止当前服务，生产模式须先重新构建。配置与验收注意事项见[本地 Node 运行说明](docs/operations/upgrade.md#本地-node-的-start-模式)。
 
 仓库还提供 `Dockerfile.prod` 与 `compose.prod.yaml`。生产 Compose 当前固定引用 `v0.1` 镜像，不能代表当前源码；部署时须构建或指定目标版本镜像。生产 Dockerfile 默认启动时也会执行迁移，已有库应将迁移改为离线执行；启用 WAL 时还需显式传入 SQLite 配置。详情见 [Docker 部署检查](docs/operations/upgrade.md#docker-部署的额外检查)。
 

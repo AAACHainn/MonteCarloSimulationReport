@@ -19,7 +19,7 @@ RUN corepack pnpm prisma generate
 
 COPY --chown=node:node . .
 
-RUN mkdir -p /app/.next
+RUN mkdir -p /app/.next-dev
 
 EXPOSE 3000
 
