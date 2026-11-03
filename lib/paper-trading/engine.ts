@@ -61,10 +61,17 @@ function cancelProtectiveOrders(orders: PaperOrderData[], reason: string, except
   }
 }
 
-function syncProtectiveQuantity(orders: PaperOrderData[], quantity: number) {
+function syncProtectiveQuantity(orders: PaperOrderData[], previousQuantity: number, quantity: number, filledOrder: PaperOrderData) {
+  const remainingRatio = previousQuantity > quantity ? quantity / previousQuantity : 1;
   for (const order of orders) {
-    if (order.status === "PENDING" && order.isProtective) {
-      order.quantity = protectiveQuantityMode(order) === "ALL" ? quantity : Math.min(order.quantity, quantity);
+    if (order.status !== "PENDING" || !order.isProtective) continue;
+    if (protectiveQuantityMode(order) === "ALL") {
+      order.quantity = quantity;
+    } else {
+      // Protective fills resize the opposite exit type; manual reductions resize
+      // both types. Same-type targets keep their plan, capped at the remainder.
+      const resize = !filledOrder.isProtective || order.type !== filledOrder.type;
+      order.quantity = Math.min(order.quantity * (resize ? remainingRatio : 1), quantity);
     }
   }
 }
@@ -227,7 +234,7 @@ function processPaperTrading(input: PaperAdvanceInput, immediateOrderId?: string
 
     const directionChanged = oldSign !== 0 && sign(nextQuantity) !== 0 && oldSign !== sign(nextQuantity);
     if (sign(nextQuantity) === 0 || directionChanged) cancelProtectiveOrders(orders, sign(nextQuantity) === 0 ? "POSITION_CLOSED" : "POSITION_REVERSED", order.id);
-    else syncProtectiveQuantity(orders, Math.abs(nextQuantity));
+    else syncProtectiveQuantity(orders, Math.abs(oldQuantity), Math.abs(nextQuantity), order);
     if (!order.isProtective && (order.stopLoss !== null || order.takeProfit !== null)) {
       createBracket(orders, order, state, bar.sequence, makeId);
     }

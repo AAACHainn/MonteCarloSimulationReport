@@ -1003,7 +1003,7 @@ describe("complete replay corrections", () => {
     const afterFirst = (await advance(session))!;
     expect(afterFirst.session.netQuantity).toBe(6);
     expect(afterFirst.activeOrders.find(o => o.id === target.id)).toMatchObject({ quantity: 6 });
-    expect(afterFirst.activeOrders.find(o => o.id === stop.id)).toMatchObject({ quantity: 2, ocoGroupId: null });
+    expect(afterFirst.activeOrders.find(o => o.id === stop.id)).toMatchObject({ quantity: 1.2, ocoGroupId: null });
     expect(afterFirst.stats.tradeCount).toBe(0);
     expect(afterFirst.stats.journalEntryCount).toBe(1);
     current = afterFirst;

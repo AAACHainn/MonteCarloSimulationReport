@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { advancePaperTrading } from "./engine";
+import { advancePaperTrading, closePaperTradingAtCurrentPrice } from "./engine";
 import { derivePaperTradeTransitions, reduceRecentPaperTrades } from "./reducers";
 import { defaultPartialExitQuantity, isValidProtectivePrice, nextPartialExitNumber, protectiveOrderLabel, protectiveQuantityMode } from "./protective-orders";
 import type { PaperOrderData, PaperSessionState } from "./types";
@@ -37,6 +37,70 @@ describe("independent partial protective exits", () => {
     expect(result.orders.filter(o => o.status === "PENDING")).toHaveLength(0);
     expect(result.fills.every(f => f.openedQuantity === 0)).toBe(true);
   });
+  it.each([
+    ["LIMIT", 1], ["LIMIT", -1], ["STOP", 1], ["STOP", -1],
+  ] as const)("scales every opposite fixed exit after %s for direction %s without shrinking same-type plans", (type, direction) => {
+    const opposite = type === "LIMIT" ? "STOP" : "LIMIT";
+    const orders = [
+      order("main-tp", "LIMIT", 130), order("main-sl", "STOP", 70),
+      order("trigger", type, type === "LIMIT" ? 110 : 95, 5, null),
+      order("same-type", type, type === "LIMIT" ? 118 : 92, 3, null),
+      order("opposite-1", opposite, opposite === "STOP" ? 90 : 120, 4, null),
+      order("opposite-2", opposite, opposite === "STOP" ? 85 : 125, 2, null),
+      { ...order("cancelled", opposite, opposite === "STOP" ? 80 : 128, 4, null), status: "CANCELLED" as const },
+    ].map(o => direction === 1 ? o : { ...o, side: "BUY" as const, price: 200 - Number(o.price) });
+    const candle = type === "LIMIT" ? { high: 112, low: 99, close: 111 } : { high: 101, low: 94, close: 100 };
+    const result = run(orders, direction === 1 ? candle : { high: 200 - candle.low, low: 200 - candle.high, close: 200 - candle.close },
+      { ...state, netQuantity: direction * 10 });
+    expect(result.fills).toHaveLength(1);
+    expect(result.fills[0]).toMatchObject({ orderId: "trigger", quantity: 5, netQuantityAfter: direction * 5 });
+    expect(result.orders.filter(o => o.status === "PENDING").map(o => [o.id, o.quantity])).toEqual([
+      ["main-tp", 5], ["main-sl", 5], ["same-type", 3], ["opposite-1", 2], ["opposite-2", 1],
+    ]);
+    expect(result.orders.find(o => o.id === "cancelled")?.quantity).toBe(4);
+    expect(orders.find(o => o.id === "opposite-1")?.quantity).toBe(4);
+  });
+  it("uses resized quantities if a target then a stop trigger within the same source candle", () => {
+    const result = run([
+      order("main-tp", "LIMIT", 120), order("main-sl", "STOP", 90),
+      order("tp-1", "LIMIT", 110, 5, null), order("tp-2", "LIMIT", 118, 3, null),
+      order("sl-1", "STOP", 95, 5, null),
+    ], { high: 112, low: 94, close: 99 });
+    expect(result.fills.map(f => [f.orderId, f.quantity, f.netQuantityAfter])).toEqual([
+      ["tp-1", 5, 5], ["sl-1", 2.5, 2.5],
+    ]);
+    expect(result.orders.filter(o => o.status === "PENDING").map(o => [o.id, o.quantity])).toEqual([
+      ["main-tp", 2.5], ["main-sl", 2.5], ["tp-2", 1.5],
+    ]);
+  });
+  it.each(["LIMIT", "STOP", "MARKET", "CURRENT_CLOSE"] as const)("scales both fixed exit types after a manual %s reduction", (type) => {
+    const reducing: PaperOrderData = {
+      ...order("manual", "LIMIT", type === "STOP" ? 95 : 100, 4, null),
+      type: type === "CURRENT_CLOSE" ? "MARKET" : type,
+      price: type === "MARKET" || type === "CURRENT_CLOSE" ? null : type === "STOP" ? 95 : 100,
+      isProtective: false, activeFromSequence: type === "CURRENT_CLOSE" ? 0 : 1,
+    };
+    const orders = [
+      order("main-tp", "LIMIT", 120), order("main-sl", "STOP", 90),
+      order("tp-1", "LIMIT", 118, 3, null), order("sl-1", "STOP", 92, 5, null), reducing,
+    ];
+    const result = type === "CURRENT_CLOSE"
+      ? closePaperTradingAtCurrentPrice({ state, orders, bar: { ...bar, sequence: 0 }, makeId: () => "generated-" + ++id }, reducing.id)
+      : run(orders, { high: 101, low: 94, close: 100 });
+    expect(result.fills).toHaveLength(1);
+    expect(result.fills[0]).toMatchObject({ reason: "REDUCE", quantity: 4, netQuantityAfter: 6 });
+    expect(result.orders.find(o => o.id === "main-tp")?.quantity).toBe(6);
+    expect(result.orders.find(o => o.id === "main-sl")?.quantity).toBe(6);
+    expect(result.orders.find(o => o.id === "tp-1")?.quantity).toBeCloseTo(1.8, 12);
+    expect(result.orders.find(o => o.id === "sl-1")?.quantity).toBe(3);
+  });
+  it("preserves fractional quantities beyond the chart's two decimal places", () => {
+    const result = run([
+      order("tp-1", "LIMIT", 110, 4.65, null), order("sl-1", "STOP", 90, 4.65, null),
+    ], {}, { ...state, netQuantity: 9.3 });
+    expect(result.state.netQuantity).toBeCloseTo(4.65, 12);
+    expect(result.orders.find(o => o.id === "sl-1")?.quantity).toBeCloseTo(2.325, 12);
+  });
   it("cancels all partial exits when a main stop closes the position first", () => {
     const result = run([order("main-tp", "LIMIT", 120), order("main-sl", "STOP", 95),
       order("partial_tp_1_a", "LIMIT", 110, 5, null)], { low: 94 });
@@ -50,11 +114,11 @@ describe("independent partial protective exits", () => {
     expect(result.orders.find(o => o.id === "partial_tp_1_a")).toMatchObject({ status: "PENDING", quantity: 5 });
     expect(result.orders.filter(o => o.status === "PENDING" && protectiveQuantityMode(o) === "ALL").map(o => o.quantity)).toEqual([14, 14]);
   });
-  it("clips fixed lines after manual reduction and cancels them on reversal", () => {
+  it("scales fixed lines after manual reduction and cancels them on reversal", () => {
     const reducing = { ...order("reduce", "LIMIT", 100), isProtective: false, ocoGroupId: null, quantity: 7 };
     const result = run([order("main-tp", "LIMIT", 120), order("partial_tp_1_a", "LIMIT", 115, 5, null), reducing]);
     expect(result.state.netQuantity).toBe(3);
-    expect(result.orders.filter(o => o.status === "PENDING").map(o => o.quantity)).toEqual([3, 3]);
+    expect(result.orders.filter(o => o.status === "PENDING").map(o => o.quantity)).toEqual([3, 1.5]);
     const reverse = { ...reducing, quantity: 15, reduceOnly: false };
     expect(run([order("partial_tp_1_a", "LIMIT", 115, 5, null), reverse]).orders[0]).toMatchObject({ status: "CANCELLED", cancelReason: "POSITION_REVERSED" });
   });

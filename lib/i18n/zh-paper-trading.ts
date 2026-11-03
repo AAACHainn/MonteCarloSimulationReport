@@ -13,7 +13,7 @@ export const zhPaperTrading = {
       exitFixedQuantity: "固定数量",
       exitCurrentPosition: "当前可平数量",
       exitEffectiveQuantity: "当前实际可平",
-      exitFixedHint: "数量在保存时固定；余仓减少时自动限制数量，加仓不会放大。",
+      exitFixedHint: "对侧止盈或止损成交、手动减仓时按余仓比例缩减；同侧成交仅限制到余仓上限，加仓不放大。",
       exitAllHint: "随剩余持仓调整；余仓全部平掉后，自动撤销其他保护单。",
       addPartialExit: "新增分批",
       createPartialExit: "创建分批退出单",
