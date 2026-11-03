@@ -39,7 +39,7 @@ export function useReplayChartCore({
   candleCountdownEnabled = false, playbackActive = false, currentSourceTimestamp = null, sourceIntervalSeconds,
   readOnly = false,
   paperBusy, paperError, onSubmitOrder, onOrderPriceChange,
-  onCancelOrder, onClosePosition, onDraftActiveChange, onDraftIdentityChange, entryCheckOpen = false, onOpenPaperAccount, onVisibleSequenceRangeChange,
+  onCancelOrder, onClosePosition, onCreatePartialExit, onPrepareProtectiveEdit, onDraftActiveChange, onDraftIdentityChange, entryCheckOpen = false, onOpenPaperAccount, onVisibleSequenceRangeChange,
   onRewindToBar, rewindRange,
 }: ReplayChartProps) {
   const replaySession = useReplaySession();
@@ -198,6 +198,9 @@ export function useReplayChartCore({
   const [defaultSaved, setDefaultSaved] = useState(false);
   const [draftError, setDraftError] = useState<string | null>(null);
   const [lineActions, setLineActions] = useState<LineAction[]>([]);
+  const lineActionsRef = useRef(lineActions);
+  lineActionsRef.current = lineActions;
+  const [protectiveEditing, setProtectiveEditing] = useState(false);
   const hasVolume = useMemo(() => [...warmupBars, ...bars].some((bar) => bar.volume !== null), [bars, warmupBars]);
   const warmupBarsRef = useRef(visibleWarmupBars);
   warmupBarsRef.current = visibleWarmupBars;
@@ -429,8 +432,8 @@ export function useReplayChartCore({
   }, [datasetId, paperInitialCapital, paperSessionId, replaySession]);
 
   useEffect(() => {
-    onDraftActiveChange(Boolean(draft));
-  }, [draft, onDraftActiveChange]);
+    onDraftActiveChange(Boolean(draft) || protectiveEditing);
+  }, [draft, protectiveEditing, onDraftActiveChange]);
 
   const draftId = draft?.id ?? null;
   useEffect(() => {
@@ -507,7 +510,7 @@ export function useReplayChartCore({
     setAbrTooltip, measurement, setMeasurement, measurementRef, drawingDraftRef, drawingDraftCoordinateRef,
     drawingPreviewRef, draft, setDraft, orderTicketPosition, setOrderTicketPosition, riskPreferences,
     setRiskPreferences, riskSettingsOpen, setRiskSettingsOpen, defaultSaved, setDefaultSaved, draftError,
-    setDraftError, lineActions, setLineActions, hasVolume, warmupBarsRef, abrLengthRef,
+    setDraftError, lineActions, lineActionsRef, setLineActions, hasVolume, warmupBarsRef, abrLengthRef,
     latest, currentPrice, currentPriceRef, displayUtcOffsetRef, onOrderPriceChangeRef, hasPendingClose,
     syncLineActionCoordinates, syncDrawingPrimitive, setChartCursor, restoreCrosshair, syncMeasurementCoordinates, syncVisibleSequenceRange, datasetId,
     dataRevision, priceTickSize, bars, warmupBars, displayUtcOffsetMinutes, displayIntervalSeconds,
@@ -515,7 +518,7 @@ export function useReplayChartCore({
     fibonacciDraftStyle, rectangleDraftStyle, emaEnabled, emaIndicators, abrEnabled, abrLength,
     volumeVisible, displaySession, barCountSession, barCountConfig, paperSnapshot, tradeAnnotations,
     tradeAnnotationsTruncated, focusSequence, tradeAnnotationsVisible, candleCountdownEnabled, playbackActive, currentSourceTimestamp,
-    sourceIntervalSeconds, readOnly, paperBusy, paperError, onSubmitOrder, onCancelOrder,
-    onClosePosition, entryCheckOpen, onOpenPaperAccount, onRewindToBar, rewindRange,
+    setProtectiveEditing, sourceIntervalSeconds, readOnly, paperBusy, paperError, onSubmitOrder, onCancelOrder,
+    onClosePosition, onCreatePartialExit, onPrepareProtectiveEdit, entryCheckOpen, onOpenPaperAccount, onRewindToBar, rewindRange,
   };
 }

@@ -1,7 +1,7 @@
 import { accountBalance } from "./account-funds";
 import { readSessionGrowth } from "@/lib/user-growth/read";
 import { parseEntryDiscipline, parseTrainingGate } from "./training-gate";
-import { accountWhere, entryProjectionWhere, getReplayScope } from '@/lib/replay-sessions/scope';
+import { accountWhere, entryProjectionWhere, getReplayScope, storageId } from '@/lib/replay-sessions/scope';
 import type { Prisma } from "@prisma/client";
 import { logicalId } from "@/lib/replay-sessions/identity";
 import { prisma } from "@/lib/db";
@@ -176,16 +176,18 @@ export async function getPaperSessionSnapshot(datasetId: string, db: Prisma.Tran
   const recentParentSequences = new Set(recentOrders
     .filter((order) => !order.isProtective && order.filledSequence !== null)
     .map((order) => order.filledSequence!));
+  const missingParentIds = includeHistory ? activeOrders.flatMap((order) => order.parentOrderId && !recentOrderIds.has(storageId(order.parentOrderId)) ? [storageId(order.parentOrderId)] : []) : [];
   const missingParentSequences = includeHistory ? [...new Set(activeOrders
     .filter((order) => order.isProtective && !recentParentSequences.has(order.createdSequence))
     .map((order) => order.createdSequence))] : [];
-  const protectiveParents = missingParentSequences.length === 0
+  const protectiveParents = missingParentSequences.length === 0 && missingParentIds.length === 0
     ? []
     : await db.paperOrder.findMany({
       where: {
         sessionId: session.id,
         isProtective: false,
-        filledSequence: { in: missingParentSequences },
+        OR: [{ filledSequence: { in: missingParentSequences } },
+          { id: { in: missingParentIds } }],
       },
     });
   const snapshotRecentOrders = [

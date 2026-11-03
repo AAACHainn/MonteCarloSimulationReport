@@ -3,6 +3,8 @@ import { ArrowPrimitive } from "@/lib/market-replay/arrow-primitive";
 import { AbcdPrimitive } from "@/lib/market-replay/abcd-primitive";
 
 import { syncPriceLine } from "@/lib/market-replay/price-lines";
+import { protectiveQuantityMode, protectiveOrderLabel } from "@/lib/paper-trading/protective-orders";
+import { formatNumber } from "@/lib/format";
 import { canUpdateReplayTail, formatChartTick, chartCandleData as candle, chartVolumeData as volume } from "@/lib/market-replay/chart-data";
 import { useCallback, useEffect, useMemo, useRef } from "react";
 import { CandlestickSeries, ColorType, createChart, CrosshairMode, HistogramSeries, type IChartApi, type Time, TickMarkType } from "lightweight-charts";
@@ -422,8 +424,8 @@ export function useReplayChartSetup(core: ReturnType<typeof useReplayChartCore>)
       if (coordinate !== null) nextLineActions.push({ ...action, y: Number(coordinate) });
     };
     if (paperSnapshot?.session.averageEntryPrice !== null && paperSnapshot?.session.averageEntryPrice !== undefined && paperSnapshot.session.netQuantity !== 0) {
-      addLine(null, paperSnapshot.session.averageEntryPrice, "#475569", copy.paperTrading.positionValue(paperSnapshot.session.netQuantity, paperSnapshot.session.averageEntryPrice));
-      addAction({ key: "position", price: paperSnapshot.session.averageEntryPrice, color: "#475569", label: copy.paperTrading.positionValue(paperSnapshot.session.netQuantity, paperSnapshot.session.averageEntryPrice), kind: "close" });
+      addLine(null, paperSnapshot.session.averageEntryPrice, "#475569", copy.paperTrading.positionValue(formatNumber(paperSnapshot.session.netQuantity), paperSnapshot.session.averageEntryPrice));
+      addAction({ key: "position", price: paperSnapshot.session.averageEntryPrice, color: "#475569", label: copy.paperTrading.positionValue(formatNumber(paperSnapshot.session.netQuantity), paperSnapshot.session.averageEntryPrice), kind: "close" });
     }
     for (const order of paperSnapshot?.activeOrders ?? []) {
       if (order.price !== null) {
@@ -431,9 +433,9 @@ export function useReplayChartSetup(core: ReturnType<typeof useReplayChartCore>)
         const color = isStop ? "#dc2626" : order.isProtective ? "#16a34a" : order.side === "BUY" ? "#2563eb" : "#ea580c";
         const rReference = order.isProtective ? protectiveOrderRReference(paperSnapshot!, order) : null;
         const title = order.isProtective
-          ? bracketPriceLineTitle(rReference, order.price, priceTickSize)
+          ? (protectiveQuantityMode(order) === "ALL" ? copy.paperTrading.exitAllLabel(formatNumber(order.quantity)) : copy.paperTrading.exitQuantityLabel(formatNumber(order.quantity))) + " · " + bracketPriceLineTitle(rReference, order.price, priceTickSize)
           : copy.paperTrading.orderLine(order.side === "BUY" ? copy.paperTrading.buy : copy.paperTrading.sell, order.type === "LIMIT" ? copy.paperTrading.limit : copy.paperTrading.stop);
-        addLine({ key: order.id, price: order.price, kind: "order", field: "price", orderId: order.id, rReference: rReference ?? undefined }, order.price, color, title, order.isProtective);
+        addLine({ key: order.id, price: order.price, kind: "order", field: "price", orderId: order.id, rReference: rReference ?? undefined }, order.price, color, order.isProtective ? protectiveOrderLabel(order) + " · " + title : title, order.isProtective);
         addAction({ key: order.id, price: order.price, color, label: order.isProtective ? title : `${title} · ${number(order.quantity)}`, kind: "cancel", orderId: order.id });
       }
       if (!order.isProtective && order.stopLoss !== null) {

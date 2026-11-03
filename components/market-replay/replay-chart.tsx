@@ -24,6 +24,10 @@ import { useReplayChartDrawingPointer } from "./use-replay-chart-drawing-pointer
 import { useReplayChartMeasurement } from "./use-replay-chart-measurement";
 import { useReplayChartOrderInteractions } from "./use-replay-chart-order-interactions";
 import { useReplayChartActions } from "./use-replay-chart-actions";
+import { useProtectiveExitControls } from "./use-protective-exit-controls";
+import { ProtectiveOrderDialog } from "./protective-order-dialog";
+import { protectiveOrderLabel } from "@/lib/paper-trading/protective-orders";
+import { layoutPriceLineLabels } from "@/lib/market-replay/price-lines";
 
 export function ReplayChart(props: ReplayChartProps) {
   const core = useReplayChartCore(props);
@@ -32,6 +36,7 @@ export function ReplayChart(props: ReplayChartProps) {
   useReplayChartMeasurement(core);
   useReplayChartOrderInteractions(core, setup);
   const actions = useReplayChartActions(core, setup);
+  const exits = useProtectiveExitControls(core);
   const {
     visibilityScope, setHiddenBoundary, hiddenAfter, visibleBars, containerRef, interactionRef,
     orderTicketRef, orderTicketDragRef, contextMenu, setContextMenu, contextMenuRef, abrTooltip,
@@ -52,6 +57,8 @@ export function ReplayChart(props: ReplayChartProps) {
     submitDraft, contextEntryOrderTypes, measurementColor, measurementGeometry, measurementDuration, measurementLabelLeft,
     measurementLabelTop,
   } = actions;
+  const paneHeight = core.chartRef.current?.panes()[0]?.getHeight() ?? 0;
+  const lineLabelY = layoutPriceLineLabels(lineActions.map(action => action.y), paneHeight);
   return (
     <div
       ref={interactionRef}
@@ -173,22 +180,43 @@ export function ReplayChart(props: ReplayChartProps) {
         </div>
       ) : null}
 
-      {lineActions.map((action) => (
+      {lineActions.map((action, index) => Math.abs(lineLabelY[index] - action.y) > 1 ? <svg key={action.key} aria-hidden="true" className="pointer-events-none absolute right-12 top-0 z-10" width="16" height={paneHeight}>
+        <path d={"M 16 " + action.y + " H 8 V " + lineLabelY[index] + " H 0"} stroke={action.color} fill="none" />
+      </svg> : null)}
+      {lineActions.map((action, index) => { const protective = action.orderId ? paperSnapshot?.activeOrders.find((order) => order.id === action.orderId && order.isProtective) : null; return (
         <div
           key={action.key}
           data-line-action
           data-testid={`line-action-${action.kind}-${action.key}`}
-          className="absolute right-16 z-20 flex max-w-[360px] -translate-y-1/2 items-center overflow-hidden rounded-md border bg-white/95 text-[11px] shadow-sm backdrop-blur"
-          style={{ top: action.y, borderColor: `${action.color}66`, color: action.color }}
+          className="absolute right-16 z-20 flex max-w-[calc(100%-5rem)] -translate-y-1/2 items-center overflow-hidden rounded-md border bg-white/95 text-xs shadow-sm backdrop-blur"
+          style={{ top: lineLabelY[index], borderColor: `${action.color}66`, color: action.color }}
           onContextMenu={(event) => event.preventDefault()}
         >
+          {protective && !readOnly && core.onCreatePartialExit ? <Button type="button" variant="ghost" size="sm"
+            className="h-8 shrink-0 cursor-ns-resize touch-none rounded-none border-r px-2"
+            disabled={paperBusy || entryCheckOpen || Boolean(draft)}
+            aria-label={copy.paperTrading.exitDragHint(protectiveOrderLabel(protective))}
+            title={copy.paperTrading.exitDragHint(protectiveOrderLabel(protective))}
+            onPointerDown={(event) => exits.begin(event, protective.id)}
+            onPointerMove={exits.move} onPointerUp={(event) => void exits.end(event)}
+            onPointerCancel={exits.cancel} onLostPointerCapture={exits.cancel}
+            onClick={(event) => { if (event.detail === 0) void exits.openSettings(protective.id); }}>
+            {protectiveOrderLabel(protective)}
+          </Button> : null}
           <span
+            onDoubleClick={protective && !readOnly ? () => void exits.openSettings(protective.id) : undefined}
             data-line-drag-key={action.kind === "cancel" ? action.key : undefined}
             className={action.kind === "cancel" ? "cursor-ns-resize touch-none truncate px-2 py-1 font-medium" : "truncate px-2 py-1 font-medium"}
             title={action.kind === "cancel" ? copy.paperTrading.dragHint : undefined}
           >
             {action.label}
           </span>
+          {protective && !readOnly ? <Button type="button" variant="ghost" size="sm" className="h-8 w-8 shrink-0 rounded-none border-l px-1"
+            aria-label={copy.paperTrading.exitSettings(protectiveOrderLabel(protective))}
+            title={copy.paperTrading.exitSettings(protectiveOrderLabel(protective))} disabled={paperBusy || entryCheckOpen || Boolean(draft)}
+            onClick={() => void exits.openSettings(protective.id)}>
+            <Settings className="h-4 w-4" aria-hidden="true" />
+          </Button> : null}
           <button
             type="button"
             className="flex shrink-0 items-center gap-1 border-l px-2 py-1 font-semibold hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-50"
@@ -201,7 +229,18 @@ export function ReplayChart(props: ReplayChartProps) {
             {action.kind === "cancel" ? copy.paperTrading.cancelFromLine : hasPendingClose ? copy.paperTrading.closePending : copy.paperTrading.oneClickClose}
           </button>
         </div>
-      ))}
+      ); })}
+
+      {exits.preview ? <div data-testid="partial-exit-preview" className={"pointer-events-none absolute left-0 right-16 z-30 border-t border-dashed " + (exits.preview.valid ? exits.preview.stop ? "border-red-600 text-red-700" : "border-emerald-600 text-emerald-700" : "border-red-600 text-red-700")} style={{ top: exits.preview.y }}>
+        <span className="absolute left-3 -translate-y-full rounded-md border bg-white px-2 py-1 text-xs tabular-nums">{exits.preview.valid ? exits.preview.label : copy.paperTrading.invalidBracket}</span>
+      </div> : null}
+      {exits.notice || (paperError && !draft && !exits.selection) ? <Alert role={paperError || exits.noticeError ? "alert" : "status"} aria-live="polite" className={"absolute bottom-10 left-3 z-30 w-auto max-w-md px-3 py-2 text-sm shadow-sm " + (paperError || exits.noticeError ? "border-red-200 bg-red-50 text-red-700" : "border-emerald-200 bg-emerald-50 text-emerald-700")}>{paperError ?? exits.notice}</Alert> : null}
+      {exits.selection && paperSnapshot && currentPrice !== null ? <ProtectiveOrderDialog
+        key={exits.selection.scope + exits.selection.order.id + String(exits.selection.creating)}
+        order={exits.selection.order} creating={exits.selection.creating}
+        netQuantity={paperSnapshot.session.netQuantity} currentPrice={currentPrice} priceTickSize={priceTickSize}
+        busy={paperBusy} error={paperError} available={Boolean(exits.selectedOrder)}
+        onSave={exits.save} onAdd={exits.add} onClose={exits.close} /> : null}
 
       {latest && (aggregatePhase(latest) === "FORMING" || aggregateHasGap(latest)) ? (
         <div className={`pointer-events-none absolute left-3 top-3 rounded-md px-2 py-1 text-xs shadow-sm ${aggregateHasGap(latest) ? "bg-amber-100 text-amber-900" : "bg-blue-50 text-blue-800"}`}>

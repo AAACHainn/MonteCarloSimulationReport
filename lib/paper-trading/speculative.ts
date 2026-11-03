@@ -48,6 +48,7 @@ export function paperStateFingerprint(session: PaperSessionState, activeOrders: 
       id: order.id,
       status: order.status,
       quantity: order.quantity,
+      ocoGroupId: order.ocoGroupId,
       price: order.price,
       activeFromSequence: order.activeFromSequence,
       filledSequence: order.filledSequence,

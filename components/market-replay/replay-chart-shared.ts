@@ -35,6 +35,7 @@ export type AbrTooltipState = {
   value: number | null;
 };
 export type OrderUpdate = {
+  quantityMode?: import("@/lib/paper-trading/protective-orders").ProtectiveQuantityMode;
   price?: number;
   quantity?: number;
   stopLoss?: number | null;
@@ -226,6 +227,8 @@ export type ReplayChartProps = {
   onOrderPriceChange: (orderId: string, update: OrderUpdate) => Promise<boolean>;
   onCancelOrder: (orderId: string) => Promise<boolean>;
   onClosePosition: () => Promise<boolean>;
+  onCreatePartialExit?: (input: import("@/lib/paper-trading/protective-orders").PartialExitInput) => Promise<boolean>;
+  onPrepareProtectiveEdit?: () => Promise<PaperSessionSnapshot | null>;
   onDraftActiveChange: (active: boolean) => void;
   onDraftIdentityChange?: (draftId: string | null) => void;
   entryCheckOpen?: boolean;

@@ -68,4 +68,14 @@ describe("paper trading price-line R multiples", () => {
     expect(rMultipleAtPrice(reference, 100)).toBe(0);
     expect(rMultipleAtPrice(reference, 110)).toBe(2);
   });
+  it("keeps a partial exit tied to its original parent rather than a later addition at the creation sequence", () => {
+    const partial = { id: "partial_tp_1_a", type: "LIMIT", side: "SELL", isProtective: true, parentOrderId: "original", createdSequence: 20 } as PaperOrderData;
+    const snapshot = { session: { averageEntryPrice: 100, netQuantity: 5 }, recentTrades: [],
+      recentOrders: [
+        { id: "addition", side: "BUY", isProtective: false, filledSequence: 20, stopLoss: 99 },
+        { id: "original", side: "BUY", isProtective: false, filledSequence: 10, stopLoss: 95 },
+      ] } as unknown as PaperSessionSnapshot;
+    expect(rMultipleAtPrice(protectiveOrderRReference(snapshot, partial), 110)).toBe(2);
+  });
+
 });

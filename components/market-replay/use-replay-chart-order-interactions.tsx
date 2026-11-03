@@ -12,7 +12,7 @@ export function useReplayChartOrderInteractions(core: ReturnType<typeof useRepla
     barsRef, measurementArmedRef, drawingToolRef, setContextMenu, setAbrTooltip, measurementRef,
     drawingDraftRef, drawingPreviewRef, setDraft, setLineActions, warmupBarsRef, abrLengthRef,
     onOrderPriceChangeRef, syncLineActionCoordinates, setChartCursor, priceTickSize, abrEnabled, paperBusy,
-    entryCheckOpen,
+    entryCheckOpen, readOnly, lineActionsRef,
   } = core;
   const {
     moveDraftLine,
@@ -140,14 +140,14 @@ export function useReplayChartOrderInteractions(core: ReturnType<typeof useRepla
   useEffect(() => {
     const container = containerRef.current; const interaction = interactionRef.current; const series = candleRef.current;
     if (!container || !interaction || !series) return;
-    let dragging: { target: LineTarget; originalPrice: number; previewPrice: number } | null = null;
+    let dragging: { target: LineTarget; originalPrice: number; previewPrice: number; originalTitle: string | undefined; originalLabel: string | undefined; startY: number; originalCoordinate: number } | null = null;
     const nearestLine = (y: number) => [...lineTargetsRef.current.values()]
       .filter((target) => target.kind !== "draft" || (!entryCheckOpen && !paperBusy))
       .map((target) => ({ target, coordinate: series.priceToCoordinate(target.price) }))
       .filter((item) => item.coordinate !== null)
       .sort((a, b) => Math.abs(Number(a.coordinate) - y) - Math.abs(Number(b.coordinate) - y))[0];
     const down = (event: PointerEvent) => {
-      if (event.shiftKey || measurementArmedRef.current || drawingToolRef.current || drawingDraftRef.current || drawingPreviewRef.current) return;
+      if (readOnly || paperBusy || event.button !== 0 || event.shiftKey || measurementArmedRef.current || drawingToolRef.current || drawingDraftRef.current || drawingPreviewRef.current) return;
       if ((event.target as HTMLElement | null)?.closest("button,input,textarea,[data-text-editor],[data-context-menu]")) return;
       const y = event.clientY - container.getBoundingClientRect().top;
       const dragKey = (event.target as HTMLElement | null)?.closest<HTMLElement>("[data-line-drag-key]")?.dataset.lineDragKey;
@@ -156,7 +156,9 @@ export function useReplayChartOrderInteractions(core: ReturnType<typeof useRepla
       const candidate = directTarget ? { target: directTarget, coordinate: series.priceToCoordinate(directTarget.price) } : nearestLine(y);
       if (!candidate || candidate.coordinate === null || (!directTarget && Math.abs(Number(candidate.coordinate) - y) > 8)) return;
       event.preventDefault(); setChartCursor("ns-resize"); setContextMenu(null);
-      dragging = { target: candidate.target, originalPrice: candidate.target.price, previewPrice: candidate.target.price };
+      dragging = { target: candidate.target, originalPrice: candidate.target.price, previewPrice: candidate.target.price,
+        originalTitle: priceLinesRef.current.get(candidate.target.key)?.options().title,
+        originalLabel: lineActionsRef.current.find(action => action.key === candidate.target.key)?.label, startY: event.clientY, originalCoordinate: Number(candidate.coordinate) };
       interaction.setPointerCapture(event.pointerId);
     };
     const move = (event: PointerEvent) => {
@@ -173,7 +175,9 @@ export function useReplayChartOrderInteractions(core: ReturnType<typeof useRepla
         setChartCursor(candidate && Math.abs(Number(candidate.coordinate) - y) <= 8 ? "ns-resize" : "");
         return;
       }
-      const price = snapPriceToTick(Number(series.coordinateToPrice((event.clientY - container.getBoundingClientRect().top) as never)), priceTickSize);
+      if (Math.abs(event.clientY - activeDrag.startY) < 4 && activeDrag.previewPrice === activeDrag.originalPrice) return;
+      const coordinate = activeDrag.originalCoordinate + event.clientY - activeDrag.startY;
+      const price = snapPriceToTick(Number(series.coordinateToPrice(coordinate as never)), priceTickSize);
       if (!Number.isFinite(price) || price <= 0) return;
       const target = activeDrag.target;
       if (target.kind === "draft") {
@@ -185,8 +189,10 @@ export function useReplayChartOrderInteractions(core: ReturnType<typeof useRepla
       } else {
         activeDrag.previewPrice = price;
         const rLabel = target.rReference ? bracketPriceLineTitle(target.rReference, price, priceTickSize) : null;
-        priceLinesRef.current.get(target.key)?.applyOptions({ price, ...(rLabel ? { title: rLabel } : {}) });
-        setLineActions((current) => current.map((action) => action.key === target.key ? { ...action, price, y, ...(rLabel ? { label: rLabel } : {}) } : action));
+        const quantityPrefix = activeDrag.originalLabel?.split(" · ")[0];
+        const label = rLabel && quantityPrefix ? quantityPrefix + " · " + rLabel : rLabel;
+        priceLinesRef.current.get(target.key)?.applyOptions({ price, ...(rLabel ? { title: label ?? rLabel } : {}) });
+        setLineActions((current) => current.map((action) => action.key === target.key ? { ...action, price, y: coordinate, ...(label ? { label } : {}) } : action));
       }
     };
     const finish = () => {
@@ -196,22 +202,30 @@ export function useReplayChartOrderInteractions(core: ReturnType<typeof useRepla
         void onOrderPriceChangeRef.current(value.target.orderId, { [value.target.field]: value.previewPrice });
       }
     };
+    const cancel = () => {
+      if (!dragging) return;
+      if (dragging.target.kind === "order") {
+        priceLinesRef.current.get(dragging.target.key)?.applyOptions({ price: dragging.originalPrice, title: dragging.originalTitle });
+        const original = dragging;
+        setLineActions(current => current.map(action => action.key === original.target.key ? { ...action, price: original.originalPrice, label: original.originalLabel ?? action.label } : action));
+      }
+      dragging = null; setChartCursor(""); syncLineActionCoordinates();
+    };
     const key = (event: KeyboardEvent) => {
       if (event.key === "Escape" && dragging) {
-        if (dragging.target.kind === "order") priceLinesRef.current.get(dragging.target.key)?.applyOptions({ price: dragging.originalPrice });
-        dragging = null; setChartCursor(""); syncLineActionCoordinates();
+        cancel();
       }
     };
     const leave = () => { if (!dragging) setChartCursor(measurementArmedRef.current || drawingToolRef.current ? "crosshair" : ""); };
     interaction.addEventListener("pointerdown", down); interaction.addEventListener("pointermove", move);
-    interaction.addEventListener("pointerup", finish); interaction.addEventListener("pointercancel", finish);
+    interaction.addEventListener("pointerup", finish); interaction.addEventListener("pointercancel", cancel);
     interaction.addEventListener("pointerleave", leave); window.addEventListener("keydown", key);
     return () => {
       interaction.removeEventListener("pointerdown", down); interaction.removeEventListener("pointermove", move);
-      interaction.removeEventListener("pointerup", finish); interaction.removeEventListener("pointercancel", finish);
+      interaction.removeEventListener("pointerup", finish); interaction.removeEventListener("pointercancel", cancel);
       interaction.removeEventListener("pointerleave", leave); window.removeEventListener("keydown", key);
       setChartCursor("");
     };
-  }, [entryCheckOpen, paperBusy, moveDraftLine, priceTickSize, setChartCursor, syncLineActionCoordinates, candleRef, containerRef, drawingDraftRef, drawingPreviewRef, drawingToolRef, interactionRef, lineTargetsRef, measurementArmedRef, onOrderPriceChangeRef, priceLinesRef, setContextMenu, setDraft, setLineActions]);
+  }, [lineActionsRef, readOnly, entryCheckOpen, paperBusy, moveDraftLine, priceTickSize, setChartCursor, syncLineActionCoordinates, candleRef, containerRef, drawingDraftRef, drawingPreviewRef, drawingToolRef, interactionRef, lineTargetsRef, measurementArmedRef, onOrderPriceChangeRef, priceLinesRef, setContextMenu, setDraft, setLineActions]);
 
 }

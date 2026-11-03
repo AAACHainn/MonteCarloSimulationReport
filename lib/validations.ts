@@ -180,15 +180,24 @@ export const paperOrderSchema = z.object({
 });
 
 export const paperOrderUpdateSchema = z.object({
+  quantityMode: z.enum(["ALL", "FIXED"]).optional(),
   quantity: z.coerce.number().finite().positive().max(1_000_000_000_000).optional(),
   price: z.coerce.number().finite().optional(),
   stopLoss: z.coerce.number().finite().optional().nullable(),
   takeProfit: z.coerce.number().finite().optional().nullable(),
   riskAmount: z.coerce.number().finite().positive().max(1_000_000_000_000).optional().nullable(),
   expectedVersion: z.coerce.number().int().positive(),
-}).refine((value) => value.quantity !== undefined || value.price !== undefined
+}).refine((value) => value.quantityMode !== undefined || value.quantity !== undefined || value.price !== undefined
   || value.stopLoss !== undefined || value.takeProfit !== undefined || value.riskAmount !== undefined,
 copy.paperTrading.orderUpdateRequired);
+
+export const MAX_ACTIVE_PROTECTIVE_ORDERS = 100;
+export const paperPartialExitSchema = z.object({
+  sourceOrderId: z.string().min(1).max(120),
+  price: z.coerce.number().finite().positive(),
+  quantity: z.coerce.number().finite().positive().max(1_000_000_000_000),
+  expectedVersion: z.coerce.number().int().positive(),
+}).strict();
 
 export const paperAdvanceSchema = z.object({
   snapshotMode: z.literal("LIVE").optional(),

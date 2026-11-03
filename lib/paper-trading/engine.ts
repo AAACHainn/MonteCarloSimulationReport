@@ -11,6 +11,7 @@ import type {
 } from "./types";
 import { closeLotsFifo, DEFAULT_PAPER_JOURNAL_CONTEXT, updateLotAdverseRisk } from "./journal";
 import { entryLotId } from "./journal-identity";
+import { protectiveQuantityMode } from "./protective-orders";
 
 const EPSILON = 1e-12;
 
@@ -50,9 +51,10 @@ function applySlippage(basePrice: number, side: PaperSide, bps: number) {
   return basePrice * multiplier;
 }
 
-function cancelProtectiveOrders(orders: PaperOrderData[], reason: string, exceptId?: string) {
+function cancelProtectiveOrders(orders: PaperOrderData[], reason: string, exceptId?: string, remainderOnly = false) {
   for (const order of orders) {
-    if (order.status === "PENDING" && order.isProtective && order.id !== exceptId) {
+    if (order.status === "PENDING" && order.isProtective && order.id !== exceptId
+      && (!remainderOnly || protectiveQuantityMode(order) === "ALL")) {
       order.status = "CANCELLED";
       order.cancelReason = reason;
     }
@@ -61,7 +63,9 @@ function cancelProtectiveOrders(orders: PaperOrderData[], reason: string, except
 
 function syncProtectiveQuantity(orders: PaperOrderData[], quantity: number) {
   for (const order of orders) {
-    if (order.status === "PENDING" && order.isProtective) order.quantity = quantity;
+    if (order.status === "PENDING" && order.isProtective) {
+      order.quantity = protectiveQuantityMode(order) === "ALL" ? quantity : Math.min(order.quantity, quantity);
+    }
   }
 }
 
@@ -72,7 +76,7 @@ function createBracket(
   sequence: number,
   makeId: (cause?: string) => string,
 ) {
-  cancelProtectiveOrders(orders, "REPLACED");
+  cancelProtectiveOrders(orders, "REPLACED", undefined, true);
   if (sign(state.netQuantity) === 0) return;
   const side: PaperSide = state.netQuantity > 0 ? "SELL" : "BUY";
   const group = makeId(`oco:${parent.id}`);
@@ -212,7 +216,7 @@ function processPaperTrading(input: PaperAdvanceInput, immediateOrderId?: string
     order.filledSequence = bar.sequence;
     order.filledAt = bar.timestamp;
     order.filledPrice = price;
-    if (order.ocoGroupId) {
+    if (order.ocoGroupId && (!order.isProtective || Math.abs(nextQuantity) <= EPSILON)) {
       for (const sibling of orders) {
         if (sibling.id !== order.id && sibling.status === "PENDING" && sibling.ocoGroupId === order.ocoGroupId) {
           sibling.status = "CANCELLED";

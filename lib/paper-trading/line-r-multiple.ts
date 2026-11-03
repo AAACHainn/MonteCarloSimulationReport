@@ -49,7 +49,7 @@ export function protectiveOrderRReference(
   const parent = snapshot.recentOrders.find((candidate) => (
     !candidate.isProtective
     && candidate.side === side
-    && candidate.filledSequence === order.createdSequence
+    && (order.parentOrderId ? candidate.id === order.parentOrderId : candidate.filledSequence === order.createdSequence)
     && candidate.stopLoss !== null
   ));
   if (parent?.stopLoss !== null && parent?.stopLoss !== undefined) {

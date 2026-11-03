@@ -517,7 +517,20 @@ export function useReplayActions(core: ReturnType<typeof useReplayCore>, drawing
 
   const gateNoticeBlock = gateNotice ? <div className="flex shrink-0 items-center justify-between gap-2 rounded-md border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-800" role="status"><span>{gateNotice}</span><Button variant="ghost" size="icon" aria-label={copy.common.cancel} onClick={() => setGateNotice(null)}><X className="h-4 w-4" /></Button></div> : null;
 
-  async function updatePaperOrder(orderId: string, update: { price?: number; quantity?: number; stopLoss?: number | null; takeProfit?: number | null; riskAmount?: number | null }) {
+  async function prepareProtectiveEdit() {
+    if (!await prepareSessionSwitch()) return null;
+    if (chartWindowDetachedRef.current && !await returnToLiveWindow()) return null;
+    return confirmedPaperSnapshotRef.current;
+  }
+
+  async function createPartialExit(input: import("@/lib/paper-trading/protective-orders").PartialExitInput) {
+    if (!paperSnapshotRef.current) return false;
+    return mutatePaper("/api/market-datasets/" + dataset.id + "/paper-session/partial-exits", (version) => ({
+      method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ ...input, expectedVersion: version }),
+    }));
+  }
+
+  async function updatePaperOrder(orderId: string, update: import("./replay-chart-shared").OrderUpdate) {
     if (!paperSnapshotRef.current) return false;
     return mutatePaper(paperOrderUrl(dataset.id, orderId), (version) => ({
       method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ ...update, expectedVersion: version }),
@@ -566,7 +579,7 @@ export function useReplayActions(core: ReturnType<typeof useReplayCore>, drawing
     updateBarCountRecentTradingDays, addEma, requestConfirmation, openStartDialog, closeStartDialog, applyNewReplayStart,
     applyConfirmedAction, openCorrectionTarget, openDateDialog, locateReplayDate, prepareSessionSwitch, createPaperAccount,
     onChartDraftChange, submitPaperOrder, cancelEntryCheck, confirmEntryCheck, saveGateConfig, currentGate,
-    gateButton, gateNoticeBlock, updatePaperOrder, cancelPaperOrder, cancelPaperScope, closePaperPosition,
+    gateButton, gateNoticeBlock, updatePaperOrder, cancelPaperOrder, cancelPaperScope, closePaperPosition, createPartialExit, prepareProtectiveEdit,
     currentBar, revealedCount, replayCount, statusText,
   };
 }

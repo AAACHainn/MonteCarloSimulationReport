@@ -20,7 +20,8 @@ export function derivePaperTradeTransitions(orders: PaperOrderData[], fills: Pap
       ? parent.riskAmount * fill.openedQuantity / fill.quantity
       : parent?.stopLoss == null ? null : Math.abs(fill.price - parent.stopLoss) * fill.openedQuantity;
     return {
-      kind: fill.reason,
+      kind: (fill.reason === "STOP_LOSS" || fill.reason === "TAKE_PROFIT") && Math.abs(fill.netQuantityAfter) > 1e-12
+        ? "REDUCE" : fill.reason,
       fill,
       plannedRisk,
       closingFee: fill.quantity ? fill.fee * fill.closedQuantity / fill.quantity : 0,

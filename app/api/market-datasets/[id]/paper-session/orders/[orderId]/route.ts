@@ -10,6 +10,8 @@ import { getPaperSessionSnapshot, serializePaperOrder } from "@/lib/paper-tradin
 import { calculateRiskSizing, isValidBracket } from "@/lib/paper-trading/risk-sizing";
 import { isPriceOnTick } from "@/lib/market-replay/price-ticks";
 import { paperOrderUpdateSchema } from "@/lib/validations";
+import { isValidProtectivePrice, protectiveQuantityMode } from "@/lib/paper-trading/protective-orders";
+import type { PaperOrderData } from "@/lib/paper-trading/types";
 import { assertPropTradingAvailable, observePropOperation } from "@/lib/prop-practice/service";
 
 type RouteContext = { params: Promise<{ id: string; orderId: string }> };
@@ -37,17 +39,19 @@ async function handlePATCH(request: Request, context: RouteContext) {
     }
     const currentBar = await tx.marketBar.findUnique({ where: { datasetId_sequence: { datasetId: id, sequence: progress.currentSequence } } });
     if (!currentBar) return { status: 400, error: copy.paperTrading.noCurrentBar };
+    let nextOcoGroupId = order.ocoGroupId;
     if (order.isProtective) {
-      if (parsed.data.stopLoss !== undefined || parsed.data.takeProfit !== undefined
-          || parsed.data.riskAmount !== undefined || parsed.data.quantity !== undefined
-          || parsed.data.price === undefined) {
+      if (parsed.data.stopLoss !== undefined || parsed.data.takeProfit !== undefined || parsed.data.riskAmount !== undefined) {
         return { status: 400, error: copy.paperTrading.orderUpdateRequired };
       }
-      const isLong = session.netQuantity > 0;
-      const valid = order.type === "STOP"
-        ? isLong ? parsed.data.price < currentBar.close : parsed.data.price > currentBar.close
-        : isLong ? parsed.data.price > currentBar.close : parsed.data.price < currentBar.close;
-      if (!valid) return { status: 400, error: copy.paperTrading.invalidBracket };
+      if (order.side !== (session.netQuantity > 0 ? "SELL" : "BUY")
+        || !isValidProtectivePrice(session.netQuantity, order.type as PaperOrderData["type"], parsed.data.price ?? Number(order.price), currentBar.close)) {
+        return { status: 400, error: copy.paperTrading.invalidBracket };
+      }
+      const mode = parsed.data.quantityMode ?? (parsed.data.quantity !== undefined ? "FIXED" : protectiveQuantityMode(order));
+      nextOcoGroupId = mode === "ALL" ? order.ocoGroupId ?? "remainder:" + orderId : null;
+    } else if (parsed.data.quantityMode !== undefined) {
+      return { status: 400, error: copy.paperTrading.orderUpdateRequired };
     }
     const nextPrice = parsed.data.price ?? order.price;
     const reference = nextPrice ?? currentBar.close;
@@ -55,6 +59,12 @@ async function handlePATCH(request: Request, context: RouteContext) {
     const nextTakeProfit = parsed.data.takeProfit !== undefined ? parsed.data.takeProfit : order.takeProfit;
     const nextRiskAmount = parsed.data.riskAmount !== undefined ? parsed.data.riskAmount : order.riskAmount;
     let nextQuantity = parsed.data.quantity ?? order.quantity;
+    if (order.isProtective) {
+      if (nextOcoGroupId !== null) nextQuantity = Math.abs(session.netQuantity);
+      if (nextQuantity <= 1e-12 || nextQuantity > Math.abs(session.netQuantity)) {
+        return { status: 400, error: copy.paperTrading.exitQuantityExceeded };
+      }
+    }
     if (!order.isProtective && !order.reduceOnly) {
       if (!isValidBracket(order.side as "BUY" | "SELL", reference, nextStopLoss, nextTakeProfit)) {
         return { status: 400, error: copy.paperTrading.invalidBracket };
@@ -80,7 +90,8 @@ async function handlePATCH(request: Request, context: RouteContext) {
     const updatedOrder = await tx.paperOrder.update({
       where: { id: storageId(orderId) },
       data: {
-        quantity: order.isProtective ? undefined : nextQuantity,
+        quantity: nextQuantity,
+        ocoGroupId: nextOcoGroupId,
         price: parsed.data.price,
         stopLoss: order.isProtective || order.reduceOnly ? undefined : parsed.data.stopLoss,
         takeProfit: order.isProtective || order.reduceOnly ? undefined : parsed.data.takeProfit,

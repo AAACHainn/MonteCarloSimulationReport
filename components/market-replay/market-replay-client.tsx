@@ -105,7 +105,7 @@ export function MarketReplayClient({ dataset: initialDataset, initialJournalFocu
     updateBarCountRecentTradingDays, addEma, requestConfirmation, openStartDialog, closeStartDialog, applyNewReplayStart,
     applyConfirmedAction, openCorrectionTarget, openDateDialog, locateReplayDate, prepareSessionSwitch, createPaperAccount,
     onChartDraftChange, submitPaperOrder, cancelEntryCheck, confirmEntryCheck, saveGateConfig, currentGate,
-    gateButton, gateNoticeBlock, updatePaperOrder, cancelPaperOrder, cancelPaperScope, closePaperPosition,
+    gateButton, gateNoticeBlock, updatePaperOrder, cancelPaperOrder, cancelPaperScope, closePaperPosition, createPartialExit, prepareProtectiveEdit,
     currentBar, revealedCount, replayCount, statusText,
   } = actions;
   async function selectCursor(mode: ReplayCursorMode) {
@@ -338,6 +338,8 @@ export function MarketReplayClient({ dataset: initialDataset, initialJournalFocu
             onOrderPriceChange={updatePaperOrder}
             onCancelOrder={cancelPaperOrder}
             onClosePosition={closePaperPosition}
+            onCreatePartialExit={createPartialExit}
+            onPrepareProtectiveEdit={prepareProtectiveEdit}
             onDraftActiveChange={setDraftActive}
             onDraftIdentityChange={onChartDraftChange}
             entryCheckOpen={Boolean(checkingOrder)}

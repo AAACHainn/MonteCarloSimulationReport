@@ -4,6 +4,7 @@ import { copy } from "@/lib/i18n";
 import { ReplaySessionError, getReplayScope, storageId } from "./scope";
 import { orderCreateData } from "@/lib/paper-trading/persist";
 import { isValidBracket } from "@/lib/paper-trading/risk-sizing";
+import { isValidProtectivePrice } from "@/lib/paper-trading/protective-orders";
 import type { PaperOrderData, PaperAccountConfig } from "@/lib/paper-trading/types";
 import { saveReplayCheckpoint } from "./checkpoint";
 import { executeCurrentPriceClose } from "@/lib/paper-trading/current-price-close";
@@ -30,6 +31,10 @@ export async function applyRecordedCommand(tx: Prisma.TransactionClient, command
     if (command.type === "ORDER_CREATE") {
       const order = payload.order;
       if (!order || order.status !== "PENDING") throw conflict(order?.id);
+      if (order.isProtective && (referencePrice === null || order.price === null
+        || !isValidProtectivePrice(account.netQuantity, order.type, order.price, referencePrice)
+        || !order.reduceOnly || order.side !== (account.netQuantity > 0 ? "SELL" : "BUY")
+        || order.quantity <= 0 || order.quantity > Math.abs(account.netQuantity))) throw conflict(order.id);
       await tx.paperOrder.create({ data: orderCreateData(account.id, order) });
       if (payload.executeAtCurrentClose) {
         const bar = await tx.marketBar.findUnique({ where: { datasetId_sequence: { datasetId: account.datasetId, sequence: command.sourceSequence } } });
@@ -49,10 +54,11 @@ export async function applyRecordedCommand(tx: Prisma.TransactionClient, command
         const valid = account.netQuantity !== 0 && order.price !== null && (existing.type === "STOP"
           ? long ? order.price < referencePrice : order.price > referencePrice
           : long ? order.price > referencePrice : order.price < referencePrice);
-        if (!valid) throw conflict(order.id);
+        if (!valid || order.quantity <= 0 || order.quantity > Math.abs(account.netQuantity)) throw conflict(order.id);
       } else if (!isValidBracket(order.side, order.price ?? referencePrice, order.stopLoss, order.takeProfit)) throw conflict(order.id);
       await tx.paperOrder.update({ where: { id: existing.id }, data: {
         quantity: order.quantity, riskAmount: order.riskAmount, price: order.price,
+        ocoGroupId: order.ocoGroupId,
         stopLoss: order.stopLoss, takeProfit: order.takeProfit, activeFromSequence: order.activeFromSequence,
       } });
     } else if (command.type === "ORDER_CANCEL") {

@@ -1,6 +1,6 @@
-import { expect, it, vi } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import type { IPriceLine, PriceLineOptions } from "lightweight-charts";
-import { syncPriceLine } from "./price-lines";
+import { layoutPriceLineLabels, syncPriceLine } from "./price-lines";
 
 it("keeps unchanged price lines and updates moved, renamed, recolored and drag-previewed lines in place", () => {
   const lines = new Map<string, IPriceLine>();
@@ -23,4 +23,20 @@ it("keeps unchanged price lines and updates moved, renamed, recolored and drag-p
   lines.delete("order"); // cancellation followed by a new order allocates a new resource
   syncPriceLine(lines, "new-order", options, create);
   expect(create).toHaveBeenCalledTimes(2);
+});
+
+describe("nearby order badges", () => {
+  it("keeps nearby badges distinct while retaining source order", () => {
+    const result = layoutPriceLineLabels([100, 101, 80, 200], 400);
+    expect(result[0] - result[2]).toBeGreaterThanOrEqual(34);
+    expect(result[1] - result[0]).toBeGreaterThanOrEqual(34);
+    expect(result[3]).toBe(200);
+  });
+  it("keeps badges inside the pane and leaves offscreen prices offscreen", () => {
+    const result = layoutPriceLineLabels([-50, 395, 394, 700], 400);
+    expect(result[0]).toBe(-50);
+    expect(result[3]).toBe(700);
+    expect(result[1]).toBeLessThanOrEqual(383);
+    expect(result[1] - result[2]).toBeGreaterThanOrEqual(34);
+  });
 });
