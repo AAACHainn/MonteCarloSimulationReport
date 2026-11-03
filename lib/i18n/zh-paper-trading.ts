@@ -191,6 +191,7 @@ export const zhPaperTrading = {
       protective: "保护单",
       ordinaryOrder: "普通挂单",
       positionValue: (quantity: string, price: number) => `持仓 ${quantity} @ ${price}`,
+      positionPnl: "盈亏：",
       journalTab: "交易日志",
       journalHistory: "回放交易日志历史",
       journalHistoryDescription: "切换查看此行情下进行中或已归档会话的 FIFO 开平配对记录、统计和复盘备注。成交依据为回放撮合。",

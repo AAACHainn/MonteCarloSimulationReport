@@ -2,7 +2,7 @@
 
 
 import { aggregateHasGap, aggregatePhase } from "@/lib/market-replay/bar-quality";
-import { formatInteger } from "@/lib/format";
+import { formatInteger, formatNumber } from "@/lib/format";
 import { type PointerEvent as ReactPointerEvent } from "react";
 import { EyeOff, Grid2X2, GripHorizontal, Link2, Loader2, LogOut, RotateCcw, Settings, ShieldAlert, Undo2, X } from "lucide-react";
 import { RiskDefaultsDialog } from "./risk-defaults-dialog";
@@ -57,6 +57,7 @@ export function ReplayChart(props: ReplayChartProps) {
     submitDraft, contextEntryOrderTypes, measurementColor, measurementGeometry, measurementDuration, measurementLabelLeft,
     measurementLabelTop,
   } = actions;
+  const positionPnl = paperSnapshot ? Number(paperSnapshot.stats.unrealizedPnl.toFixed(2)) || 0 : null;
   const paneHeight = core.chartRef.current?.panes()[0]?.getHeight() ?? 0;
   const lineLabelY = layoutPriceLineLabels(lineActions.map(action => action.y), paneHeight);
   return (
@@ -211,6 +212,15 @@ export function ReplayChart(props: ReplayChartProps) {
           >
             {action.label}
           </span>
+          {action.kind === "close" && positionPnl !== null ? <span
+            className="shrink-0 border-l px-2 py-1 tabular-nums"
+            style={{ borderColor: `${action.color}44` }}
+            title={paperSnapshot?.session.currency}
+          >
+            {copy.paperTrading.positionPnl}<span className={positionPnl > 0 ? "text-emerald-700" : positionPnl < 0 ? "text-red-700" : "text-slate-600"}>
+              {positionPnl > 0 ? "+" : ""}{formatNumber(positionPnl)}
+            </span>
+          </span> : null}
           {protective && !readOnly ? <Button type="button" variant="ghost" size="sm" className="h-8 w-8 shrink-0 rounded-none border-l px-1"
             aria-label={copy.paperTrading.exitSettings(protectiveOrderLabel(protective))}
             title={copy.paperTrading.exitSettings(protectiveOrderLabel(protective))} disabled={paperBusy || entryCheckOpen || Boolean(draft)}
