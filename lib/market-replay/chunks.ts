@@ -65,6 +65,15 @@ export function tradingDayForTimestamp(timestamp: string | number | Date, sessio
     : localDate;
 }
 
+// Start of the date label returned by tradingDayForTimestamp, including any break after the session closes.
+export function tradingDayLabelStart(tradingDay: string, session: TradingSessionConfig) {
+  if (session.mode === "OVERNIGHT_SESSION") return tradingDayBounds(tradingDay, session).start;
+  const { year, month, day } = parseTradingDate(tradingDay);
+  return session.mode === "TWENTY_FOUR_SEVEN"
+    ? Date.UTC(year, month - 1, day)
+    : new TZDate(year, month - 1, day, session.timezone).getTime();
+}
+
 export function chunkRequestBounds(startDate: string, sourceIntervalSeconds: number, session: TradingSessionConfig) {
   const dates = chunkRequestDates(startDate, sourceIntervalSeconds);
   const first = tradingDayBounds(dates[0], session);

@@ -16,11 +16,17 @@ export function DatePicker({
   onChange,
   className,
   disabled,
+  minMonth,
+  maxMonth,
+  closeOnSelect,
 }: {
   value: string;
   onChange: (value: string) => void;
   className?: string;
   disabled?: boolean;
+  minMonth?: string;
+  maxMonth?: string;
+  closeOnSelect?: boolean;
 }) {
   const yearInputId = useId();
   const yearPickerRef = useRef<HTMLDivElement | null>(null);
@@ -35,8 +41,14 @@ export function DatePicker({
   const [yearInput, setYearInput] = useState(() => String(displayMonth.getFullYear()));
   const [isYearListOpen, setIsYearListOpen] = useState(false);
 
-  const navigationStart = useMemo(() => new Date(1900, 0, 1), []);
-  const navigationEnd = useMemo(() => new Date(today.getFullYear() + 20, 11, 31), [today]);
+  const navigationStart = useMemo(() => minMonth ? parseISO(minMonth) : new Date(1900, 0, 1), [minMonth]);
+  const navigationEnd = useMemo(() => maxMonth ? parseISO(maxMonth) : new Date(today.getFullYear() + 20, 11, 31), [maxMonth, today]);
+  const clampMonth = useCallback((date: Date) => {
+    const month = toMonthStart(date);
+    if (minMonth && month < navigationStart) return navigationStart;
+    if (maxMonth && month > navigationEnd) return navigationEnd;
+    return month;
+  }, [minMonth, maxMonth, navigationStart, navigationEnd]);
   const startYear = navigationStart.getFullYear();
   const endYear = navigationEnd.getFullYear();
   const months = useMemo(
@@ -77,10 +89,10 @@ export function DatePicker({
 
   useEffect(() => {
     if (!isOpen) return;
-    const nextMonth = toMonthStart(selected ?? today);
+    const nextMonth = clampMonth(selected ?? today);
     setDisplayMonth(nextMonth);
     setYearInput(String(nextMonth.getFullYear()));
-  }, [isOpen, selected, today]);
+  }, [clampMonth, isOpen, selected, today]);
 
   useEffect(() => {
     if (!isOpen) setIsYearListOpen(false);
@@ -101,7 +113,7 @@ export function DatePicker({
   }, [isYearListOpen, normalizeYearInput]);
 
   function handleMonthChange(month: Date) {
-    const nextMonth = toMonthStart(month);
+    const nextMonth = clampMonth(month);
     setDisplayMonth(nextMonth);
     setYearInput(String(nextMonth.getFullYear()));
   }
@@ -111,17 +123,17 @@ export function DatePicker({
     const year = Number(rawValue);
     if (!Number.isInteger(year) || rawValue.length < 4) return;
     if (year < startYear || year > endYear) return;
-    setDisplayMonth(toMonthStart(new Date(year, displayMonth.getMonth(), 1)));
+    setDisplayMonth(clampMonth(new Date(year, displayMonth.getMonth(), 1)));
   }
 
   function handleYearSelect(year: number) {
     setIsYearListOpen(false);
     setYearInput(String(year));
-    setDisplayMonth(toMonthStart(new Date(year, displayMonth.getMonth(), 1)));
+    setDisplayMonth(clampMonth(new Date(year, displayMonth.getMonth(), 1)));
   }
 
   function handleMonthSelect(month: string) {
-    const nextMonth = toMonthStart(new Date(displayMonth.getFullYear(), Number(month), 1));
+    const nextMonth = clampMonth(new Date(displayMonth.getFullYear(), Number(month), 1));
     setDisplayMonth(nextMonth);
   }
 
@@ -138,9 +150,11 @@ export function DatePicker({
   function handleSelect(date: Date | undefined) {
     if (!date) return;
     const nextMonth = toMonthStart(date);
+    if (nextMonth.getTime() !== clampMonth(date).getTime()) return;
     setDisplayMonth(nextMonth);
     setYearInput(String(nextMonth.getFullYear()));
     onChange(format(date, "yyyy-MM-dd"));
+    if (closeOnSelect) setIsOpen(false);
   }
 
   return (
@@ -232,7 +246,9 @@ export function DatePicker({
                   className="z-[200] max-h-64 min-w-[6.25rem]"
                 >
                   {months.map((month) => (
-                    <SelectItem key={month.value} value={month.value}>
+                    <SelectItem key={month.value} value={month.value} disabled={
+                      clampMonth(new Date(displayMonth.getFullYear(), Number(month.value), 1)).getMonth() !== Number(month.value)
+                    }>
                       {month.label}
                     </SelectItem>
                   ))}

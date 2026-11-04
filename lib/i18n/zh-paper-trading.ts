@@ -3,6 +3,17 @@ import { MIN_JOURNAL_TABLE_LEFT_GAP } from "../market-replay/journal-column-widt
 
 export const zhPaperTrading = {
     paperTrading: {
+      journalCalendar: {
+        table: "表格", calendar: "日历",
+        weekdays: ["周一", "周二", "周三", "周四", "周五", "周六", "周日"], weekTotal: "本周合计",
+        description: (timezone: string) => `按平仓所属交易日统计（${timezone}），金额为手续费前盈亏。周汇总包含跨月日期。`,
+        count: (count: string) => `${count} 笔`,
+        profit: "盈利", loss: "亏损", net: "净盈亏",
+        openDay: (day: string) => `查看 ${day} 第一笔平仓交易的历史回放`,
+        loading: "正在读取交易日历…", failed: "无法读取交易日历，请重试。", retry: "重试",
+        empty: "当前月历范围内没有符合条件的平仓记录。",
+        invalidMonth: "请选择有效月份。",
+      },
       title: "交易",
       panelTitle: "交易面板",
       exitSettings: (label: string) => label + " 设置",

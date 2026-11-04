@@ -1,6 +1,7 @@
 import { replayRouteBusinessScope } from "@/test-utils/replay-route-business-scope";
 vi.mock("@/lib/replay-sessions/scope", async (importOriginal) => ({
   ...await importOriginal<typeof import("@/lib/replay-sessions/scope")>(), ...replayRouteBusinessScope,
+  getReplayScope: mocks.getReplayScope,
 }));
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
@@ -9,6 +10,10 @@ const mocks = vi.hoisted(() => ({
   paperSessionFindUnique: vi.fn(),
   entryFindMany: vi.fn(),
   journalSessionFindMany: vi.fn(),
+  progressFindUnique: vi.fn(),
+  marketBarFindUnique: vi.fn(),
+  getReplayScope: vi.fn(),
+  propRoundFindMany: vi.fn(),
 }));
 
 vi.mock("@/lib/db", () => ({
@@ -17,10 +22,14 @@ vi.mock("@/lib/db", () => ({
     paperTradingSession: { findFirst: mocks.paperSessionFindUnique },
     replayJournalEntry: { findMany: mocks.entryFindMany },
     replayJournalSession: { findMany: mocks.journalSessionFindMany },
+    replayProgress: { findUnique: mocks.progressFindUnique },
+    marketBar: { findUnique: mocks.marketBarFindUnique },
+    propPracticeRound: { findMany: mocks.propRoundFindMany },
   },
 }));
 
 import { GET } from "./route";
+import { sumJournalDays } from "@/lib/paper-trading/journal-calendar";
 
 const context = { params: Promise.resolve({ id: "dataset-1" }) };
 
@@ -40,6 +49,7 @@ function record() {
 
 beforeEach(() => {
   vi.clearAllMocks();
+  mocks.getReplayScope.mockReturnValue({ id: "replay-1" });
   mocks.datasetFindUnique.mockResolvedValue({ id: "dataset-1" });
   mocks.paperSessionFindUnique.mockResolvedValue({ journalSessionId: "journal-1" });
   mocks.entryFindMany.mockResolvedValue([record()]);
@@ -47,6 +57,94 @@ beforeEach(() => {
 });
 
 describe("replay paper journal API", () => {
+  it("includes closes after the display session ends in both calendars covering a cross-month week", async () => {
+    const september = new Date("2026-09-01T14:00:00Z");
+    const closeInBreak = new Date("2026-10-04T21:30:00Z");
+    const nextTradingDay = new Date("2026-10-04T22:00:00Z");
+    mocks.datasetFindUnique.mockResolvedValue({ id: "dataset-1", symbol: "ES", startTime: september });
+    mocks.journalSessionFindMany.mockResolvedValue([{ id: "journal-1", currency: "USD" }]);
+    mocks.progressFindUnique.mockResolvedValue({ startSequence: 4, currentSequence: 5 });
+    mocks.marketBarFindUnique.mockImplementation(({ where }) => ({
+      timestamp: where.datasetId_sequence.sequence === 4 ? september : nextTradingDay,
+    }));
+    mocks.entryFindMany.mockImplementation(({ where }) =>
+      [{ ...record(), closedAt: closeInBreak }, { ...record(), no: 4, closedAt: nextTradingDay }]
+        .filter(entry => entry.closedAt >= where.closedAt.gte && entry.closedAt < where.closedAt.lt));
+
+    for (const month of ["2026-09", "2026-10"]) {
+      const response = await GET(new Request(`http://localhost/api/market-datasets/dataset-1/paper-journal?view=calendar&month=${month}`), context);
+      expect((await response.json()).days).toContainEqual(expect.objectContaining({
+        date: "2026-10-04", firstTradeNo: 3, count: 1,
+      }));
+    }
+  });
+
+  it("limits an archived prop calendar to the same projection as the log unless all rounds are selected", async () => {
+    const september = new Date("2026-09-01T14:00:00Z");
+    const october = new Date("2026-10-01T14:00:00Z");
+    const baseScope = { id: "replay-1", accountCategory: "PROP_PRACTICE", status: "ARCHIVED", projectionId: "final-round" };
+    mocks.datasetFindUnique.mockResolvedValue({ id: "dataset-1", symbol: "ES", startTime: september });
+    mocks.progressFindUnique.mockResolvedValue({ startSequence: 4, currentSequence: 8 });
+    mocks.marketBarFindUnique.mockImplementation(({ where }) => ({
+      timestamp: where.datasetId_sequence.sequence === 4 ? september : october,
+    }));
+    const finalRound = { startSequence: 6, endSequence: 8, projection: { currentSequence: 8 } };
+    const url = "http://localhost/api/market-datasets/dataset-1/paper-journal?view=calendar&month=2026-09";
+
+    mocks.getReplayScope.mockReturnValue(baseScope);
+    mocks.propRoundFindMany.mockResolvedValueOnce([finalRound]);
+    const current = await GET(new Request(url), context);
+    expect(mocks.propRoundFindMany).toHaveBeenLastCalledWith(expect.objectContaining({
+      where: { replaySessionId: "replay-1", projectionId: "final-round" },
+    }));
+    expect(await current.json()).toMatchObject({ month: "2026-10", monthRange: { first: "2026-10", last: "2026-10" } });
+
+    const projections = ["first-round", "final-round"];
+    mocks.getReplayScope.mockReturnValue({ ...baseScope, propRoundNumber: 0, journalProjectionIds: projections });
+    mocks.propRoundFindMany.mockResolvedValueOnce([{ startSequence: 4, endSequence: 5, projection: { currentSequence: 5 } }, finalRound]);
+    const all = await GET(new Request(url), context);
+    expect(mocks.propRoundFindMany).toHaveBeenLastCalledWith(expect.objectContaining({
+      where: { replaySessionId: "replay-1", projectionId: { in: projections } },
+    }));
+    expect(await all.json()).toMatchObject({ month: "2026-09", monthRange: { first: "2026-09", last: "2026-10" } });
+  });
+
+  it("includes cross-month trades and links each day to its earliest matching close", async () => {
+    const first = new Date("2026-08-31T14:00:00Z");
+    const second = new Date("2026-09-01T14:00:00Z");
+    mocks.datasetFindUnique.mockResolvedValue({ id: "dataset-1", symbol: "ES", startTime: first });
+    mocks.journalSessionFindMany.mockResolvedValue([{ id: "journal-1", currency: "USD" }]);
+    mocks.progressFindUnique.mockResolvedValue({ startSequence: 4, currentSequence: 5 });
+    mocks.marketBarFindUnique.mockImplementation(({ where }) => ({
+      timestamp: where.datasetId_sequence.sequence === 4 ? first : second,
+    }));
+    mocks.entryFindMany.mockResolvedValue([
+      { ...record(), no: 2, closedAt: first, direction: "SHORT" },
+      { ...record(), closedAt: first, quantity: 3 },
+      { ...record(), no: 1, closedAt: new Date(first.getTime() + 60_000), quantity: 1 },
+      { ...record(), no: 4, closedAt: second, gainLoss: -2 },
+      { ...record(), no: 5, closedAt: second, gainLoss: 0 },
+    ]);
+    const response = await GET(new Request("http://localhost/api/market-datasets/dataset-1/paper-journal?view=calendar&directions=LONG"), context);
+    expect(response.status).toBe(200);
+    const calendar = await response.json();
+    expect(calendar.month).toBe("2026-09");
+    expect(calendar.monthRange).toEqual({ first: "2026-08", last: "2026-09" });
+    expect(calendar.journalSessionId).toBe("journal-1");
+    expect(mocks.entryFindMany).toHaveBeenCalledWith(expect.objectContaining({
+      orderBy: [{ closedAt: "asc" }, { no: "asc" }],
+    }));
+    expect(calendar.days.slice(0, 3)).toEqual([
+      { date: "2026-08-31", firstTradeNo: 3, count: 2, profit: 8, loss: 0, results: { W: 2, L: 0, BE: 0 } },
+      { date: "2026-09-01", firstTradeNo: 4, count: 2, profit: 0, loss: -2, results: { W: 0, L: 1, BE: 1 } },
+      { date: "2026-09-02", firstTradeNo: null, count: 0, profit: 0, loss: 0, results: { W: 0, L: 0, BE: 0 } },
+    ]);
+    expect(sumJournalDays(calendar.days.slice(0, 7))).toEqual({
+      count: 4, profit: 8, loss: -2, results: { W: 2, L: 1, BE: 1 },
+    });
+    const future = await GET(new Request("http://localhost/api/market-datasets/dataset-1/paper-journal?view=calendar&month=2026-10"), context);
+    expect((await future.json()).month).toBe("2026-09");
+  });
   it("loads and serializes the Setup and trade-reason relations", async () => {
     const response = await GET(new Request(
       "http://localhost/api/market-datasets/dataset-1/paper-journal?scope=current",

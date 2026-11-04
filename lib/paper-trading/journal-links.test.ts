@@ -32,6 +32,10 @@ describe("journal links independent of display numbering", () => {
     expect(replayJournalTradeHref("market id", "journal/id", 91)).toBe("/market-replay/market%20id/history/journal%2Fid?journalNo=91");
     expect(replayJournalLinkTarget({ journalNo: "91" })).toEqual({ no: 91 });
   });
+  it("keeps the same trade target while preserving the calendar return context", () => {
+    expect(replayJournalTradeHref("market id", "journal/id", 91, { month: "2026-09", allRounds: true }))
+      .toBe("/market-replay/market%20id/history/journal%2Fid?journalNo=91&calendarMonth=2026-09&calendarRound=0");
+  });
   it("keeps old numeric bookmarks bound to their original stored account number", () => {
     expect(replayJournalLinkTarget({ trade: "6" })).toEqual({ accountNo: 6 });
     expect(replayJournalLinkTarget({ journalNo: "91", trade: "1" })).toEqual({ no: 91 });

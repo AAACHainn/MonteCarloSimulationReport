@@ -1,4 +1,6 @@
 "use client";
+import { useState } from "react";
+import { PaperJournalCalendar } from "./paper-journal-calendar";
 import { useCurrentUser } from "@/components/user-growth/user-context";
 import { useReplaySessionEntry } from "./replay-session-entry-guard";
 import { usePaperJournalTableController } from "./use-paper-journal-table-controller";
@@ -8,7 +10,7 @@ import { usePaperJournalTableController } from "./use-paper-journal-table-contro
 
 
 
-import { ChevronLeft, ChevronRight, Download, Loader2, Pencil, RotateCcw, Settings2, Trash2 } from "lucide-react";
+import { CalendarDays, ChevronLeft, ChevronRight, Download, Loader2, Pencil, RotateCcw, Settings2, Table2, Trash2 } from "lucide-react";
 import Link from "next/link";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
@@ -34,6 +36,7 @@ import { MAX_JOURNAL_COLUMN_WIDTH, MIN_JOURNAL_COLUMN_WIDTH } from "@/lib/market
 
 import { journalColumns, journalFieldValue } from "@/lib/paper-trading/journal-columns";
 import { journalSetupChecklist, journalSetupChecklistTitle } from "@/lib/paper-trading/journal-checklist";
+import { parseJournalDate } from "@/lib/paper-trading/journal-calendar";
 
 import type { ReplayJournalEntryData } from "@/lib/paper-trading/types";
 import type { ReplaySessionSummary } from "@/lib/replay-sessions/types";
@@ -76,12 +79,18 @@ export function PaperJournalTable({
   scope,
   onFocus,
   replaySessions,
+  initialCalendar,
+  initialMonth,
 }: {
   datasetId: string;
   scope: "current" | "history";
   onFocus?: (entry: ReplayJournalEntryData) => void;
   replaySessions?: Pick<ReplaySessionSummary, "id" | "name" | "mode" | "status" | "createdAt" | "userId">[];
+  initialCalendar?: boolean;
+  initialMonth?: string;
 }) {
+  const [calendarView, setCalendarView] = useState(Boolean(initialCalendar));
+  const [month, setMonth] = useState(initialMonth && parseJournalDate(initialMonth + "-01") ? initialMonth : "");
   const currentUser = useCurrentUser();
   const sessionEntry = useReplaySessionEntry();
   const {
@@ -129,7 +138,11 @@ export function PaperJournalTable({
 
   if (loading && items.length === 0 && sessions.length === 0) return <div className="space-y-4">{sessionEntry.ui}{sessionPicker}<div className="flex items-center gap-2 py-8 text-sm text-slate-500"><Loader2 className="h-4 w-4 animate-spin" />{copy.paperTrading.journalLoading}</div></div>;
   if (error && items.length === 0 && sessions.length === 0) return <div className="space-y-4">{sessionEntry.ui}{sessionPicker}<p className="py-6 text-sm text-red-600" role="alert">{error}</p></div>;
-  if (items.length === 0 && sessions.length === 0) return <div className="space-y-4">{sessionEntry.ui}{sessionPicker}<p className="rounded-md border border-dashed p-6 text-center text-sm text-slate-500">{copy.paperTrading.noJournalEntries}</p></div>;
+  const canShowCalendar = scope === "history" && Boolean(replaySession);
+  const showCalendar = canShowCalendar && calendarView;
+  const noEntries = items.length === 0 && sessions.length === 0;
+  const viewCopy = copy.paperTrading.journalCalendar;
+  if (noEntries && !canShowCalendar) return <div className="space-y-4">{sessionEntry.ui}{sessionPicker}<p className="rounded-md border border-dashed p-6 text-center text-sm text-slate-500">{copy.paperTrading.noJournalEntries}</p></div>;
   return <div className="space-y-4" aria-busy={loading || switchingSession || sessionEntry.busy}>
     {sessionEntry.ui}
     {scope === "history" && selectedSession ? <>
@@ -146,10 +159,10 @@ export function PaperJournalTable({
             </a>
           </Button>
           <PdfExportButton datasetId={datasetId} sessionId={selectedSession.id} filters={appliedFilters} loading={loading} count={totalItems} />
-          <Button type="button" variant="outline" size="sm" onClick={openVisibleColumns}>
+          {!showCalendar && <Button type="button" variant="outline" size="sm" onClick={openVisibleColumns}>
             <Settings2 className="h-4 w-4" aria-hidden="true" />
             {copy.paperTrading.setVisibleColumns}
-          </Button>
+          </Button>}
           {!replaySession || replaySession.status === "ACTIVE" ? <Button type="button" variant="outline" size="sm" onClick={beginRename} disabled={loading}>
             <Pencil className="h-4 w-4" aria-hidden="true" />
             {copy.paperTrading.renameJournalSession}
@@ -200,7 +213,30 @@ export function PaperJournalTable({
           />
         </CardContent>
       </Card> : null}
-      <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+    </> : sessionPicker}
+    {canShowCalendar && <Card className="shadow-none">
+      <CardHeader className="flex-row flex-wrap items-center justify-between gap-3 space-y-0 px-5 py-3">
+        <CardTitle>{copy.paperTrading.records}</CardTitle>
+        <div role="group" aria-label={copy.paperTrading.records} className="inline-flex rounded-lg border bg-slate-50 p-0.5">
+          <Button type="button" variant="ghost" aria-pressed={!showCalendar}
+            className="border border-transparent text-slate-600 aria-pressed:border-blue-200 aria-pressed:bg-blue-50 aria-pressed:text-blue-700"
+            onClick={() => setCalendarView(false)}><Table2 aria-hidden="true" />{viewCopy.table}</Button>
+          <Button type="button" variant="ghost" aria-pressed={showCalendar}
+            className="border border-transparent text-slate-600 aria-pressed:border-blue-200 aria-pressed:bg-blue-50 aria-pressed:text-blue-700"
+            onClick={() => setCalendarView(true)}><CalendarDays aria-hidden="true" />{viewCopy.calendar}</Button>
+        </div>
+      </CardHeader>
+      {showCalendar && <CardContent className="space-y-3 border-t pt-4">
+        {hasActiveFilters && <Button type="button" variant="ghost" disabled={loading} onClick={clearAllExpressionFilters}>
+          {copy.paperTrading.journalFiltersActive(activeFilterCount)} · {copy.paperTrading.clearJournalFilters}
+        </Button>}
+        <PaperJournalCalendar datasetId={datasetId} month={month} onMonthChange={setMonth}
+          filters={appliedFilters} journalSessionId={selectedSession?.id} />
+      </CardContent>}
+    </Card>}
+    {!showCalendar && noEntries && <p className="rounded-md border border-dashed p-6 text-center text-sm text-slate-500">{copy.paperTrading.noJournalEntries}</p>}
+    {!showCalendar && !noEntries && <>
+    {scope === "history" && selectedSession ? <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
         <div className="flex flex-wrap items-center gap-2">
           <p className="flex items-center gap-2 text-sm text-slate-600">
             {loading ? <Loader2 className="h-4 w-4 animate-spin" aria-hidden="true" /> : null}
@@ -241,8 +277,7 @@ export function PaperJournalTable({
             </SelectContent>
           </Select>
         </div>
-      </div>
-    </> : null}
+      </div> : null}
     {scope === "current" ? <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
       <p className="flex items-center gap-2 text-sm text-slate-600">
         {loading ? <Loader2 className="h-4 w-4 animate-spin" aria-hidden="true" /> : null}
@@ -505,6 +540,7 @@ export function PaperJournalTable({
         </Button>
       </div>
     </div> : null}
+    </>}
     <Dialog
       open={visibleColumnsOpen}
       title={copy.paperTrading.visibleColumnsTitle}

@@ -15,7 +15,7 @@ import { getPaperSessionSnapshot } from "@/lib/paper-trading/serialize";
 
 export const dynamic = "force-dynamic";
 
-export default async function ReplayTradeHistoryPage({ params, searchParams }: { params: Promise<{ id: string }>; searchParams: Promise<{ sessionId?: string; propRound?: string }> }) {
+export default async function ReplayTradeHistoryPage({ params, searchParams }: { params: Promise<{ id: string }>; searchParams: Promise<{ sessionId?: string; propRound?: string; view?: string; month?: string }> }) {
   const { id } = await params;
   const dataset = await prisma.marketDataset.findUnique({ where: { id }, select: { id: true, name: true, symbol: true } });
   if (!dataset) notFound();
@@ -47,6 +47,6 @@ export default async function ReplayTradeHistoryPage({ params, searchParams }: {
     {isProp ? <PropRoundHistory datasetId={id} sessionId={session.id} rounds={rounds} selected={number!} /> : null}
     {snapshot?.propAccount ? <PropAccountPanel sessionId={session.id} runtime={snapshot.propAccount} tradingSnapshot={snapshot} readOnly /> : null}
     {snapshot?.propAccount?.state.result ? <PropRoundTradingRecords snapshot={snapshot} /> : null}
-    <PaperJournalTable datasetId={id} scope="history" replaySessions={sessions} />
+    <PaperJournalTable datasetId={id} scope="history" replaySessions={sessions} initialCalendar={query.view === "calendar"} initialMonth={query.month} />
   </div></ReplaySessionProvider></ReplaySessionGate>;
 }

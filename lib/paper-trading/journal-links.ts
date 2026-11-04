@@ -4,8 +4,15 @@ export function replayJournalEntryApiHref(datasetId: string, entryId: string) {
 }
 
 /** Links use the unrecycled internal number, independently of the visible ordinal. */
-export function replayJournalTradeHref(datasetId: string, journalSessionId: string, globalNo: number) {
-  return `/market-replay/${encodeURIComponent(datasetId)}/history/${encodeURIComponent(journalSessionId)}?journalNo=${globalNo}`;
+export function replayJournalTradeHref(datasetId: string, journalSessionId: string, globalNo: number,
+  calendar?: { month: string; allRounds: boolean },
+) {
+  const params = new URLSearchParams({ journalNo: String(globalNo) });
+  if (calendar) {
+    params.set("calendarMonth", calendar.month);
+    if (calendar.allRounds) params.set("calendarRound", "0");
+  }
+  return `/market-replay/${encodeURIComponent(datasetId)}/history/${encodeURIComponent(journalSessionId)}?${params}`;
 }
 
 export function replayJournalLinkTarget(query: { journalNo?: string; trade?: string }): { no: number } | { accountNo: number } | null {

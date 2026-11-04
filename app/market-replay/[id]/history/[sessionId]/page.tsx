@@ -16,6 +16,7 @@ import { listReplaySessions } from "@/lib/replay-sessions/read";
 import { ReplaySessionProvider } from "@/components/market-replay/replay-session-context";
 import { replayJournalLinkTarget } from "@/lib/paper-trading/journal-links";
 import { withReplayJournalDisplayNumbers } from "@/lib/paper-trading/journal-numbering";
+import { parseJournalDate } from "@/lib/paper-trading/journal-calendar";
 
 export const dynamic = "force-dynamic";
 
@@ -24,7 +25,7 @@ export default async function HistoricalReplayPage({
   searchParams,
 }: {
   params: Promise<{ id: string; sessionId: string }>;
-  searchParams: Promise<{ trade?: string; journalNo?: string }>;
+  searchParams: Promise<{ trade?: string; journalNo?: string; calendarMonth?: string; calendarRound?: string }>;
 }) {
   const { id, sessionId } = await params;
   const query = await searchParams;
@@ -97,7 +98,14 @@ export default async function HistoricalReplayPage({
   const displaySession: DisplaySession = resolveDisplaySession(dataset, requestedDisplaySession)
     ? requestedDisplaySession
     : "ETH";
-  const historyHref = `/market-replay/${id}/trade-history?sessionId=${encodeURIComponent(replaySession.id)}${round ? `&propRound=${round.number}` : ""}`;
+  const historyParams = new URLSearchParams({ sessionId: replaySession.id });
+  if (round) historyParams.set("propRound", String(round.number));
+  if (query.calendarMonth && parseJournalDate(query.calendarMonth + "-01")) {
+    historyParams.set("view", "calendar");
+    historyParams.set("month", query.calendarMonth);
+    if (round && query.calendarRound === "0") historyParams.set("propRound", "0");
+  }
+  const historyHref = `/market-replay/${id}/trade-history?${historyParams}`;
   const title = session.name || copy.paperTrading.historicalReplayTitle(session.replayGeneration);
 
   return <ReplaySessionGate key={`${replaySession.id}:${projectionId}`} session={replaySession}><ReplaySessionProvider session={{ ...replaySession, activeProjectionId: projectionId, propRoundNumber: round?.number, status: "ARCHIVED" }}><div className="relative left-1/2 flex h-[calc(100dvh-4.3125rem-var(--app-notice-height,0px))] w-[calc(100vw-2rem)] max-w-none -translate-x-1/2 flex-col gap-3 overflow-hidden sm:w-[calc(100vw-3rem)]">

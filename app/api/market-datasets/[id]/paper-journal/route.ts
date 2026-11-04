@@ -1,11 +1,13 @@
 import { withReplaySessionRoute } from '@/lib/replay-sessions/scope';
-import { accountWhere, entryProjectionWhere, journalScopeWhere } from '@/lib/replay-sessions/scope';
+import { accountWhere, entryProjectionWhere, getReplayScope, journalScopeWhere } from '@/lib/replay-sessions/scope';
 import { NextResponse } from "next/server";
 import { prisma } from "@/lib/db";
 import { copy } from "@/lib/i18n";
 import { compileReplayJournalFilters, readReplayJournalFilters } from "@/lib/paper-trading/journal-filters";
 import { calculateReplayJournalSummary, serializeReplayJournalEntry } from "@/lib/paper-trading/journal";
 import { withReplayJournalDisplayNumbers } from "@/lib/paper-trading/journal-numbering";
+import { parseJournalDate } from "@/lib/paper-trading/journal-calendar";
+import { readJournalCalendar } from "@/lib/paper-trading/journal-calendar-read";
 
 type RouteContext = { params: Promise<{ id: string }> };
 
@@ -15,7 +17,7 @@ async function handleGET(request: Request, context: RouteContext) {
   const scope = url.searchParams.get("scope") === "current" ? "current" : "history";
   const take = Math.min(100, Math.max(10, Math.floor(Number(url.searchParams.get("take") ?? 20) || 20)));
   const requestedPage = Math.max(1, Math.floor(Number(url.searchParams.get("page") ?? 1) || 1));
-  const dataset = await prisma.marketDataset.findUnique({ where: { id }, select: { id: true } });
+  const dataset = await prisma.marketDataset.findUnique({ where: { id } });
   if (!dataset) return NextResponse.json({ error: copy.marketReplay.datasetNotFound }, { status: 404 });
 
   if (scope === "current") {
@@ -63,6 +65,27 @@ async function handleGET(request: Request, context: RouteContext) {
   const compiledFilters = compileReplayJournalFilters(filters);
   if (compiledFilters.error) {
     return NextResponse.json({ error: copy.paperTrading.journalFilterInvalid }, { status: 400 });
+  }
+
+  if (url.searchParams.get("view") === "calendar") {
+    const month = url.searchParams.get("month");
+    if (month !== null && !parseJournalDate(month + "-01")) {
+      return NextResponse.json({ error: copy.paperTrading.journalCalendar.invalidMonth }, { status: 400 });
+    }
+    const calendar = await readJournalCalendar(dataset, getReplayScope()!, month, async (from, to) => {
+      if (!selectedSession) return [];
+      const records = await prisma.replayJournalEntry.findMany({
+        where: { journalSessionId: selectedSession.id, ...entryProjectionWhere(), closedAt: { gte: from, lt: to } },
+        orderBy: [{ closedAt: "asc" }, { no: "asc" }],
+        include: {
+          journalSession: { select: { archivedAt: true } },
+          setupOption: { select: { name: true } },
+          tradeReasons: { select: { id: true, name: true } },
+        },
+      });
+      return records.map(serializeReplayJournalEntry).filter(compiledFilters.test);
+    });
+    return NextResponse.json({ ...calendar, journalSessionId: selectedSession?.id ?? null, currency: selectedSession?.currency ?? null });
   }
 
   const allRecords = selectedSession ? await prisma.replayJournalEntry.findMany({
