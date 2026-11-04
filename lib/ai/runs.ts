@@ -9,7 +9,8 @@ import { readSettings, resolveModel, ensureAiStorage } from "./config";
 import { assetDataUrl } from "./assets";
 import { checkCurrentContext, readContext, type ContextValue } from "./context";
 import { AiError } from "./errors";
-import { EVIDENCE_RULES } from "./prompts";
+import { EVIDENCE_RULES } from "./system-prompts";
+import runStages from "./prompt/run-stages.json";
 import { generateTurn, type ModelMessage, type Usage } from "./provider";
 import { hashValue } from "./context";
 import type { ResponseDetails } from "./response-details";
@@ -279,7 +280,7 @@ export async function executeRun(id: string, emit: (event: unknown) => void = ()
       const unit = units[i], assets = await prisma.aiAsset.findMany({ where: { contextId: run.contextId, chartHash: { in: unit.charts.map((c) => c.hash) } }, orderBy: { createdAt: "asc" } });
         const uniqueAssets = unit.charts.map((c) => assets.find((a) => a.chartHash === c.hash && config.chartAssetIds.includes(a.id))?.id).filter((s): s is string => Boolean(s));
         const batch = config.executionMode === "tools-v1" ? programBatch({ id, secret: config.scopeSecret!, context }, unit.entries, unit.charts, unit.charts.filter((c) => assets.some((a) => a.chartHash === c.hash && uniqueAssets.includes(a.id))).map((c) => c.hash), signal) : null;
-        const partial = await call({ ...(batch?.payload ?? contextText({ ...context, entries: unit.entries, charts: unit.charts })), instruction: "This is one batch only. Extract concise observations and source IDs; do not claim complete coverage. Keep under 1500 characters. Include both support and contrary cases; an empty review is still a real sample." }, uniqueAssets);
+        const partial = await call({ ...(batch?.payload ?? contextText({ ...context, entries: unit.entries, charts: unit.charts })), instruction: runStages.reviewBatch }, uniqueAssets);
         checkpoint.push({ ...partial, ...(batch ? { coverage: batch.coverage } : {}) }); signal.throwIfAborted();
         const saved = await retrySqliteWrite(() => prisma.aiRun.updateMany({ where: { id, status: "RUNNING" }, data: { checkpoint: JSON.stringify(checkpoint) } }));
         if (!saved.count) throw new AiError("CANCELLED", copy.ai.stopped);
@@ -299,7 +300,7 @@ export async function executeRun(id: string, emit: (event: unknown) => void = ()
         for (let i = 0; i < groups.length; i++) {
           const stage = "reduce:" + level + ":" + i, existing = checkpoint.find((p) => p.stage === stage);
           if (existing) { reduced.push(existing.content); continue; }
-          const result = await call({ batches: groups[i], instruction: "Compress all these batches into under 1200 characters. Preserve useful observations, counterexamples and actual source IDs. No overall statistical claims." }, []);
+          const result = await call({ batches: groups[i], instruction: runStages.compressBatches }, []);
           if (result.content.length > 4000) throw new AiError("SUMMARY_SIZE", copy.ai.summaryTooLarge);
           checkpoint.push({ ...result, stage }); reduced.push(result.content);
           const saved = await retrySqliteWrite(() => prisma.aiRun.updateMany({ where: { id, status: "RUNNING" }, data: { checkpoint: JSON.stringify(checkpoint) } }));
@@ -315,11 +316,11 @@ export async function executeRun(id: string, emit: (event: unknown) => void = ()
         const template = context.template ? executeReadTool(scope, "get_review_template", {}, signal) : null;
         const programReceipts = [...checkpoint.flatMap((p) => p.coverage?.receipts ?? []), ...overall.sources.map((r) => ({ ...r, readVia: "PROGRAM_INPUT" as const })), ...(template?.sources.map((r) => ({ ...r, readVia: "PROGRAM_INPUT" as const })) ?? [])];
         config.estimatedChars = totalChars;
-        const loop = await toolLoop(id, scope, config, signal, emit, [{ role: "user", content: JSON.stringify({ programInput: { overall, template, coverage, batches: summaries }, instruction: "Synthesize every program batch; evidence receipts already belong to supplied inputs, never invent tool messages. Follow task JSON schema. Candidate rules require supports, counterexamples, gaps and next-session validation. Setup net statistics remain unavailable." }) }], programReceipts);
+        const loop = await toolLoop(id, scope, config, signal, emit, [{ role: "user", content: JSON.stringify({ programInput: { overall, template, coverage, batches: summaries }, instruction: runStages.synthesizeWithTools }) }], programReceipts);
         answer = loop.answer; receipts = loop.receipts;
       } else answer = await call({ metrics: context.selectedEntryId ? undefined : context.metrics, warnings: context.warnings,
         template: context.template, originalDraft: context.originalDraft, batches: summaries,
-        instruction: "Synthesize every batch. Follow the configured task output schema. Patterns are exploratory and require counterexamples." },
+        instruction: runStages.synthesizeFixed },
         config.assetIds, true, ["reviewDraft", "sessionReview"].includes(run.task));
     } else {
       const history = await relevantHistory(run.conversationId, context, id, config.historyBefore ? new Date(config.historyBefore) : undefined);

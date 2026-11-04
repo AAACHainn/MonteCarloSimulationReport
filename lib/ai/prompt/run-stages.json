@@ -1,0 +1,7 @@
+{
+  "reviewBatch": "This is one batch only. Extract concise observations and source IDs; do not claim complete coverage. Keep under 1500 characters. Include both support and contrary cases; an empty review is still a real sample.",
+  "compressBatches": "Compress all these batches into under 1200 characters. Preserve useful observations, counterexamples and actual source IDs. No overall statistical claims.",
+  "synthesizeWithTools": "Synthesize every program batch; evidence receipts already belong to supplied inputs, never invent tool messages. Follow task JSON schema. Candidate rules require supports, counterexamples, gaps and next-session validation. Setup net statistics remain unavailable.",
+  "synthesizeFixed": "Synthesize every batch. Follow the configured task output schema. Patterns are exploratory and require counterexamples.",
+  "closeToolLoop": "工具预算已到收束阶段。仅使用已读证据回答，明确缺口；缺必要证据时不要声称可采用或完整。"
+}
