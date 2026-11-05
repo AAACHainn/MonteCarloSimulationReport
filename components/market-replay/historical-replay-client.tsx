@@ -1,6 +1,6 @@
 "use client";
 
-import { AppearanceToggle } from "@/components/appearance-toggle";
+
 import { ArrowSettingsDialog } from "./arrow-controls";
 import { useArrowPreferences } from "./use-arrow-preferences";
 import { useAbcdPreferences } from "./use-abcd-preferences";
@@ -510,7 +510,7 @@ export function HistoricalReplayClient({
         <Button type="button" variant={settingsDialog === "indicators" ? "secondary" : "ghost"} size="sm" className="h-8" onClick={() => setSettingsDialog("indicators")}>
           <Settings2 className="h-4 w-4" />{copy.marketReplay.indicators}
         </Button>
-        <div className="ml-auto"><AppearanceToggle compact /></div>
+
       </div>
       <div className="flex min-h-0 flex-1">
         <ReplayDrawingToolbar cursorMode={cursorMode} onCursorChange={mode => void selectCursor(mode)} drawingTool={drawingTool} drawingDisabled={!drawingsLoaded || drawingBusy}

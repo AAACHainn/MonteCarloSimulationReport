@@ -34,6 +34,7 @@ vi.mock("@/components/ui/button", () => ({ Button: "button" }));
 vi.mock("@/components/ui/input", () => ({ Input: "input" }));
 vi.mock("@/components/ui/label", () => ({ Label: "label" }));
 vi.mock("@/components/ui/option-popover", () => ({ OptionPopoverContent: "content" }));
+vi.mock("@/components/appearance-menu", () => ({ AppearanceMenu: "appearance-menu" }));
 vi.mock("./user-avatar", () => ({ UserAvatar: "avatar" }));
 vi.mock("./experience-progress", () => ({ ExperienceProgress: "experience-progress" }));
 

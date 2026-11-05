@@ -1,6 +1,6 @@
 "use client";
 
-import { AppearanceToggle } from "@/components/appearance-toggle";
+import { UserEntry } from "@/components/user-growth/user-entry";
 import { ArrowBigDown, ArrowBigUp, Waypoints } from "lucide-react";
 import { ArrowSettingsDialog } from "./arrow-controls";
 import { isArrowDrawing } from "@/lib/market-replay/chart-drawings";
@@ -266,7 +266,7 @@ export function MarketReplayClient({ dataset: initialDataset, initialJournalFocu
           </div>
           </div>
           <div className="mx-1 h-5 w-px shrink-0 bg-slate-200 dark:bg-hover" aria-hidden="true" />
-          <AppearanceToggle compact />
+          {webFullscreen && <UserEntry compact session={replaySession ?? undefined} />}
           <Button type="button" variant="ghost" size="sm" className={tradePanelOpen ? "h-8 shrink-0 bg-blue-50 dark:bg-info-background text-blue-700 dark:text-link hover:bg-blue-100 dark:hover:bg-info-background hover:text-blue-700 dark:hover:text-link" : "h-8 shrink-0"} aria-expanded={tradePanelOpen} disabled={Boolean(checkingOrder)}
             aria-controls={tradePanelOpen ? "replay-trade-panel" : undefined} onClick={() => setTradePanelOpen(current => !current)}>
             <PanelRight className="h-4 w-4" aria-hidden="true" />{copy.paperTrading.panelTitle}

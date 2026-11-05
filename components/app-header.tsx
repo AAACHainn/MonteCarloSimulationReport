@@ -1,6 +1,5 @@
 "use client";
 
-import { AppearanceToggle } from "@/components/appearance-toggle";
 import Link from "next/link";
 import Image from "next/image";
 import { usePathname } from "next/navigation";
@@ -38,8 +37,7 @@ export function AppHeader() {
             </Link>
           ))}
         </nav>
-        <div className="flex items-center gap-2"><AppearanceToggle />
-        {pathname !== "/preview/user-growth" && !/^\/market-replay\/[^/]+\/trade-history\/?$/.test(pathname) && <UserEntry />}</div>
+        {pathname !== "/preview/user-growth" && !/^\/market-replay\/[^/]+\/trade-history\/?$/.test(pathname) && <UserEntry />}
       </div>
     </header>
   );

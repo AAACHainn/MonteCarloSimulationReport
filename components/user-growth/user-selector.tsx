@@ -13,6 +13,7 @@ import { cn } from "@/lib/utils";
 import type { QueryState, UserIdentity } from "@/lib/user-growth/types";
 import { UserAvatar } from "./user-avatar";
 import { ExperienceProgress } from "./experience-progress";
+import { AppearanceMenu } from "@/components/appearance-menu";
 
 const t = copy.userGrowth;
 export function UserSelector({ users, selected, onSelect, onCreate, onProfiles, state = "normal", onRetry, notice = "", compact = false, context, allowSwitch = true, onOpen }: {
@@ -68,6 +69,7 @@ export function UserSelector({ users, selected, onSelect, onCreate, onProfiles, 
         {selectedUser?.growth && <div className="shrink-0 px-2 pb-3"><ExperienceProgress growth={selectedUser.growth} compact /></div>}
         {context && <div className="shrink-0 border-t px-2 py-3">{context}</div>}
         {allowSwitch && <Button ref={switchRef} variant="ghost" className="w-full justify-start gap-3" onClick={() => setView("users")}><ArrowRightLeft className="h-4 w-4" aria-hidden="true" />{t.switchUser}</Button>}
+        <div className="mt-1 shrink-0 border-t pt-1"><AppearanceMenu portalContainer={portalContainer} /></div>
         <p className="shrink-0 border-t px-2 py-3 text-xs text-slate-600 dark:text-secondary-text">{t.scopeHint}</p>
         <div className="flex shrink-0 justify-between gap-2"><Button variant="outline" onClick={() => { changeOpen(false); onCreate(); }}>{t.create}</Button><Button variant="ghost" onClick={() => { changeOpen(false); onProfiles(); }}>{t.profiles}</Button></div>
       </>}

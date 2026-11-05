@@ -24,8 +24,8 @@ const aiLimitLabels = {
   outputChars: "响应字符保护", protocolBytes: "响应与工具记录大小保护",
 };
 export const copy = { ...dictionaries[defaultLocale], appearance: {
-  darkAppearance: "暗色外观", light: "浅色", dark: "暗色",
-  toggleHint: (current: string, next: string) => `当前为${current}，切换为${next}`,
+  theme: "主题", light: "浅色", dark: "深色",
+  currentTheme: (mode: string) => `主题：${mode}`,
   presetVersion: (name: string, version: string) => `${name} · ${version}版`,
   presetHint: "点击预设应用当前外观的配色；已有颜色保持不变。",
 }, ai: {
