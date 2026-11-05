@@ -34,12 +34,12 @@ export function ReplayDateDialog({ open, currentTime, minimum, maximum, displayU
   }
   return <Dialog open={open} title={copy.replaySessions.locateDate} className="max-w-sm" onClose={() => { if (!busy) onClose(); }}>
     <form className="space-y-4" noValidate aria-busy={busy} onSubmit={(event) => { event.preventDefault(); void locate(false); }}>
-      <p id={`${id}-timezone`} className="text-xs text-slate-600">{copy.marketReplay.displayTimezone} · {formatUtcOffset(displayUtcOffsetMinutes)}</p>
+      <p id={`${id}-timezone`} className="text-xs text-slate-600 dark:text-secondary-text">{copy.marketReplay.displayTimezone} · {formatUtcOffset(displayUtcOffsetMinutes)}</p>
       <DateTimePicker ref={pickerRef} value={value} minimum={minimumValue} maximum={maximumValue} disabled={busy} describedBy={`${id}-timezone ${id}-hint${error ? ` ${id}-error` : ""}`} onChange={(next) => { setValue(next); setError(null); }} />
-      <p id={`${id}-hint`} className="text-xs text-slate-500">{copy.replaySessions.locateHint}</p>
-      <p className="text-xs tabular-nums text-slate-500">{minimumValue.replace("T", " ")} – {maximumValue.replace("T", " ")}</p>
-      {allowForward ? <p className="text-xs text-slate-600">{copy.replaySessions.forwardHint}</p> : null}
-      {error ? <p id={`${id}-error`} role="alert" className="text-xs text-red-600">{error}</p> : null}
+      <p id={`${id}-hint`} className="text-xs text-slate-500 dark:text-muted-foreground">{copy.replaySessions.locateHint}</p>
+      <p className="text-xs tabular-nums text-slate-500 dark:text-muted-foreground">{minimumValue.replace("T", " ")} – {maximumValue.replace("T", " ")}</p>
+      {allowForward ? <p className="text-xs text-slate-600 dark:text-secondary-text">{copy.replaySessions.forwardHint}</p> : null}
+      {error ? <p id={`${id}-error`} role="alert" className="text-xs text-red-600 dark:text-negative">{error}</p> : null}
       <div className="flex flex-wrap justify-end gap-2 border-t pt-4">
         <Button type="button" variant="outline" disabled={busy} onClick={onClose}>{copy.common.cancel}</Button>
         {allowForward ? <Button type="button" variant="outline" disabled={busy} onClick={() => void locate(true)}>{copy.replaySessions.fastForwardDate}</Button> : null}

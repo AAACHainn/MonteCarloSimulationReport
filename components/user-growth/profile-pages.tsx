@@ -22,12 +22,12 @@ export function UserProfiles() {
   const current = useCurrentUser(), router = useRouter();
   const [creating, setCreating] = useState(false);
   return <div className="space-y-6"><Breadcrumbs items={[{ label: t.title }]} />
-    <section className="flex items-end justify-between gap-4 border-b pb-6"><div><h1 className="text-3xl font-semibold tracking-tight text-slate-950">{t.title}</h1><p className="mt-2 text-sm text-slate-600">{t.profileListHint}</p></div><Button onClick={() => setCreating(true)}>{t.create}</Button></section>
-    {current.notice && <p role="status" className="text-sm text-slate-600">{current.notice}</p>}
-    {current.state === "loading" && <p role="status" className="text-sm text-slate-600">{t.loadingUsers}</p>}
-    {current.state === "error" && <div role="alert" className="flex items-center gap-3 text-sm text-red-700">{t.failedUsers}<Button variant="outline" onClick={current.refresh}>{t.retry}</Button></div>}
-    <div className="grid gap-4 md:grid-cols-2">{current.users.map(user => <Card key={user.id}><CardContent className="flex items-center gap-4 p-5"><UserAvatar avatar={user.avatar} realm={user.growth?.realm} /><div className="min-w-0 flex-1"><h2 className="break-words font-semibold">{user.nickname}</h2><p className="mt-1 text-sm text-slate-600">{user.realmLabel}</p></div><Button asChild variant="outline"><Link href={`/users/${encodeURIComponent(user.id)}`}>{t.openProfile}</Link></Button></CardContent></Card>)}</div>
-    {current.state === "normal" && !current.users.length && <p className="rounded-lg border border-dashed p-6 text-sm text-slate-600">{t.noUsers}</p>}
+    <section className="flex items-end justify-between gap-4 border-b pb-6"><div><h1 className="text-3xl font-semibold tracking-tight text-slate-950 dark:text-foreground">{t.title}</h1><p className="mt-2 text-sm text-slate-600 dark:text-secondary-text">{t.profileListHint}</p></div><Button onClick={() => setCreating(true)}>{t.create}</Button></section>
+    {current.notice && <p role="status" className="text-sm text-slate-600 dark:text-secondary-text">{current.notice}</p>}
+    {current.state === "loading" && <p role="status" className="text-sm text-slate-600 dark:text-secondary-text">{t.loadingUsers}</p>}
+    {current.state === "error" && <div role="alert" className="flex items-center gap-3 text-sm text-red-700 dark:text-negative">{t.failedUsers}<Button variant="outline" onClick={current.refresh}>{t.retry}</Button></div>}
+    <div className="grid gap-4 md:grid-cols-2">{current.users.map(user => <Card key={user.id}><CardContent className="flex items-center gap-4 p-5"><UserAvatar avatar={user.avatar} realm={user.growth?.realm} /><div className="min-w-0 flex-1"><h2 className="break-words font-semibold">{user.nickname}</h2><p className="mt-1 text-sm text-slate-600 dark:text-secondary-text">{user.realmLabel}</p></div><Button asChild variant="outline"><Link href={`/users/${encodeURIComponent(user.id)}`}>{t.openProfile}</Link></Button></CardContent></Card>)}</div>
+    {current.state === "normal" && !current.users.length && <p className="rounded-lg border border-dashed p-6 text-sm text-slate-600 dark:text-secondary-text">{t.noUsers}</p>}
     {creating && <ProfileDialog description={t.profileAvatarHint} onClose={() => setCreating(false)} onSave={async (nickname, avatar, image) => {
       try { const user = await writeProfile(nickname, avatar, image); current.upsert(user); current.select(user.id); current.refresh(); setCreating(false); router.push(`/users/${encodeURIComponent(user.id)}`); return null; }
       catch (error) { return error instanceof Error ? error.message : t.requestFailed; }
@@ -60,8 +60,8 @@ export function UserProfilePage({ userId }: { userId: string }) {
   if (!data || data.user.id !== userId) return <div className="space-y-6"><Breadcrumbs items={[{ label: t.title, href: "/users" }]} /><p role={state === "error" ? "alert" : "status"}>{state === "error" ? error : t.loadingProfile}</p>{state === "error" && <Button variant="outline" onClick={() => setRevision(value => value + 1)}>{t.retry}</Button>}</div>;
   const profile: GrowthProfile = { ...data.growth, user: data.user, sessions: data.sessions.items };
   return <div className="space-y-6"><Breadcrumbs items={[{ label: t.title, href: "/users" }, { label: data.user.nickname }]} />
-    {status && <p role="status" className="rounded-md border border-emerald-200 bg-emerald-50 p-3 text-sm text-emerald-700">{status}</p>}
-    {error && <p role="alert" className="text-sm text-red-700">{error}<Button variant="outline" className="ml-3" onClick={() => setRevision(value => value + 1)}>{t.retry}</Button></p>}
+    {status && <p role="status" className="rounded-md border border-emerald-200 dark:border-positive/40 bg-emerald-50 dark:bg-positive-background p-3 text-sm text-emerald-700 dark:text-positive">{status}</p>}
+    {error && <p role="alert" className="text-sm text-red-700 dark:text-negative">{error}<Button variant="outline" className="ml-3" onClick={() => setRevision(value => value + 1)}>{t.retry}</Button></p>}
     <ProfileView key={userId} profile={profile} selected={current.selected} state={state} onRetry={() => setRevision(value => value + 1)} onSwitch={() => current.select(userId)} onEdit={() => setEditing(true)} walletContent={<WalletPanel userId={userId} />}
       onBreakthrough={async () => {
         if (breaking) return false; setBreaking(true); setActionError("");

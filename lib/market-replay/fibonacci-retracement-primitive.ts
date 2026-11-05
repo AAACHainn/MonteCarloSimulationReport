@@ -1,3 +1,4 @@
+import { chartThemes, type ChartTheme } from "@/lib/chart-theme";
 import {
   type IPrimitivePaneRenderer,
   type IPrimitivePaneView,
@@ -99,6 +100,7 @@ function drawLevels(
   context: CanvasRenderingContext2D,
   item: ProjectedDrawing,
   priceTickSize: number,
+  theme: ChartTheme,
 ) {
   const left = Math.min(item.start.x, item.end.x);
   const right = Math.max(item.start.x, item.end.x);
@@ -124,7 +126,7 @@ function drawLevels(
       ...(style.showPrices ? [formatPriceForTick(level.price, priceTickSize)] : []),
     ].join("  ");
     const textWidth = context.measureText(text).width;
-    context.fillStyle = "rgba(255,255,255,.86)";
+    context.fillStyle = theme.annotationBackground;
     context.fillRect(left + 3, level.y - 14, textWidth + 6, 13);
     context.fillStyle = level.color;
     context.fillText(text, left + 6, level.y - 2);
@@ -133,21 +135,21 @@ function drawLevels(
 }
 
 class FibonacciPaneRenderer implements IPrimitivePaneRenderer {
-  constructor(private readonly snapshot: () => ProjectedSnapshot) {}
+  constructor(private readonly snapshot: () => ProjectedSnapshot, private readonly theme: () => ChartTheme) {}
 
   draw(target: Parameters<IPrimitivePaneRenderer["draw"]>[0]): void {
     target.useMediaCoordinateSpace(({ context }) => {
       const snapshot = this.snapshot();
       for (const item of snapshot.drawings) {
-        drawLevels(context, item, snapshot.priceTickSize);
+        drawLevels(context, item, snapshot.priceTickSize, this.theme());
       }
-      if (snapshot.draft) drawLevels(context, snapshot.draft, snapshot.priceTickSize);
+      if (snapshot.draft) drawLevels(context, snapshot.draft, snapshot.priceTickSize, this.theme());
       for (const item of snapshot.drawings) {
         if (!item.selected) continue;
         for (const point of [item.start, item.end]) {
           context.save();
-          context.fillStyle = "#ffffff";
-          context.strokeStyle = "#2962FF";
+          context.fillStyle = this.theme().handle;
+          context.strokeStyle = this.theme().selection;
           context.lineWidth = 2;
           context.beginPath();
           context.arc(point.x, point.y, HANDLE_RADIUS, 0, Math.PI * 2);
@@ -162,12 +164,14 @@ class FibonacciPaneRenderer implements IPrimitivePaneRenderer {
 
 class FibonacciPaneView implements IPrimitivePaneView {
   private readonly paneRenderer: FibonacciPaneRenderer;
-  constructor(snapshot: () => ProjectedSnapshot) { this.paneRenderer = new FibonacciPaneRenderer(snapshot); }
+  constructor(snapshot: () => ProjectedSnapshot, theme: () => ChartTheme) { this.paneRenderer = new FibonacciPaneRenderer(snapshot, theme); }
   zOrder() { return "top" as const; }
   renderer() { return this.paneRenderer; }
 }
 
 export class FibonacciRetracementPrimitive implements ISeriesPrimitive<Time> {
+  private theme: ChartTheme = chartThemes.light;
+  setTheme(theme: ChartTheme) { this.theme = theme; this.requestUpdate?.(); }
   private chart: SeriesAttachedParameter<Time>["chart"] | null = null;
   private series: SeriesAttachedParameter<Time>["series"] | null = null;
   private requestUpdate: (() => void) | null = null;
@@ -180,7 +184,7 @@ export class FibonacciRetracementPrimitive implements ISeriesPrimitive<Time> {
   };
   private readonly timeline = new DrawingTimelineLocator();
   private projected: ProjectedSnapshot = EMPTY_PROJECTED;
-  private readonly views = [new FibonacciPaneView(() => this.projected)];
+  private readonly views = [new FibonacciPaneView(() => this.projected, () => this.theme)];
 
   attached(param: SeriesAttachedParameter<Time>) {
     this.chart = param.chart;

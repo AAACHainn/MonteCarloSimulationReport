@@ -1,4 +1,6 @@
 "use client";
+
+import { AppearanceToggle } from "@/components/appearance-toggle";
 import { ArrowBigDown, ArrowBigUp, Waypoints } from "lucide-react";
 import { ArrowSettingsDialog } from "./arrow-controls";
 import { isArrowDrawing } from "@/lib/market-replay/chart-drawings";
@@ -117,14 +119,14 @@ export function MarketReplayClient({ dataset: initialDataset, initialJournalFocu
   }
   function wrapWorkspace(content: ReactNode) {
     return <div className="flex h-full min-h-0 flex-col gap-2">
-      <header className={webFullscreen ? "hidden" : "shrink-0 rounded-lg border bg-white px-4 py-3 shadow-sm"} data-replay-workspace-header>
+      <header className={webFullscreen ? "hidden" : "shrink-0 rounded-lg border bg-white dark:bg-card px-4 py-3 shadow-sm"} data-replay-workspace-header>
         <UserContextHeader className="items-center" session={replaySession ?? undefined} growthNotice={growthNotice} growthNoticeKey={growthNoticeKey}>
           <div className="flex min-w-0 flex-wrap items-center justify-between gap-x-5 gap-y-2">
             <div className="min-w-0">
               <Breadcrumbs className="text-xs" items={[{ label: copy.marketReplay.title, href: "/market-replay" }, { label: dataset.name }]} />
               <div className="mt-1 flex min-w-0 items-center gap-3">
-                <h1 className="shrink-0 text-xl font-semibold tracking-tight text-slate-950">{dataset.symbol}</h1>
-                <p className="min-w-0 truncate border-l border-slate-200 pl-3 text-xs text-slate-500">{copy.marketReplay.sourcePeriod} {dataset.sourceIntervalSeconds !== null ? formatInterval(dataset.sourceIntervalSeconds) : copy.common.dash} · {dataset.timezone}</p>
+                <h1 className="shrink-0 text-xl font-semibold tracking-tight text-slate-950 dark:text-foreground">{dataset.symbol}</h1>
+                <p className="min-w-0 truncate border-l border-slate-200 dark:border-border pl-3 text-xs text-slate-500 dark:text-muted-foreground">{copy.marketReplay.sourcePeriod} {dataset.sourceIntervalSeconds !== null ? formatInterval(dataset.sourceIntervalSeconds) : copy.common.dash} · {dataset.timezone}</p>
               </div>
             </div>
             <div className="ml-auto flex min-w-0 flex-wrap items-center gap-2">
@@ -152,26 +154,26 @@ export function MarketReplayClient({ dataset: initialDataset, initialJournalFocu
         <Button type="button" onClick={async () => {
           const response = await fetch(`/api/market-datasets/${dataset.id}`, { method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ sourceIntervalSeconds: Number(repairInterval), sessionMode: "TWENTY_FOUR_SEVEN", sessionOpenMinute: null, sessionCloseMinute: null, tradingWeekdays: [1,2,3,4,5,6,7] }) });
           const data = await response.json().catch(() => null); if (!response.ok) setLoadError(data?.error ?? copy.marketReplay.loadError); else window.location.reload();
-        }}>{copy.marketReplay.saveMetadata}</Button>{loadError ? <p className="text-sm text-red-600">{loadError}</p> : null}</CardContent></Card>
+        }}>{copy.marketReplay.saveMetadata}</Button>{loadError ? <p className="text-sm text-red-600 dark:text-negative">{loadError}</p> : null}</CardContent></Card>
   );
 
   if (isLoading) return wrapWorkspace(
     <div className="space-y-3" aria-busy="true" aria-label={copy.marketReplay.loading}>
-      <div className="flex h-12 items-center justify-between rounded-lg border bg-white px-4">
-        <div className="h-4 w-40 animate-pulse rounded bg-slate-200" />
-        <div className="flex items-center gap-2 text-sm text-slate-600"><Loader2 className="h-4 w-4 animate-spin" />{copy.marketReplay.loading}</div>
+      <div className="flex h-12 items-center justify-between rounded-lg border bg-white dark:bg-card px-4">
+        <div className="h-4 w-40 animate-pulse rounded bg-slate-200 dark:bg-hover" />
+        <div className="flex items-center gap-2 text-sm text-slate-600 dark:text-secondary-text"><Loader2 className="h-4 w-4 animate-spin" />{copy.marketReplay.loading}</div>
       </div>
-      <div className="h-[min(68vh,44rem)] animate-pulse rounded-lg border bg-slate-100" />
-      <div className="h-14 animate-pulse rounded-lg border bg-slate-50" />
+      <div className="h-[min(68vh,44rem)] animate-pulse rounded-lg border bg-slate-100 dark:bg-muted" />
+      <div className="h-14 animate-pulse rounded-lg border bg-slate-50 dark:bg-muted" />
     </div>
   );
-  if (loadError) return wrapWorkspace(<Alert className="border-red-200 bg-red-50"><AlertTitle>{copy.marketReplay.loadError}</AlertTitle><AlertDescription>{loadError}</AlertDescription></Alert>);
+  if (loadError) return wrapWorkspace(<Alert className="border-red-200 dark:border-negative/40 bg-red-50 dark:bg-negative-background"><AlertTitle>{copy.marketReplay.loadError}</AlertTitle><AlertDescription>{loadError}</AlertDescription></Alert>);
 
   if (!replay) {
     return wrapWorkspace(
       <Card className="max-w-xl">
         <CardHeader>
-          <p className="font-mono text-xs uppercase tracking-wide text-blue-700">{copy.marketReplay.setupEyebrow}</p>
+          <p className="font-mono text-xs uppercase tracking-wide text-blue-700 dark:text-link">{copy.marketReplay.setupEyebrow}</p>
           <CardTitle>{copy.marketReplay.setupTitle}</CardTitle>
           <CardDescription>{copy.marketReplay.setupDescription}</CardDescription>
         </CardHeader>
@@ -182,9 +184,9 @@ export function MarketReplayClient({ dataset: initialDataset, initialJournalFocu
                 minimum={dateTimeLocalValue(dataset.startTime, dataset.timezone)}
                 maximum={dateTimeLocalValue(dataset.endTime, dataset.timezone)}
                 value={startValue} onChange={setStartValue} />
-              <p className="text-xs text-slate-500">{dataset.timezone} · {formatDatasetTime(dataset.startTime, dataset.timezone)} – {formatDatasetTime(dataset.endTime, dataset.timezone)}</p>
+              <p className="text-xs text-slate-500 dark:text-muted-foreground">{dataset.timezone} · {formatDatasetTime(dataset.startTime, dataset.timezone)} – {formatDatasetTime(dataset.endTime, dataset.timezone)}</p>
             </div>
-            {startError ? <p className="text-sm text-red-600">{startError}</p> : null}
+            {startError ? <p className="text-sm text-red-600 dark:text-negative">{startError}</p> : null}
             <Button type="submit"><Settings2 className="h-4 w-4" />{copy.marketReplay.begin}</Button>
           </form>
         </CardContent>
@@ -200,11 +202,11 @@ export function MarketReplayClient({ dataset: initialDataset, initialJournalFocu
         data-web-fullscreen={webFullscreen}
         aria-label={dataset.name}
         className={webFullscreen
-          ? "fixed inset-0 z-40 flex h-dvh min-h-0 flex-col overflow-hidden bg-white"
-          : "flex min-h-0 flex-1 flex-col overflow-hidden rounded-lg border bg-white shadow-sm"}
+          ? "fixed inset-0 z-40 flex h-dvh min-h-0 flex-col overflow-hidden bg-white dark:bg-card"
+          : "flex min-h-0 flex-1 flex-col overflow-hidden rounded-lg border bg-white dark:bg-card shadow-sm"}
       >
         {webFullscreen ? gateNoticeBlock : null}
-        {paperSnapshot?.propAccount?.state.result === "FAILED" ? <Alert role="alert" className="flex shrink-0 items-center justify-between gap-3 rounded-none border-x-0 border-t-0 border-amber-200 bg-amber-50 py-2 text-amber-800"><AlertDescription>{copy.propPractice.roundFailed}</AlertDescription><Button size="sm" variant="outline" onClick={() => setSettingsDialog("paper")}>{copy.propPractice.reset}</Button></Alert> : null}
+        {paperSnapshot?.propAccount?.state.result === "FAILED" ? <Alert role="alert" className="flex shrink-0 items-center justify-between gap-3 rounded-none border-x-0 border-t-0 border-amber-200 dark:border-warning/40 bg-amber-50 dark:bg-warning-background py-2 text-amber-800 dark:text-warning"><AlertDescription>{copy.propPractice.roundFailed}</AlertDescription><Button size="sm" variant="outline" onClick={() => setSettingsDialog("paper")}>{copy.propPractice.reset}</Button></Alert> : null}
         {replaySession?.mode === "LIVE_REPLAY" ? <ReplayCorrectionDialog target={correctionTarget} displayUtcOffsetMinutes={displayUtcOffsetMinutes} beforeCreate={prepareSessionSwitch} onClose={() => setCorrectionTarget(null)} onPendingChange={setCorrectionPending} /> : null}
         <div className="flex h-12 shrink-0 items-center gap-2 border-b px-3">
           <div className="flex min-w-0 flex-1 items-center gap-2 overflow-x-auto [&>*]:shrink-0">
@@ -216,7 +218,7 @@ export function MarketReplayClient({ dataset: initialDataset, initialJournalFocu
           />
           {dataset.availableDisplaySessions.length > 1 ? (
             <>
-              <Label htmlFor="display-session" className="whitespace-nowrap text-xs text-slate-500">{copy.marketReplay.displaySession}</Label>
+              <Label htmlFor="display-session" className="whitespace-nowrap text-xs text-slate-500 dark:text-muted-foreground">{copy.marketReplay.displaySession}</Label>
               <Select disabled={Boolean(journalReview) || correctionPending} value={replay.displaySession} onValueChange={(value) => void changeChartSession(value as DisplaySession)}>
                 <SelectTrigger id="display-session" className="h-8 w-20" title={copy.marketReplay.displaySessionHint}><SelectValue /></SelectTrigger>
                 <SelectContent>
@@ -226,7 +228,7 @@ export function MarketReplayClient({ dataset: initialDataset, initialJournalFocu
               </Select>
             </>
           ) : null}
-          <Label htmlFor="display-timezone" className="whitespace-nowrap text-xs text-slate-500">{copy.marketReplay.displayTimezone}</Label>
+          <Label htmlFor="display-timezone" className="whitespace-nowrap text-xs text-slate-500 dark:text-muted-foreground">{copy.marketReplay.displayTimezone}</Label>
           <Select value={String(displayUtcOffsetMinutes)} onValueChange={(value) => setDisplayUtcOffsetMinutes(Number(value))}>
             <SelectTrigger id="display-timezone" className="h-8 w-28" title={copy.marketReplay.displayTimezoneHint}><SelectValue /></SelectTrigger>
             <SelectContent
@@ -239,7 +241,7 @@ export function MarketReplayClient({ dataset: initialDataset, initialJournalFocu
               {UTC_OFFSET_OPTIONS.map((offset) => <SelectItem key={offset} value={String(offset)}>{formatUtcOffset(offset)}</SelectItem>)}
             </SelectContent>
           </Select>
-          <div className="mx-1 h-5 w-px bg-slate-200" />
+          <div className="mx-1 h-5 w-px bg-slate-200 dark:bg-hover" />
           <ChartVisibilityMenu value={chartVisibility} onChange={changeChartVisibility} />
           <Button
             type="button"
@@ -257,14 +259,15 @@ export function MarketReplayClient({ dataset: initialDataset, initialJournalFocu
           <Button type="button" variant="ghost" size="sm" className="h-8" onClick={() => setSettingsDialog("indicators")}><Settings2 className="h-4 w-4" />{copy.marketReplay.indicators}</Button>
           <Button type="button" variant="ghost" size="sm" className="h-8" onClick={() => setSettingsDialog("paper")}><WalletCards className="h-4 w-4" />{copy.marketReplay.accountSettings}</Button>
           <Button asChild type="button" variant="ghost" size="sm" className="h-8"><Link href={`/market-replay/${dataset.id}/trade-history?sessionId=${encodeURIComponent(replaySession?.id ?? "")}`}><BookOpen className="h-4 w-4" />{copy.paperTrading.openJournalHistory}</Link></Button>
-          {paperSnapshot ? <div className="flex shrink-0 items-center gap-2 whitespace-nowrap px-2"><span className="text-xs tabular-nums text-slate-500">{copy.propPractice.balance} <strong className="font-medium text-slate-800">{formatMoney(paperSnapshot.propAccount ? funds(paperSnapshot.propAccount.state).balance : paperSnapshot.stats.balance, paperSnapshot.session.currency)}</strong></span>{paperSnapshot.propAccount ? <PropAccountStatusBadge runtime={paperSnapshot.propAccount} /> : null}</div> : null}
+          {paperSnapshot ? <div className="flex shrink-0 items-center gap-2 whitespace-nowrap px-2"><span className="text-xs tabular-nums text-slate-500 dark:text-muted-foreground">{copy.propPractice.balance} <strong className="font-medium text-slate-800 dark:text-foreground">{formatMoney(paperSnapshot.propAccount ? funds(paperSnapshot.propAccount.state).balance : paperSnapshot.stats.balance, paperSnapshot.session.currency)}</strong></span>{paperSnapshot.propAccount ? <PropAccountStatusBadge runtime={paperSnapshot.propAccount} /> : null}</div> : null}
           <div className="ml-auto flex items-center gap-1">
             <Button type="button" variant="ghost" size="sm" className="h-8" disabled={draftActive} title={draftActive ? copy.paperTrading.draftLockedReplay : undefined} onClick={() => requestConfirmation("reset")}><RotateCcw className="h-4 w-4" /><span className="hidden xl:inline">{copy.marketReplay.reset}</span></Button>
             <Button type="button" variant="ghost" size="sm" className="h-8" disabled={draftActive} title={draftActive ? copy.paperTrading.draftLockedReplay : undefined} onClick={openStartDialog}><span className="hidden xl:inline">{copy.marketReplay.chooseNewStart}</span><span className="xl:hidden">{copy.marketReplay.startAt}</span></Button>
           </div>
           </div>
-          <div className="mx-1 h-5 w-px shrink-0 bg-slate-200" aria-hidden="true" />
-          <Button type="button" variant="ghost" size="sm" className={tradePanelOpen ? "h-8 shrink-0 bg-blue-50 text-blue-700 hover:bg-blue-100 hover:text-blue-700" : "h-8 shrink-0"} aria-expanded={tradePanelOpen} disabled={Boolean(checkingOrder)}
+          <div className="mx-1 h-5 w-px shrink-0 bg-slate-200 dark:bg-hover" aria-hidden="true" />
+          <AppearanceToggle compact />
+          <Button type="button" variant="ghost" size="sm" className={tradePanelOpen ? "h-8 shrink-0 bg-blue-50 dark:bg-info-background text-blue-700 dark:text-link hover:bg-blue-100 dark:hover:bg-info-background hover:text-blue-700 dark:hover:text-link" : "h-8 shrink-0"} aria-expanded={tradePanelOpen} disabled={Boolean(checkingOrder)}
             aria-controls={tradePanelOpen ? "replay-trade-panel" : undefined} onClick={() => setTradePanelOpen(current => !current)}>
             <PanelRight className="h-4 w-4" aria-hidden="true" />{copy.paperTrading.panelTitle}
           </Button>
@@ -349,23 +352,23 @@ export function MarketReplayClient({ dataset: initialDataset, initialJournalFocu
             onRewindToBar={replaySession?.mode === "LIVE_REPLAY" && !replaySession.legacy && !journalReview
               ? (target) => openCorrectionTarget({ type: "REWIND", sequence: target.sequence, chartTimestamp: target.timestamp }) : undefined}
           />
-          {journalReview ? <div className="absolute left-1/2 top-3 z-50 flex -translate-x-1/2 items-center gap-3 rounded-md border border-violet-200 bg-white/95 px-3 py-2 text-sm text-violet-800 shadow-lg backdrop-blur"><span className="font-medium">{journalReview.no > 0 ? copy.paperTrading.journalReviewing(journalReview.no) : copy.replaySessions.viewingPast}</span><Button type="button" variant="outline" size="sm" className="h-7" onClick={() => void returnToLiveWindow()}>{copy.paperTrading.returnToLive}</Button></div> : null}
+          {journalReview ? <div className="absolute left-1/2 top-3 z-50 flex -translate-x-1/2 items-center gap-3 rounded-md border border-violet-200 dark:border-link/40 bg-white/95 dark:bg-card/95 px-3 py-2 text-sm text-violet-800 dark:text-link shadow-lg backdrop-blur"><span className="font-medium">{journalReview.no > 0 ? copy.paperTrading.journalReviewing(journalReview.no) : copy.replaySessions.viewingPast}</span><Button type="button" variant="outline" size="sm" className="h-7" onClick={() => void returnToLiveWindow()}>{copy.paperTrading.returnToLive}</Button></div> : null}
           {drawingError ? (
-            <div className="pointer-events-none absolute left-3 top-3 z-40 max-w-sm rounded-md border border-red-200 bg-red-50/95 px-3 py-2 text-xs text-red-700 shadow-sm">
+            <div className="pointer-events-none absolute left-3 top-3 z-40 max-w-sm rounded-md border border-red-200 dark:border-negative/40 bg-red-50/95 dark:bg-negative-background/95 px-3 py-2 text-xs text-red-700 dark:text-negative shadow-sm">
               {drawingError}
             </div>
           ) : null}
           {drawingObjectsOpen ? (
-            <aside className="absolute right-3 top-3 z-50 flex max-h-[calc(100%-1.5rem)] w-72 flex-col overflow-hidden rounded-lg border border-slate-200 bg-white/95 shadow-xl backdrop-blur">
+            <aside className="absolute right-3 top-3 z-50 flex max-h-[calc(100%-1.5rem)] w-72 flex-col overflow-hidden rounded-lg border border-slate-200 dark:border-border bg-white/95 dark:bg-card/95 shadow-xl backdrop-blur">
               <header className="flex items-center gap-2 border-b px-3 py-2.5">
-                <ListTree className="h-4 w-4 text-slate-500" />
-                <h3 className="text-sm font-semibold text-slate-950">{copy.marketReplay.drawingObjects}</h3>
+                <ListTree className="h-4 w-4 text-slate-500 dark:text-muted-foreground" />
+                <h3 className="text-sm font-semibold text-slate-950 dark:text-foreground">{copy.marketReplay.drawingObjects}</h3>
                 <Button type="button" variant="ghost" size="sm" disabled={clearingDrawings || Boolean(pendingDrawingIds.size) || !drawings.length}
-                  data-text-delete="all" aria-label={copy.marketReplay.clearDrawings} className="ml-auto text-red-600 hover:bg-red-50 hover:text-red-700"
+                  data-text-delete="all" aria-label={copy.marketReplay.clearDrawings} className="ml-auto text-red-600 dark:text-negative hover:bg-red-50 dark:hover:bg-negative-background hover:text-red-700 dark:hover:text-negative"
                   onClick={() => void clearDrawings()}>{copy.marketReplay.clearDrawingsShort}</Button>
                 <button
                   type="button"
-                  className="rounded p-1 text-slate-400 hover:bg-slate-100 hover:text-slate-700"
+                  className="rounded p-1 text-slate-400 dark:text-muted-foreground hover:bg-slate-100 dark:hover:bg-hover hover:text-slate-700 dark:hover:text-secondary-text"
                   aria-label={copy.marketReplay.closeDrawingObjects}
                   onClick={() => setDrawingObjectsOpen(false)}
                 >
@@ -382,7 +385,7 @@ export function MarketReplayClient({ dataset: initialDataset, initialJournalFocu
                       key={drawing.id}
                       role="button"
                       tabIndex={0}
-                      className={`group flex items-center gap-2 rounded-md px-2 py-2 text-sm outline-none transition-colors ${selected ? "bg-blue-50 text-blue-800" : "text-slate-700 hover:bg-slate-100"}`}
+                      className={`group flex items-center gap-2 rounded-md px-2 py-2 text-sm outline-none transition-colors ${selected ? "bg-blue-50 dark:bg-info-background text-blue-800 dark:text-link" : "text-slate-700 dark:text-secondary-text hover:bg-slate-100 dark:hover:bg-hover"}`}
                       onClick={() => setSelectedDrawingId(drawing.id)}
                       onDoubleClick={() => openDrawingStyle(drawing.id)}
                       onKeyDown={(event) => {
@@ -408,7 +411,7 @@ export function MarketReplayClient({ dataset: initialDataset, initialJournalFocu
                         type="button"
                         disabled={pending}
                         data-text-delete={drawing.id} aria-label={drawingDeleteLabel(drawing)}
-                        className="rounded p-1 text-slate-400 hover:bg-red-50 hover:text-red-600 disabled:opacity-40"
+                        className="rounded p-1 text-slate-400 dark:text-muted-foreground hover:bg-red-50 dark:hover:bg-negative-background hover:text-red-600 dark:hover:text-negative disabled:opacity-40"
                         onClick={(event) => {
                           event.stopPropagation();
                           void deleteDrawing(drawing.id);
@@ -418,7 +421,7 @@ export function MarketReplayClient({ dataset: initialDataset, initialJournalFocu
                       </button>
                     </div>
                   );
-                }) : <p className="px-3 py-8 text-center text-xs text-slate-500">{copy.marketReplay.drawingObjectsEmpty}</p>}
+                }) : <p className="px-3 py-8 text-center text-xs text-slate-500 dark:text-muted-foreground">{copy.marketReplay.drawingObjectsEmpty}</p>}
               </div>
             </aside>
           ) : null}
@@ -532,10 +535,10 @@ export function MarketReplayClient({ dataset: initialDataset, initialJournalFocu
       />
       <Dialog open={settingsDialog === "paper" && !checkingOrder} keepMounted={settingsDialog === "paper"} title={paperSnapshot ? copy.marketReplay.accountSettings : copy.propPractice.createAccountTitle} description={paperSnapshot?.propAccount ? paperSnapshot.propAccount.state.phase === "FUNDED" ? copy.propPractice.payoutOverviewDescription : copy.propPractice.overviewDescription : paperSnapshot ? copy.marketReplay.accountSettingsDescription : copy.propPractice.createAccountHint} className={paperSnapshot ? "max-w-5xl" : "max-w-2xl"} onClose={() => setSettingsDialog(null)}>
         <div className="space-y-4">
-          {replaySession && (paperSnapshot?.propAccount ?? replaySession.propAccount) ? <PropAccountPanel overview sessionId={replaySession.id} runtime={(paperSnapshot?.propAccount ?? replaySession.propAccount)!} tradingSnapshot={paperSnapshot} busy={paperBusy || dateForwarding || isLoading} archiveAction={paperSnapshot && !journalReview ? <Button type="button" variant="ghost" className="text-red-600" onClick={() => requestConfirmation("paper-clear")}><Trash2 className="h-4 w-4" />{copy.paperTrading.resetAccount}</Button> : undefined}
+          {replaySession && (paperSnapshot?.propAccount ?? replaySession.propAccount) ? <PropAccountPanel overview sessionId={replaySession.id} runtime={(paperSnapshot?.propAccount ?? replaySession.propAccount)!} tradingSnapshot={paperSnapshot} busy={paperBusy || dateForwarding || isLoading} archiveAction={paperSnapshot && !journalReview ? <Button type="button" variant="ghost" className="text-red-600 dark:text-negative" onClick={() => requestConfirmation("paper-clear")}><Trash2 className="h-4 w-4" />{copy.paperTrading.resetAccount}</Button> : undefined}
             onBeforeOpen={async () => { core.pausePlayback(); await core.advanceCompletionRef.current; await core.paperMutationChainRef.current; await engine.flushPreferences(); await engine.reloadPaper(); }} onChanged={engine.reloadPaper} /> : <PaperAccountStrip snapshot={paperSnapshot} compact overview />}
           {!paperSnapshot && !journalReview ? <PaperAccountCreateForm busy={paperBusy || correctionPending || dateForwarding} error={paperError} onCreate={createPaperAccount} /> : null}
-          {paperSnapshot && !(replaySession && (paperSnapshot.propAccount ?? replaySession.propAccount)) && !journalReview ? <div className="flex justify-end border-t pt-4"><Button type="button" variant="ghost" className="text-red-600" onClick={() => requestConfirmation("paper-clear")}><Trash2 className="h-4 w-4" />{copy.paperTrading.resetAccount}</Button></div> : null}
+          {paperSnapshot && !(replaySession && (paperSnapshot.propAccount ?? replaySession.propAccount)) && !journalReview ? <div className="flex justify-end border-t pt-4"><Button type="button" variant="ghost" className="text-red-600 dark:text-negative" onClick={() => requestConfirmation("paper-clear")}><Trash2 className="h-4 w-4" />{copy.paperTrading.resetAccount}</Button></div> : null}
         </div>
       </Dialog>
       {(() => {
@@ -587,7 +590,7 @@ export function MarketReplayClient({ dataset: initialDataset, initialJournalFocu
         onChange={setStartDialogValue}
         onCancel={closeStartDialog}
         onConfirm={(value) => void applyNewReplayStart(value)}
-      >{replaySession && <p className="text-sm text-slate-700">{copy.userGrowth.restartOwnership(replaySession.owner?.nickname ?? copy.userGrowth.unowned, eligibilityLabel(replaySession))} {restartWalletHint}</p>}</ReplayStartDialog>
+      >{replaySession && <p className="text-sm text-slate-700 dark:text-secondary-text">{copy.userGrowth.restartOwnership(replaySession.owner?.nickname ?? copy.userGrowth.unowned, eligibilityLabel(replaySession))} {restartWalletHint}</p>}</ReplayStartDialog>
     </>)}
     </ReplayCorrectionProvider>
   );

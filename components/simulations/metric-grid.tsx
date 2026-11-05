@@ -121,12 +121,12 @@ export function MetricGrid({
 
 function MetricTile({ metric }: { metric: Metric }) {
   return (
-    <div className="rounded-md bg-slate-50 p-3">
-      <div className="flex items-center gap-1.5 text-xs font-medium uppercase tracking-wide text-slate-500">
+    <div className="rounded-md bg-slate-50 dark:bg-muted p-3">
+      <div className="flex items-center gap-1.5 text-xs font-medium uppercase tracking-wide text-slate-500 dark:text-muted-foreground">
         <span>{metric.label}</span>
         {metric.tip ? (
           <span className="group relative inline-flex">
-            <CircleAlert className="h-3.5 w-3.5 cursor-help text-slate-400" aria-label={metric.tip} />
+            <CircleAlert className="h-3.5 w-3.5 cursor-help text-slate-400 dark:text-muted-foreground" aria-label={metric.tip} />
             <span className="pointer-events-none absolute bottom-full left-1/2 z-20 mb-2 hidden w-72 -translate-x-1/2 rounded-md border bg-slate-950 px-3 py-2 text-left text-xs font-normal leading-relaxed tracking-normal text-white shadow-lg group-hover:block">
               {metric.tip}
             </span>
@@ -134,9 +134,9 @@ function MetricTile({ metric }: { metric: Metric }) {
         ) : null}
       </div>
       <div className="mt-1 flex flex-wrap items-baseline gap-x-2 gap-y-1">
-        <span className="font-mono text-lg font-semibold text-slate-950">{metric.value}</span>
+        <span className="font-mono text-lg font-semibold text-slate-950 dark:text-foreground">{metric.value}</span>
         {metric.subValue ? (
-          <span className="font-mono text-sm font-semibold text-slate-500">{metric.subValue}</span>
+          <span className="font-mono text-sm font-semibold text-slate-500 dark:text-muted-foreground">{metric.subValue}</span>
         ) : null}
       </div>
     </div>

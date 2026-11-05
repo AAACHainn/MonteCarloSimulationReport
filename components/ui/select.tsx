@@ -16,7 +16,7 @@ const SelectScrollUpButton = React.forwardRef<
 >(({ className, ...props }, ref) => (
   <SelectPrimitive.ScrollUpButton
     ref={ref}
-    className={cn("flex h-6 cursor-default items-center justify-center bg-white text-slate-500", className)}
+    className={cn("flex h-6 cursor-default items-center justify-center bg-white dark:bg-surface-raised text-slate-500 dark:text-muted-foreground", className)}
     {...props}
   >
     <ChevronUp className="h-4 w-4" />
@@ -30,7 +30,7 @@ const SelectScrollDownButton = React.forwardRef<
 >(({ className, ...props }, ref) => (
   <SelectPrimitive.ScrollDownButton
     ref={ref}
-    className={cn("flex h-6 cursor-default items-center justify-center bg-white text-slate-500", className)}
+    className={cn("flex h-6 cursor-default items-center justify-center bg-white dark:bg-surface-raised text-slate-500 dark:text-muted-foreground", className)}
     {...props}
   >
     <ChevronDown className="h-4 w-4" />
@@ -45,7 +45,7 @@ export const SelectTrigger = React.forwardRef<
   <SelectPrimitive.Trigger
     ref={ref}
     className={cn(
-      "flex h-10 w-full items-center justify-between rounded-md border border-input bg-white px-3 py-2 text-sm ring-offset-background placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-ring disabled:cursor-not-allowed disabled:opacity-50",
+      "flex h-10 w-full items-center justify-between rounded-md border border-input bg-white dark:bg-input-background px-3 py-2 text-sm ring-offset-background placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-ring disabled:cursor-not-allowed disabled:opacity-50",
       variant === "primary" && buttonVariants({ variant: "default", size: "sm" }),
       className,
     )}
@@ -67,13 +67,13 @@ export const SelectContent = React.forwardRef<
     <SelectPrimitive.Content
       ref={ref}
       className={cn(
-        "relative z-[200] min-w-32 overflow-hidden rounded-md border bg-white text-slate-950 shadow-md",
+        "relative z-[200] min-w-32 overflow-hidden rounded-md border bg-white dark:bg-surface-raised text-slate-950 dark:text-foreground shadow-md",
         className,
       )}
       {...props}
     >
       <SelectScrollUpButton />
-      <SelectPrimitive.Viewport className="overscroll-contain p-1 [scrollbar-color:#cbd5e1_transparent] ![scrollbar-width:thin] [&::-webkit-scrollbar]:!block [&::-webkit-scrollbar]:w-2 [&::-webkit-scrollbar-thumb]:rounded-full [&::-webkit-scrollbar-thumb]:bg-slate-300 [&::-webkit-scrollbar-track]:bg-transparent">
+      <SelectPrimitive.Viewport className="overscroll-contain p-1 [scrollbar-color:#cbd5e1_transparent] dark:[scrollbar-color:hsl(var(--input))_transparent] ![scrollbar-width:thin] [&::-webkit-scrollbar]:!block [&::-webkit-scrollbar]:w-2 [&::-webkit-scrollbar-thumb]:rounded-full [&::-webkit-scrollbar-thumb]:bg-slate-300 dark:[&::-webkit-scrollbar-thumb]:bg-input [&::-webkit-scrollbar-track]:bg-transparent">
         {children}
       </SelectPrimitive.Viewport>
       <SelectScrollDownButton />
@@ -89,7 +89,7 @@ export const SelectItem = React.forwardRef<
   <SelectPrimitive.Item
     ref={ref}
     className={cn(
-      "relative flex w-full cursor-default select-none items-center rounded-sm py-1.5 pl-8 pr-2 text-sm outline-none focus:bg-slate-100 data-[disabled]:pointer-events-none data-[disabled]:opacity-50",
+      "relative flex w-full cursor-default select-none items-center rounded-sm py-1.5 pl-8 pr-2 text-sm outline-none focus:bg-slate-100 dark:focus:bg-hover data-[disabled]:pointer-events-none data-[disabled]:opacity-50",
       className,
     )}
     {...props}

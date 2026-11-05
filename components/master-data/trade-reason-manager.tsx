@@ -17,7 +17,7 @@ export function TradeReasonManager({ reasons }: { reasons: ManagedTradeReason[] 
       inputId="new-trade-reason"
       maxNameLength={MAX_TRADE_REASON_NAME_LENGTH}
       text={copy.masterData.reasons}
-      icon={<ListChecks className="h-5 w-5 text-blue-700" aria-hidden="true" />}
+      icon={<ListChecks className="h-5 w-5 text-blue-700 dark:text-link" aria-hidden="true" />}
     />
   );
 }

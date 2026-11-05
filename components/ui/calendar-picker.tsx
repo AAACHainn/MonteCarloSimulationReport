@@ -44,22 +44,22 @@ function MonthPicker({ value, onChange, minMonth, maxMonth, disabled = false }: 
     const next = adjacent(offset);
     if (inRange(next)) onChange(next);
   };
-  const iconClass = "rounded-none border-0 text-slate-600";
+  const iconClass = "rounded-none border-0 text-slate-600 dark:text-secondary-text";
 
   return <Popover.Root open={open} onOpenChange={next => {
     setOpen(next);
     if (next) setYear(Number(anchor.slice(0, 4)));
   }}>
-    <div className="inline-flex items-stretch rounded-md border bg-white">
+    <div className="inline-flex items-stretch rounded-md border bg-white dark:bg-surface-raised">
       <Button type="button" variant="ghost" size="icon" className={iconClass}
         aria-label={t.previousMonth} disabled={disabled || !inRange(adjacent(-1))} onClick={() => stepMonth(-1)}>
         <ChevronLeft aria-hidden="true" />
       </Button>
       <Popover.Trigger asChild>
         <Button type="button" variant="ghost" disabled={disabled}
-          className="gap-2 rounded-none border-x bg-white px-4 font-semibold text-slate-950 hover:bg-white data-[state=open]:bg-blue-50">
-          <CalendarDays className="text-blue-700" aria-hidden="true" />{label}
-          <ChevronDown className={cn("text-slate-600 transition-transform motion-reduce:transition-none", open && "rotate-180")} aria-hidden="true" />
+          className="gap-2 rounded-none border-x bg-white dark:bg-surface-raised px-4 font-semibold text-slate-950 dark:text-foreground hover:bg-white dark:hover:bg-surface-raised data-[state=open]:bg-blue-50 dark:data-[state=open]:bg-info-background">
+          <CalendarDays className="text-blue-700 dark:text-link" aria-hidden="true" />{label}
+          <ChevronDown className={cn("text-slate-600 dark:text-secondary-text transition-transform motion-reduce:transition-none", open && "rotate-180")} aria-hidden="true" />
         </Button>
       </Popover.Trigger>
       <Button type="button" variant="ghost" size="icon" className={iconClass}
@@ -69,8 +69,8 @@ function MonthPicker({ value, onChange, minMonth, maxMonth, disabled = false }: 
     </div>
     <Popover.Portal>
       <Popover.Content align="start" sideOffset={8} collisionPadding={12}
-        className="z-[150] w-80 max-w-[calc(100vw-1.5rem)] rounded-lg border bg-white p-4 shadow-lg">
-        <p className="mb-2 text-sm font-medium text-slate-600">{t.monthSelect}</p>
+        className="z-[150] w-80 max-w-[calc(100vw-1.5rem)] rounded-lg border bg-white dark:bg-surface-raised p-4 shadow-lg">
+        <p className="mb-2 text-sm font-medium text-slate-600 dark:text-secondary-text">{t.monthSelect}</p>
         <div className="mb-3 flex items-center justify-between gap-2">
           <Button type="button" variant="outline" size="icon" aria-label={t.previousYear}
             disabled={monthKey(year - 1, 12) < minMonth} onClick={() => setYear(year - 1)}><ChevronLeft aria-hidden="true" /></Button>
@@ -84,7 +84,7 @@ function MonthPicker({ value, onChange, minMonth, maxMonth, disabled = false }: 
             const key = monthKey(year, month);
             const current = key === selectedMonth;
             return <Button key={key} type="button" variant="ghost" disabled={!inRange(key)} aria-pressed={current}
-              className={cn("bg-slate-50 disabled:opacity-40", current && "border border-blue-200 bg-blue-50 font-semibold text-blue-700")}
+              className={cn("bg-slate-50 dark:bg-muted disabled:opacity-40", current && "border border-blue-200 dark:border-link/40 bg-blue-50 dark:bg-info-background font-semibold text-blue-700 dark:text-link")}
               onClick={() => {
                 onChange(key);
                 setOpen(false);

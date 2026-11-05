@@ -187,7 +187,7 @@ export function JournalDashboard({
                 <Label htmlFor="journal-description">{copy.tradeJournals.description}</Label>
                 <Textarea id="journal-description" name="description" placeholder={copy.tradeJournals.descriptionPlaceholder} />
               </div>
-              {createError ? <p className="text-sm text-red-600">{createError}</p> : null}
+              {createError ? <p className="text-sm text-red-600 dark:text-negative">{createError}</p> : null}
               <Button type="submit" disabled={isPending}>
                 <Plus className="h-4 w-4" />
                 {copy.tradeJournals.create}
@@ -220,7 +220,7 @@ export function JournalDashboard({
               </Label>
               <button
                 type="button"
-                className="flex w-full flex-col items-center justify-center rounded-lg border-2 border-dashed border-slate-300 bg-slate-50 px-4 py-5 text-center transition hover:border-blue-400 hover:bg-blue-50/60 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring disabled:cursor-not-allowed disabled:opacity-60"
+                className="flex w-full flex-col items-center justify-center rounded-lg border-2 border-dashed border-slate-300 dark:border-input bg-slate-50 dark:bg-muted px-4 py-5 text-center transition hover:border-blue-400 dark:hover:border-link hover:bg-blue-50/60 dark:hover:bg-info-background/60 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring disabled:cursor-not-allowed disabled:opacity-60"
                 onClick={() => importInputRef.current?.click()}
                 onDragOver={(event) => event.preventDefault()}
                 onDrop={(event) => {
@@ -231,36 +231,36 @@ export function JournalDashboard({
               >
                 {selectedBackup ? (
                   <>
-                    <FileArchive className="mb-2 h-8 w-8 text-blue-700" />
-                    <span className="font-medium text-slate-950">{copy.tradeJournals.zipFileSelected}</span>
-                    <span className="mt-1 max-w-full break-all text-sm text-slate-700">{selectedBackup.name}</span>
-                    <span className="mt-1 text-xs text-slate-500">
+                    <FileArchive className="mb-2 h-8 w-8 text-blue-700 dark:text-link" />
+                    <span className="font-medium text-slate-950 dark:text-foreground">{copy.tradeJournals.zipFileSelected}</span>
+                    <span className="mt-1 max-w-full break-all text-sm text-slate-700 dark:text-secondary-text">{selectedBackup.name}</span>
+                    <span className="mt-1 text-xs text-slate-500 dark:text-muted-foreground">
                       {formatFileSize(selectedBackup.size)} · {copy.tradeJournals.replaceZipFile}
                     </span>
                   </>
                 ) : (
                   <>
-                    <UploadCloud className="mb-2 h-8 w-8 text-blue-700" />
-                    <span className="font-medium text-slate-950">{copy.tradeJournals.chooseZipFile}</span>
-                    <span className="mt-1 text-sm text-slate-600">{copy.tradeJournals.dropZipFile}</span>
-                    <span className="mt-1 text-xs text-slate-500">{copy.tradeJournals.zipFileHint}</span>
+                    <UploadCloud className="mb-2 h-8 w-8 text-blue-700 dark:text-link" />
+                    <span className="font-medium text-slate-950 dark:text-foreground">{copy.tradeJournals.chooseZipFile}</span>
+                    <span className="mt-1 text-sm text-slate-600 dark:text-secondary-text">{copy.tradeJournals.dropZipFile}</span>
+                    <span className="mt-1 text-xs text-slate-500 dark:text-muted-foreground">{copy.tradeJournals.zipFileHint}</span>
                   </>
                 )}
               </button>
 
               {importInProgress ? (
-                <div className="space-y-2 rounded-lg border border-blue-200 bg-blue-50 p-3" role="status" aria-live="polite">
+                <div className="space-y-2 rounded-lg border border-blue-200 dark:border-link/40 bg-blue-50 dark:bg-info-background p-3" role="status" aria-live="polite">
                   <div className="flex items-center justify-between gap-3 text-sm">
-                    <span className="flex min-w-0 items-center gap-2 font-medium text-blue-900">
+                    <span className="flex min-w-0 items-center gap-2 font-medium text-blue-900 dark:text-link">
                       <Loader2 className="h-4 w-4 shrink-0 animate-spin" />
                       {importStatus === "uploading"
                         ? copy.tradeJournals.uploadingBackup(uploadProgress)
                         : copy.tradeJournals.processingBackup}
                     </span>
-                    <span className="shrink-0 font-mono text-xs text-blue-700">{overallProgress}%</span>
+                    <span className="shrink-0 font-mono text-xs text-blue-700 dark:text-link">{overallProgress}%</span>
                   </div>
                   <div
-                    className="h-2 overflow-hidden rounded-full bg-blue-100"
+                    className="h-2 overflow-hidden rounded-full bg-blue-100 dark:bg-info-background"
                     role="progressbar"
                     aria-label={copy.tradeJournals.importing}
                     aria-valuemin={0}
@@ -278,12 +278,12 @@ export function JournalDashboard({
               ) : null}
 
               {importStatus === "success" && importedJournal ? (
-                <Alert className="border-emerald-200 bg-emerald-50" role="status" aria-live="polite">
+                <Alert className="border-emerald-200 dark:border-positive/40 bg-emerald-50 dark:bg-positive-background" role="status" aria-live="polite">
                   <div className="flex items-start gap-3">
-                    <CheckCircle2 className="mt-0.5 h-5 w-5 shrink-0 text-emerald-700" />
+                    <CheckCircle2 className="mt-0.5 h-5 w-5 shrink-0 text-emerald-700 dark:text-positive" />
                     <div className="min-w-0 flex-1">
-                      <AlertTitle className="text-emerald-950">{copy.tradeJournals.importSuccessTitle}</AlertTitle>
-                      <AlertDescription className="text-emerald-800">
+                      <AlertTitle className="text-emerald-950 dark:text-positive">{copy.tradeJournals.importSuccessTitle}</AlertTitle>
+                      <AlertDescription className="text-emerald-800 dark:text-positive">
                         {copy.tradeJournals.importSuccess(importedJournal.name)}
                       </AlertDescription>
                       <Button asChild size="sm" className="mt-3">
@@ -295,12 +295,12 @@ export function JournalDashboard({
               ) : null}
 
               {importStatus === "error" && importError ? (
-                <Alert className="border-red-200 bg-red-50" role="alert">
+                <Alert className="border-red-200 dark:border-negative/40 bg-red-50 dark:bg-negative-background" role="alert">
                   <div className="flex items-start gap-3">
-                    <CircleAlert className="mt-0.5 h-5 w-5 shrink-0 text-red-700" />
+                    <CircleAlert className="mt-0.5 h-5 w-5 shrink-0 text-red-700 dark:text-negative" />
                     <div>
-                      <AlertTitle className="text-red-950">{copy.tradeJournals.importFailedTitle}</AlertTitle>
-                      <AlertDescription className="text-red-700">{importError}</AlertDescription>
+                      <AlertTitle className="text-red-950 dark:text-negative">{copy.tradeJournals.importFailedTitle}</AlertTitle>
+                      <AlertDescription className="text-red-700 dark:text-negative">{importError}</AlertDescription>
                     </div>
                   </div>
                 </Alert>
@@ -318,11 +318,11 @@ export function JournalDashboard({
       <section className="space-y-4">
         <div>
           <h2 className="text-2xl font-semibold tracking-tight">{copy.tradeJournals.title}</h2>
-          <p className="text-sm text-slate-600">{copy.tradeJournals.subtitle}</p>
+          <p className="text-sm text-slate-600 dark:text-secondary-text">{copy.tradeJournals.subtitle}</p>
         </div>
         <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-3">
           {journals.length === 0 ? (
-            <p className="rounded-lg border bg-white p-6 text-sm text-slate-600">{copy.tradeJournals.empty}</p>
+            <p className="rounded-lg border bg-white dark:bg-card p-6 text-sm text-slate-600 dark:text-secondary-text">{copy.tradeJournals.empty}</p>
           ) : (
             journals.map((journal) => <JournalCard key={journal.id} journal={journal} />)
           )}
@@ -410,7 +410,7 @@ function JournalCard({ journal }: { journal: Journal }) {
                 className="min-h-20"
               />
             </div>
-            {error ? <p className="text-sm text-red-600">{error}</p> : null}
+            {error ? <p className="text-sm text-red-600 dark:text-negative">{error}</p> : null}
             <div className="flex flex-wrap justify-end gap-2">
               <Button type="button" variant="outline" size="sm" onClick={cancelEdit} disabled={isSaving}>
                 <X className="h-4 w-4" />
@@ -425,11 +425,11 @@ function JournalCard({ journal }: { journal: Journal }) {
         ) : (
           <>
             <div className="flex items-start gap-3">
-              <NotebookTabs className="mt-1 h-5 w-5 shrink-0 text-blue-700" />
+              <NotebookTabs className="mt-1 h-5 w-5 shrink-0 text-blue-700 dark:text-link" />
               <div className="min-w-0 flex-1">
-                <h3 className="truncate font-semibold text-slate-950">{journal.name}</h3>
-                <p className="text-sm text-slate-600">{journal.description || copy.datasets.noDescription}</p>
-                <p className="mt-2 text-xs text-slate-500">
+                <h3 className="truncate font-semibold text-slate-950 dark:text-foreground">{journal.name}</h3>
+                <p className="text-sm text-slate-600 dark:text-secondary-text">{journal.description || copy.datasets.noDescription}</p>
+                <p className="mt-2 text-xs text-slate-500 dark:text-muted-foreground">
                   {journal.dataset._count.trades} {copy.tradeJournals.trades} · {journal.dataset._count.simulationRuns}{" "}
                   {copy.tradeJournals.simulations}
                 </p>

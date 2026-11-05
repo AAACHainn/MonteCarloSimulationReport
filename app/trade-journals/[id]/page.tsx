@@ -71,9 +71,9 @@ export default async function TradeJournalDetailPage({ params }: PageProps) {
         <Breadcrumbs items={[{ label: copy.tradeJournals.title, href: "/trade-journals" }, { label: journal.name }]} />
         <section className="flex flex-col gap-4 border-b pb-6 lg:flex-row lg:items-end lg:justify-between">
           <div>
-            <p className="font-mono text-sm uppercase tracking-wide text-blue-700">{copy.tradeJournals.eyebrow}</p>
-            <h1 className="text-3xl font-semibold tracking-tight text-slate-950">{journal.name}</h1>
-            <p className="mt-2 text-sm text-slate-600">{journal.description || copy.tradeJournals.detailDescription}</p>
+            <p className="font-mono text-sm uppercase tracking-wide text-blue-700 dark:text-link">{copy.tradeJournals.eyebrow}</p>
+            <h1 className="text-3xl font-semibold tracking-tight text-slate-950 dark:text-foreground">{journal.name}</h1>
+            <p className="mt-2 text-sm text-slate-600 dark:text-secondary-text">{journal.description || copy.tradeJournals.detailDescription}</p>
           </div>
           <div className="flex flex-wrap gap-2">
             <Button asChild>
@@ -110,8 +110,8 @@ function StatCard({ label, value }: { label: ReactNode; value: string }) {
   return (
     <Card>
       <CardContent className="p-4">
-        <div className="text-xs font-medium text-slate-500">{label}</div>
-        <div className="mt-2 font-mono text-xl font-semibold text-slate-950">{value}</div>
+        <div className="text-xs font-medium text-slate-500 dark:text-muted-foreground">{label}</div>
+        <div className="mt-2 font-mono text-xl font-semibold text-slate-950 dark:text-foreground">{value}</div>
       </CardContent>
     </Card>
   );

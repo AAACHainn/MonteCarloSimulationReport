@@ -42,19 +42,19 @@ export default async function DatasetDetailPage({ params }: PageProps) {
       />
       <section className="flex flex-col gap-4 border-b pb-6 md:flex-row md:items-end md:justify-between">
         <div>
-          <p className="font-mono text-sm uppercase tracking-wide text-blue-700">{copy.datasets.detailEyebrow}</p>
-          <h1 className="text-3xl font-semibold tracking-tight text-slate-950">{dataset.name}</h1>
-          <p className="mt-2 max-w-2xl text-sm text-slate-600">
+          <p className="font-mono text-sm uppercase tracking-wide text-blue-700 dark:text-link">{copy.datasets.detailEyebrow}</p>
+          <h1 className="text-3xl font-semibold tracking-tight text-slate-950 dark:text-foreground">{dataset.name}</h1>
+          <p className="mt-2 max-w-2xl text-sm text-slate-600 dark:text-secondary-text">
             {dataset.description || copy.datasets.noDescription}
           </p>
-          <div className="mt-2 flex flex-wrap items-center gap-2 text-xs text-slate-500">
+          <div className="mt-2 flex flex-wrap items-center gap-2 text-xs text-slate-500 dark:text-muted-foreground">
             <span>
               {dataset.trades.length} {copy.datasets.trades} / {dataset._count.simulationRuns}{" "}
               {copy.datasets.savedSimulations}
             </span>
             <Link
               href={`/simulations/history?datasetId=${dataset.id}`}
-              className="font-medium text-blue-700 hover:text-blue-900 hover:underline"
+              className="font-medium text-blue-700 dark:text-link hover:text-blue-900 dark:hover:text-link hover:underline"
             >
               {copy.datasets.viewSimulationRecords}
             </Link>
@@ -66,7 +66,7 @@ export default async function DatasetDetailPage({ params }: PageProps) {
           </Button>
           <span className="group relative inline-flex">
             <CircleHelp
-              className="h-4 w-4 cursor-help text-slate-400 hover:text-blue-700"
+              className="h-4 w-4 cursor-help text-slate-400 dark:text-muted-foreground hover:text-blue-700 dark:hover:text-link"
               aria-label={copy.datasets.simulationFormulaTip}
             />
             <span className="pointer-events-none absolute bottom-full left-1/2 z-20 mb-2 hidden w-80 -translate-x-1/2 rounded-md border bg-slate-950 px-3 py-2 text-left text-xs leading-relaxed text-white shadow-lg group-hover:block">

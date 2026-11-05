@@ -32,7 +32,7 @@ export function PropPayoutHistory({ payouts, currency, timeZone, busy = false }:
   const visible = sorted.slice((page - 1) * PAGE_SIZE, page * PAGE_SIZE);
   const money = (value: number) => formatMoney(value, currency);
   return <section className="space-y-4" aria-label={t.payouts}>
-    <p className="text-xs text-slate-500">{t.payoutHistorySummary(formatInteger(sorted.length), formatInteger(PAGE_SIZE))}</p>
+    <p className="text-xs text-slate-500 dark:text-muted-foreground">{t.payoutHistorySummary(formatInteger(sorted.length), formatInteger(PAGE_SIZE))}</p>
     {visible.length ? <div className="overflow-hidden rounded-md border">
       <Table>
         <TableHeader><TableRow><TableHead>{t.day}</TableHead><TableHead className="text-right">{t.requested}</TableHead><TableHead className="text-right">{t.share}</TableHead><TableHead className="text-right">{t.received}</TableHead></TableRow></TableHeader>
@@ -43,7 +43,7 @@ export function PropPayoutHistory({ payouts, currency, timeZone, busy = false }:
           <TableCell className="whitespace-nowrap py-2 text-right tabular-nums">{money(payout.received)}</TableCell>
         </TableRow>)}</TableBody>
       </Table>
-    </div> : <p className="rounded-md border bg-slate-50 p-5 text-sm text-slate-500">{t.noPayouts}</p>}
+    </div> : <p className="rounded-md border bg-slate-50 dark:bg-muted p-5 text-sm text-slate-500 dark:text-muted-foreground">{t.noPayouts}</p>}
     {sorted.length > PAGE_SIZE ? <TablePagination page={page} totalPages={totalPages} onPageChange={setPage} label={t.payoutHistoryPagination} busy={busy} /> : null}
   </section>;
 }

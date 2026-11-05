@@ -147,7 +147,7 @@ export function SimulationForm({
         <Input value={copy.simulations.bootstrap} disabled />
       </div>
 
-      {error ? <p className="text-sm text-red-600 md:col-span-2">{error}</p> : null}
+      {error ? <p className="text-sm text-red-600 dark:text-negative md:col-span-2">{error}</p> : null}
       <div className="md:col-span-2">
         <Button type="submit" disabled={isRunning || !datasetId || datasets.length === 0}>
           <Play className="h-4 w-4" />

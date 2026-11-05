@@ -14,7 +14,7 @@ type TradeRow = {
 
 export function TradeTable({ trades }: { trades: TradeRow[] }) {
   if (trades.length === 0) {
-    return <p className="rounded-lg border bg-white p-6 text-sm text-slate-600">{copy.datasets.noTrades}</p>;
+    return <p className="rounded-lg border bg-white dark:bg-card p-6 text-sm text-slate-600 dark:text-secondary-text">{copy.datasets.noTrades}</p>;
   }
 
   const serializableTrades: SerializableTradeRow[] = trades.map((trade) => ({

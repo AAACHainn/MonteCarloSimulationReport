@@ -1,5 +1,7 @@
 import { CandlestickSeries, ColorType, createChart, CrosshairMode, HistogramSeries, LineSeries, type UTCTimestamp, type Time, type TickMarkType } from "lightweight-charts";
-import { candlestickSeriesStyleOptions } from "@/lib/market-replay/candlestick-style";
+import { CURRENT_CHART_RENDERER_VERSION } from "./snapshot-version";
+import { chartThemes } from "@/lib/chart-theme";
+import { candlestickSeriesStyleOptions, resolveSnapshotCandlestickStyle } from "@/lib/market-replay/candlestick-style";
 import { calculateEmaSeries } from "@/lib/market-replay/ema";
 import { emaSeriesStyleOptions } from "@/lib/market-replay/ema-style";
 import { ReplayTradeAnnotationPrimitive, buildReplayTradePriceAnnotations } from "@/lib/market-replay/trade-annotation-primitive";
@@ -38,11 +40,15 @@ export function createChartSnapshotRenderer(
   preferences: PdfChartPreferences,
   tick: number,
   display: Pick<PdfOptions, "displaySession" | "displayIntervalSeconds"> & { session: TradingSessionConfig },
+  rendererVersion: number,
 ) {
+  const style = rendererVersion === CURRENT_CHART_RENDERER_VERSION
+    ? resolveSnapshotCandlestickStyle(preferences.candlestickStyle) : { ...preferences.candlestickStyle };
+  const theme = chartThemes.light;
   const chart = createChart(container, {
     width: 2400, height: 1200, autoSize: false,
-    layout: { background: { type: ColorType.Solid, color: "#ffffff" }, textColor: "#475569", fontSize: 28, attributionLogo: true },
-    grid: { vertLines: { visible: preferences.gridVisible, color: "#f1f5f9" }, horzLines: { visible: preferences.gridVisible, color: "#f1f5f9" } },
+    layout: { background: { type: ColorType.Solid, color: theme.background }, textColor: theme.text, fontSize: 28, attributionLogo: true },
+    grid: { vertLines: { visible: preferences.gridVisible, color: theme.grid }, horzLines: { visible: preferences.gridVisible, color: theme.grid } },
     crosshair: { mode: CrosshairMode.Hidden }, handleScale: false, handleScroll: false,
     timeScale: { timeVisible: true, secondsVisible: true, rightOffset: 0, tickMarkMaxCharacterLength: 8, tickMarkFormatter: (time: Time, type: TickMarkType) => formatChartTick(time, type, preferences.displayUtcOffsetMinutes) },
     localization: { locale: "zh-CN" },
@@ -50,14 +56,16 @@ export function createChartSnapshotRenderer(
   });
   let priceMin = 0; let priceMax = 1;
   const candles = chart.addSeries(CandlestickSeries, {
-    ...candlestickSeriesStyleOptions(preferences.candlestickStyle),
+    ...candlestickSeriesStyleOptions(style),
     priceLineVisible: false, lastValueVisible: false,
     priceFormat: { type: "price", minMove: tick, precision: priceDecimalsForTick(tick) },
     autoscaleInfoProvider: () => ({ priceRange: { minValue: priceMin, maxValue: priceMax } }),
   });
   const barCount = new BarCountPrimitive(28 / 10);
+  barCount.setTheme(theme);
   candles.attachPrimitive(barCount);
   const primitive = new ReplayTradeAnnotationPrimitive(28 / 12);
+  primitive.setTheme(theme);
   candles.attachPrimitive(primitive);
   const volume = preferences.volumeVisible ? chart.addSeries(HistogramSeries, { priceScaleId: "", priceFormat: { type: "volume" }, priceLineVisible: false, lastValueVisible: false }) : null;
   volume?.priceScale().applyOptions({ scaleMargins: { top: 0.83, bottom: 0 } });
@@ -86,7 +94,7 @@ export function createChartSnapshotRenderer(
       priceMin = Math.min(...bounds); priceMax = Math.max(...bounds);
       if (priceMax <= priceMin) { priceMin -= tick; priceMax += tick; }
       candles.setData(bars.map(chartCandleData));
-      volume?.setData(bars.filter((b) => b.volume !== null).map((b) => chartVolumeData(b, preferences.candlestickStyle.upColor + "55", preferences.candlestickStyle.downColor + "55")));
+      volume?.setData(bars.filter((b) => b.volume !== null).map((b) => chartVolumeData(b, style.upColor + "55", style.downColor + "55")));
       barCount.setData({ bars, ...display, config: preferences.barCountConfig });
       primitive.setData({ bars, entries: annotations });
       chart.timeScale().setVisibleLogicalRange({ from: -0.5, to: bars.length + Math.max(3, Math.ceil(bars.length * 0.04)) });

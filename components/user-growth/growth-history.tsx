@@ -27,7 +27,7 @@ export function GrowthSourceDialog({ record, onClose }: { record: GrowthRecord; 
   return <Dialog open title={t.realSourceTitle} description={t.realSourceHint} onClose={onClose}>
     <div className="space-y-4 text-sm"><h3 className="font-semibold">{record.title}</h3><p>{record.detail}</p><p>{record.source}</p>
       <p className="tabular-nums">{t.settlementTime}：{record.settledAt}</p><p className="tabular-nums">{t.replayTime}：{record.replayAt}</p>
-      {record.ruleVersion && <p className="text-xs text-slate-600">{t.ruleVersion(record.ruleVersion)}</p>}
+      {record.ruleVersion && <p className="text-xs text-slate-600 dark:text-secondary-text">{t.ruleVersion(record.ruleVersion)}</p>}
       {record.deleted ? <p>{t.deleted}</p> : record.sourceUrl ? <div className="flex justify-end border-t pt-4"><Button asChild variant="outline"><Link href={record.sourceUrl}>{t.openRecordedSource}</Link></Button></div> : null}
     </div>
   </Dialog>;

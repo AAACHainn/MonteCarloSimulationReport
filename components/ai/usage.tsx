@@ -7,7 +7,7 @@ import { formatInteger } from "@/lib/format";
 export function AiUsage({ value }: { value: BudgetView }) {
   const { limits, lastUsage } = value;
   const known = value.inputTokens + value.outputTokens, partial = value.totalTokens === null;
-  return <details className="rounded-md border bg-white text-xs text-slate-600">
+  return <details className="rounded-md border bg-white dark:bg-card text-xs text-slate-600 dark:text-secondary-text">
     <summary className="min-h-10 cursor-pointer rounded-md px-3 py-2 leading-5 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring">
       {copy.ai.usageTitle} · {known || !partial ? copy.ai.tokenTotal(formatInteger(known), partial) : copy.ai.usageUnknown} · {copy.ai.nextOutputLimit(formatInteger(limits.outputTokens))}
     </summary>
@@ -24,7 +24,7 @@ export function AiUsage({ value }: { value: BudgetView }) {
       {partial ? <p>{copy.ai.usagePartial}</p> : null}
       <p className="leading-5">{copy.ai.usageHint}</p>
       {value.legacy ? <p>{copy.ai.usageLegacy}</p> : null}
-      {value.blocked ? <p className="text-red-700">{copy.ai.budgetExceeded(value.blocked.resource, value.blocked.used, value.blocked.limit)}</p> : null}
+      {value.blocked ? <p className="text-red-700 dark:text-negative">{copy.ai.budgetExceeded(value.blocked.resource, value.blocked.used, value.blocked.limit)}</p> : null}
     </div>
   </details>;
 }

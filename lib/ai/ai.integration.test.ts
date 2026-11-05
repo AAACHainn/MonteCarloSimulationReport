@@ -14,7 +14,7 @@ import { prisma } from "@/lib/db";
 import { queueAggregation, processAggregationJob } from "@/lib/market-replay/aggregation-jobs";
 import { defaultSettings } from "./prompts";
 import { saveSettings, readSettings, publicSettings, endpointUrls, protectKey, revealKey, resolveModel } from "./config";
-import { createContext, readContext, sessionMetrics } from "./context";
+import { createContext, readContext, sessionMetrics, annotatedChart } from "./context";
 import { createRun, executeRun, cancelRun, recoverRuns, retryRun, validatedResult, resumeRun } from "./runs";
 import { generate, sseData } from "./provider";
 import { createReplaySession } from "@/lib/replay-sessions/service";
@@ -469,6 +469,41 @@ describe("A: scoped read tools and persisted protocol", () => {
   });
 });
 describe("B: frozen multi-period charts", () => {
+  it("isolates new render identities from legacy variants and keeps a queued missing legacy image on its original rule", async () => {
+    await configure();
+    const c = await createContext({ replaySessionId: sessionId, projectionId, includeCurrentChart: true, chartAccess: true });
+    expect(c.rendererVersion).toBe(3); expect(c.charts.every(chart => chart.rendererVersion === 3)).toBe(true);
+    const legacy = { ...c, rendererVersion: undefined };
+    legacy.charts = c.charts.map(chart => annotatedChart(legacy, { ...chart, rendererVersion: undefined }));
+    const signal = new AbortController().signal;
+    const args = { chartRef: null, timeframes: null, cursor: null };
+    await executeChartTool({ id: "legacy-render", secret: "same", context: legacy }, c.id, args, signal, []);
+    const old = (await prisma.aiChartVariant.findMany({ where: { contextId: c.id } }))[0];
+    const oldChart = JSON.parse(old.value); delete oldChart.rendererVersion;
+    await prisma.aiChartVariant.update({ where: { id: old.id }, data: { value: JSON.stringify(oldChart) } });
+    await executeChartTool({ id: "current-render", secret: "same", context: c }, c.id, args, signal, []);
+    const variants = await prisma.aiChartVariant.findMany({ where: { contextId: c.id } });
+    expect(variants).toHaveLength(2);
+    expect(new Set(variants.map(v => JSON.parse(v.value).hash)).size).toBe(2);
+    expect(JSON.parse((await prisma.aiChartVariant.findUniqueOrThrow({ where: { id: old.id } })).value)).toEqual(oldChart);
+    expect(await prisma.aiAsset.count({ where: { contextId: c.id, chartHash: oldChart.hash } })).toBe(0);
+    const run = await makeRun(c.id, "globalAssistant", "tools-v1");
+    await prisma.aiRun.update({ where: { id: run.id }, data: { status: "RUNNING" } });
+    const waiting = requestChartImage(run.id, c.id, old.id, oldChart, signal, () => undefined);
+    let taskId = "";
+    await vi.waitFor(async () => { const tasks = await listChartCaptures([run.id]); expect(tasks).toHaveLength(1); taskId = tasks[0].id; });
+    const job = await claimChartCapture(taskId);
+    expect(job.chart.hash).toBe(oldChart.hash);
+    expect(job.chart.rendererVersion).toBeUndefined();
+    await finishChartCapture(job.id, job.lease, { dataUrl: capturePng });
+    expect((await waiting).chartHash).toBe(oldChart.hash);
+    // A repeated lookup of the legacy identity still uses the existing frozen chart.
+    const cached = await executeChartTool({ id: "legacy-render", secret: "same", context: legacy }, c.id, args, signal, [], captureFixture(c.id));
+    expect(cached.images).toHaveLength(1);
+    expect(await prisma.aiChartVariant.count({ where: { contextId: c.id } })).toBe(2);
+    await cancelRun(run.id);
+  });
+
   it("only warms up visible indicators and retains a bounded maximum", () => {
     const prefs = defaultChartPreferences(0);
     prefs.emaEnabled = true;

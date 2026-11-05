@@ -1,3 +1,4 @@
+import { chartThemes, type ChartTheme } from "@/lib/chart-theme";
 import type { IPrimitivePaneRenderer, ISeriesPrimitive, SeriesAttachedParameter, Time, PrimitiveHoveredItem } from "lightweight-charts";
 import { TEXT_MAX_LENGTH, type DrawingAnchor, type TextDrawing, type TextGeometry, type TextDrawingStyle } from "./chart-drawings";
 import { TextLayoutCache, TEXT_PADDING, type CachedTextLayout, type TextMeasure } from "./text-layout";
@@ -18,6 +19,8 @@ type ProjectedText = { id: string; anchor: DrawingAnchor; x: number; y: number; 
 export type TextHit = { drawingId: string; part: "text"; distance: number; priority: 0 };
 
 export class TextDrawingPrimitive implements ISeriesPrimitive<Time> {
+  private theme: ChartTheme = chartThemes.light;
+  setTheme(theme: ChartTheme) { this.theme = theme; this.attachment?.requestUpdate(); }
   private attachment: SeriesAttachedParameter<Time> | null = null;
   private snapshot: TextDrawingSnapshot | null = null;
   private projected: ProjectedText[] = [];
@@ -92,11 +95,11 @@ export class TextDrawingPrimitive implements ISeriesPrimitive<Time> {
       const { x, y, layout, style } = item;
       if (editing) {
         if (this.hoveredId !== item.id) continue;
-        context.strokeStyle = "#2563eb"; context.lineWidth = 1; context.setLineDash([]);
+        context.strokeStyle = this.theme.selection; context.lineWidth = 1; context.setLineDash([]);
         context.globalAlpha = 0.5;
         context.strokeRect(x, y, layout.width, layout.height);
         const handleX = x + layout.width, handleY = y + layout.height / 2;
-        context.fillStyle = "#ffffff"; context.fillRect(handleX - 4, handleY - 4, 8, 8); context.strokeRect(handleX - 4, handleY - 4, 8, 8);
+        context.fillStyle = this.theme.handle; context.fillRect(handleX - 4, handleY - 4, 8, 8); context.strokeRect(handleX - 4, handleY - 4, 8, 8);
         context.globalAlpha = 1;
         continue;
       }

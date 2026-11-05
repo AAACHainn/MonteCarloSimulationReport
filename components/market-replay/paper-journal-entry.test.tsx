@@ -1,5 +1,6 @@
 import React from "react";
 import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
+vi.mock("react", async () => ({ ...await vi.importActual<typeof import("react")>("react"), useState: (initial: unknown) => [initial, vi.fn()] }));
 const rt = vi.hoisted(() => ({ controller: {} as Record<string, unknown>, open: vi.fn(), push: vi.fn(), busy: false }));
 vi.mock("@/components/user-growth/user-context", () => ({ useCurrentUser: () => ({ selectedId: null }) }));
 vi.mock("./use-paper-journal-table-controller", () => ({ usePaperJournalTableController: () => rt.controller }));

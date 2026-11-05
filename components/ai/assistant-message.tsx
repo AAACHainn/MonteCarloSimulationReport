@@ -14,11 +14,11 @@ import { AiMessageImages } from "./message-images";
 import type { DisplayedImage } from "@/lib/ai/display-images-contract";
 
 export const AiMarkdown = memo(function AiMarkdown({ text }: { text: string }) {
-  return <div className="min-w-0 break-words text-sm leading-6 [&_code]:break-all [&_h1]:my-3 [&_h1]:text-lg [&_h1]:font-semibold [&_h2]:my-3 [&_h2]:font-semibold [&_h3]:my-2 [&_h3]:font-medium [&_li]:ml-4 [&_ol]:list-decimal [&_p]:mb-3 [&_pre]:overflow-x-auto [&_pre]:rounded-md [&_pre]:bg-slate-100 [&_pre]:p-3 [&_table]:w-full [&_td]:border [&_td]:p-2 [&_th]:border [&_th]:bg-slate-50 [&_th]:p-2 [&_ul]:list-disc">
+  return <div className="min-w-0 break-words text-sm leading-6 [&_code]:break-all [&_h1]:my-3 [&_h1]:text-lg [&_h1]:font-semibold [&_h2]:my-3 [&_h2]:font-semibold [&_h3]:my-2 [&_h3]:font-medium [&_li]:ml-4 [&_ol]:list-decimal [&_p]:mb-3 [&_pre]:overflow-x-auto [&_pre]:rounded-md [&_pre]:bg-slate-100 dark:[&_pre]:bg-muted [&_pre]:p-3 [&_table]:w-full [&_td]:border [&_td]:p-2 [&_th]:border [&_th]:bg-slate-50 dark:[&_th]:bg-muted [&_th]:p-2 [&_ul]:list-disc">
     <ReactMarkdown remarkPlugins={[remarkGfm]} components={{
       img: () => null,
       table: ({ children }) => <div className="mb-3 overflow-x-auto"><table>{children}</table></div>,
-      a: ({ href, children }) => <a href={href} target="_blank" rel="noopener noreferrer" className="text-blue-700 underline">{children}</a>,
+      a: ({ href, children }) => <a href={href} target="_blank" rel="noopener noreferrer" className="text-blue-700 dark:text-link underline">{children}</a>,
     }}>{text}</ReactMarkdown>
   </div>;
 });
@@ -45,24 +45,24 @@ export function AiMessageCard({ role = "assistant", assistantName = copy.ai.titl
   assistantName?: string;
 }) {
   const user = role === "user", Icon = user ? UserRound : Bot;
-  return <article className={"min-w-0 space-y-3 rounded-lg border p-3 text-left " + (user ? "ml-auto w-fit max-w-[95%] border-blue-100 bg-blue-50" : "mr-auto w-full border-slate-200 bg-slate-50")} aria-label={user ? copy.ai.userMessage : copy.ai.assistantMessage} aria-busy={live}>
-    <header className="flex flex-wrap items-center gap-x-3 gap-y-1 text-xs text-slate-500">
-      <span className={"inline-flex min-w-0 max-w-full items-center gap-1.5 font-medium " + (user ? "text-blue-700" : "text-slate-700")}><Icon className="h-4 w-4 shrink-0" aria-hidden="true" /><span className="min-w-0 break-words">{user ? copy.ai.you : assistantName}</span></span>
+  return <article className={"min-w-0 space-y-3 rounded-lg border p-3 text-left " + (user ? "ml-auto w-fit max-w-[95%] border-blue-100 dark:border-link/40 bg-blue-50 dark:bg-info-background" : "mr-auto w-full border-slate-200 dark:border-border bg-slate-50 dark:bg-muted")} aria-label={user ? copy.ai.userMessage : copy.ai.assistantMessage} aria-busy={live}>
+    <header className="flex flex-wrap items-center gap-x-3 gap-y-1 text-xs text-slate-500 dark:text-muted-foreground">
+      <span className={"inline-flex min-w-0 max-w-full items-center gap-1.5 font-medium " + (user ? "text-blue-700 dark:text-link" : "text-slate-700 dark:text-secondary-text")}><Icon className="h-4 w-4 shrink-0" aria-hidden="true" /><span className="min-w-0 break-words">{user ? copy.ai.you : assistantName}</span></span>
       {createdAt ? <time dateTime={createdAt} className="tabular-nums">{new Date(createdAt).toLocaleString(defaultLocale, { year: "numeric", month: "2-digit", day: "2-digit", hour: "2-digit", minute: "2-digit", second: "2-digit", timeZoneName: "short" })}</time> : null}
       {!user ? <Elapsed startedAt={response?.startedAt ?? createdAt} durationMs={response?.durationMs} live={live} /> : null}
     </header>
-    {reference ? <p className="break-words text-xs text-slate-500">{reference}</p> : null}
-    {!user && reads.length ? <details className="rounded-md border bg-white"><summary className="min-h-10 cursor-pointer rounded-md px-3 py-2 text-xs text-blue-700 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring">{copy.ai.readRecords}</summary><ul className="max-h-64 space-y-2 overflow-y-auto border-t p-3 text-xs" aria-live="polite">{reads.map((read) => <li key={read.toolCallId} className={read.status === "FAILED" ? "text-red-700" : "text-slate-600"}>{copy.ai.readNames[read.name as keyof typeof copy.ai.readNames] ?? copy.ai.readUnknown} · {read.name === "display_images" ? read.status === "COMPLETED" ? copy.ai.replyImageAttached : read.status === "FAILED" ? copy.ai.replyImageAttachFailed : copy.ai.replyImageAttaching : read.status === "COMPLETED" ? copy.ai.readComplete : read.status === "FAILED" ? copy.ai.readFailed : copy.ai.readRunning}</li>)}</ul></details> : null}
-    {!user && reasoning ? <details className="group rounded-md border border-blue-100 bg-white">
-      <summary className="flex min-h-10 cursor-pointer list-none flex-wrap items-center gap-2 rounded-md px-3 py-2 text-xs text-blue-700 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring [&::-webkit-details-marker]:hidden">
+    {reference ? <p className="break-words text-xs text-slate-500 dark:text-muted-foreground">{reference}</p> : null}
+    {!user && reads.length ? <details className="rounded-md border bg-white dark:bg-card"><summary className="min-h-10 cursor-pointer rounded-md px-3 py-2 text-xs text-blue-700 dark:text-link focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring">{copy.ai.readRecords}</summary><ul className="max-h-64 space-y-2 overflow-y-auto border-t p-3 text-xs" aria-live="polite">{reads.map((read) => <li key={read.toolCallId} className={read.status === "FAILED" ? "text-red-700 dark:text-negative" : "text-slate-600 dark:text-secondary-text"}>{copy.ai.readNames[read.name as keyof typeof copy.ai.readNames] ?? copy.ai.readUnknown} · {read.name === "display_images" ? read.status === "COMPLETED" ? copy.ai.replyImageAttached : read.status === "FAILED" ? copy.ai.replyImageAttachFailed : copy.ai.replyImageAttaching : read.status === "COMPLETED" ? copy.ai.readComplete : read.status === "FAILED" ? copy.ai.readFailed : copy.ai.readRunning}</li>)}</ul></details> : null}
+    {!user && reasoning ? <details className="group rounded-md border border-blue-100 dark:border-link/40 bg-white dark:bg-card">
+      <summary className="flex min-h-10 cursor-pointer list-none flex-wrap items-center gap-2 rounded-md px-3 py-2 text-xs text-blue-700 dark:text-link focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring [&::-webkit-details-marker]:hidden">
         <ChevronRight className="h-4 w-4 shrink-0 transition-transform group-open:rotate-90 motion-reduce:transition-none" aria-hidden="true" />
         <BrainCircuit className="h-4 w-4 shrink-0" aria-hidden="true" />
         <span>{live && !text ? copy.ai.thinking : copy.ai.reasoning}</span>
         <Elapsed startedAt={response?.startedAt ?? createdAt} durationMs={reasoningMs} live={live} thinking />
       </summary>
-      <div className="max-h-64 overflow-y-auto whitespace-pre-wrap break-words border-t border-blue-100 px-3 py-2 text-xs leading-6 text-slate-600">{reasoning}</div>
+      <div className="max-h-64 overflow-y-auto whitespace-pre-wrap break-words border-t border-blue-100 dark:border-link/40 px-3 py-2 text-xs leading-6 text-slate-600 dark:text-secondary-text">{reasoning}</div>
     </details> : null}
-    {text ? <AiMarkdown text={text} /> : live ? <p className="text-sm text-slate-600" role="status">{reasoning ? copy.ai.thinking : copy.ai.running}…</p> : null}
+    {text ? <AiMarkdown text={text} /> : live ? <p className="text-sm text-slate-600 dark:text-secondary-text" role="status">{reasoning ? copy.ai.thinking : copy.ai.running}…</p> : null}
     {!user ? <AiMessageImages images={images} /> : null}
     {!user && budget ? <AiUsage value={budget} /> : null}
     {children}

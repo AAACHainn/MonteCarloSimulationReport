@@ -129,12 +129,12 @@ export function ReplayCorrectionDialog({ target, displayUtcOffsetMinutes, before
     {!open && jobId && (!job || !terminal.has(job.status)) ? <Button size="sm" variant="outline" className="m-2 self-start" onClick={() => setOpen(true)}>{t.correctionPending}</Button> : null}
     <Dialog open={open} title={t.correction} onClose={close} className="max-w-2xl">
       <div className="space-y-4" aria-busy={busy}>
-        {target?.type === "REWIND" || job?.type === "REWIND" ? <p className="text-sm text-slate-600">{t.rewindBoundary}</p> : null}
-        {target?.type === "REWIND" ? <div className="space-y-2 rounded-md border bg-slate-50 p-3">
-          <p className="text-sm text-slate-600">{target.chartTimestamp ? t.rewindSelectedBar : t.correctionTarget} · {formatUtcOffset(displayUtcOffsetMinutes)}</p>
+        {target?.type === "REWIND" || job?.type === "REWIND" ? <p className="text-sm text-slate-600 dark:text-secondary-text">{t.rewindBoundary}</p> : null}
+        {target?.type === "REWIND" ? <div className="space-y-2 rounded-md border bg-slate-50 dark:bg-muted p-3">
+          <p className="text-sm text-slate-600 dark:text-secondary-text">{target.chartTimestamp ? t.rewindSelectedBar : t.correctionTarget} · {formatUtcOffset(displayUtcOffsetMinutes)}</p>
           {target.chartTimestamp || rewindPoint ? <p className="text-sm font-medium tabular-nums">{formatUtcDateTime(target.chartTimestamp ?? rewindPoint!.timestamp, displayUtcOffsetMinutes)}</p> : null}
-          {busy && !rewindPoint && !jobId ? <p role="status" className="flex items-center gap-2 text-sm text-slate-600"><Loader2 className="h-4 w-4 animate-spin" aria-hidden="true" />{t.rewindLoading}</p> : null}
-          <p className="text-xs text-slate-600">{t.rewindTargetHint}</p>
+          {busy && !rewindPoint && !jobId ? <p role="status" className="flex items-center gap-2 text-sm text-slate-600 dark:text-secondary-text"><Loader2 className="h-4 w-4 animate-spin" aria-hidden="true" />{t.rewindLoading}</p> : null}
+          <p className="text-xs text-slate-600 dark:text-secondary-text">{t.rewindTargetHint}</p>
         </div> : null}
         {!jobId && target?.type === "DELETE_CYCLE" && cycle ? <p className="text-sm">{cycle.closed ? t.correctionCycleDescription(target.no, cycle.entryCount) : t.correctionOpenCycle}</p> : null}
         {job ? <>
@@ -146,10 +146,10 @@ export function ReplayCorrectionDialog({ target, displayUtcOffsetMinutes, before
               {metrics.map((metric) => <TableRow key={metric.key}><TableCell>{metric.label}</TableCell><TableCell className="text-right tabular-nums">{job.summary.before ? metric.format(job.summary.before[metric.key], job.summary.before.currency) : t.correctionNoAccount}</TableCell><TableCell className="text-right tabular-nums">{job.summary.after ? metric.format(job.summary.after[metric.key], job.summary.after.currency) : t.correctionNoAccount}</TableCell></TableRow>)}
               <TableRow><TableCell>{t.correctionEntryCount}</TableCell><TableCell className="text-right tabular-nums">{job.summary.beforeEntries ?? 0}</TableCell><TableCell className="text-right tabular-nums">{job.summary.afterEntries ?? 0}</TableCell></TableRow>
             </TableBody></Table>
-            <p className="text-xs text-slate-600">{t.correctionRemovedCommands(job.summary.removedCommands ?? 0)}</p>
+            <p className="text-xs text-slate-600 dark:text-secondary-text">{t.correctionRemovedCommands(job.summary.removedCommands ?? 0)}</p>
           </> : null}
         </> : null}
-        {error || job?.error ? <Alert className="border-red-200 bg-red-50" role="alert"><AlertDescription>{error ?? job?.error}</AlertDescription></Alert> : null}
+        {error || job?.error ? <Alert className="border-red-200 dark:border-negative/40 bg-red-50 dark:bg-negative-background" role="alert"><AlertDescription>{error ?? job?.error}</AlertDescription></Alert> : null}
         <div className="flex justify-end gap-2 border-t pt-4">
           {jobId && job && !terminal.has(job.status) ? <Button variant="outline" disabled={busy} onClick={() => void action("cancel")}>{t.correctionCancel}</Button> : <Button variant="outline" disabled={busy} onClick={close}>{copy.common.cancel}</Button>}
           {job?.status === "READY" ? <Button disabled={busy} onClick={() => setConfirm(true)}>{t.correctionApply}</Button> : null}

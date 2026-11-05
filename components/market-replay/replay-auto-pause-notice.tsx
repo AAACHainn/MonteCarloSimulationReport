@@ -39,8 +39,8 @@ export function ReplayAutoPauseNotice({
   return (
     <div
       className={`pointer-events-auto flex w-full items-center gap-2 rounded-md border px-3 py-2 text-sm shadow-lg backdrop-blur-sm ${hiddenPause
-        ? "border-amber-200 bg-amber-50/95 text-amber-900"
-        : "border-red-200 bg-red-50/95 text-red-800"}`}
+        ? "border-amber-200 dark:border-warning/40 bg-amber-50/95 dark:bg-warning-background/95 text-amber-900 dark:text-warning"
+        : "border-red-200 dark:border-negative/40 bg-red-50/95 dark:bg-negative-background/95 text-red-800 dark:text-negative"}`}
       role={hiddenPause ? "status" : "alert"}
       aria-live={hiddenPause ? "polite" : "assertive"}
     >

@@ -23,7 +23,7 @@ export function PropDailyLedger({ stages, currency, timeZone, busy = false }: {
   const visible = rows.slice((page - 1) * PAGE_SIZE, page * PAGE_SIZE);
 
   return <section className="space-y-4" aria-label={t.dailyLedger}>
-    <p className="text-xs text-slate-500">{t.dailyLedgerSummary(formatInteger(rows.length), formatInteger(PAGE_SIZE))}</p>
+    <p className="text-xs text-slate-500 dark:text-muted-foreground">{t.dailyLedgerSummary(formatInteger(rows.length), formatInteger(PAGE_SIZE))}</p>
     {visible.length ? <Table>
       <TableHeader><TableRow><TableHead aria-sort="descending">{t.day}</TableHead><TableHead>{t.pause}</TableHead><TableHead className="text-right">{t.dayProfit}</TableHead><TableHead className="text-right">{t.balance}</TableHead></TableRow></TableHeader>
       <TableBody>{visible.map(({ day, kind, stageIndex, dayIndex }) => <TableRow key={`${stageIndex}:${dayIndex}`}>
@@ -32,7 +32,7 @@ export function PropDailyLedger({ stages, currency, timeZone, busy = false }: {
         <TableCell className="whitespace-nowrap py-2 text-right tabular-nums">{formatMoney(day.endRawNet - day.startRawNet, currency)}</TableCell>
         <TableCell className="whitespace-nowrap py-2 text-right tabular-nums">{formatMoney(day.balance, currency)}</TableCell>
       </TableRow>)}</TableBody>
-    </Table> : <p className="rounded-md border bg-slate-50 p-5 text-sm text-slate-500">{t.noDailyLedger}</p>}
+    </Table> : <p className="rounded-md border bg-slate-50 dark:bg-muted p-5 text-sm text-slate-500 dark:text-muted-foreground">{t.noDailyLedger}</p>}
     {rows.length > PAGE_SIZE ? <TablePagination page={page} totalPages={totalPages} onPageChange={setPage} label={t.dailyLedgerPagination} busy={busy} /> : null}
   </section>;
 }

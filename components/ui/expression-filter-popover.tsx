@@ -45,20 +45,20 @@ export function ExpressionFilterPopover({
     >
       <div className="space-y-3">
               <div className="flex items-center justify-between gap-2">
-                <p className="text-xs font-medium text-slate-500">{conditionLabel ?? label}</p>
+                <p className="text-xs font-medium text-slate-500 dark:text-muted-foreground">{conditionLabel ?? label}</p>
                 <div className="group relative">
                   <button
                     type="button"
-                    className="flex h-7 w-7 items-center justify-center rounded-md text-slate-400 transition-colors hover:bg-slate-100 hover:text-slate-700 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+                    className="flex h-7 w-7 items-center justify-center rounded-md text-slate-400 dark:text-muted-foreground transition-colors hover:bg-slate-100 dark:hover:bg-hover hover:text-slate-700 dark:hover:text-secondary-text focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
                     aria-label={copy.tradeJournals.filters.rExpressionHelpTitle}
                   >
                     <HelpCircle className="h-4 w-4" />
                   </button>
-                  <div className="pointer-events-none absolute right-0 top-8 z-[160] hidden w-72 rounded-md border bg-white p-3 text-xs leading-5 text-slate-600 shadow-lg group-hover:block group-focus-within:block">
-                    <div className="mb-1 font-medium text-slate-950">{copy.tradeJournals.filters.rExpressionHelpTitle}</div>
+                  <div className="pointer-events-none absolute right-0 top-8 z-[160] hidden w-72 rounded-md border bg-white dark:bg-surface-raised p-3 text-xs leading-5 text-slate-600 dark:text-secondary-text shadow-lg group-hover:block group-focus-within:block">
+                    <div className="mb-1 font-medium text-slate-950 dark:text-foreground">{copy.tradeJournals.filters.rExpressionHelpTitle}</div>
                     <p>{copy.tradeJournals.filters.rExpressionHelpVariable}</p>
                     <p>{copy.tradeJournals.filters.rExpressionHelpOperators}</p>
-                    <div className="mt-2 space-y-1 font-mono text-[11px] text-slate-700">
+                    <div className="mt-2 space-y-1 font-mono text-[11px] text-slate-700 dark:text-secondary-text">
                       {copy.tradeJournals.filters.rExpressionExamples.map((example) => (
                         <div key={example}>{example}</div>
                       ))}
@@ -67,17 +67,17 @@ export function ExpressionFilterPopover({
                 </div>
               </div>
               <label className="space-y-1">
-                <span className="text-xs font-medium text-slate-500">{copy.tradeJournals.filters.rExpression}</span>
+                <span className="text-xs font-medium text-slate-500 dark:text-muted-foreground">{copy.tradeJournals.filters.rExpression}</span>
                 <div className="space-y-1">
                   <Input
                     value={expression}
                     onChange={(event) => onExpressionChange(event.target.value)}
                     placeholder={copy.tradeJournals.filters.rExpressionPlaceholder}
-                    className={cn("h-9 font-mono", hasError && "border-red-300 focus-visible:ring-red-100")}
+                    className={cn("h-9 font-mono", hasError && "border-red-300 dark:border-negative/40 focus-visible:ring-red-100")}
                     aria-invalid={hasError}
                     autoFocus
                   />
-                  {hasError ? <p className="text-xs text-red-600">{copy.tradeJournals.filters.rExpressionError}</p> : null}
+                  {hasError ? <p className="text-xs text-red-600 dark:text-negative">{copy.tradeJournals.filters.rExpressionError}</p> : null}
                 </div>
               </label>
               <Button

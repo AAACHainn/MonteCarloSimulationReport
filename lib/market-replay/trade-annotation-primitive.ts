@@ -1,3 +1,4 @@
+import { chartThemes, type ChartTheme } from "@/lib/chart-theme";
 import {
   type IPrimitivePaneRenderer,
   type IPrimitivePaneView,
@@ -153,7 +154,7 @@ function laneOffsets(height = LABEL_HEIGHT, gap = LABEL_LANE_GAP) {
 }
 
 class ReplayTradeAnnotationPaneRenderer implements IPrimitivePaneRenderer {
-  constructor(private readonly snapshot: () => ProjectedSnapshot, private readonly scale = 1) {}
+  constructor(private readonly snapshot: () => ProjectedSnapshot, private readonly scale: number, private readonly theme: () => ChartTheme) {}
 
   draw(target: Parameters<IPrimitivePaneRenderer["draw"]>[0]): void {
     target.useMediaCoordinateSpace(({ context }) => {
@@ -202,8 +203,8 @@ class ReplayTradeAnnotationPaneRenderer implements IPrimitivePaneRenderer {
         }
         placed.push(labelRect);
 
-        context.strokeStyle = annotation.color;
-        context.fillStyle = annotation.color;
+        context.strokeStyle = this.theme().tradeColors[REPLAY_TRADE_ANNOTATION_COLORS.indexOf(annotation.color as typeof REPLAY_TRADE_ANNOTATION_COLORS[number])] ?? annotation.color;
+        context.fillStyle = this.theme().tradeColors[REPLAY_TRADE_ANNOTATION_COLORS.indexOf(annotation.color as typeof REPLAY_TRADE_ANNOTATION_COLORS[number])] ?? annotation.color;
         context.beginPath();
         context.moveTo(annotation.x, annotation.y);
         context.lineTo(lineEndX, annotation.y);
@@ -211,9 +212,9 @@ class ReplayTradeAnnotationPaneRenderer implements IPrimitivePaneRenderer {
         context.stroke();
         // Print-sized labels use a half-opacity white background.
         if (this.scale > 1) {
-          context.fillStyle = "rgba(255,255,255,.5)";
+          context.fillStyle = this.theme().annotationWash;
           context.fillRect(labelRect.left - gap / 2, labelRect.top, labelWidth + gap, labelHeight);
-          context.fillStyle = annotation.color;
+          context.fillStyle = this.theme().tradeColors[REPLAY_TRADE_ANNOTATION_COLORS.indexOf(annotation.color as typeof REPLAY_TRADE_ANNOTATION_COLORS[number])] ?? annotation.color;
         }
         context.fillText(annotation.label, labelX, labelY);
       }
@@ -225,8 +226,8 @@ class ReplayTradeAnnotationPaneRenderer implements IPrimitivePaneRenderer {
 class ReplayTradeAnnotationPaneView implements IPrimitivePaneView {
   private readonly paneRenderer: ReplayTradeAnnotationPaneRenderer;
 
-  constructor(snapshot: () => ProjectedSnapshot, scale = 1) {
-    this.paneRenderer = new ReplayTradeAnnotationPaneRenderer(snapshot, scale);
+  constructor(snapshot: () => ProjectedSnapshot, scale: number, theme: () => ChartTheme) {
+    this.paneRenderer = new ReplayTradeAnnotationPaneRenderer(snapshot, scale, theme);
   }
 
   zOrder() {
@@ -239,6 +240,8 @@ class ReplayTradeAnnotationPaneView implements IPrimitivePaneView {
 }
 
 export class ReplayTradeAnnotationPrimitive implements ISeriesPrimitive<Time> {
+  private theme: ChartTheme = chartThemes.light;
+  setTheme(theme: ChartTheme) { this.theme = theme; this.requestUpdate?.(); }
   private chart: SeriesAttachedParameter<Time>["chart"] | null = null;
   private series: SeriesAttachedParameter<Time>["series"] | null = null;
   private requestUpdate: (() => void) | null = null;
@@ -247,7 +250,7 @@ export class ReplayTradeAnnotationPrimitive implements ISeriesPrimitive<Time> {
   private readonly views: ReplayTradeAnnotationPaneView[];
 
   constructor(scale = 1) {
-    this.views = [new ReplayTradeAnnotationPaneView(() => this.projected, scale)];
+    this.views = [new ReplayTradeAnnotationPaneView(() => this.projected, scale, () => this.theme)];
   }
 
   attached(param: SeriesAttachedParameter<Time>) {

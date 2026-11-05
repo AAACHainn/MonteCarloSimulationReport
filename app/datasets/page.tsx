@@ -39,23 +39,23 @@ export default async function DatasetsPage() {
         <div className="flex items-center justify-between">
           <div>
             <h1 className="text-2xl font-semibold tracking-tight">{copy.datasets.title}</h1>
-            <p className="text-sm text-slate-600">{copy.datasets.subtitle}</p>
+            <p className="text-sm text-slate-600 dark:text-secondary-text">{copy.datasets.subtitle}</p>
           </div>
         </div>
 
         <div className="grid gap-3">
           {datasets.length === 0 ? (
-            <p className="rounded-lg border bg-white p-6 text-sm text-slate-600">{copy.datasets.empty}</p>
+            <p className="rounded-lg border bg-white dark:bg-card p-6 text-sm text-slate-600 dark:text-secondary-text">{copy.datasets.empty}</p>
           ) : (
             datasets.map((dataset) => (
               <Card key={dataset.id}>
                 <CardContent className="flex items-center justify-between gap-4 p-5">
                   <div className="flex items-start gap-3">
-                    <Database className="mt-1 h-5 w-5 text-blue-700" />
+                    <Database className="mt-1 h-5 w-5 text-blue-700 dark:text-link" />
                     <div>
-                      <h2 className="font-semibold text-slate-950">{dataset.name}</h2>
-                      <p className="text-sm text-slate-600">{dataset.description || copy.datasets.noDescription}</p>
-                      <p className="mt-2 text-xs text-slate-500">
+                      <h2 className="font-semibold text-slate-950 dark:text-foreground">{dataset.name}</h2>
+                      <p className="text-sm text-slate-600 dark:text-secondary-text">{dataset.description || copy.datasets.noDescription}</p>
+                      <p className="mt-2 text-xs text-slate-500 dark:text-muted-foreground">
                         {dataset._count.trades} {copy.datasets.trades} · {dataset._count.simulationRuns}{" "}
                         {copy.datasets.simulations}
                       </p>

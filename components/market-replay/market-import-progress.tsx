@@ -70,16 +70,16 @@ export function MarketImportProgress({ job, uploadPercent, children }: {
       : copy.marketReplay.importStageEta(duration(job.estimatedRemainingSeconds));
 
   return (
-    <div className={cn("space-y-2 rounded-lg border border-blue-200 bg-blue-50 p-3", job.status === "AWAITING_CONFIRMATION" && "border-amber-200 bg-amber-50")} role="status" aria-live="polite">
+    <div className={cn("space-y-2 rounded-lg border border-blue-200 dark:border-link/40 bg-blue-50 dark:bg-info-background p-3", job.status === "AWAITING_CONFIRMATION" && "border-amber-200 dark:border-warning/40 bg-amber-50 dark:bg-warning-background")} role="status" aria-live="polite">
       <div className="flex flex-wrap items-center justify-between gap-2">
-        <div className="flex min-w-0 items-center gap-2 text-sm font-medium text-blue-950">
+        <div className="flex min-w-0 items-center gap-2 text-sm font-medium text-blue-950 dark:text-link">
           {active ? <Loader2 className="h-4 w-4 shrink-0 animate-spin" /> : null}
           <span className="truncate">{job.fileName}</span>
         </div>
-        <span className="font-mono text-sm font-semibold text-blue-800">{progress.toFixed(1)}%</span>
+        <span className="font-mono text-sm font-semibold text-blue-800 dark:text-link">{progress.toFixed(1)}%</span>
       </div>
       <div
-        className="h-2 overflow-hidden rounded-full bg-blue-100"
+        className="h-2 overflow-hidden rounded-full bg-blue-100 dark:bg-info-background"
         role="progressbar"
         aria-label={copy.marketReplay.importProgressLabel}
         aria-valuemin={0}
@@ -88,8 +88,8 @@ export function MarketImportProgress({ job, uploadPercent, children }: {
       >
         <div className="h-full rounded-full bg-blue-600 transition-[width] duration-300" style={{ width: `${progress}%` }} />
       </div>
-      {job.targetName ? <p className="text-xs text-slate-700">{copy.marketReplay.appendJobTarget(job.targetName)}</p> : null}
-      <div className="grid gap-1 text-xs text-slate-700 sm:grid-cols-2">
+      {job.targetName ? <p className="text-xs text-slate-700 dark:text-secondary-text">{copy.marketReplay.appendJobTarget(job.targetName)}</p> : null}
+      <div className="grid gap-1 text-xs text-slate-700 dark:text-secondary-text sm:grid-cols-2">
         <div>{copy.marketReplay.importStageLabel}：<strong>{stateLabel}</strong></div>
         <div>{eta}</div>
         {job.stage === "UPLOADING" ? (
@@ -105,7 +105,7 @@ export function MarketImportProgress({ job, uploadPercent, children }: {
         {job.peakWorkerRssBytes > 0 ? <div>{copy.marketReplay.importPeakMemory(bytes(job.peakWorkerRssBytes))}</div> : null}
         <div>{copy.marketReplay.importLastUpdated(new Date(job.updatedAt).toLocaleTimeString("zh-CN", { hour12: false }))}</div>
       </div>
-      {job.appendPreview ? <p className="text-xs text-slate-700">{copy.marketReplay.appendSkipped(job.appendPreview.overlappingRows, job.appendPreview.duplicateRows)}</p> : null}
+      {job.appendPreview ? <p className="text-xs text-slate-700 dark:text-secondary-text">{copy.marketReplay.appendSkipped(job.appendPreview.overlappingRows, job.appendPreview.duplicateRows)}</p> : null}
       {children ? <div className="flex flex-wrap justify-end gap-2">{children}</div> : null}
     </div>
   );

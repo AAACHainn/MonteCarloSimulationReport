@@ -17,7 +17,7 @@ export function TradeTagManager({ tags }: { tags: ManagedTradeTag[] }) {
       inputId="new-trade-tag"
       maxNameLength={MAX_TAG_NAME_LENGTH}
       text={copy.masterData.tags}
-      icon={<Tags className="h-5 w-5 text-blue-700" aria-hidden="true" />}
+      icon={<Tags className="h-5 w-5 text-blue-700 dark:text-link" aria-hidden="true" />}
     />
   );
 }

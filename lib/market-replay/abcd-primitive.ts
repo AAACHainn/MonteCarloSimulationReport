@@ -1,3 +1,4 @@
+import { chartThemes, type ChartTheme } from "@/lib/chart-theme";
 import type { IPrimitivePaneRenderer, ISeriesPrimitive, PrimitiveHoveredItem, SeriesAttachedParameter, Time } from "lightweight-charts";
 import { abcdPriceAtLevel, distanceToSegment, trendLineCanvasDashArray, type AbcdDrawing, type AbcdGeometry, type FibonacciRetracementStyle } from "./chart-drawings";
 import { type AbcdCoordinates, type AbcdDraft, type AbcdHitPart, type AbcdPoint } from "./abcd-interaction";
@@ -15,6 +16,8 @@ type Projected = { id: string; coordinates: AbcdCoordinates; style: FibonacciRet
 
 /** All objects share the chart-owned timeline and a single canvas primitive. */
 export class AbcdPrimitive implements ISeriesPrimitive<Time> {
+  private theme: ChartTheme = chartThemes.light;
+  setTheme(theme: ChartTheme) { this.theme = theme; this.attachment?.requestUpdate(); }
   private attachment: SeriesAttachedParameter<Time> | null = null;
   private snapshot: AbcdSnapshot | null = null;
   private projected: Projected[] = [];
@@ -38,13 +41,13 @@ export class AbcdPrimitive implements ISeriesPrimitive<Time> {
             ...(item.style.showPrices ? [formatPriceForTick(segment.price!, this.snapshot!.priceTickSize)] : [])].join("  ");
           const x = Math.max(0, segment.start.x) + 3, y = segment.start.y;
           const width = context.measureText(text).width;
-          context.fillStyle = "rgba(255,255,255,.86)"; context.fillRect(x, y - 15, width + 6, 14);
+          context.fillStyle = this.theme.annotationBackground; context.fillRect(x, y - 15, width + 6, 14);
           context.fillStyle = segment.color; context.fillText(text, x + 3, y - 2);
         }
       }
       context.setLineDash([]); context.lineWidth = 2;
       for (const item of this.projected) if (item.selected || item.draft) {
-        context.strokeStyle = "#2962FF"; context.fillStyle = "#FFFFFF";
+        context.strokeStyle = this.theme.selection; context.fillStyle = this.theme.handle;
         // Only A, B, C are editable anchors; the D level never gets a handle.
         for (const point of Object.values(item.coordinates)) {
           if (point.x < -5 || point.x > this.width + 5 || point.y < -5 || point.y > this.height + 5) continue;

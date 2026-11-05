@@ -18,7 +18,7 @@ type HistoryRun = {
 
 export function HistoryTable({ runs }: { runs: HistoryRun[] }) {
   if (runs.length === 0) {
-    return <p className="rounded-lg border bg-white p-6 text-sm text-slate-600">{copy.simulations.noRuns}</p>;
+    return <p className="rounded-lg border bg-white dark:bg-card p-6 text-sm text-slate-600 dark:text-secondary-text">{copy.simulations.noRuns}</p>;
   }
 
   return (

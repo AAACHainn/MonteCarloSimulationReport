@@ -46,7 +46,7 @@ export function DisplayIntervalControls({
   }
 
   return <>
-    <Label htmlFor="display-interval" className="whitespace-nowrap text-xs text-slate-500">{copy.marketReplay.displayInterval}</Label>
+    <Label htmlFor="display-interval" className="whitespace-nowrap text-xs text-slate-500 dark:text-muted-foreground">{copy.marketReplay.displayInterval}</Label>
     <Select disabled={controlsDisabled} value={String(value)} onValueChange={(next) => void applyInterval(Number(next))}>
       <SelectTrigger id="display-interval" className="h-8 w-24"><SelectValue /></SelectTrigger>
       <SelectContent>

@@ -1,3 +1,4 @@
+import { CURRENT_CHART_RENDERER_VERSION, snapshotRendererVersion } from "@/lib/market-replay/snapshot-version";
 import { retrySqliteWrite } from "@/lib/sqlite-write";
 import { sessionMetrics } from "./statistics";
 export { sessionMetrics } from "./statistics";
@@ -29,14 +30,15 @@ import { AI_CHART_MAX_BARS, chartWarmupCount, selectChartAnnotations, type Chart
 
 export const hashValue = (value: unknown) => createHash("sha256").update(JSON.stringify(value)).digest("hex");
 export type ContextEntry = ReplayJournalEntryData & { sourceId: string; logicalKey: string; href: string; reviewOrigin: string; reviewSourceRunId?: string | null; disciplineStatus?: "PRESENT" | "NOT_RECORDED" | "CORRUPT"; disciplineContentHash?: string };
-export type ContextChart = { hash: string; sourceId: string; entryId: string; window: PdfWindow; intervalSeconds?: number; preferencesHash?: string; variantRef?: string; sourceTimes?: Record<string, string>; annotations?: ChartAnnotations };
+export type ContextChart = { rendererVersion?: number; hash: string; sourceId: string; entryId: string; window: PdfWindow; intervalSeconds?: number; preferencesHash?: string; variantRef?: string; sourceTimes?: Record<string, string>; annotations?: ChartAnnotations };
 export type ChartPlan = { entryId: string; intervalSeconds: number; fromSequence: number; endSequence: number; historyAvailable: number };
 export type ChartSubject = Pick<ContextEntry, "id" | "logicalKey" | "displayIntervalSeconds" | "closedAt">;
 export function annotatedChart(context: ContextValue, chart: ContextChart): ContextChart {
+  const rendererVersion = snapshotRendererVersion(context.rendererVersion);
   const annotations = selectChartAnnotations(context, chart);
   const hash = hashValue({ entryId: chart.entryId, displaySeconds: chart.intervalSeconds ?? context.display.displayIntervalSeconds,
-    displaySession: context.display.displaySession, window: chart.window, preferencesHash: chart.preferencesHash ?? hashValue(context.chartPreferences), rendererVersion: 2, annotations });
-  return { ...chart, hash, sourceId: "chart:" + hash, variantRef: "variant:" + hash, annotations };
+    displaySession: context.display.displaySession, window: chart.window, preferencesHash: chart.preferencesHash ?? hashValue(context.chartPreferences), rendererVersion, annotations });
+  return { ...chart, rendererVersion, hash, sourceId: "chart:" + hash, variantRef: "variant:" + hash, annotations };
 }
 export async function chartSourceTimes(datasetId: string, window: PdfWindow) {
   const rows = await prisma.marketBar.findMany({ where: { datasetId, sequence: { in: [...new Set(window.bars.flatMap((b) => [b.firstSequence, b.lastSequence]))] } }, take: 400, select: { sequence: true, timestamp: true } });
@@ -44,6 +46,7 @@ export async function chartSourceTimes(datasetId: string, window: PdfWindow) {
 }
 export type ContextEvent = { sourceId: string; cycleKey: string | null; sequence: number; kind: string; value: unknown; ordinal?: number; exactLogicalKeys?: string[] };
 export type ContextValue = {
+  rendererVersion?: number;
   schemaVersion: 1; capturedAt: string; mode: "review";
   replaySessionId: string; projectionId: string; sessionName: string;
   historyVersion: number; dataVersion: number; endSequence: number; asOfTime: string;
@@ -183,8 +186,8 @@ export async function createContext(input: z.input<typeof contextRequestSchema>)
         const window = await readExportWindow({ ...base, anchorSequence: anchor, direction: "forward", count: AI_CHART_MAX_BARS, warmupCount: chartWarmupCount(chartPreferences) });
         if (!window.bars.length) break;
         const preferencesHash = hashValue(chartPreferences);
-        const hash = hashValue({ entryId: entry.id, displaySeconds: initialSeconds, displaySession, window, preferencesHash, rendererVersion: 1 });
-        charts.push({ hash, sourceId: "chart:" + hash, entryId: entry.id, window, intervalSeconds: initialSeconds, preferencesHash, variantRef: "variant:" + hash, sourceTimes: await chartSourceTimes(dataset.id, window) });
+        const hash = hashValue({ entryId: entry.id, displaySeconds: initialSeconds, displaySession, window, preferencesHash, rendererVersion: CURRENT_CHART_RENDERER_VERSION });
+        charts.push({ rendererVersion: CURRENT_CHART_RENDERER_VERSION, hash, sourceId: "chart:" + hash, entryId: entry.id, window, intervalSeconds: initialSeconds, preferencesHash, variantRef: "variant:" + hash, sourceTimes: await chartSourceTimes(dataset.id, window) });
         const last = window.bars.at(-1)!.lastSequence;
         if (last >= entry.closedSequence || window.nextSequence === null) break;
         anchor = last + 1;
@@ -212,8 +215,8 @@ export async function createContext(input: z.input<typeof contextRequestSchema>)
         anchorSequence: plan.fromSequence, endSequence, finalSequence: endSequence + 1, direction: "forward", count: AI_CHART_MAX_BARS,
         warmupCount: chartWarmupCount(chartPreferences) });
       if (window.bars.length) {
-        const preferencesHash = hashValue(chartPreferences), hash = hashValue({ entryId: currentChart.id, displaySeconds: intervalSeconds, displaySession, window, preferencesHash, rendererVersion: 1 });
-        charts.push({ hash, sourceId: "chart:" + hash, entryId: currentChart.id, window, intervalSeconds, preferencesHash, variantRef: "variant:" + hash, sourceTimes: await chartSourceTimes(dataset.id, window) });
+        const preferencesHash = hashValue(chartPreferences), hash = hashValue({ entryId: currentChart.id, displaySeconds: intervalSeconds, displaySession, window, preferencesHash, rendererVersion: CURRENT_CHART_RENDERER_VERSION });
+        charts.push({ rendererVersion: CURRENT_CHART_RENDERER_VERSION, hash, sourceId: "chart:" + hash, entryId: currentChart.id, window, intervalSeconds, preferencesHash, variantRef: "variant:" + hash, sourceTimes: await chartSourceTimes(dataset.id, window) });
       }
     }
   }
@@ -221,6 +224,7 @@ export async function createContext(input: z.input<typeof contextRequestSchema>)
   if (!current || current.activeProjectionId !== input.projectionId || current.dataset.historyVersion !== dataset.historyVersion || current.dataset.dataVersion !== dataset.dataVersion)
     throw new AiError("CONTEXT_CONFLICT", copy.ai.conflict, 409);
   const value: ContextValue = {
+    rendererVersion: CURRENT_CHART_RENDERER_VERSION,
     schemaVersion: 1, capturedAt: new Date().toISOString(), mode: "review",
     replaySessionId: fixed.session.id, projectionId: input.projectionId, sessionName: fixed.session.name,
     historyVersion: dataset.historyVersion, dataVersion: dataset.dataVersion,

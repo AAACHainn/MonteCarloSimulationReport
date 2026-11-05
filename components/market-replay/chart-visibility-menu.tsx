@@ -60,7 +60,7 @@ export function ChartVisibilityMenu({
           align="start"
           sideOffset={6}
           collisionPadding={8}
-          className="z-[80] w-48 rounded-lg border border-slate-200 bg-white p-1.5 shadow-xl"
+          className="z-[80] w-48 rounded-lg border border-slate-200 dark:border-border bg-white dark:bg-card p-1.5 shadow-xl"
           role="menu"
           aria-label={copy.marketReplay.chartVisibility}
         >
@@ -70,22 +70,22 @@ export function ChartVisibilityMenu({
               type="button"
               role="menuitemcheckbox"
               aria-checked={!item.visible}
-              className="flex w-full items-center gap-2.5 rounded-md px-3 py-2 text-left text-sm text-slate-700 hover:bg-slate-100 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-600"
+              className="flex w-full items-center gap-2.5 rounded-md px-3 py-2 text-left text-sm text-slate-700 dark:text-secondary-text hover:bg-slate-100 dark:hover:bg-hover focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-600"
               onClick={() => toggle(item.target)}
             >
-              {item.visible ? <EyeOff className="h-4 w-4 text-slate-500" /> : <Eye className="h-4 w-4 text-blue-600" />}
+              {item.visible ? <EyeOff className="h-4 w-4 text-slate-500 dark:text-muted-foreground" /> : <Eye className="h-4 w-4 text-blue-600 dark:text-link" />}
               <span>{item.visible ? item.hideLabel : item.showLabel}</span>
             </button>
           ))}
-          <div className="my-1 border-t border-slate-200" />
+          <div className="my-1 border-t border-slate-200 dark:border-border" />
           <button
             type="button"
             role="menuitemcheckbox"
             aria-checked={allHidden}
-            className="flex w-full items-center gap-2.5 rounded-md px-3 py-2 text-left text-sm font-medium text-slate-800 hover:bg-slate-100 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-600"
+            className="flex w-full items-center gap-2.5 rounded-md px-3 py-2 text-left text-sm font-medium text-slate-800 dark:text-foreground hover:bg-slate-100 dark:hover:bg-hover focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-600"
             onClick={() => toggle("all")}
           >
-            {allHidden ? <Eye className="h-4 w-4 text-blue-600" /> : <EyeOff className="h-4 w-4 text-slate-500" />}
+            {allHidden ? <Eye className="h-4 w-4 text-blue-600 dark:text-link" /> : <EyeOff className="h-4 w-4 text-slate-500 dark:text-muted-foreground" />}
             <span>{allHidden ? copy.marketReplay.showAll : copy.marketReplay.hideAll}</span>
           </button>
         </Popover.Content>

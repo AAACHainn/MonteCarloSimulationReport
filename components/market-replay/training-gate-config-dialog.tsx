@@ -39,24 +39,24 @@ export function TrainingGateConfigDialog({ gate, busy, error, onClose, onSave }:
   return <Dialog open title={copy.trainingGate.title} description={copy.trainingGate.description}
     contentClassName="flex flex-col p-0" onClose={close}>
     <div className="min-h-0 flex-1 space-y-6 overflow-y-auto p-5" aria-busy={busy}>
-      {gate.active ? <div className="space-y-2 rounded-md border border-amber-200 bg-amber-50 p-3 text-sm text-amber-800" role="status">
+      {gate.active ? <div className="space-y-2 rounded-md border border-amber-200 dark:border-warning/40 bg-amber-50 dark:bg-warning-background p-3 text-sm text-amber-800 dark:text-warning" role="status">
         <p>{gate.source === "LOSS_STREAK" ? copy.trainingGate.automatic : copy.trainingGate.manual} · {copy.trainingGate.activeMode}：{copy.trainingGate.modes[gate.activeMode ?? "CHECKLIST"]}</p>
         <p className="tabular-nums">{copy.trainingGate.progress(gate.completedCount, gate.targetCount)}</p>
         <p>{copy.trainingGate.locked}</p>
         {gate.cancelledOrderCount ? <p>{copy.trainingGate.cancelled(gate.cancelledOrderCount)}</p> : null}
       </div> : null}
-      <div className="flex items-center justify-between gap-3 rounded-md border bg-slate-50 px-4 py-3 text-sm">
-        <p className="font-semibold text-slate-700">{copy.trainingGate.autoStatusLabel}</p>
-        <p className="flex items-center gap-2 tabular-nums text-slate-600">
-          <span aria-hidden="true" className={`h-2 w-2 rounded-full ${gate.autoEnabled ? "bg-primary" : "bg-slate-400"}`} />
+      <div className="flex items-center justify-between gap-3 rounded-md border bg-slate-50 dark:bg-muted px-4 py-3 text-sm">
+        <p className="font-semibold text-slate-700 dark:text-secondary-text">{copy.trainingGate.autoStatusLabel}</p>
+        <p className="flex items-center gap-2 tabular-nums text-slate-600 dark:text-secondary-text">
+          <span aria-hidden="true" className={`h-2 w-2 rounded-full ${gate.autoEnabled ? "bg-primary" : "bg-slate-400 dark:bg-secondary-text"}`} />
           {copy.trainingGate.autoStatusValue(gate.autoEnabled, gate.lossThreshold, gate.lossStreak)}
         </p>
       </div>
 
       <section aria-labelledby="gate-config-heading" className="space-y-4">
         <div className="flex items-baseline gap-2">
-          <h3 id="gate-config-heading" className="text-sm font-semibold text-slate-950">{copy.trainingGate.configuration}</h3>
-          <p className="text-xs text-slate-500">{copy.trainingGate.configurationHint}</p>
+          <h3 id="gate-config-heading" className="text-sm font-semibold text-slate-950 dark:text-foreground">{copy.trainingGate.configuration}</h3>
+          <p className="text-xs text-slate-500 dark:text-muted-foreground">{copy.trainingGate.configurationHint}</p>
         </div>
         <div className="grid grid-cols-2 gap-4">
           <div className="space-y-2">
@@ -64,8 +64,8 @@ export function TrainingGateConfigDialog({ gate, busy, error, onClose, onSave }:
             <Input id="gate-trade-count" type="number" min={1} max={2147483647} step={1} value={count}
               disabled={readOnly} onChange={event => setCount(event.target.value)}
               aria-invalid={!validCount} aria-describedby={validCount ? "gate-count-hint" : "gate-count-hint gate-count-error"} />
-            <p id="gate-count-hint" className="text-xs text-slate-500">{copy.trainingGate.countHint}</p>
-            {!validCount ? <p id="gate-count-error" className="text-xs text-red-600" role="alert">{copy.trainingGate.invalidCount}</p> : null}
+            <p id="gate-count-hint" className="text-xs text-slate-500 dark:text-muted-foreground">{copy.trainingGate.countHint}</p>
+            {!validCount ? <p id="gate-count-error" className="text-xs text-red-600 dark:text-negative" role="alert">{copy.trainingGate.invalidCount}</p> : null}
           </div>
           <div className="space-y-2">
             <Label htmlFor="gate-next-mode">{copy.trainingGate.nextMode}</Label>
@@ -82,14 +82,14 @@ export function TrainingGateConfigDialog({ gate, busy, error, onClose, onSave }:
 
       <section aria-labelledby="gate-auto-heading" className="space-y-3">
         <div className="flex items-baseline gap-2">
-          <h3 id="gate-auto-heading" className="text-sm font-semibold text-slate-950">{copy.trainingGate.automation}</h3>
-          <p className="text-xs text-slate-500">{copy.trainingGate.automationHint}</p>
+          <h3 id="gate-auto-heading" className="text-sm font-semibold text-slate-950 dark:text-foreground">{copy.trainingGate.automation}</h3>
+          <p className="text-xs text-slate-500 dark:text-muted-foreground">{copy.trainingGate.automationHint}</p>
         </div>
         <div className="overflow-hidden rounded-md border">
-          <div className="flex items-center justify-between gap-4 border-b bg-slate-50 px-4 py-3">
+          <div className="flex items-center justify-between gap-4 border-b bg-slate-50 dark:bg-muted px-4 py-3">
             <div className="space-y-1">
               <Label htmlFor="gate-auto-enabled">{copy.trainingGate.autoEnabled}</Label>
-              <p id="gate-auto-hint" className="text-xs text-slate-500">{copy.trainingGate.autoEnabledHint}</p>
+              <p id="gate-auto-hint" className="text-xs text-slate-500 dark:text-muted-foreground">{copy.trainingGate.autoEnabledHint}</p>
             </div>
             <Switch id="gate-auto-enabled" checked={autoEnabled} disabled={readOnly} onCheckedChange={setAutoEnabled} aria-describedby="gate-auto-hint" />
           </div>
@@ -98,12 +98,12 @@ export function TrainingGateConfigDialog({ gate, busy, error, onClose, onSave }:
             <Input id="gate-loss-threshold" type="number" min={1} max={2147483647} step={1} value={threshold}
               disabled={readOnly || !autoEnabled} onChange={event => setThreshold(event.target.value)} className="w-56 max-w-full"
               aria-invalid={autoEnabled && !validThreshold} aria-describedby={autoEnabled && !validThreshold ? "gate-loss-hint gate-loss-error" : "gate-loss-hint"} />
-            <p id="gate-loss-hint" className="text-xs text-slate-500">{copy.trainingGate.lossThresholdHint}</p>
-            {autoEnabled && !validThreshold ? <p id="gate-loss-error" className="text-xs text-red-600" role="alert">{copy.trainingGate.invalidThreshold}</p> : null}
+            <p id="gate-loss-hint" className="text-xs text-slate-500 dark:text-muted-foreground">{copy.trainingGate.lossThresholdHint}</p>
+            {autoEnabled && !validThreshold ? <p id="gate-loss-error" className="text-xs text-red-600 dark:text-negative" role="alert">{copy.trainingGate.invalidThreshold}</p> : null}
           </div>
         </div>
       </section>
-      {error ? <p className="text-sm text-red-600" role="alert">{error}</p> : null}
+      {error ? <p className="text-sm text-red-600 dark:text-negative" role="alert">{error}</p> : null}
     </div>
     <div className="flex shrink-0 flex-wrap justify-end gap-2 border-t px-5 py-4" aria-busy={busy}>
       <Button type="button" variant="outline" disabled={busy} onClick={close}>{copy.common.cancel}</Button>

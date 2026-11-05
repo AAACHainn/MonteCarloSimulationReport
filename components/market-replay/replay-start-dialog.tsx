@@ -57,8 +57,8 @@ export function ReplayStartDialog({
         <DateTimePicker ref={pickerRef} value={value} minimum={minimum} maximum={maximum} disabled={busy} onChange={onChange} />
 
         <div className="flex justify-center">{firstAvailableDate}</div>
-        <p className="text-center text-xs text-slate-500">{timezone} · {minimum.replace("T", " ")} – {maximum.replace("T", " ")}</p>
-        {error ? <p className="text-sm text-red-600">{error}</p> : null}
+        <p className="text-center text-xs text-slate-500 dark:text-muted-foreground">{timezone} · {minimum.replace("T", " ")} – {maximum.replace("T", " ")}</p>
+        {error ? <p className="text-sm text-red-600 dark:text-negative">{error}</p> : null}
         <div className="flex justify-end gap-2 border-t pt-4">
           <Button type="button" variant="outline" disabled={busy} onClick={onCancel}>{copy.common.cancel}</Button>
           <Button type="submit" disabled={busy}>{busy ? copy.marketReplay.selectingReplayDate : confirmLabel ?? copy.marketReplay.selectReplayDateConfirm}</Button>

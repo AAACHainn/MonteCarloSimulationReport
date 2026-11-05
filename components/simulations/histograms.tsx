@@ -1,5 +1,9 @@
 "use client";
 
+import { useMemo } from "react";
+import { useAppearance } from "@/components/appearance-provider";
+import { resolveChartTheme, chartTooltipStyle } from "@/lib/chart-theme";
+
 import { Bar, BarChart, CartesianGrid, ResponsiveContainer, Tooltip, XAxis, YAxis } from "recharts";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { copy } from "@/lib/i18n";
@@ -15,7 +19,9 @@ export function Histograms({
   initialCapital: number;
   valueMode: ChartValueMode;
 }) {
-  const charts = [
+  const { mode } = useAppearance();
+  const theme = resolveChartTheme(mode);
+  const charts = useMemo(() => [
     {
       title: copy.report.finalEquityHistogram,
       data: summary.finalEquityHistogram.map((bin) => ({
@@ -43,7 +49,7 @@ export function Histograms({
       data: summary.losingStreakDistribution,
       xKey: "streak",
     },
-  ];
+  ], [summary, initialCapital, valueMode]);
 
   return (
     <div className="grid gap-4 lg:grid-cols-3">
@@ -55,11 +61,11 @@ export function Histograms({
           <CardContent className="h-80">
             <ResponsiveContainer width="100%" height="100%">
               <BarChart data={chart.data}>
-                <CartesianGrid strokeDasharray="3 3" />
-                <XAxis dataKey={chart.xKey} tick={{ fontSize: 11 }} interval="preserveStartEnd" />
-                <YAxis />
-                <Tooltip />
-                <Bar dataKey="count" fill="#2563eb" radius={[3, 3, 0, 0]} />
+                <CartesianGrid stroke={theme.grid} strokeDasharray="3 3" />
+                <XAxis stroke={theme.text} axisLine={{ stroke: theme.border }} tickLine={{ stroke: theme.border }} dataKey={chart.xKey} tick={{ fontSize: 11 }} interval="preserveStartEnd" />
+                <YAxis stroke={theme.text} axisLine={{ stroke: theme.border }} tickLine={{ stroke: theme.border }} />
+                <Tooltip contentStyle={chartTooltipStyle(theme)} labelStyle={{ color: theme.tooltipText }} itemStyle={{ color: theme.tooltipText }} cursor={{ stroke: theme.crosshair, fill: theme.grid }} />
+                <Bar dataKey="count" fill={theme.buy} radius={[3, 3, 0, 0]} />
               </BarChart>
             </ResponsiveContainer>
           </CardContent>

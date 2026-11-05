@@ -55,7 +55,7 @@ export function MarketAggregationControl({ datasetId }: { datasetId: string }) {
     : job?.status === "CANCELLED" ? copy.marketReplay.aggregation.cancelled
     : job?.status === "INTERRUPTED" ? copy.marketReplay.aggregation.interrupted
     : status?.ready ? copy.marketReplay.aggregation.ready : copy.marketReplay.aggregation.pending;
-  return <section aria-label={copy.marketReplay.aggregation.title} aria-busy={!status || !!running || busy} className="space-y-2 border-t pt-3 text-xs text-slate-600">
+  return <section aria-label={copy.marketReplay.aggregation.title} aria-busy={!status || !!running || busy} className="space-y-2 border-t pt-3 text-xs text-slate-600 dark:text-secondary-text">
     <p className="flex items-center gap-2" role="status" aria-live="polite">{running ? <Loader2 className="h-4 w-4 animate-spin motion-reduce:animate-none" aria-hidden="true" /> : null}{label}</p>
     {job && job.status !== "COMPLETED" ? <p className="tabular-nums">{copy.marketReplay.aggregation.progress(formatInteger(job.processed), formatInteger(job.total))}</p> : null}
     {status?.ready && job && job.status !== "COMPLETED" ? <p>{copy.marketReplay.aggregation.ready}</p> : null}
@@ -71,7 +71,7 @@ export function MarketAggregationControl({ datasetId }: { datasetId: string }) {
         </Button>
       </>}
     </div>
-    {error || job?.error ? <p role="alert" className="text-red-700">{error ?? job?.error}</p> : null}
+    {error || job?.error ? <p role="alert" className="text-red-700 dark:text-negative">{error ?? job?.error}</p> : null}
     <ConfirmDialog open={confirm} onCancel={() => setConfirm(false)} title={copy.marketReplay.aggregation.rebuildTitle} description={copy.marketReplay.aggregation.rebuildDescription} confirmLabel={copy.marketReplay.aggregation.rebuild} confirmVariant="default" isLoading={busy} error={error} onConfirm={() => void act("rebuild")} />
   </section>;
 }

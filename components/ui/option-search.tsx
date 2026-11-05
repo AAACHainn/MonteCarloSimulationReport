@@ -30,7 +30,7 @@ export const OptionSearch = forwardRef<HTMLInputElement, {
   const id = useId();
   return <div className="relative shrink-0">
     <Label htmlFor={id} className="sr-only">{placeholder}</Label>
-    <Search className="pointer-events-none absolute left-3 top-3 h-4 w-4 text-slate-500" aria-hidden="true" />
+    <Search className="pointer-events-none absolute left-3 top-3 h-4 w-4 text-slate-500 dark:text-muted-foreground" aria-hidden="true" />
     <Input
       ref={ref}
       id={id}

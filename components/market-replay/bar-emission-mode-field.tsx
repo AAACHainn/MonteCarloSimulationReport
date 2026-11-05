@@ -14,6 +14,6 @@ export function BarEmissionModeField({ id, value, onChange, name, disabled }: {
       <SelectTrigger id={id} aria-describedby={`${id}-hint`}><SelectValue /></SelectTrigger>
       <SelectContent>{BAR_EMISSION_MODES.map(mode => <SelectItem key={mode} value={mode}>{copy.marketReplay.barEmission.modes[mode]}</SelectItem>)}</SelectContent>
     </Select>
-    <p id={`${id}-hint`} className="text-xs text-slate-500">{copy.marketReplay.barEmission.hint}</p>
+    <p id={`${id}-hint`} className="text-xs text-slate-500 dark:text-muted-foreground">{copy.marketReplay.barEmission.hint}</p>
   </div>;
 }

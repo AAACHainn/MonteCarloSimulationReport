@@ -1,3 +1,4 @@
+import { chartThemes, type ChartTheme } from "@/lib/chart-theme";
 import {
   type IPrimitivePaneRenderer,
   type IPrimitivePaneView,
@@ -60,7 +61,7 @@ function firstLabelAtOrAfter(labels: BarCountLabel[], index: number) {
 }
 
 class BarCountPaneRenderer implements IPrimitivePaneRenderer {
-  constructor(private readonly labels: () => ProjectedLabel[], private readonly scale: number) {}
+  constructor(private readonly labels: () => ProjectedLabel[], private readonly scale: number, private readonly theme: () => ChartTheme) {}
 
   draw(target: Parameters<IPrimitivePaneRenderer["draw"]>[0]) {
     target.useMediaCoordinateSpace(({ context }) => {
@@ -74,7 +75,7 @@ class BarCountPaneRenderer implements IPrimitivePaneRenderer {
         if (this.scale > 1) {
           const width = context.measureText(label.text).width + 4 * this.scale;
           const height = LABEL_HEIGHT * this.scale;
-          context.fillStyle = "rgba(255, 255, 255, 0.5)";
+          context.fillStyle = this.theme().annotationWash;
           context.fillRect(label.x - width / 2, label.y - height / 2, width, height);
         }
         context.fillStyle = label.color;
@@ -88,8 +89,8 @@ class BarCountPaneRenderer implements IPrimitivePaneRenderer {
 class BarCountPaneView implements IPrimitivePaneView {
   private readonly paneRenderer: BarCountPaneRenderer;
 
-  constructor(labels: () => ProjectedLabel[], scale: number) {
-    this.paneRenderer = new BarCountPaneRenderer(labels, scale);
+  constructor(labels: () => ProjectedLabel[], scale: number, theme: () => ChartTheme) {
+    this.paneRenderer = new BarCountPaneRenderer(labels, scale, theme);
   }
 
   zOrder() { return "top" as const; }
@@ -97,6 +98,8 @@ class BarCountPaneView implements IPrimitivePaneView {
 }
 
 export class BarCountPrimitive implements ISeriesPrimitive<Time> {
+  private theme: ChartTheme = chartThemes.light;
+  setTheme(theme: ChartTheme) { this.theme = theme; this.requestUpdate?.(); }
   private chart: SeriesAttachedParameter<Time>["chart"] | null = null;
   private series: SeriesAttachedParameter<Time>["series"] | null = null;
   private requestUpdate: (() => void) | null = null;
@@ -108,7 +111,7 @@ export class BarCountPrimitive implements ISeriesPrimitive<Time> {
   private readonly views: BarCountPaneView[];
 
   constructor(private readonly scale = 1) {
-    this.views = [new BarCountPaneView(() => this.projected, scale)];
+    this.views = [new BarCountPaneView(() => this.projected, scale, () => this.theme)];
   }
 
   attached(param: SeriesAttachedParameter<Time>) {

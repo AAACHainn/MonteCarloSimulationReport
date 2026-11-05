@@ -53,10 +53,10 @@ export default function Home() {
   return (
     <div className="space-y-8">
       <section className="flex flex-col gap-4 border-b pb-8">
-        <p className="font-mono text-sm uppercase tracking-wide text-blue-700">{copy.home.eyebrow}</p>
+        <p className="font-mono text-sm uppercase tracking-wide text-blue-700 dark:text-link">{copy.home.eyebrow}</p>
         <div className="max-w-3xl space-y-3">
-          <h1 className="text-4xl font-semibold tracking-tight text-slate-950">{copy.home.title}</h1>
-          <p className="text-lg text-slate-600">{copy.home.description}</p>
+          <h1 className="text-4xl font-semibold tracking-tight text-slate-950 dark:text-foreground">{copy.home.title}</h1>
+          <p className="text-lg text-slate-600 dark:text-secondary-text">{copy.home.description}</p>
         </div>
         <div className="flex gap-3">
           <Button asChild>
@@ -75,11 +75,11 @@ export default function Home() {
         {actions.map((action) => (
           <Card key={action.href}>
             <CardHeader>
-              <action.icon className="h-5 w-5 text-blue-700" />
+              <action.icon className="h-5 w-5 text-blue-700 dark:text-link" />
               <CardTitle>{action.title}</CardTitle>
             </CardHeader>
             <CardContent className="space-y-4">
-              <p className="text-sm text-slate-600">{action.body}</p>
+              <p className="text-sm text-slate-600 dark:text-secondary-text">{action.body}</p>
               <Button asChild variant="outline" className="w-full">
                 <Link href={action.href}>{copy.home.open}</Link>
               </Button>

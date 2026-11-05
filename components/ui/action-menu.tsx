@@ -15,7 +15,7 @@ export function ActionMenu({ trigger, label, items, layerClassName = "z-[70]" }:
       if (event.key === "Escape") { event.preventDefault(); setOpen(false); }
     }} className={layerClassName + " w-56 overflow-y-auto rounded-lg p-1"}>
       <div className="space-y-1">{items.map((item) => <Popover.Close asChild key={item.label}>
-        <Button variant="ghost" disabled={item.disabled} onClick={item.onSelect} className={"w-full justify-start whitespace-normal text-left " + (item.destructive ? "text-red-700 hover:text-red-700" : "")}>{item.icon}{item.label}</Button>
+        <Button variant="ghost" disabled={item.disabled} onClick={item.onSelect} className={"w-full justify-start whitespace-normal text-left " + (item.destructive ? "text-red-700 dark:text-negative hover:text-red-700 dark:hover:text-negative" : "")}>{item.icon}{item.label}</Button>
       </Popover.Close>)}</div>
     </OptionPopoverContent>
   </Popover.Portal></Popover.Root>;

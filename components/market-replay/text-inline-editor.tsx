@@ -129,11 +129,11 @@ export function TextInlineEditor({ apiRef, anchor, text, style, onChange, valid,
             if (event.key !== "ArrowLeft" && event.key !== "ArrowRight") return;
             event.preventDefault(); event.stopPropagation();
             onWidth(Math.max(120, Math.min(800, style.wrapWidth + (event.key === "ArrowRight" ? 1 : -1) * (event.shiftKey ? 10 : 1))));
-          }}><span aria-hidden="true" className="h-2 w-2 rounded-sm border border-blue-600 bg-white" /></button>
+          }}><span aria-hidden="true" className="h-2 w-2 rounded-sm border border-blue-600 dark:border-link bg-white dark:bg-card" /></button>
       </div>
     </div>
     <div aria-live="polite" className="absolute left-0 top-full mt-1 max-w-full text-xs">
-      {error || text.trim() && !valid ? <div id={`${id}-error`} role="alert" className="rounded border border-red-200 bg-white p-2 text-red-700">
+      {error || text.trim() && !valid ? <div id={`${id}-error`} role="alert" className="rounded border border-red-200 dark:border-negative/40 bg-white dark:bg-card p-2 text-red-700 dark:text-negative">
         {error || copy.marketReplay.textContentError}
         {error ? <Button type="button" variant="ghost" size="sm" onClick={() => void onRetry()}>{copy.marketReplay.textSaveRetry}</Button> : null}
       </div> : saving ? <span className="sr-only">{copy.marketReplay.textAutosaving}</span>

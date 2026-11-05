@@ -63,15 +63,15 @@ export function ResizableTradePanel({ onClose, children, checking }: { onClose: 
   }
 
   return <aside ref={panelRef} id="replay-trade-panel" aria-label={copy.paperTrading.panelTitle}
-    className="relative flex min-h-0 shrink-0 flex-col border-l bg-white" style={{ width }} inert={checking || undefined}>
+    className="relative flex min-h-0 shrink-0 flex-col border-l bg-white dark:bg-card" style={{ width }} inert={checking || undefined}>
     <div role="separator" tabIndex={0} aria-orientation="vertical" aria-label={copy.paperTrading.resizeTradePanel} aria-controls="replay-trade-panel"
       aria-valuemin={TRADE_PANEL_MIN_WIDTH} aria-valuemax={maximum} aria-valuenow={width} title={copy.paperTrading.resizeTradePanelHint}
       className="absolute -left-1 top-0 z-20 h-full w-2 cursor-col-resize touch-none focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring after:absolute after:inset-y-0 after:left-1/2 after:w-px after:bg-transparent hover:after:bg-blue-600 focus-visible:after:bg-blue-600"
       onPointerDown={onPointerDown} onPointerMove={onPointerMove} onPointerUp={event => finishDrag(event)}
       onPointerCancel={event => finishDrag(event, true)} onLostPointerCapture={event => finishDrag(event, true)} onKeyDown={onResizeKey} />
     <header className="flex shrink-0 items-center justify-between border-b px-4 py-2">
-      <h2 className="text-sm font-semibold text-slate-950">{copy.paperTrading.panelTitle}</h2>
-      <Button type="button" variant="ghost" size="icon" className="h-8 w-8 text-slate-500" aria-label={copy.paperTrading.closeTradePanel} onClick={onClose}>
+      <h2 className="text-sm font-semibold text-slate-950 dark:text-foreground">{copy.paperTrading.panelTitle}</h2>
+      <Button type="button" variant="ghost" size="icon" className="h-8 w-8 text-slate-500 dark:text-muted-foreground" aria-label={copy.paperTrading.closeTradePanel} onClick={onClose}>
         <X className="h-4 w-4" aria-hidden="true" />
       </Button>
     </header>

@@ -1,4 +1,7 @@
 "use client";
+
+import { useAppearance } from "@/components/appearance-provider";
+import { resolveChartTheme, chartTooltipStyle } from "@/lib/chart-theme";
 import { protectiveOrderLabel, protectiveQuantityMode } from "@/lib/paper-trading/protective-orders";
 import { createUuid } from "@/lib/uuid";
 import { useReplayFetch } from "./replay-session-context";
@@ -91,7 +94,7 @@ function fillReasonLabel(reason: PaperSessionSnapshot["recentFills"][number]["re
 
 export function PaperAccountStrip({ snapshot, compact = false, overview = false }: { snapshot: PaperSessionSnapshot | null; compact?: boolean; overview?: boolean }) {
   if (!snapshot || snapshot.propAccount) return null;
-  if (overview) return <div className="space-y-4"><h3 className="text-base font-semibold text-slate-950">{copy.propPractice.standard}</h3><div className="flex items-baseline justify-between gap-2"><h4 className="text-sm font-semibold text-slate-950">{copy.propPractice.tradingOverview}</h4><p className="text-xs text-slate-500">{copy.propPractice.currentSessionData}</p></div><PaperAccountMetrics snapshot={snapshot} compact={compact} tiles /></div>;
+  if (overview) return <div className="space-y-4"><h3 className="text-base font-semibold text-slate-950 dark:text-foreground">{copy.propPractice.standard}</h3><div className="flex items-baseline justify-between gap-2"><h4 className="text-sm font-semibold text-slate-950 dark:text-foreground">{copy.propPractice.tradingOverview}</h4><p className="text-xs text-slate-500 dark:text-muted-foreground">{copy.propPractice.currentSessionData}</p></div><PaperAccountMetrics snapshot={snapshot} compact={compact} tiles /></div>;
   return <Card><CardContent className="p-4"><PaperAccountMetrics snapshot={snapshot} compact={compact} /></CardContent></Card>;
 }
 
@@ -115,7 +118,7 @@ export function PaperAccountMetrics({ snapshot, compact = false, includeBalances
   ];
   return (
     <div className={tiles ? "grid grid-cols-2 gap-px overflow-hidden rounded-md border bg-border text-sm tabular-nums sm:grid-cols-4" : compact ? "grid grid-cols-4 gap-4 text-sm tabular-nums" : "grid gap-3 text-sm sm:grid-cols-2 lg:grid-cols-4 xl:grid-cols-8"}>
-      {items.map(([label, value]) => <div key={label} className={tiles ? "min-w-0 bg-white p-3" : undefined}><p className="text-xs text-slate-500">{label}</p><p className={tiles ? "mt-1 break-words font-medium text-slate-950" : "font-medium text-slate-950"}>{value}</p></div>)}
+      {items.map(([label, value]) => <div key={label} className={tiles ? "min-w-0 bg-white dark:bg-card p-3" : undefined}><p className="text-xs text-slate-500 dark:text-muted-foreground">{label}</p><p className={tiles ? "mt-1 break-words font-medium text-slate-950 dark:text-foreground" : "font-medium text-slate-950 dark:text-foreground"}>{value}</p></div>)}
     </div>
   );
 }
@@ -142,7 +145,7 @@ export function PaperTradingPanel({ embedded = false, priceTickSize, snapshot, c
           <div><Label htmlFor="paper-quantity">{copy.paperTrading.quantity}</Label><Input id="paper-quantity" name="quantity" type="number" min="0.00000001" step="any" value={inputQuantity} onChange={(event) => setInputQuantity(Number(event.target.value))} required /></div>
           {type !== "MARKET" ? <div><Label htmlFor="paper-price">{copy.paperTrading.orderPrice}</Label><Input id="paper-price" name="price" type="number" step={priceTickSize} defaultValue={currentBar ? snapPriceToTick(currentBar.close, priceTickSize) : undefined} required /></div> : null}
           <div className="grid grid-cols-2 gap-2"><div><Label htmlFor="paper-stop-loss">{copy.paperTrading.stopLoss}（{copy.paperTrading.optional}）</Label><Input id="paper-stop-loss" name="stopLoss" type="number" step={priceTickSize} /></div><div><Label htmlFor="paper-take-profit">{copy.paperTrading.takeProfit}（{copy.paperTrading.optional}）</Label><Input id="paper-take-profit" name="takeProfit" type="number" step={priceTickSize} /></div></div>
-          {error ? <p className="text-sm text-red-600">{error}</p> : null}
+          {error ? <p className="text-sm text-red-600 dark:text-negative">{error}</p> : null}
           <Button type="submit" disabled={busy || !currentBar} className="w-full">{busy ? <Loader2 className="h-4 w-4 animate-spin" /> : null}{busy ? copy.paperTrading.submitting : snapshot.session.trainingGate?.active && !isClosingOrder(snapshot.session.netQuantity, side, inputQuantity) ? copy.trainingGate.entryAction(snapshot.session.trainingGate.activeMode ?? "CHECKLIST") : copy.paperTrading.submitOrder}</Button>
         </form>
         {quantity > 0 ? <div className="grid grid-cols-2 gap-2 border-t pt-3"><Button type="button" variant="outline" disabled={busy} onClick={() => void onSubmit({ side: snapshot.session.netQuantity > 0 ? "SELL" : "BUY", type: "MARKET", quantity, price: null, stopLoss: null, takeProfit: null, reduceOnly: true })}>{copy.paperTrading.closePosition}</Button><Button type="button" variant="outline" disabled={busy} onClick={() => void onSubmit({ side: snapshot.session.netQuantity > 0 ? "SELL" : "BUY", type: "MARKET", quantity: quantity * 2, price: null, stopLoss: null, takeProfit: null })}>{copy.paperTrading.reversePosition}</Button></div> : null}
@@ -155,8 +158,8 @@ export function PaperTradingPanel({ embedded = false, priceTickSize, snapshot, c
 
 function ActiveOrders({ embedded, priceTickSize, orders, busy, onCancel, onUpdate }: { embedded: boolean; priceTickSize: number; orders: PaperOrderData[]; busy: boolean; onCancel: Props["onCancel"]; onUpdate: Props["onUpdate"] }) {
   const [openId, setOpenId] = useState<string | null>(null);
-  if (!orders.length) return <p className="rounded-md border border-dashed p-3 text-xs text-slate-500">{copy.paperTrading.noOrders}</p>;
-  return <div className="space-y-2 border-t pt-3">{orders.map((order) => <div key={order.id} className="rounded-md border bg-slate-50 p-2 text-xs"><div className="flex items-center justify-between gap-2"><div><span className={order.side === "BUY" ? "font-medium text-emerald-700" : "font-medium text-red-700"}>{order.side === "BUY" ? copy.paperTrading.buy : copy.paperTrading.sell}</span> · {order.isProtective ? protectiveOrderLabel(order) : orderTypeLabel(order.type)} · {number(order.quantity, 8)} {order.price == null ? "" : `@ ${number(order.price, 8)}`}</div><button type="button" onClick={() => setOpenId(openId === order.id ? null : order.id)} aria-label={copy.paperTrading.edit}>{openId === order.id ? <ChevronUp className="h-4 w-4" /> : <ChevronDown className="h-4 w-4" />}</button></div>{openId === order.id ? <form className={embedded ? "mt-2 grid grid-cols-2 gap-1" : "mt-2 grid grid-cols-[minmax(0,1fr)_minmax(0,1fr)_auto_auto] gap-1"} onSubmit={(event) => { event.preventDefault(); const data = new FormData(event.currentTarget); void onUpdate(order.id, { ...(order.isProtective ? {} : { quantity: Number(data.get("quantity")) }), ...(order.price == null ? {} : { price: snapPriceToTick(Number(data.get("price")), priceTickSize) }) }); setOpenId(null); }}>{order.isProtective ? <span /> : <Input name="quantity" type="number" step="any" defaultValue={order.quantity} className="h-8" />}{order.price == null ? <span /> : <Input name="price" type="number" step={priceTickSize} defaultValue={order.price} className="h-8" />}<Button type="submit" size="sm" disabled={busy}>{copy.paperTrading.save}</Button><Button type="button" variant="ghost" size="sm" disabled={busy} onClick={() => void onCancel(order.id)}>{copy.paperTrading.cancel}</Button></form> : null}</div>)}</div>;
+  if (!orders.length) return <p className="rounded-md border border-dashed p-3 text-xs text-slate-500 dark:text-muted-foreground">{copy.paperTrading.noOrders}</p>;
+  return <div className="space-y-2 border-t pt-3">{orders.map((order) => <div key={order.id} className="rounded-md border bg-slate-50 dark:bg-muted p-2 text-xs"><div className="flex items-center justify-between gap-2"><div><span className={order.side === "BUY" ? "font-medium text-emerald-700 dark:text-positive" : "font-medium text-red-700 dark:text-negative"}>{order.side === "BUY" ? copy.paperTrading.buy : copy.paperTrading.sell}</span> · {order.isProtective ? protectiveOrderLabel(order) : orderTypeLabel(order.type)} · {number(order.quantity, 8)} {order.price == null ? "" : `@ ${number(order.price, 8)}`}</div><button type="button" onClick={() => setOpenId(openId === order.id ? null : order.id)} aria-label={copy.paperTrading.edit}>{openId === order.id ? <ChevronUp className="h-4 w-4" /> : <ChevronDown className="h-4 w-4" />}</button></div>{openId === order.id ? <form className={embedded ? "mt-2 grid grid-cols-2 gap-1" : "mt-2 grid grid-cols-[minmax(0,1fr)_minmax(0,1fr)_auto_auto] gap-1"} onSubmit={(event) => { event.preventDefault(); const data = new FormData(event.currentTarget); void onUpdate(order.id, { ...(order.isProtective ? {} : { quantity: Number(data.get("quantity")) }), ...(order.price == null ? {} : { price: snapPriceToTick(Number(data.get("price")), priceTickSize) }) }); setOpenId(null); }}>{order.isProtective ? <span /> : <Input name="quantity" type="number" step="any" defaultValue={order.quantity} className="h-8" />}{order.price == null ? <span /> : <Input name="price" type="number" step={priceTickSize} defaultValue={order.price} className="h-8" />}<Button type="submit" size="sm" disabled={busy}>{copy.paperTrading.save}</Button><Button type="button" variant="ghost" size="sm" disabled={busy} onClick={() => void onCancel(order.id)}>{copy.paperTrading.cancel}</Button></form> : null}</div>)}</div>;
 }
 
 export function PaperTradingDetails({ snapshot, onFocusJournalEntry }: { snapshot: PaperSessionSnapshot | null; onFocusJournalEntry?: (entry: ReplayJournalEntryData) => void }) {
@@ -280,9 +283,9 @@ export function PaperTradingDetails({ snapshot, onFocusJournalEntry }: { snapsho
             ? { left: position.x, top: position.y, width: size.width, height: size.height }
             : { left: "50%", top: "50%", transform: "translate(-50%, -50%)" }}
         >
-          <Card className="h-full overflow-hidden border-slate-300 bg-white shadow-2xl"><CardContent className="flex h-full flex-col p-0">
+          <Card className="h-full overflow-hidden border-slate-300 dark:border-input bg-white dark:bg-card shadow-2xl"><CardContent className="flex h-full flex-col p-0">
             <div
-              className="flex h-12 shrink-0 touch-none select-none items-center gap-2 border-b bg-slate-50 px-3 cursor-move"
+              className="flex h-12 shrink-0 touch-none select-none items-center gap-2 border-b bg-slate-50 dark:bg-muted px-3 cursor-move"
               title={copy.paperTrading.dragRecords}
               onPointerDown={(event) => {
                 if (event.button !== 0 || (event.target as HTMLElement).closest("button")) return;
@@ -308,8 +311,8 @@ export function PaperTradingDetails({ snapshot, onFocusJournalEntry }: { snapsho
               }}
               onPointerCancel={() => { dragRef.current = null; }}
             >
-              <GripHorizontal className="h-4 w-4 text-slate-400" aria-hidden="true" />
-              <span className="mr-1 text-sm font-semibold text-slate-800">{copy.paperTrading.records}</span>
+              <GripHorizontal className="h-4 w-4 text-slate-400 dark:text-muted-foreground" aria-hidden="true" />
+              <span className="mr-1 text-sm font-semibold text-slate-800 dark:text-foreground">{copy.paperTrading.records}</span>
               <Button size="sm" variant={tab === "orders" ? "default" : "ghost"} onClick={() => setTab("orders")}>{copy.paperTrading.ordersTab}</Button>
               <Button size="sm" variant={tab === "fills" ? "default" : "ghost"} onClick={() => setTab("fills")}>{copy.paperTrading.fillsTab}</Button>
               <Button size="sm" variant={tab === "journal" ? "default" : "ghost"} onClick={() => setTab("journal")}>{copy.paperTrading.journalTab}</Button>
@@ -333,7 +336,7 @@ export function PaperTradingDetails({ snapshot, onFocusJournalEntry }: { snapsho
               onPointerCancel={stopResize}
             />
           ))}
-          <div className="pointer-events-none absolute bottom-1 right-1 h-3 w-3 border-b-2 border-r-2 border-slate-400/60" aria-hidden="true" />
+          <div className="pointer-events-none absolute bottom-1 right-1 h-3 w-3 border-b-2 border-r-2 border-slate-400/60 dark:border-input/60" aria-hidden="true" />
         </div>,
         document.body,
       ) : null}
@@ -343,13 +346,13 @@ export function PaperTradingDetails({ snapshot, onFocusJournalEntry }: { snapsho
 
 export function OrderHistory({ snapshot }: { snapshot: PaperSessionSnapshot }) {
   const orders = [...snapshot.activeOrders, ...snapshot.recentOrders];
-  if (!orders.length) return <p className="text-sm text-slate-500">{copy.paperTrading.noOrders}</p>;
-  return <div className="overflow-x-auto"><table className="w-full text-left text-sm"><thead><tr className="border-b text-xs text-slate-500"><th className="p-2">{copy.paperTrading.side}</th><th className="p-2">{copy.paperTrading.orderType}</th><th className="p-2">{copy.paperTrading.quantity}</th><th className="p-2">{copy.paperTrading.price}</th><th className="p-2">{copy.paperTrading.status}</th></tr></thead><tbody>{orders.map((order) => <tr key={order.id} className="border-b"><td className="p-2">{order.side === "BUY" ? copy.paperTrading.buy : copy.paperTrading.sell}</td><td className="p-2">{order.isProtective ? protectiveOrderLabel(order) : orderTypeLabel(order.type)}</td><td className="p-2">{order.isProtective && order.status === "PENDING" && protectiveQuantityMode(order) === "ALL" ? copy.paperTrading.exitAllLabel(number(order.quantity, 8)) : number(order.quantity, 8)}</td><td className="p-2">{order.filledPrice ?? order.price ?? "—"}</td><td className="p-2">{orderStatusLabel(order.status)}</td></tr>)}</tbody></table></div>;
+  if (!orders.length) return <p className="text-sm text-slate-500 dark:text-muted-foreground">{copy.paperTrading.noOrders}</p>;
+  return <div className="overflow-x-auto"><table className="w-full text-left text-sm"><thead><tr className="border-b text-xs text-slate-500 dark:text-muted-foreground"><th className="p-2">{copy.paperTrading.side}</th><th className="p-2">{copy.paperTrading.orderType}</th><th className="p-2">{copy.paperTrading.quantity}</th><th className="p-2">{copy.paperTrading.price}</th><th className="p-2">{copy.paperTrading.status}</th></tr></thead><tbody>{orders.map((order) => <tr key={order.id} className="border-b"><td className="p-2">{order.side === "BUY" ? copy.paperTrading.buy : copy.paperTrading.sell}</td><td className="p-2">{order.isProtective ? protectiveOrderLabel(order) : orderTypeLabel(order.type)}</td><td className="p-2">{order.isProtective && order.status === "PENDING" && protectiveQuantityMode(order) === "ALL" ? copy.paperTrading.exitAllLabel(number(order.quantity, 8)) : number(order.quantity, 8)}</td><td className="p-2">{order.filledPrice ?? order.price ?? "—"}</td><td className="p-2">{orderStatusLabel(order.status)}</td></tr>)}</tbody></table></div>;
 }
 
 export function FillHistory({ snapshot }: { snapshot: PaperSessionSnapshot }) {
-  if (!snapshot.recentFills.length) return <p className="text-sm text-slate-500">{copy.paperTrading.noFills}</p>;
-  return <div className="overflow-x-auto"><table className="w-full text-left text-sm"><thead><tr className="border-b text-xs text-slate-500"><th className="p-2">{copy.paperTrading.time}</th><th className="p-2">{copy.paperTrading.side}</th><th className="p-2">{copy.paperTrading.quantity}</th><th className="p-2">{copy.paperTrading.price}</th><th className="p-2">{copy.paperTrading.reason}</th><th className="p-2">{copy.paperTrading.exitLeg}</th><th className="p-2">{copy.paperTrading.exitRemainingPosition}</th><th className="p-2">{copy.paperTrading.pnl}</th></tr></thead><tbody>{snapshot.recentFills.map((fill) => <tr key={fill.id} className="border-b"><td className="p-2">{new Date(fill.timestamp).toLocaleString("zh-CN")}</td><td className="p-2">{fill.side === "BUY" ? copy.paperTrading.buy : copy.paperTrading.sell}</td><td className="p-2">{number(fill.quantity, 8)}</td><td className="p-2">{number(fill.price, 8)}</td><td className="p-2">{fill.netQuantityAfter !== 0 && fill.reason === "TAKE_PROFIT" ? copy.paperTrading.partialTakeProfitFill : fill.netQuantityAfter !== 0 && fill.reason === "STOP_LOSS" ? copy.paperTrading.partialStopLossFill : fillReasonLabel(fill.reason)}</td><td className="p-2">{fill.reason === "TAKE_PROFIT" || fill.reason === "STOP_LOSS" ? protectiveOrderLabel({ id: fill.orderId, type: fill.reason === "STOP_LOSS" ? "STOP" : "LIMIT" }) : copy.common.dash}</td><td className="p-2 tabular-nums">{number(fill.netQuantityAfter, 8)}</td><td className="p-2">{number(fill.realizedPnl)}</td></tr>)}</tbody></table></div>;
+  if (!snapshot.recentFills.length) return <p className="text-sm text-slate-500 dark:text-muted-foreground">{copy.paperTrading.noFills}</p>;
+  return <div className="overflow-x-auto"><table className="w-full text-left text-sm"><thead><tr className="border-b text-xs text-slate-500 dark:text-muted-foreground"><th className="p-2">{copy.paperTrading.time}</th><th className="p-2">{copy.paperTrading.side}</th><th className="p-2">{copy.paperTrading.quantity}</th><th className="p-2">{copy.paperTrading.price}</th><th className="p-2">{copy.paperTrading.reason}</th><th className="p-2">{copy.paperTrading.exitLeg}</th><th className="p-2">{copy.paperTrading.exitRemainingPosition}</th><th className="p-2">{copy.paperTrading.pnl}</th></tr></thead><tbody>{snapshot.recentFills.map((fill) => <tr key={fill.id} className="border-b"><td className="p-2">{new Date(fill.timestamp).toLocaleString("zh-CN")}</td><td className="p-2">{fill.side === "BUY" ? copy.paperTrading.buy : copy.paperTrading.sell}</td><td className="p-2">{number(fill.quantity, 8)}</td><td className="p-2">{number(fill.price, 8)}</td><td className="p-2">{fill.netQuantityAfter !== 0 && fill.reason === "TAKE_PROFIT" ? copy.paperTrading.partialTakeProfitFill : fill.netQuantityAfter !== 0 && fill.reason === "STOP_LOSS" ? copy.paperTrading.partialStopLossFill : fillReasonLabel(fill.reason)}</td><td className="p-2">{fill.reason === "TAKE_PROFIT" || fill.reason === "STOP_LOSS" ? protectiveOrderLabel({ id: fill.orderId, type: fill.reason === "STOP_LOSS" ? "STOP" : "LIMIT" }) : copy.common.dash}</td><td className="p-2 tabular-nums">{number(fill.netQuantityAfter, 8)}</td><td className="p-2">{number(fill.realizedPnl)}</td></tr>)}</tbody></table></div>;
 }
 
 type JournalTrainingStats = {
@@ -381,8 +384,8 @@ function Stats({ snapshot }: { snapshot: PaperSessionSnapshot }) {
       .catch(() => { if (!cancelled) setError(true); });
     return () => { cancelled = true; };
   }, [snapshot.session.datasetId, snapshot.session.id, snapshot.stats.journalEntryCount, fetch]);
-  if (error) return <p role="alert" className="text-sm text-red-700">{copy.paperTrading.journalStatsError}</p>;
-  if (!stats) return <p role="status" className="text-sm text-slate-600">{copy.paperTrading.journalStatsLoading}</p>;
+  if (error) return <p role="alert" className="text-sm text-red-700 dark:text-negative">{copy.paperTrading.journalStatsError}</p>;
+  if (!stats) return <p role="status" className="text-sm text-slate-600 dark:text-secondary-text">{copy.paperTrading.journalStatsLoading}</p>;
   const values = [
     [copy.paperTrading.tradeCount, stats.tradeCount],
     [copy.paperTrading.winRate, `${number(stats.winRate)}%`],
@@ -393,10 +396,12 @@ function Stats({ snapshot }: { snapshot: PaperSessionSnapshot }) {
     [copy.paperTrading.maxLosses, stats.maxConsecutiveLosses],
     [copy.paperTrading.totalSlippage, `${number(snapshot.stats.totalSlippage)} ${snapshot.session.currency}`],
   ];
-  return <div className="space-y-4"><p className="text-xs text-slate-600">{copy.paperTrading.journalStatsBasis}</p><div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">{values.map(([label, value]) => <div key={String(label)} className="rounded-md border bg-slate-50 p-3"><p className="text-xs text-slate-500">{label}</p><p className="mt-1 font-medium tabular-nums text-slate-950">{value}</p></div>)}</div>{stats.tradeCount ? <JournalPnlCurve points={stats.pnlCurve} currency={snapshot.session.currency} /> : <p className="text-sm text-slate-600">{copy.paperTrading.journalStatsEmpty}</p>}</div>;
+  return <div className="space-y-4"><p className="text-xs text-slate-600 dark:text-secondary-text">{copy.paperTrading.journalStatsBasis}</p><div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">{values.map(([label, value]) => <div key={String(label)} className="rounded-md border bg-slate-50 dark:bg-muted p-3"><p className="text-xs text-slate-500 dark:text-muted-foreground">{label}</p><p className="mt-1 font-medium tabular-nums text-slate-950 dark:text-foreground">{value}</p></div>)}</div>{stats.tradeCount ? <JournalPnlCurve points={stats.pnlCurve} currency={snapshot.session.currency} /> : <p className="text-sm text-slate-600 dark:text-secondary-text">{copy.paperTrading.journalStatsEmpty}</p>}</div>;
 }
 
 function JournalPnlCurve({ points, currency }: { points: JournalTrainingStats["pnlCurve"]; currency: string }) {
   const label = `${copy.paperTrading.cumulativePnl}（${currency}）`;
-  return <div className="flex h-64 flex-col rounded-md border p-3"><p className="text-xs text-slate-600">{label}</p><div className="min-h-0 flex-1"><ResponsiveContainer width="100%" height="100%"><LineChart data={points} margin={{ bottom: 14 }}><XAxis dataKey="tradeNumber" type="number" domain={[0, "dataMax"]} allowDecimals={false} tick={{ fontSize: 11 }} label={{ value: copy.paperTrading.equityCurveXAxis, position: "insideBottom", offset: -8 }} /><YAxis domain={["auto", "auto"]} tick={{ fontSize: 11 }} width={70} /><Tooltip labelFormatter={(value) => Number(value) === 0 ? copy.paperTrading.equityCurveInitial : copy.paperTrading.equityCurveTrade(Number(value))} formatter={(value) => [`${formatNumber(Number(value))} ${currency}`, copy.paperTrading.cumulativePnl]} /><Line type="monotone" dataKey="cumulativePnl" name={label} stroke="#2563eb" strokeWidth={2} dot={false} isAnimationActive={false} /></LineChart></ResponsiveContainer></div></div>;
+  const { mode } = useAppearance();
+  const theme = resolveChartTheme(mode);
+  return <div className="flex h-64 flex-col rounded-md border p-3"><p className="text-xs text-slate-600 dark:text-secondary-text">{label}</p><div className="min-h-0 flex-1"><ResponsiveContainer width="100%" height="100%"><LineChart data={points} margin={{ bottom: 14 }}><XAxis stroke={theme.text} axisLine={{ stroke: theme.border }} tickLine={{ stroke: theme.border }} dataKey="tradeNumber" type="number" domain={[0, "dataMax"]} allowDecimals={false} tick={{ fontSize: 11 }} label={{ value: copy.paperTrading.equityCurveXAxis, position: "insideBottom", offset: -8, fill: theme.text }} /><YAxis stroke={theme.text} axisLine={{ stroke: theme.border }} tickLine={{ stroke: theme.border }} domain={["auto", "auto"]} tick={{ fontSize: 11 }} width={70} /><Tooltip contentStyle={chartTooltipStyle(theme)} labelStyle={{ color: theme.tooltipText }} itemStyle={{ color: theme.tooltipText }} cursor={{ stroke: theme.crosshair, fill: theme.grid }} labelFormatter={(value) => Number(value) === 0 ? copy.paperTrading.equityCurveInitial : copy.paperTrading.equityCurveTrade(Number(value))} formatter={(value) => [`${formatNumber(Number(value))} ${currency}`, copy.paperTrading.cumulativePnl]} /><Line type="monotone" dataKey="cumulativePnl" name={label} stroke={theme.buy} strokeWidth={2} dot={false} isAnimationActive={false} /></LineChart></ResponsiveContainer></div></div>;
 }

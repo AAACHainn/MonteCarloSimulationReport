@@ -18,10 +18,10 @@ export function ReplayCursorMenu({ value, onChange }: { value: ReplayCursorMode;
       </Button>
     </Popover.Trigger>
     <Popover.Portal>
-      <Popover.Content side="right" align="start" sideOffset={8} collisionPadding={8} className="z-[80] w-40 rounded-lg border border-slate-200 bg-white p-1 shadow-xl">
+      <Popover.Content side="right" align="start" sideOffset={8} collisionPadding={8} className="z-[80] w-40 rounded-lg border border-slate-200 dark:border-border bg-white dark:bg-card p-1 shadow-xl">
         <div role="group" aria-label={copy.marketReplay.cursorSelect}>
           {(["pointer", "crosshair"] as const).map(mode => <button key={mode} type="button" aria-pressed={value === mode}
-            className="flex h-9 w-full items-center gap-2 rounded-md px-2 text-left text-sm text-slate-700 hover:bg-slate-100 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+            className="flex h-9 w-full items-center gap-2 rounded-md px-2 text-left text-sm text-slate-700 dark:text-secondary-text hover:bg-slate-100 dark:hover:bg-hover focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
             onClick={() => { onChange(mode); setOpen(false); }}>
             {mode === "pointer" ? <MousePointer2 className="h-4 w-4" aria-hidden="true" /> : <Crosshair className="h-4 w-4" aria-hidden="true" />}
             <span>{mode === "pointer" ? copy.marketReplay.cursorPointer : copy.marketReplay.cursorCrosshair}</span>

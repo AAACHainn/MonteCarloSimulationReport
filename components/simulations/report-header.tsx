@@ -8,12 +8,12 @@ export function ReportHeader({ config }: { config: SimulationConfig }) {
     <section className="space-y-4 border-b pb-6">
       <div className="flex flex-col gap-3 md:flex-row md:items-end md:justify-between">
         <div>
-          <p className="font-mono text-sm uppercase tracking-wide text-blue-700">{copy.report.titlePrefix}</p>
-          <h1 className="text-3xl font-semibold tracking-tight text-slate-950">
+          <p className="font-mono text-sm uppercase tracking-wide text-blue-700 dark:text-link">{copy.report.titlePrefix}</p>
+          <h1 className="text-3xl font-semibold tracking-tight text-slate-950 dark:text-foreground">
             {copy.report.titlePrefix} - {config.simulationCount.toLocaleString("zh-CN")} {copy.report.scenarios}
           </h1>
         </div>
-        <Badge className="w-fit bg-white text-slate-700">{formatSamplingMethod(config.samplingMethod)}</Badge>
+        <Badge className="w-fit bg-white dark:bg-card text-slate-700 dark:text-secondary-text">{formatSamplingMethod(config.samplingMethod)}</Badge>
       </div>
       <div className="grid gap-3 md:grid-cols-5">
         <ConfigItem label={copy.report.initialCapital} value={formatMoney(config.initialCapital)} />
@@ -28,9 +28,9 @@ export function ReportHeader({ config }: { config: SimulationConfig }) {
 
 function ConfigItem({ label, value }: { label: string; value: string }) {
   return (
-    <div className="rounded-lg border bg-white p-4">
-      <div className="text-xs font-medium uppercase tracking-wide text-slate-500">{label}</div>
-      <div className="mt-1 font-mono text-sm font-semibold text-slate-950">{value}</div>
+    <div className="rounded-lg border bg-white dark:bg-card p-4">
+      <div className="text-xs font-medium uppercase tracking-wide text-slate-500 dark:text-muted-foreground">{label}</div>
+      <div className="mt-1 font-mono text-sm font-semibold text-slate-950 dark:text-foreground">{value}</div>
     </div>
   );
 }

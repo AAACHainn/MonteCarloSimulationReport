@@ -25,8 +25,8 @@ export function ReportCharts({
   return (
     <div className="space-y-4">
       <div className="flex flex-wrap items-center justify-between gap-3">
-        <div className="text-sm font-medium text-slate-600">{copy.report.chartValueMode}</div>
-        <div className="flex rounded-md border bg-white p-1">
+        <div className="text-sm font-medium text-slate-600 dark:text-secondary-text">{copy.report.chartValueMode}</div>
+        <div className="flex rounded-md border bg-white dark:bg-card p-1">
           <Button
             type="button"
             size="sm"

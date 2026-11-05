@@ -98,10 +98,10 @@ export function JournalTradeBrowser({
 
   if (!currentTrade) {
     return (
-      <div className="flex min-h-80 flex-col items-center justify-center rounded-lg border border-dashed bg-slate-50 px-6 py-12 text-center">
-        <ImageOff className="h-10 w-10 text-slate-400" />
-        <h3 className="mt-4 font-semibold text-slate-950">{copy.tradeJournals.browser.emptyTitle}</h3>
-        <p className="mt-2 max-w-lg text-sm text-slate-600">{copy.tradeJournals.browser.emptyDescription}</p>
+      <div className="flex min-h-80 flex-col items-center justify-center rounded-lg border border-dashed bg-slate-50 dark:bg-muted px-6 py-12 text-center">
+        <ImageOff className="h-10 w-10 text-slate-400 dark:text-muted-foreground" />
+        <h3 className="mt-4 font-semibold text-slate-950 dark:text-foreground">{copy.tradeJournals.browser.emptyTitle}</h3>
+        <p className="mt-2 max-w-lg text-sm text-slate-600 dark:text-secondary-text">{copy.tradeJournals.browser.emptyDescription}</p>
       </div>
     );
   }
@@ -168,20 +168,20 @@ export function JournalTradeBrowser({
 
   return (
     <div className="space-y-4">
-      <div className="flex flex-col gap-3 rounded-lg border bg-slate-50/70 p-4">
+      <div className="flex flex-col gap-3 rounded-lg border bg-slate-50/70 dark:bg-muted/70 p-4">
         <div className="flex flex-wrap items-center justify-between gap-3">
           <div>
-            <p className="text-xs font-medium uppercase tracking-wide text-slate-500">
+            <p className="text-xs font-medium uppercase tracking-wide text-slate-500 dark:text-muted-foreground">
               {copy.tradeJournals.browser.tradeInformation}
             </p>
-            <p className="mt-1 text-sm font-medium text-slate-950">
+            <p className="mt-1 text-sm font-medium text-slate-950 dark:text-foreground">
               {currentTrade.date || copy.common.dash}
-              <span className="mx-2 text-slate-300">/</span>
+              <span className="mx-2 text-slate-300 dark:text-muted-foreground">/</span>
               {currentTrade.instrumentOption?.name ?? copy.common.dash}
             </p>
           </div>
           <div
-            className="rounded-full border bg-white px-3 py-1 font-mono text-sm font-medium text-slate-700"
+            className="rounded-full border bg-white dark:bg-card px-3 py-1 font-mono text-sm font-medium text-slate-700 dark:text-secondary-text"
             aria-live="polite"
           >
             {copy.tradeJournals.browser.counter
@@ -234,23 +234,23 @@ export function JournalTradeBrowser({
             label={copy.tradeJournals.table.r}
             value={`${formatNumber(currentTrade.rMultiple)} R`}
             valueClassName={cn(
-              currentTrade.rMultiple > 0 && "text-emerald-700",
-              currentTrade.rMultiple < 0 && "text-red-700",
+              currentTrade.rMultiple > 0 && "text-emerald-700 dark:text-positive",
+              currentTrade.rMultiple < 0 && "text-red-700 dark:text-negative",
             )}
           />
         </div>
       </div>
 
-      <section className="rounded-lg border bg-white p-4" aria-labelledby="trade-tags-title">
+      <section className="rounded-lg border bg-white dark:bg-card p-4" aria-labelledby="trade-tags-title">
         <div className="flex flex-wrap items-center justify-between gap-2">
           <div>
-            <h3 id="trade-tags-title" className="flex items-center gap-2 text-sm font-semibold text-slate-950">
-              <Tag className="h-4 w-4 text-blue-700" />
+            <h3 id="trade-tags-title" className="flex items-center gap-2 text-sm font-semibold text-slate-950 dark:text-foreground">
+              <Tag className="h-4 w-4 text-blue-700 dark:text-link" />
               {copy.tradeJournals.tags.currentTradeTags}
             </h3>
-            <p className="mt-1 text-xs text-slate-500">{copy.tradeJournals.tags.browserHint}</p>
+            <p className="mt-1 text-xs text-slate-500 dark:text-muted-foreground">{copy.tradeJournals.tags.browserHint}</p>
           </div>
-          <span className="text-xs text-slate-500">
+          <span className="text-xs text-slate-500 dark:text-muted-foreground">
             {currentTrade.tags.length} / {MAX_TAGS_PER_TRADE}
           </span>
         </div>
@@ -260,12 +260,12 @@ export function JournalTradeBrowser({
             currentTrade.tags.map((tag) => (
               <Badge
                 key={tag.id}
-                className="gap-1 border-blue-200 bg-blue-50 py-1 pl-2.5 pr-1 text-blue-700"
+                className="gap-1 border-blue-200 dark:border-link/40 bg-blue-50 dark:bg-info-background py-1 pl-2.5 pr-1 text-blue-700 dark:text-link"
               >
                 {tag.name}
                 <button
                   type="button"
-                  className="rounded-full p-0.5 hover:bg-blue-100 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500"
+                  className="rounded-full p-0.5 hover:bg-blue-100 dark:hover:bg-info-background focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500"
                   onClick={() => removeTag(tag.id)}
                   disabled={isSavingTags}
                   aria-label={copy.tradeJournals.tags.remove.replace("{name}", tag.name)}
@@ -275,7 +275,7 @@ export function JournalTradeBrowser({
               </Badge>
             ))
           ) : (
-            <span className="text-sm text-slate-500">{copy.tradeJournals.tags.none}</span>
+            <span className="text-sm text-slate-500 dark:text-muted-foreground">{copy.tradeJournals.tags.none}</span>
           )}
         </div>
 
@@ -286,7 +286,7 @@ export function JournalTradeBrowser({
               value={tagInput}
               maxLength={MAX_TAG_NAME_LENGTH}
               placeholder={copy.tradeJournals.tags.inputPlaceholder}
-              className="h-9 min-w-0 flex-1 rounded-md border border-input bg-white px-3 py-1 text-sm shadow-sm transition-colors placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring disabled:cursor-not-allowed disabled:opacity-50"
+              className="h-9 min-w-0 flex-1 rounded-md border border-input bg-white dark:bg-card px-3 py-1 text-sm shadow-sm transition-colors placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring disabled:cursor-not-allowed disabled:opacity-50"
               onChange={(event) => {
                 setTagInput(event.target.value);
                 setTagError(null);
@@ -315,12 +315,12 @@ export function JournalTradeBrowser({
             </Button>
           </div>
           {showTagSuggestions && tagSuggestions.length > 0 ? (
-            <div className="absolute inset-x-0 top-11 z-30 overflow-hidden rounded-md border bg-white p-1 shadow-lg">
+            <div className="absolute inset-x-0 top-11 z-30 overflow-hidden rounded-md border bg-white dark:bg-card p-1 shadow-lg">
               {tagSuggestions.map((tag) => (
                 <button
                   key={tag.id}
                   type="button"
-                  className="flex w-full items-center rounded px-3 py-2 text-left text-sm text-slate-700 hover:bg-slate-100 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+                  className="flex w-full items-center rounded px-3 py-2 text-left text-sm text-slate-700 dark:text-secondary-text hover:bg-slate-100 dark:hover:bg-hover focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
                   onMouseDown={(event) => event.preventDefault()}
                   onClick={() => void addTag(tag.name)}
                 >
@@ -330,7 +330,7 @@ export function JournalTradeBrowser({
             </div>
           ) : null}
         </div>
-        {tagError ? <p className="mt-2 text-sm text-red-600" role="alert">{tagError}</p> : null}
+        {tagError ? <p className="mt-2 text-sm text-red-600 dark:text-negative" role="alert">{tagError}</p> : null}
       </section>
 
       <div className="overflow-hidden rounded-lg border bg-slate-950 shadow-sm">
@@ -355,7 +355,7 @@ export function JournalTradeBrowser({
       </div>
 
       <div className="flex flex-col gap-3 border-t pt-4 sm:flex-row sm:items-center sm:justify-between">
-        <div className="flex items-center gap-2 text-xs text-slate-500">
+        <div className="flex items-center gap-2 text-xs text-slate-500 dark:text-muted-foreground">
           <Keyboard className="h-4 w-4" />
           {copy.tradeJournals.browser.keyboardHint}
         </div>
@@ -404,9 +404,9 @@ function TradeInfo({
   valueClassName?: string;
 }) {
   return (
-    <div className={cn("min-w-0 rounded-md border bg-white px-3 py-2", className)}>
-      <div className="text-xs text-slate-500">{label}</div>
-      <div className={cn("mt-1 min-w-0 font-mono text-sm font-semibold text-slate-950", valueClassName)}>
+    <div className={cn("min-w-0 rounded-md border bg-white dark:bg-card px-3 py-2", className)}>
+      <div className="text-xs text-slate-500 dark:text-muted-foreground">{label}</div>
+      <div className={cn("mt-1 min-w-0 font-mono text-sm font-semibold text-slate-950 dark:text-foreground", valueClassName)}>
         {value}
       </div>
     </div>
@@ -425,9 +425,9 @@ function StrategyStatusBadge({ status, reason }: { status: StrategyCodeStatus; r
       title={reason}
       className={cn(
         "shrink-0 px-1.5 py-0",
-        status === "PASS" && "border-emerald-200 bg-emerald-50 text-emerald-700",
-        status === "FAIL" && "border-red-200 bg-red-50 text-red-700",
-        status === "UNRATED" && "border-slate-200 bg-slate-100 text-slate-600",
+        status === "PASS" && "border-emerald-200 dark:border-positive/40 bg-emerald-50 dark:bg-positive-background text-emerald-700 dark:text-positive",
+        status === "FAIL" && "border-red-200 dark:border-negative/40 bg-red-50 dark:bg-negative-background text-red-700 dark:text-negative",
+        status === "UNRATED" && "border-slate-200 dark:border-border bg-slate-100 dark:bg-muted text-slate-600 dark:text-secondary-text",
       )}
     >
       {label}

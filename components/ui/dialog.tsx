@@ -45,7 +45,7 @@ export function Dialog({ open, title, description, children, className, contentC
         aria-modal={framed ? undefined : modal}
         aria-labelledby={framed ? undefined : titleId}
         aria-describedby={!framed && description ? descriptionId : undefined}
-        className={cn("pointer-events-auto flex max-h-[calc(100dvh-2rem)] w-full max-w-2xl flex-col overflow-hidden rounded-lg border bg-white shadow-2xl", framed && "h-full max-w-none", className)}
+        className={cn("pointer-events-auto flex max-h-[calc(100dvh-2rem)] w-full max-w-2xl flex-col overflow-hidden rounded-lg border bg-white dark:bg-surface-raised shadow-2xl", framed && "h-full max-w-none", className)}
         onMouseDown={(event) => event.stopPropagation()}
       >
         <header
@@ -57,12 +57,12 @@ export function Dialog({ open, title, description, children, className, contentC
           className={cn("flex shrink-0 items-start gap-3 border-b px-5 py-4", framed && "cursor-move touch-none select-none focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring")}
         >
           <div className="min-w-0 flex-1">
-            <h2 id={titleId} className="break-words text-lg font-semibold text-slate-950">{title}</h2>
-            {description ? <p id={descriptionId} className="mt-1 text-sm text-slate-600">{description}</p> : null}
+            <h2 id={titleId} className="break-words text-lg font-semibold text-slate-950 dark:text-foreground">{title}</h2>
+            {description ? <p id={descriptionId} className="mt-1 text-sm text-slate-600 dark:text-secondary-text">{description}</p> : null}
           </div>
           <div className="flex shrink-0 items-center gap-2">
             {headerActions}
-            <Button type="button" size="icon" variant="ghost" onClick={onClose} className="text-slate-500" aria-label={copy.common.close}>
+            <Button type="button" size="icon" variant="ghost" onClick={onClose} className="text-slate-500 dark:text-muted-foreground" aria-label={copy.common.close}>
               <X className="h-4 w-4" aria-hidden="true" />
             </Button>
           </div>
@@ -72,7 +72,7 @@ export function Dialog({ open, title, description, children, className, contentC
   );
 
   return createPortal(
-    <div aria-hidden={!open || undefined} className={cn("fixed inset-0 z-50 flex items-center justify-center p-4", layerClassName, modal ? "bg-slate-950/35 backdrop-blur-sm" : "pointer-events-none", !open && "hidden")} onMouseDown={modal ? onClose : undefined}>
+    <div aria-hidden={!open || undefined} className={cn("fixed inset-0 z-50 flex items-center justify-center p-4", layerClassName, modal ? "bg-slate-950/35 dark:bg-[var(--overlay)] backdrop-blur-sm" : "pointer-events-none", !open && "hidden")} onMouseDown={modal ? onClose : undefined}>
       {framed ? <DialogResizeFrame ref={panelRef} modal={modal} resizable={resizable} titleId={titleId} descriptionId={description ? descriptionId : undefined} widthStorageKey={widthStorageKey} heightStorageKey={heightStorageKey} defaultWidth={defaultWidth} defaultHeight={defaultHeight}>
         {panel}
       </DialogResizeFrame> : panel}

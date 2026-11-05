@@ -1,4 +1,5 @@
 "use client";
+import { snapshotRendererVersion } from "@/lib/market-replay/snapshot-version";
 import type { ContextValue } from "@/lib/ai/context";
 import { aiApi } from "./api";
 import type { ContextChart } from "@/lib/ai/context";
@@ -12,7 +13,7 @@ export async function captureChartImage(context: CaptureRenderContext, chart: Co
   container.style.cssText = "position:fixed;left:-10000px;top:0;width:2400px;height:1200px;pointer-events:none";
   document.body.appendChild(container);
   const preferences = context.chartPreferences ?? capturePdfChartPreferences({ id: context.datasetId, startTime: context.asOfTime, timezone: context.timezone });
-  const renderer = createChartSnapshotRenderer(container, preferences, context.tick, { ...context.display, displayIntervalSeconds: chart.intervalSeconds ?? context.display.displayIntervalSeconds });
+  const renderer = createChartSnapshotRenderer(container, preferences, context.tick, { ...context.display, displayIntervalSeconds: chart.intervalSeconds ?? context.display.displayIntervalSeconds }, snapshotRendererVersion(chart.rendererVersion));
   try {
     const bars = chart.window.bars;
     const annotations = chart.annotations ?? selectChartAnnotations(context, chart);

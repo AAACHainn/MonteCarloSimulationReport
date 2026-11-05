@@ -4,6 +4,8 @@ import { copy } from "@/lib/i18n";
 import { CANDLESTICK_COLOR_PRESETS, DEFAULT_CANDLESTICK_STYLE, applyCandlestickColorPreset, type CandlestickStyle } from "@/lib/market-replay/candlestick-style";
 import { CandlestickSettingsDialog } from "./candlestick-settings-dialog";
 
+const appearance = vi.hoisted(() => ({ mode: "light" as "light" | "dark" }));
+vi.mock("@/components/appearance-provider", () => ({ useAppearance: () => appearance }));
 vi.mock("react", async () => ({ ...await vi.importActual<typeof import("react")>("react"), useId: () => "candle-test" }));
 vi.mock("@/components/ui/dialog", () => ({ Dialog: (props: object) => React.createElement("dialog", props) }));
 
@@ -32,12 +34,31 @@ function button(label: string) {
 }
 beforeEach(() => {
   vi.stubGlobal("React", React);
+  appearance.mode = "light";
   draft = { ...DEFAULT_CANDLESTICK_STYLE };
   onConfirm = vi.fn(); onClose = vi.fn();
 });
 afterEach(() => vi.unstubAllGlobals());
 
 describe("candlestick settings dialog", () => {
+  it("does not highlight another theme's preset or rewrite the draft when appearance changes", () => {
+    draft = applyCandlestickColorPreset(draft, CANDLESTICK_COLOR_PRESETS[1]);
+    const lightDraft = { ...draft, borderVisible: false }; draft = lightDraft;
+    appearance.mode = "dark";
+    expect(button(copy.marketReplay.candlestickPresetNames["green-up"]).props["aria-pressed"]).toBe(false);
+    expect(draft).toBe(lightDraft);
+    expect(render().some(element => element.props.role === "status" && textOf(element.props.children).includes("浅色版"))).toBe(true);
+    (button(copy.marketReplay.candlestickPresetNames["green-up"]).props.onClick as () => void)();
+    expect(draft).toMatchObject({ upColor: "#2DD4BF", downColor: "#F87171", borderVisible: false });
+    expect(button(copy.marketReplay.candlestickPresetNames["green-up"]).props["aria-pressed"]).toBe(true);
+    const darkDraft = draft;
+    appearance.mode = "light";
+    expect(button(copy.marketReplay.candlestickPresetNames["green-up"]).props["aria-pressed"]).toBe(false);
+    expect(draft).toBe(darkDraft);
+    (button(copy.marketReplay.drawingCancel).props.onClick as () => void)();
+    expect(onConfirm).not.toHaveBeenCalled();
+  });
+
   it("updates only the draft from presets and visibility controls until confirmation", () => {
     draft.wickVisible = false;
     (button(copy.marketReplay.candlestickPresetNames.monochrome).props.onClick as () => void)();

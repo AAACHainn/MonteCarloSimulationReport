@@ -12,7 +12,7 @@ const t = copy.propPractice;
 export function PropPayoutGuidance({ runtime, preview, explanation }: {
   runtime: PropRuntime; preview: ReturnType<typeof payoutPreview>; explanation: ReturnType<typeof explainPayout>;
 }) {
-  if (preview.eligible) return <Alert role="status" aria-live="polite" className="flex items-center gap-2 border-emerald-200 bg-emerald-50 p-3 text-xs text-emerald-700">
+  if (preview.eligible) return <Alert role="status" aria-live="polite" className="flex items-center gap-2 border-emerald-200 dark:border-positive/40 bg-emerald-50 dark:bg-positive-background p-3 text-xs text-emerald-700 dark:text-positive">
     <Check className="h-4 w-4 shrink-0" aria-hidden="true" /><p>{t.payoutConditionsMet}</p>
   </Alert>;
   const labels: Record<PayoutBlockReason, string> = {
@@ -23,11 +23,11 @@ export function PropPayoutGuidance({ runtime, preview, explanation }: {
     fraction: t.payoutBlockedFraction, maximum: t.payoutBlockedMaximum, buffer: t.payoutBlockedBuffer, risk: t.payoutBlockedRisk,
   };
   const { reasons, gap } = explanation, money = (amount: number) => formatMoney(amount, runtime.snapshot.currency);
-  return <Alert id="prop-payout-blocked" role="status" aria-live="polite" className="flex items-start gap-2 border-amber-200 bg-amber-50 p-3 text-amber-800">
+  return <Alert id="prop-payout-blocked" role="status" aria-live="polite" className="flex items-start gap-2 border-amber-200 dark:border-warning/40 bg-amber-50 dark:bg-warning-background p-3 text-amber-800 dark:text-warning">
     <Info className="mt-0.5 h-4 w-4 shrink-0" aria-hidden="true" />
     <div className="min-w-0 space-y-2">
       <AlertTitle className="mb-0 text-sm font-semibold leading-relaxed">{reasons.length === 1 ? t.payoutBlockedBecause(labels[reasons[0]]) : t.payoutBlockedTitle}</AlertTitle>
-      <AlertDescription className="space-y-2 text-xs leading-relaxed text-amber-800">
+      <AlertDescription className="space-y-2 text-xs leading-relaxed text-amber-800 dark:text-warning">
         {reasons.length > 1 ? <ul className="list-disc space-y-1 pl-4">{reasons.map(reason => <li key={reason}>{labels[reason]}</li>)}</ul> : null}
         {reasons.length === 0 ? <p>{t.payoutConditionsPending}</p> : null}
         {gap ? <>

@@ -1,3 +1,4 @@
+import { chartThemes, type ChartTheme } from "@/lib/chart-theme";
 import {
   type IPrimitivePaneRenderer,
   type IPrimitivePaneView,
@@ -57,7 +58,7 @@ export function formatCandleCountdown(totalSeconds: number) {
 }
 
 class CandleCountdownPaneRenderer implements IPrimitivePaneRenderer {
-  constructor(private readonly countdown: () => ProjectedCountdown | null) {}
+  constructor(private readonly countdown: () => ProjectedCountdown | null, private readonly theme: () => ChartTheme) {}
 
   draw(target: Parameters<IPrimitivePaneRenderer["draw"]>[0]) {
     target.useMediaCoordinateSpace(({ context }) => {
@@ -69,7 +70,7 @@ class CandleCountdownPaneRenderer implements IPrimitivePaneRenderer {
       context.font = "600 11px ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace";
       context.textAlign = "center";
       context.textBaseline = "middle";
-      context.fillStyle = "#1d4ed8";
+      context.fillStyle = this.theme().countdown;
       context.fillText(countdown.text, countdown.left + countdown.width / 2, centerY + 0.5);
       context.restore();
     });
@@ -79,8 +80,8 @@ class CandleCountdownPaneRenderer implements IPrimitivePaneRenderer {
 class CandleCountdownPaneView implements IPrimitivePaneView {
   private readonly paneRenderer: CandleCountdownPaneRenderer;
 
-  constructor(countdown: () => ProjectedCountdown | null) {
-    this.paneRenderer = new CandleCountdownPaneRenderer(countdown);
+  constructor(countdown: () => ProjectedCountdown | null, theme: () => ChartTheme) {
+    this.paneRenderer = new CandleCountdownPaneRenderer(countdown, theme);
   }
 
   zOrder() { return "top" as const; }
@@ -88,6 +89,8 @@ class CandleCountdownPaneView implements IPrimitivePaneView {
 }
 
 export class CandleCountdownPrimitive implements ISeriesPrimitive<Time> {
+  private theme: ChartTheme = chartThemes.light;
+  setTheme(theme: ChartTheme) { this.theme = theme; this.requestUpdate?.(); }
   private chart: SeriesAttachedParameter<Time>["chart"] | null = null;
   private series: SeriesAttachedParameter<Time>["series"] | null = null;
   private requestUpdate: (() => void) | null = null;
@@ -95,7 +98,7 @@ export class CandleCountdownPrimitive implements ISeriesPrimitive<Time> {
     bars: [], currentSourceTimestamp: null, enabled: false, playing: false, sourceIntervalSeconds: 1,
   };
   private projected: ProjectedCountdown | null = null;
-  private readonly views = [new CandleCountdownPaneView(() => this.projected)];
+  private readonly views = [new CandleCountdownPaneView(() => this.projected, () => this.theme)];
 
   attached(param: SeriesAttachedParameter<Time>) {
     this.chart = param.chart;

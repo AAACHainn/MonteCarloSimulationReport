@@ -1,3 +1,4 @@
+import { chartThemes, type ChartTheme } from "@/lib/chart-theme";
 import type { IPrimitivePaneRenderer, ISeriesPrimitive, PrimitiveHoveredItem, SeriesAttachedParameter, Time } from "lightweight-charts";
 import { distanceToSegment, type ArrowDrawing, type ArrowDrawingType, type ArrowGeometry } from "./chart-drawings";
 import type { DrawingTimelineLocator } from "./drawing-timeline";
@@ -24,6 +25,8 @@ export function arrowPoints(type: ArrowDrawingType, anchor: Point): Point[] {
 /** One canvas primitive for all arrows. Projection and clipping happen on chart updates,
  * never during hit tests; pointer movement shares the chart's animation-frame scheduler. */
 export class ArrowPrimitive implements ISeriesPrimitive<Time> {
+  private theme: ChartTheme = chartThemes.light;
+  setTheme(theme: ChartTheme) { this.theme = theme; this.attachment?.requestUpdate(); }
   private attachment: SeriesAttachedParameter<Time> | null = null;
   private snapshot: ArrowSnapshot | null = null;
   private projected: ProjectedArrow[] = [];
@@ -41,7 +44,7 @@ export class ArrowPrimitive implements ISeriesPrimitive<Time> {
         for (let index = 1; index < points.length; index++) context.lineTo(points[index].x, points[index].y);
         context.closePath(); context.fill();
         if (item.selected) {
-          context.strokeStyle = "#2962FF"; context.fillStyle = "#FFFFFF";
+          context.strokeStyle = this.theme.selection; context.fillStyle = this.theme.handle;
           context.beginPath(); context.arc(item.point.x, item.point.y, 4, 0, Math.PI * 2); context.fill(); context.stroke();
         }
       }

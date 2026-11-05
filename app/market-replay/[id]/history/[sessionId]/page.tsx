@@ -119,12 +119,12 @@ export default async function HistoricalReplayPage({
       <section className="flex flex-col gap-3 border-b pb-3 md:flex-row md:items-end md:justify-between">
         <div className="min-w-0">
           <div className="flex flex-wrap items-center gap-2">
-            <h1 className="truncate text-xl font-semibold tracking-tight text-slate-950">{title}</h1>
-            <Badge className="border-blue-200 bg-blue-50 text-blue-700">{copy.paperTrading.historicalReplayReadOnly}</Badge>
-            <Badge className="border-slate-200 bg-white text-slate-600">{session.archivedAt ? copy.paperTrading.journalArchived : copy.paperTrading.journalCurrent}</Badge>
+            <h1 className="truncate text-xl font-semibold tracking-tight text-slate-950 dark:text-foreground">{title}</h1>
+            <Badge className="border-blue-200 dark:border-link/40 bg-blue-50 dark:bg-info-background text-blue-700 dark:text-link">{copy.paperTrading.historicalReplayReadOnly}</Badge>
+            <Badge className="border-slate-200 dark:border-border bg-white dark:bg-card text-slate-600 dark:text-secondary-text">{session.archivedAt ? copy.paperTrading.journalArchived : copy.paperTrading.journalCurrent}</Badge>
           </div>
-          <p className="mt-1 text-xs text-slate-600">{copy.paperTrading.historicalReplayDescription}</p>
-          <p className="mt-1 font-mono text-xs tabular-nums text-slate-500">
+          <p className="mt-1 text-xs text-slate-600 dark:text-secondary-text">{copy.paperTrading.historicalReplayDescription}</p>
+          <p className="mt-1 font-mono text-xs tabular-nums text-slate-500 dark:text-muted-foreground">
             {dataset.symbol} · {formatInterval(entry.displayIntervalSeconds)} · {copy.paperTrading.historicalReplayRange(startSequence, endSequence)}
           </p>
         </div>
@@ -133,7 +133,7 @@ export default async function HistoricalReplayPage({
         </Button>
       </section>
     </div>
-    <div className="min-h-0 flex-1 overflow-hidden rounded-lg border bg-white shadow-sm">
+    <div className="min-h-0 flex-1 overflow-hidden rounded-lg border bg-white dark:bg-card shadow-sm">
       <HistoricalReplayClient
         key={`${session.id}:${replaySession.activeProjectionId}:${replaySession.status}:${entry.accountNo}`}
         dataset={serializeMarketDataset(dataset)}

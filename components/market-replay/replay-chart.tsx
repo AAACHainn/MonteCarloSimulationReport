@@ -71,7 +71,7 @@ export function ReplayChart(props: ReplayChartProps) {
     >
       <div
         ref={containerRef}
-        className="h-full min-h-[240px] w-full overflow-hidden bg-white"
+        className="h-full min-h-[240px] w-full overflow-hidden bg-white dark:bg-card"
         aria-label={copy.marketReplay.chartAriaLabel}
         data-bar-count={bars.length}
         data-visible-bar-count={visibleBars.length}
@@ -81,14 +81,14 @@ export function ReplayChart(props: ReplayChartProps) {
       </Dialog>
 
       {hiddenAfter ? <Alert data-hidden-bars-notice role="status" aria-live="polite"
-        className="absolute bottom-3 left-3 z-30 flex w-auto max-w-[calc(100%-1.5rem)] flex-wrap items-center gap-2 bg-white/95 px-3 py-2 shadow-lg backdrop-blur">
-        <span className="flex items-center gap-2 font-medium text-slate-700"><EyeOff className="h-4 w-4 shrink-0" aria-hidden="true" />{copy.marketReplay.subsequentBarsHidden}</span>
+        className="absolute bottom-3 left-3 z-30 flex w-auto max-w-[calc(100%-1.5rem)] flex-wrap items-center gap-2 bg-white/95 dark:bg-card/95 px-3 py-2 shadow-lg backdrop-blur">
+        <span className="flex items-center gap-2 font-medium text-slate-700 dark:text-secondary-text"><EyeOff className="h-4 w-4 shrink-0" aria-hidden="true" />{copy.marketReplay.subsequentBarsHidden}</span>
         <Button type="button" variant="outline" size="sm" className="min-h-10 sm:min-h-8" data-testid="restore-subsequent-bars" aria-label={copy.marketReplay.restoreSubsequentBars}
           onClick={() => { setHiddenBoundary(null); setAbrTooltip(null); }}>{copy.marketReplay.restoreSubsequentBars}</Button>
       </Alert> : null}
 
       {tradeAnnotationsVisible && tradeAnnotationsTruncated ? (
-        <div className="pointer-events-none absolute right-3 top-3 z-20 rounded-md bg-amber-50/95 px-2 py-1 text-[11px] text-amber-800 shadow-sm backdrop-blur">
+        <div className="pointer-events-none absolute right-3 top-3 z-20 rounded-md bg-amber-50/95 dark:bg-warning-background/95 px-2 py-1 text-[11px] text-amber-800 dark:text-warning shadow-sm backdrop-blur">
           {copy.paperTrading.tradeAnnotationLimit(100)}
         </div>
       ) : null}
@@ -96,30 +96,30 @@ export function ReplayChart(props: ReplayChartProps) {
       {abrTooltip ? (
         <div
           data-testid="abr-bar-tooltip"
-          className="pointer-events-none absolute z-30 w-[196px] rounded-md border border-slate-200 bg-white/95 px-3 py-2.5 text-xs shadow-lg backdrop-blur"
+          className="pointer-events-none absolute z-30 w-[196px] rounded-md border border-slate-200 dark:border-border bg-white/95 dark:bg-card/95 px-3 py-2.5 text-xs shadow-lg backdrop-blur"
           style={{ left: abrTooltip.left, top: abrTooltip.top }}
         >
           <div className="grid grid-cols-[1fr_auto] gap-x-5 gap-y-1.5">
             {abrEnabled ? (
               <>
-                <span className="font-medium text-slate-600">{copy.marketReplay.abrName(abrLength)}</span>
-                <span className="font-mono font-semibold text-slate-950">{formatAbrValue(abrTooltip.value, priceTickSize)}</span>
+                <span className="font-medium text-slate-600 dark:text-secondary-text">{copy.marketReplay.abrName(abrLength)}</span>
+                <span className="font-mono font-semibold text-slate-950 dark:text-foreground">{formatAbrValue(abrTooltip.value, priceTickSize)}</span>
               </>
             ) : null}
-            <span className="text-slate-600">{copy.marketReplay.abrOpen}</span>
-            <span className="font-mono font-semibold text-slate-950">{formatPriceForTick(abrTooltip.bar.open, priceTickSize)}</span>
-            <span className="text-slate-600">{copy.marketReplay.abrHigh}</span>
-            <span className="font-mono font-semibold text-slate-950">{formatPriceForTick(abrTooltip.bar.high, priceTickSize)}</span>
-            <span className="text-slate-600">{copy.marketReplay.abrLow}</span>
-            <span className="font-mono font-semibold text-slate-950">{formatPriceForTick(abrTooltip.bar.low, priceTickSize)}</span>
-            <span className="text-slate-600">{copy.marketReplay.abrClose}</span>
-            <span className="font-mono font-semibold text-slate-950">{formatPriceForTick(abrTooltip.bar.close, priceTickSize)}</span>
-            <span className="text-slate-600">{copy.marketReplay.barEmission.phaseLabel}</span>
-            <span className="text-right text-slate-950">{copy.marketReplay.barEmission.phase[aggregatePhase(abrTooltip.bar)]}</span>
-            <span className="text-slate-600">{copy.marketReplay.barEmission.qualityLabel}</span>
-            <span className={aggregateHasGap(abrTooltip.bar) ? "text-right text-amber-800" : "text-right text-slate-950"}>{copy.marketReplay.barEmission.quality[abrTooltip.bar.quality ?? (aggregateHasGap(abrTooltip.bar) ? "GAP" : "UNKNOWN")]}</span>
-            <span className="text-slate-600">{copy.marketReplay.barEmission.records}</span>
-            <span className="text-right font-mono tabular-nums text-slate-950">{formatInteger(abrTooltip.bar.sourceCount)} / {formatInteger(abrTooltip.bar.expectedCount)}</span>
+            <span className="text-slate-600 dark:text-secondary-text">{copy.marketReplay.abrOpen}</span>
+            <span className="font-mono font-semibold text-slate-950 dark:text-foreground">{formatPriceForTick(abrTooltip.bar.open, priceTickSize)}</span>
+            <span className="text-slate-600 dark:text-secondary-text">{copy.marketReplay.abrHigh}</span>
+            <span className="font-mono font-semibold text-slate-950 dark:text-foreground">{formatPriceForTick(abrTooltip.bar.high, priceTickSize)}</span>
+            <span className="text-slate-600 dark:text-secondary-text">{copy.marketReplay.abrLow}</span>
+            <span className="font-mono font-semibold text-slate-950 dark:text-foreground">{formatPriceForTick(abrTooltip.bar.low, priceTickSize)}</span>
+            <span className="text-slate-600 dark:text-secondary-text">{copy.marketReplay.abrClose}</span>
+            <span className="font-mono font-semibold text-slate-950 dark:text-foreground">{formatPriceForTick(abrTooltip.bar.close, priceTickSize)}</span>
+            <span className="text-slate-600 dark:text-secondary-text">{copy.marketReplay.barEmission.phaseLabel}</span>
+            <span className="text-right text-slate-950 dark:text-foreground">{copy.marketReplay.barEmission.phase[aggregatePhase(abrTooltip.bar)]}</span>
+            <span className="text-slate-600 dark:text-secondary-text">{copy.marketReplay.barEmission.qualityLabel}</span>
+            <span className={aggregateHasGap(abrTooltip.bar) ? "text-right text-amber-800 dark:text-warning" : "text-right text-slate-950 dark:text-foreground"}>{copy.marketReplay.barEmission.quality[abrTooltip.bar.quality ?? (aggregateHasGap(abrTooltip.bar) ? "GAP" : "UNKNOWN")]}</span>
+            <span className="text-slate-600 dark:text-secondary-text">{copy.marketReplay.barEmission.records}</span>
+            <span className="text-right font-mono tabular-nums text-slate-950 dark:text-foreground">{formatInteger(abrTooltip.bar.sourceCount)} / {formatInteger(abrTooltip.bar.expectedCount)}</span>
           </div>
         </div>
       ) : null}
@@ -189,7 +189,7 @@ export function ReplayChart(props: ReplayChartProps) {
           key={action.key}
           data-line-action
           data-testid={`line-action-${action.kind}-${action.key}`}
-          className="absolute right-16 z-20 flex max-w-[calc(100%-5rem)] -translate-y-1/2 items-center overflow-hidden rounded-md border bg-white/95 text-xs shadow-sm backdrop-blur"
+          className="absolute right-16 z-20 flex max-w-[calc(100%-5rem)] -translate-y-1/2 items-center overflow-hidden rounded-md border bg-white/95 dark:bg-card/95 text-xs shadow-sm backdrop-blur"
           style={{ top: lineLabelY[index], borderColor: `${action.color}66`, color: action.color }}
           onContextMenu={(event) => event.preventDefault()}
         >
@@ -217,7 +217,7 @@ export function ReplayChart(props: ReplayChartProps) {
             style={{ borderColor: `${action.color}44` }}
             title={paperSnapshot?.session.currency}
           >
-            {copy.paperTrading.positionPnl}<span className={positionPnl > 0 ? "text-emerald-700" : positionPnl < 0 ? "text-red-700" : "text-slate-600"}>
+            {copy.paperTrading.positionPnl}<span className={positionPnl > 0 ? "text-emerald-700 dark:text-positive" : positionPnl < 0 ? "text-red-700 dark:text-negative" : "text-slate-600 dark:text-secondary-text"}>
               {positionPnl > 0 ? "+" : ""}{formatNumber(positionPnl)}
             </span>
           </span> : null}
@@ -229,7 +229,7 @@ export function ReplayChart(props: ReplayChartProps) {
           </Button> : null}
           <button
             type="button"
-            className="flex shrink-0 items-center gap-1 border-l px-2 py-1 font-semibold hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-50"
+            className="flex shrink-0 items-center gap-1 border-l px-2 py-1 font-semibold hover:bg-slate-50 dark:hover:bg-hover disabled:cursor-not-allowed disabled:opacity-50"
             style={{ borderColor: `${action.color}44` }}
             disabled={paperBusy || (action.kind === "close" && hasPendingClose)}
             aria-label={action.kind === "cancel" ? copy.paperTrading.cancelOrderFromLine(action.label) : copy.paperTrading.oneClickClose}
@@ -241,10 +241,10 @@ export function ReplayChart(props: ReplayChartProps) {
         </div>
       ); })}
 
-      {exits.preview ? <div data-testid="partial-exit-preview" className={"pointer-events-none absolute left-0 right-16 z-30 border-t border-dashed " + (exits.preview.valid ? exits.preview.stop ? "border-red-600 text-red-700" : "border-emerald-600 text-emerald-700" : "border-red-600 text-red-700")} style={{ top: exits.preview.y }}>
-        <span className="absolute left-3 -translate-y-full rounded-md border bg-white px-2 py-1 text-xs tabular-nums">{exits.preview.valid ? exits.preview.label : copy.paperTrading.invalidBracket}</span>
+      {exits.preview ? <div data-testid="partial-exit-preview" className={"pointer-events-none absolute left-0 right-16 z-30 border-t border-dashed " + (exits.preview.valid ? exits.preview.stop ? "border-red-600 dark:border-negative text-red-700 dark:text-negative" : "border-emerald-600 dark:border-positive text-emerald-700 dark:text-positive" : "border-red-600 dark:border-negative text-red-700 dark:text-negative")} style={{ top: exits.preview.y }}>
+        <span className="absolute left-3 -translate-y-full rounded-md border bg-white dark:bg-card px-2 py-1 text-xs tabular-nums">{exits.preview.valid ? exits.preview.label : copy.paperTrading.invalidBracket}</span>
       </div> : null}
-      {exits.notice || (paperError && !draft && !exits.selection) ? <Alert role={paperError || exits.noticeError ? "alert" : "status"} aria-live="polite" className={"absolute bottom-10 left-3 z-30 w-auto max-w-md px-3 py-2 text-sm shadow-sm " + (paperError || exits.noticeError ? "border-red-200 bg-red-50 text-red-700" : "border-emerald-200 bg-emerald-50 text-emerald-700")}>{paperError ?? exits.notice}</Alert> : null}
+      {exits.notice || (paperError && !draft && !exits.selection) ? <Alert role={paperError || exits.noticeError ? "alert" : "status"} aria-live="polite" className={"absolute bottom-10 left-3 z-30 w-auto max-w-md px-3 py-2 text-sm shadow-sm " + (paperError || exits.noticeError ? "border-red-200 dark:border-negative/40 bg-red-50 dark:bg-negative-background text-red-700 dark:text-negative" : "border-emerald-200 dark:border-positive/40 bg-emerald-50 dark:bg-positive-background text-emerald-700 dark:text-positive")}>{paperError ?? exits.notice}</Alert> : null}
       {exits.selection && paperSnapshot && currentPrice !== null ? <ProtectiveOrderDialog
         key={exits.selection.scope + exits.selection.order.id + String(exits.selection.creating)}
         order={exits.selection.order} creating={exits.selection.creating}
@@ -253,23 +253,23 @@ export function ReplayChart(props: ReplayChartProps) {
         onSave={exits.save} onAdd={exits.add} onClose={exits.close} /> : null}
 
       {latest && (aggregatePhase(latest) === "FORMING" || aggregateHasGap(latest)) ? (
-        <div className={`pointer-events-none absolute left-3 top-3 rounded-md px-2 py-1 text-xs shadow-sm ${aggregateHasGap(latest) ? "bg-amber-100 text-amber-900" : "bg-blue-50 text-blue-800"}`}>
+        <div className={`pointer-events-none absolute left-3 top-3 rounded-md px-2 py-1 text-xs shadow-sm ${aggregateHasGap(latest) ? "bg-amber-100 dark:bg-warning-background text-amber-900 dark:text-warning" : "bg-blue-50 dark:bg-info-background text-blue-800 dark:text-link"}`}>
           {aggregateHasGap(latest) ? copy.marketReplay.incompleteBar(latest.sourceCount, latest.expectedCount) : copy.marketReplay.formingBar(latest.sourceCount, latest.expectedCount)}
         </div>
       ) : null}
 
-      {!draft && paperSnapshot && latest ? <div className="pointer-events-none absolute bottom-3 left-3 rounded-md border border-slate-200 bg-white/90 px-2 py-1 text-[11px] text-slate-500 shadow-sm backdrop-blur">{copy.paperTrading.rightClickHint}</div> : null}
+      {!draft && paperSnapshot && latest ? <div className="pointer-events-none absolute bottom-3 left-3 rounded-md border border-slate-200 dark:border-border bg-white/90 dark:bg-card/90 px-2 py-1 text-[11px] text-slate-500 dark:text-muted-foreground shadow-sm backdrop-blur">{copy.paperTrading.rightClickHint}</div> : null}
 
       {contextMenu ? (
-        <div ref={contextMenuRef} data-context-menu role="menu" className="absolute z-40 max-h-[calc(100%-1rem)] w-[220px] max-w-[calc(100%-1rem)] overflow-y-auto rounded-lg border border-slate-200 bg-white p-1.5 shadow-xl" style={{ left: contextMenu.x, top: contextMenu.y }}>
+        <div ref={contextMenuRef} data-context-menu role="menu" className="absolute z-40 max-h-[calc(100%-1rem)] w-[220px] max-w-[calc(100%-1rem)] overflow-y-auto rounded-lg border border-slate-200 dark:border-border bg-white dark:bg-card p-1.5 shadow-xl" style={{ left: contextMenu.x, top: contextMenu.y }}>
           {!readOnly ? (
-            <button type="button" role="menuitem" data-testid="context-reset-chart-view" className="flex w-full items-center gap-2 rounded-md px-2 py-2 text-left text-sm font-medium text-slate-700 hover:bg-slate-100 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-600" onClick={resetChartView}>
+            <button type="button" role="menuitem" data-testid="context-reset-chart-view" className="flex w-full items-center gap-2 rounded-md px-2 py-2 text-left text-sm font-medium text-slate-700 dark:text-secondary-text hover:bg-slate-100 dark:hover:bg-hover focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-600" onClick={resetChartView}>
               <RotateCcw className="h-4 w-4" />
               {copy.marketReplay.resetChartView}
             </button>
           ) : null}
           {contextMenu.hideAfter ? <Button type="button" role="menuitem" variant="ghost" data-testid="context-hide-subsequent-bars"
-            className="w-full justify-start px-2 text-left font-medium text-slate-700"
+            className="w-full justify-start px-2 text-left font-medium text-slate-700 dark:text-secondary-text"
             onClick={() => { const target = contextMenu.hideAfter; if (target) setHiddenBoundary({ scope: visibilityScope, target }); setContextMenu(null); setAbrTooltip(null); }}>
             <EyeOff className="h-4 w-4" aria-hidden="true" />{copy.marketReplay.hideSubsequentBars}
           </Button> : null}
@@ -280,7 +280,7 @@ export function ReplayChart(props: ReplayChartProps) {
                 type="button"
                 role="menuitem"
                 variant="ghost"
-                className="w-full justify-start px-2 text-left font-medium text-slate-700"
+                className="w-full justify-start px-2 text-left font-medium text-slate-700 dark:text-secondary-text"
                 onClick={() => { onToggleGrid(); setContextMenu(null); }}
               >
                 <Grid2X2 className="h-4 w-4" aria-hidden="true" />
@@ -290,30 +290,30 @@ export function ReplayChart(props: ReplayChartProps) {
           </div>
           {onRewindToBar && contextMenu.rewindTarget ? <div className="mb-1 border-b pb-1">
             <Button type="button" role="menuitem" variant="ghost" data-testid="context-rewind-to-bar" disabled={paperBusy || entryCheckOpen}
-              className="w-full justify-start px-2 text-left text-slate-700" title={paperBusy ? copy.replaySessions.rewindWait : undefined}
+              className="w-full justify-start px-2 text-left text-slate-700 dark:text-secondary-text" title={paperBusy ? copy.replaySessions.rewindWait : undefined}
               onClick={() => { const target = contextMenu.rewindTarget; setContextMenu(null); if (target) onRewindToBar(target); }}>
               <Undo2 className="h-4 w-4" aria-hidden="true" />{copy.replaySessions.rewindToBar}
             </Button>
-            <p className="px-2 pb-1 text-xs tabular-nums text-slate-600">{copy.replaySessions.rewindSelectedBar} · {formatUtcOffset(displayUtcOffsetMinutes)}<br />{formatUtcDateTime(contextMenu.rewindTarget.timestamp, displayUtcOffsetMinutes)}</p>
-            {paperBusy ? <p className="px-2 pb-1 text-xs text-slate-600">{copy.replaySessions.rewindWait}</p> : null}
+            <p className="px-2 pb-1 text-xs tabular-nums text-slate-600 dark:text-secondary-text">{copy.replaySessions.rewindSelectedBar} · {formatUtcOffset(displayUtcOffsetMinutes)}<br />{formatUtcDateTime(contextMenu.rewindTarget.timestamp, displayUtcOffsetMinutes)}</p>
+            {paperBusy ? <p className="px-2 pb-1 text-xs text-slate-600 dark:text-secondary-text">{copy.replaySessions.rewindWait}</p> : null}
           </div> : null}
           <div className="border-b px-2 py-1.5">
-            <p className="text-[10px] font-medium uppercase tracking-wide text-slate-400">{copy.paperTrading.contextPrice}</p>
-            <p className="font-mono text-sm font-semibold text-slate-900">{formatPriceForTick(contextMenu.price, priceTickSize)}</p>
+            <p className="text-[10px] font-medium uppercase tracking-wide text-slate-400 dark:text-muted-foreground">{copy.paperTrading.contextPrice}</p>
+            <p className="font-mono text-sm font-semibold text-slate-900 dark:text-foreground">{formatPriceForTick(contextMenu.price, priceTickSize)}</p>
           </div>
           {!paperSnapshot ? (
             <div className="space-y-2 p-2">
-              <p className="text-xs leading-5 text-slate-600">{copy.paperTrading.contextNoAccount}</p>
+              <p className="text-xs leading-5 text-slate-600 dark:text-secondary-text">{copy.paperTrading.contextNoAccount}</p>
               <Button type="button" size="sm" className="w-full" onClick={() => { setContextMenu(null); onOpenPaperAccount(); }}>{copy.paperTrading.openAccountSettings}</Button>
             </div>
           ) : !latest || currentPrice === null ? (
-            <div className="flex gap-2 p-2 text-xs leading-5 text-amber-800"><ShieldAlert className="mt-0.5 h-4 w-4 shrink-0" />{copy.paperTrading.contextNoBar}</div>
+            <div className="flex gap-2 p-2 text-xs leading-5 text-amber-800 dark:text-warning"><ShieldAlert className="mt-0.5 h-4 w-4 shrink-0" />{copy.paperTrading.contextNoBar}</div>
           ) : contextEntryOrderTypes ? (
             <fieldset disabled={entryCheckOpen || paperBusy} className="space-y-0.5 pt-1">
-              {contextEntryOrderTypes.buy === "LIMIT" ? <button type="button" role="menuitem" data-testid="context-buy-limit" className="flex w-full items-center rounded-md px-2 py-2 text-left text-sm font-medium text-blue-700 hover:bg-blue-50" onClick={() => createDraft("BUY", "LIMIT")}>{copy.paperTrading.buyLimit}</button> : null}
-              {contextEntryOrderTypes.sell === "LIMIT" ? <button type="button" role="menuitem" data-testid="context-sell-limit" className="flex w-full items-center rounded-md px-2 py-2 text-left text-sm font-medium text-orange-700 hover:bg-orange-50" onClick={() => createDraft("SELL", "LIMIT")}>{copy.paperTrading.sellLimit}</button> : null}
-              {contextEntryOrderTypes.sell === "STOP" ? <button type="button" role="menuitem" data-testid="context-sell-stop" className="flex w-full items-center rounded-md px-2 py-2 text-left text-sm font-medium text-red-700 hover:bg-red-50" onClick={() => createDraft("SELL", "STOP")}>{copy.paperTrading.sellStop}</button> : null}
-              {contextEntryOrderTypes.buy === "STOP" ? <button type="button" role="menuitem" data-testid="context-buy-stop" className="flex w-full items-center rounded-md px-2 py-2 text-left text-sm font-medium text-blue-700 hover:bg-blue-50" onClick={() => createDraft("BUY", "STOP")}>{copy.paperTrading.buyStop}</button> : null}
+              {contextEntryOrderTypes.buy === "LIMIT" ? <button type="button" role="menuitem" data-testid="context-buy-limit" className="flex w-full items-center rounded-md px-2 py-2 text-left text-sm font-medium text-blue-700 dark:text-link hover:bg-blue-50 dark:hover:bg-info-background" onClick={() => createDraft("BUY", "LIMIT")}>{copy.paperTrading.buyLimit}</button> : null}
+              {contextEntryOrderTypes.sell === "LIMIT" ? <button type="button" role="menuitem" data-testid="context-sell-limit" className="flex w-full items-center rounded-md px-2 py-2 text-left text-sm font-medium text-orange-700 dark:text-warning hover:bg-orange-50 dark:hover:bg-warning-background" onClick={() => createDraft("SELL", "LIMIT")}>{copy.paperTrading.sellLimit}</button> : null}
+              {contextEntryOrderTypes.sell === "STOP" ? <button type="button" role="menuitem" data-testid="context-sell-stop" className="flex w-full items-center rounded-md px-2 py-2 text-left text-sm font-medium text-red-700 dark:text-negative hover:bg-red-50 dark:hover:bg-negative-background" onClick={() => createDraft("SELL", "STOP")}>{copy.paperTrading.sellStop}</button> : null}
+              {contextEntryOrderTypes.buy === "STOP" ? <button type="button" role="menuitem" data-testid="context-buy-stop" className="flex w-full items-center rounded-md px-2 py-2 text-left text-sm font-medium text-blue-700 dark:text-link hover:bg-blue-50 dark:hover:bg-info-background" onClick={() => createDraft("BUY", "STOP")}>{copy.paperTrading.buyStop}</button> : null}
             </fieldset>
           ) : null}
           </> : null}
@@ -325,7 +325,7 @@ export function ReplayChart(props: ReplayChartProps) {
           ref={orderTicketRef}
           data-order-ticket
           data-testid="risk-order-ticket"
-          className={`absolute z-30 w-[292px] rounded-xl border border-slate-200 bg-white/95 shadow-xl backdrop-blur ${orderTicketPosition ? "" : "right-16 top-3"}`}
+          className={`absolute z-30 w-[292px] rounded-xl border border-slate-200 dark:border-border bg-white/95 dark:bg-card/95 shadow-xl backdrop-blur ${orderTicketPosition ? "" : "right-16 top-3"}`}
           style={orderTicketPosition ? { left: orderTicketPosition.x, top: orderTicketPosition.y } : undefined}
         >
           <div
@@ -363,41 +363,41 @@ export function ReplayChart(props: ReplayChartProps) {
             }}
             onPointerCancel={() => { orderTicketDragRef.current = null; }}
           >
-            <GripHorizontal className="mt-0.5 h-4 w-4 shrink-0 text-slate-400" aria-hidden="true" />
+            <GripHorizontal className="mt-0.5 h-4 w-4 shrink-0 text-slate-400 dark:text-muted-foreground" aria-hidden="true" />
             <div className="min-w-0 flex-1">
               <div className="flex items-center gap-2">
-                <span className={`rounded px-1.5 py-0.5 text-[10px] font-bold ${draft.side === "BUY" ? "bg-blue-100 text-blue-700" : "bg-orange-100 text-orange-700"}`}>{draft.side === "BUY" ? copy.paperTrading.buy : copy.paperTrading.sell}</span>
-                <span className="text-sm font-semibold text-slate-950">{copy.paperTrading.draftTitle}</span>
+                <span className={`rounded px-1.5 py-0.5 text-[10px] font-bold ${draft.side === "BUY" ? "bg-blue-100 dark:bg-info-background text-blue-700 dark:text-link" : "bg-orange-100 dark:bg-warning-background text-orange-700 dark:text-warning"}`}>{draft.side === "BUY" ? copy.paperTrading.buy : copy.paperTrading.sell}</span>
+                <span className="text-sm font-semibold text-slate-950 dark:text-foreground">{copy.paperTrading.draftTitle}</span>
               </div>
-              <p className="mt-1 text-[11px] text-slate-500">{copy.paperTrading.draftDescription}</p>
+              <p className="mt-1 text-[11px] text-slate-500 dark:text-muted-foreground">{copy.paperTrading.draftDescription}</p>
             </div>
             <Button type="button" variant="ghost" size="icon" disabled={entryCheckOpen || paperBusy} className="-mr-1 -mt-1 h-7 w-7 shrink-0 cursor-pointer" aria-label={copy.paperTrading.cancelDraft} onClick={() => { setDraft(null); setDraftError(null); setOrderTicketPosition(null); }}><X className="h-4 w-4" /></Button>
           </div>
           <fieldset disabled={entryCheckOpen || paperBusy} className="space-y-3 p-3">
             <div className="grid grid-cols-3 gap-2">
-              <div><Label htmlFor="draft-entry" className="text-[10px] text-blue-700">ENTRY · {orderTypeLabel(draft.type)}</Label><Input id="draft-entry" data-testid="draft-entry" type="number" step={priceTickSize} className="mt-1 h-8 px-2 font-mono text-xs" value={draft.entryPrice} onChange={(event) => setDraftPrice("entryPrice", Number(event.target.value))} /></div>
-              <div><Label htmlFor="draft-sl" className="text-[10px] text-red-700">SL</Label><Input id="draft-sl" data-testid="draft-sl" type="number" step={priceTickSize} className="mt-1 h-8 px-2 font-mono text-xs" value={draft.stopLoss} onChange={(event) => setDraftPrice("stopLoss", Number(event.target.value))} /></div>
-              <div><Label htmlFor="draft-tp" className="text-[10px] text-emerald-700">TP</Label><Input id="draft-tp" data-testid="draft-tp" type="number" step={priceTickSize} className="mt-1 h-8 px-2 font-mono text-xs" value={draft.takeProfit} onChange={(event) => setDraftPrice("takeProfit", Number(event.target.value))} /></div>
+              <div><Label htmlFor="draft-entry" className="text-[10px] text-blue-700 dark:text-link">ENTRY · {orderTypeLabel(draft.type)}</Label><Input id="draft-entry" data-testid="draft-entry" type="number" step={priceTickSize} className="mt-1 h-8 px-2 font-mono text-xs" value={draft.entryPrice} onChange={(event) => setDraftPrice("entryPrice", Number(event.target.value))} /></div>
+              <div><Label htmlFor="draft-sl" className="text-[10px] text-red-700 dark:text-negative">SL</Label><Input id="draft-sl" data-testid="draft-sl" type="number" step={priceTickSize} className="mt-1 h-8 px-2 font-mono text-xs" value={draft.stopLoss} onChange={(event) => setDraftPrice("stopLoss", Number(event.target.value))} /></div>
+              <div><Label htmlFor="draft-tp" className="text-[10px] text-emerald-700 dark:text-positive">TP</Label><Input id="draft-tp" data-testid="draft-tp" type="number" step={priceTickSize} className="mt-1 h-8 px-2 font-mono text-xs" value={draft.takeProfit} onChange={(event) => setDraftPrice("takeProfit", Number(event.target.value))} /></div>
             </div>
             <div className="grid grid-cols-2 gap-2">
               <div><div className="flex items-center gap-1"><Label htmlFor="draft-risk" className="text-[11px]">{copy.paperTrading.fixedRiskAmount}</Label><Button type="button" variant="ghost" size="icon" className="h-5 w-5" aria-label={copy.paperTrading.riskDefaultsTitle} title={copy.paperTrading.riskDefaultsTitle} onClick={() => setRiskSettingsOpen(true)}><Settings className="h-3 w-3" aria-hidden="true" /></Button></div><Input id="draft-risk" data-testid="draft-risk" type="number" min="0.01" step="any" className="mt-1 h-8" value={draft.riskAmount} onChange={(event) => { setDraft((current) => current ? { ...current, riskAmount: Number(event.target.value) } : current); setDraftError(null); setDefaultSaved(false); }} /></div>
               <div><Label htmlFor="draft-target-r" className="text-[11px]">{copy.paperTrading.targetR}</Label><Input id="draft-target-r" data-testid="draft-target-r" type="number" min="0.01" step="0.1" className="mt-1 h-8" value={draft.targetR} onChange={(event) => { setTargetR(Number(event.target.value)); setDefaultSaved(false); }} /></div>
             </div>
             <div className="flex items-center justify-between text-[11px]">
-              <span className={`inline-flex items-center gap-1 ${draft.tpMode === "LINKED" ? "text-blue-700" : "text-slate-500"}`}><Link2 className="h-3 w-3" />{draft.tpMode === "LINKED" ? copy.paperTrading.linkedTarget : copy.paperTrading.freeTarget}</span>
+              <span className={`inline-flex items-center gap-1 ${draft.tpMode === "LINKED" ? "text-blue-700 dark:text-link" : "text-slate-500 dark:text-muted-foreground"}`}><Link2 className="h-3 w-3" />{draft.tpMode === "LINKED" ? copy.paperTrading.linkedTarget : copy.paperTrading.freeTarget}</span>
               <div className="flex items-center gap-1">
-                {draft.tpMode === "FREE" ? <button type="button" className="font-medium text-blue-700 hover:underline" onClick={() => setTargetR(draft.targetR)}>{copy.paperTrading.restoreTargetR}</button> : null}
-                <button type="button" className="font-medium text-slate-500 hover:text-slate-900" title={copy.paperTrading.riskSaveFixedHint} onClick={saveDefaults}>{defaultSaved ? copy.paperTrading.defaultSaved : copy.paperTrading.saveAsDefault}</button>
+                {draft.tpMode === "FREE" ? <button type="button" className="font-medium text-blue-700 dark:text-link hover:underline" onClick={() => setTargetR(draft.targetR)}>{copy.paperTrading.restoreTargetR}</button> : null}
+                <button type="button" className="font-medium text-slate-500 dark:text-muted-foreground hover:text-slate-900 dark:hover:text-foreground" title={copy.paperTrading.riskSaveFixedHint} onClick={saveDefaults}>{defaultSaved ? copy.paperTrading.defaultSaved : copy.paperTrading.saveAsDefault}</button>
               </div>
             </div>
-            <div className="grid grid-cols-2 gap-x-3 gap-y-1 rounded-lg bg-slate-50 p-2.5 text-xs">
-              <span className="text-slate-500">{copy.paperTrading.estimatedQuantity}</span><strong data-testid="draft-quantity" className="text-right font-mono font-semibold text-slate-900">{draftSizing?.ok ? number(draftSizing.value.quantity) : "—"}</strong>
-              <span className="text-slate-500">{copy.paperTrading.estimatedLoss}</span><strong className="text-right font-medium text-red-700">{draftSizing?.ok ? `-${money(draftSizing.value.projectedLoss, paperSnapshot.session.currency)}` : "—"}</strong>
-              <span className="text-slate-500">{copy.paperTrading.estimatedProfit}</span><strong className="text-right font-medium text-emerald-700">{draftSizing?.ok && draftSizing.value.projectedProfit !== null ? `+${money(draftSizing.value.projectedProfit, paperSnapshot.session.currency)}` : "—"}</strong>
-              <span className="text-slate-500">{copy.paperTrading.netRewardRisk}</span><strong data-testid="draft-ratio" className="text-right font-mono font-semibold text-slate-900">{draftSizing?.ok && draftSizing.value.rewardRiskRatio !== null ? `${draftSizing.value.rewardRiskRatio.toFixed(2)}R` : "—"}</strong>
+            <div className="grid grid-cols-2 gap-x-3 gap-y-1 rounded-lg bg-slate-50 dark:bg-muted p-2.5 text-xs">
+              <span className="text-slate-500 dark:text-muted-foreground">{copy.paperTrading.estimatedQuantity}</span><strong data-testid="draft-quantity" className="text-right font-mono font-semibold text-slate-900 dark:text-foreground">{draftSizing?.ok ? number(draftSizing.value.quantity) : "—"}</strong>
+              <span className="text-slate-500 dark:text-muted-foreground">{copy.paperTrading.estimatedLoss}</span><strong className="text-right font-medium text-red-700 dark:text-negative">{draftSizing?.ok ? `-${money(draftSizing.value.projectedLoss, paperSnapshot.session.currency)}` : "—"}</strong>
+              <span className="text-slate-500 dark:text-muted-foreground">{copy.paperTrading.estimatedProfit}</span><strong className="text-right font-medium text-emerald-700 dark:text-positive">{draftSizing?.ok && draftSizing.value.projectedProfit !== null ? `+${money(draftSizing.value.projectedProfit, paperSnapshot.session.currency)}` : "—"}</strong>
+              <span className="text-slate-500 dark:text-muted-foreground">{copy.paperTrading.netRewardRisk}</span><strong data-testid="draft-ratio" className="text-right font-mono font-semibold text-slate-900 dark:text-foreground">{draftSizing?.ok && draftSizing.value.rewardRiskRatio !== null ? `${draftSizing.value.rewardRiskRatio.toFixed(2)}R` : "—"}</strong>
             </div>
-            {!draftSizing?.ok ? <p className="text-xs text-red-600">{draftSizing ? sizingErrorText(draftSizing.error) : copy.paperTrading.invalidPrice}</p> : null}
-            {draftError || paperError ? <p className="text-xs text-red-600">{draftError ?? paperError}</p> : null}
+            {!draftSizing?.ok ? <p className="text-xs text-red-600 dark:text-negative">{draftSizing ? sizingErrorText(draftSizing.error) : copy.paperTrading.invalidPrice}</p> : null}
+            {draftError || paperError ? <p className="text-xs text-red-600 dark:text-negative">{draftError ?? paperError}</p> : null}
             <div className="grid grid-cols-[1fr_1.6fr] gap-2">
               <Button type="button" variant="outline" size="sm" disabled={paperBusy} onClick={() => { setDraft(null); setDraftError(null); setOrderTicketPosition(null); }}>{copy.paperTrading.cancelDraft}</Button>
               <Button type="button" size="sm" data-testid="confirm-risk-order" disabled={paperBusy || !draftSizing?.ok} onClick={() => void submitDraft()}>{paperBusy ? <Loader2 className="h-4 w-4 animate-spin" /> : null}{paperBusy ? copy.paperTrading.submitting : paperSnapshot.session.trainingGate?.active && !isClosingOrder(paperSnapshot.session.netQuantity, draft.side, draftSizing?.ok ? draftSizing.value.quantity : 0) ? copy.trainingGate.entryAction(paperSnapshot.session.trainingGate.activeMode ?? "CHECKLIST") : copy.paperTrading.confirmDraft}</Button>

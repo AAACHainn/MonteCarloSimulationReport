@@ -23,15 +23,15 @@ export type TextEditor = TextEditPreview & { key: string };
 export function TextToolOption({ onArm }: { onArm: () => void }) {
   return <Button type="button" variant="ghost" className="w-full justify-start gap-3" aria-keyshortcuts="Shift+t" onClick={onArm}>
     <Type className="h-4 w-4 shrink-0" aria-hidden="true" />{copy.marketReplay.textTool}
-    <kbd className="ml-auto whitespace-nowrap font-mono text-xs text-slate-500">{copy.marketReplay.textShortcut}</kbd>
+    <kbd className="ml-auto whitespace-nowrap font-mono text-xs text-slate-500 dark:text-muted-foreground">{copy.marketReplay.textShortcut}</kbd>
   </Button>;
 }
 function TextToggle({ label, checked, onChange, children }: { label: string; checked: boolean;
   onChange: (checked: boolean) => void; children?: ReactNode }) {
   return <div className="space-y-3">
-    <label className="flex min-h-10 items-center gap-2 text-sm text-slate-700">
+    <label className="flex min-h-10 items-center gap-2 text-sm text-slate-700 dark:text-secondary-text">
       <input type="checkbox" checked={checked} onChange={event => onChange(event.target.checked)}
-        className="h-4 w-4 rounded border-slate-300 focus-visible:ring-2 focus-visible:ring-ring" />{label}
+        className="h-4 w-4 rounded border-slate-300 dark:border-input focus-visible:ring-2 focus-visible:ring-ring" />{label}
     </label>
     {checked ? children : null}
   </div>;
@@ -172,7 +172,7 @@ export function TextSettingsDialog({ editor, apiRef, templates, onTemplatesChang
             <div role="group" aria-labelledby={`${prefix}-font`} className="flex gap-2">
               {[{ key: "bold" as const, label: copy.marketReplay.textBold, Icon: Bold }, { key: "italic" as const, label: copy.marketReplay.textItalic, Icon: Italic }].map(({ key, label, Icon }) =>
                 <Button key={key} type="button" variant="outline" aria-label={label} aria-pressed={style[key]}
-                  className={style[key] ? "border-blue-600 bg-blue-50 text-blue-700" : ""}
+                  className={style[key] ? "border-blue-600 dark:border-link bg-blue-50 dark:bg-info-background text-blue-700 dark:text-link" : ""}
                   onClick={() => setStyle(s => ({ ...s, [key]: !s[key] }))}><Icon className="h-4 w-4" aria-hidden="true" />{label}</Button>)}
             </div>
           </div>
@@ -180,7 +180,7 @@ export function TextSettingsDialog({ editor, apiRef, templates, onTemplatesChang
             <Label htmlFor={`${prefix}-text`}>{copy.marketReplay.textContent}</Label>
             <Textarea id={`${prefix}-text`} data-dialog-initial-focus autoFocus value={text} onChange={event => { setText(event.target.value); setError(null); }}
               aria-invalid={Boolean(text) && !contentValid} aria-describedby={`${prefix}-content-hint`} className="min-h-32 resize-y" />
-            <p id={`${prefix}-content-hint`} className={text && !contentValid ? "text-xs text-red-600" : "text-xs text-slate-500"}>
+            <p id={`${prefix}-content-hint`} className={text && !contentValid ? "text-xs text-red-600 dark:text-negative" : "text-xs text-slate-500 dark:text-muted-foreground"}>
               {normalized.length} / 2000 · {text && !contentValid ? copy.marketReplay.textContentError : copy.marketReplay.textContentHint}
             </p>
           </div>
@@ -199,12 +199,12 @@ export function TextSettingsDialog({ editor, apiRef, templates, onTemplatesChang
                   const value = event.target.value; setWidth(value);
                   if (/^\d+$/.test(value) && Number(value) >= 120 && Number(value) <= 800) setStyle(s => ({ ...s, wrapWidth: Number(value) }));
                 }} />
-              <p id={`${prefix}-width-hint`} className={widthValid ? "text-xs text-slate-500" : "text-xs text-red-600"}>{widthValid ? copy.marketReplay.textWrapHint : copy.marketReplay.textWrapError}</p>
+              <p id={`${prefix}-width-hint`} className={widthValid ? "text-xs text-slate-500 dark:text-muted-foreground" : "text-xs text-red-600 dark:text-negative"}>{widthValid ? copy.marketReplay.textWrapHint : copy.marketReplay.textWrapError}</p>
             </div>
           </TextToggle>
         </fieldset>
-        {error ? <p role="alert" className="text-sm text-red-600">{error}</p> : null}
-        <p className="text-xs text-slate-500">{copy.marketReplay.textStyleHint}</p>
+        {error ? <p role="alert" className="text-sm text-red-600 dark:text-negative">{error}</p> : null}
+        <p className="text-xs text-slate-500 dark:text-muted-foreground">{copy.marketReplay.textStyleHint}</p>
         <div className="flex flex-wrap items-center justify-between gap-3 border-t pt-4">
           <Button type="button" variant="outline" disabled={busy || !styleValid} onClick={() => { setName(""); setTemplateError(null); setNaming(true); }}>{copy.marketReplay.saveDrawingTemplate}</Button>
           <div className="ml-auto flex gap-2">
@@ -221,7 +221,7 @@ export function TextSettingsDialog({ editor, apiRef, templates, onTemplatesChang
           <Input id={`${prefix}-name`} value={name} autoFocus maxLength={50} onChange={event => setName(event.target.value)}
             onKeyDown={event => { if (event.key === "Enter" && event.nativeEvent.isComposing) event.preventDefault(); }} />
         </div>
-        {templateError ? <p role="alert" className="text-xs text-red-600">{templateError}</p> : null}
+        {templateError ? <p role="alert" className="text-xs text-red-600 dark:text-negative">{templateError}</p> : null}
         <div className="flex justify-end gap-2 border-t pt-4">
           <Button type="button" variant="outline" onClick={() => setNaming(false)}>{copy.marketReplay.drawingCancel}</Button>
           <Button type="submit" disabled={!name.trim() || !styleValid}>{copy.marketReplay.saveDrawingTemplate}</Button>

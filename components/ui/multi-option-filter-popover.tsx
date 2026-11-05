@@ -49,7 +49,7 @@ export function MultiOptionFilterPopover({
       disabled={disabled}
     >
       <div className="space-y-2">
-        <p className="text-xs font-medium text-slate-500">{conditionLabel ?? label}</p>
+        <p className="text-xs font-medium text-slate-500 dark:text-muted-foreground">{conditionLabel ?? label}</p>
         <div className="max-h-64 overflow-auto rounded-md border p-1">
           {options.map((option) => {
             const isSelected = selected.has(option.value);
@@ -57,15 +57,15 @@ export function MultiOptionFilterPopover({
               key={option.value}
               type="button"
               className={cn(
-                "flex w-full items-center gap-2 rounded-sm px-2 py-1.5 text-left text-sm outline-none hover:bg-slate-100 focus:bg-slate-100",
-                isSelected && "font-medium text-slate-950",
+                "flex w-full items-center gap-2 rounded-sm px-2 py-1.5 text-left text-sm outline-none hover:bg-slate-100 dark:hover:bg-hover focus:bg-slate-100 dark:focus:bg-hover",
+                isSelected && "font-medium text-slate-950 dark:text-foreground",
               )}
               aria-pressed={isSelected}
               onClick={() => toggle(option.value)}
             >
               <span className={cn(
                 "flex h-4 w-4 shrink-0 items-center justify-center rounded border",
-                isSelected ? "border-blue-600 bg-blue-600 text-white" : "border-slate-300 bg-white text-transparent",
+                isSelected ? "border-blue-600 dark:border-link bg-blue-600 text-white" : "border-slate-300 dark:border-input bg-white dark:bg-surface-raised text-transparent",
               )}>
                 <Check className="h-3 w-3" />
               </span>

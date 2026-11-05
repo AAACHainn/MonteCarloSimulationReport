@@ -1,4 +1,6 @@
 "use client";
+import { useAppearance } from "@/components/appearance-provider";
+import { chartThemeOptions, resolveChartTheme } from "@/lib/chart-theme";
 import { ArrowPrimitive } from "@/lib/market-replay/arrow-primitive";
 import { AbcdPrimitive } from "@/lib/market-replay/abcd-primitive";
 
@@ -7,7 +9,7 @@ import { protectiveQuantityMode, protectiveOrderLabel } from "@/lib/paper-tradin
 import { formatNumber } from "@/lib/format";
 import { canUpdateReplayTail, formatChartTick, chartCandleData as candle, chartVolumeData as volume } from "@/lib/market-replay/chart-data";
 import { useCallback, useEffect, useMemo, useRef } from "react";
-import { CandlestickSeries, ColorType, createChart, CrosshairMode, HistogramSeries, type IChartApi, type Time, TickMarkType } from "lightweight-charts";
+import { CandlestickSeries, createChart, CrosshairMode, HistogramSeries, type IChartApi, type Time, TickMarkType } from "lightweight-charts";
 import { copy } from "@/lib/i18n";
 import { defaultReplayLogicalRange, captureReplayViewport, isReplayRangeFollowing, rangeForReplayViewport, rangeAfterNewReplayBar, rangeAfterWindowReplacement, rangeForReplayFocus, type ReplayLogicalRange } from "@/lib/market-replay/chart-range";
 import { candlestickSeriesStyleOptions } from "@/lib/market-replay/candlestick-style";
@@ -44,6 +46,10 @@ export function useReplayChartSetup(core: ReturnType<typeof useReplayChartCore>)
     barCountConfig, paperSnapshot, tradeAnnotations, focusSequence, tradeAnnotationsVisible, candleCountdownEnabled,
     playbackActive, currentSourceTimestamp, sourceIntervalSeconds, readOnly,
   } = core;
+  const { mode } = useAppearance();
+  const theme = resolveChartTheme(mode);
+  const themeRef = useRef(theme);
+  themeRef.current = theme;
   const viewportBeforeEmaResetRef = useRef<{ chart: IChartApi; range: ReplayLogicalRange | null } | null>(null);
   const captureViewportBeforeEmaReset = useCallback(() => {
     const chart = chartRef.current;
@@ -62,12 +68,13 @@ export function useReplayChartSetup(core: ReturnType<typeof useReplayChartCore>)
     const lineTargets = lineTargetsRef.current;
     const chart = createChart(container, {
       width: container.clientWidth, height: container.clientHeight,
-      layout: { background: { type: ColorType.Solid, color: "#fff" }, textColor: "#475569", attributionLogo: true, panes: { separatorColor: "#e2e8f0", separatorHoverColor: "#cbd5e1" } },
-      grid: { vertLines: { color: "#f1f5f9", visible: gridVisibleRef.current }, horzLines: { color: "#f1f5f9", visible: gridVisibleRef.current } },
+      ...chartThemeOptions(themeRef.current),
+      layout: { ...chartThemeOptions(themeRef.current).layout, attributionLogo: true },
+      grid: { vertLines: { color: themeRef.current.grid, visible: gridVisibleRef.current }, horzLines: { color: themeRef.current.grid, visible: gridVisibleRef.current } },
       crosshair: { mode: CrosshairMode.Normal },
       localization: { locale: "zh-CN", timeFormatter: (time: Time) => typeof time === "number" ? formatUtcDateTimeWithWeekday(time * 1_000, displayUtcOffsetRef.current) : String(time) },
       timeScale: {
-        borderColor: "#e2e8f0",
+        borderColor: themeRef.current.border,
         timeVisible: true,
         secondsVisible: true,
         rightOffset: 4,
@@ -76,7 +83,7 @@ export function useReplayChartSetup(core: ReturnType<typeof useReplayChartCore>)
         enableConflation: true,
         tickMarkFormatter: (time: Time, tickMarkType: TickMarkType) => formatChartTick(time, tickMarkType, displayUtcOffsetRef.current),
       },
-      rightPriceScale: { borderColor: "#e2e8f0" },
+      rightPriceScale: { borderColor: themeRef.current.border },
     });
     const candles = chart.addSeries(CandlestickSeries, {
       ...candlestickSeriesStyleOptions(candlestickStyleRef.current),
@@ -191,6 +198,15 @@ export function useReplayChartSetup(core: ReturnType<typeof useReplayChartCore>)
       priceLines.clear(); lineTargets.clear(); lastDataRef.current = [];
     };
   }, [abcdPrimitiveRef, abcdDraftRef, abcdPreviewRef, arrowPrimitiveRef, arrowDragRef, priceTickSize, restoreCrosshair, setChartCursor, syncDrawingPrimitive, syncLineActionCoordinates, syncMeasurementCoordinates, syncVisibleSequenceRange, barCountPrimitiveRef, barsRef, candleCountdownPrimitiveRef, candleRef, candlestickStyleRef, chartRef, containerRef, displayUtcOffsetRef, drawingFrameRef, fibonacciPrimitiveRef, gridVisibleRef, lastDataRef, lineTargetsRef, priceLinesRef, rectanglePrimitiveRef, textDragRef, textEditRef, textPositionRef, textPrimitiveRef, tradeAnnotationPrimitiveRef, tradeAnnotationsRef, tradeAnnotationsVisibleRef, trendLinePrimitiveRef, volumeRef, viewportGestureRef]);
+
+  useEffect(() => {
+    chartRef.current?.applyOptions(chartThemeOptions(theme));
+    for (const primitive of [rectanglePrimitiveRef.current, trendLinePrimitiveRef.current,
+      fibonacciPrimitiveRef.current, textPrimitiveRef.current, arrowPrimitiveRef.current,
+      abcdPrimitiveRef.current, tradeAnnotationPrimitiveRef.current, barCountPrimitiveRef.current,
+      candleCountdownPrimitiveRef.current]) primitive?.setTheme(theme);
+  }, [theme, priceTickSize, chartRef, rectanglePrimitiveRef, trendLinePrimitiveRef, fibonacciPrimitiveRef,
+    textPrimitiveRef, arrowPrimitiveRef, abcdPrimitiveRef, tradeAnnotationPrimitiveRef, barCountPrimitiveRef, candleCountdownPrimitiveRef]);
 
   useEffect(() => {
     chartRef.current?.applyOptions({
@@ -424,13 +440,13 @@ export function useReplayChartSetup(core: ReturnType<typeof useReplayChartCore>)
       if (coordinate !== null) nextLineActions.push({ ...action, y: Number(coordinate) });
     };
     if (paperSnapshot?.session.averageEntryPrice !== null && paperSnapshot?.session.averageEntryPrice !== undefined && paperSnapshot.session.netQuantity !== 0) {
-      addLine(null, paperSnapshot.session.averageEntryPrice, "#475569", copy.paperTrading.positionValue(formatNumber(paperSnapshot.session.netQuantity), paperSnapshot.session.averageEntryPrice));
-      addAction({ key: "position", price: paperSnapshot.session.averageEntryPrice, color: "#475569", label: copy.paperTrading.positionValue(formatNumber(paperSnapshot.session.netQuantity), paperSnapshot.session.averageEntryPrice), kind: "close" });
+      addLine(null, paperSnapshot.session.averageEntryPrice, theme.text, copy.paperTrading.positionValue(formatNumber(paperSnapshot.session.netQuantity), paperSnapshot.session.averageEntryPrice));
+      addAction({ key: "position", price: paperSnapshot.session.averageEntryPrice, color: theme.text, label: copy.paperTrading.positionValue(formatNumber(paperSnapshot.session.netQuantity), paperSnapshot.session.averageEntryPrice), kind: "close" });
     }
     for (const order of paperSnapshot?.activeOrders ?? []) {
       if (order.price !== null) {
         const isStop = order.isProtective && order.type === "STOP";
-        const color = isStop ? "#dc2626" : order.isProtective ? "#16a34a" : order.side === "BUY" ? "#2563eb" : "#ea580c";
+        const color = isStop ? theme.negative : order.isProtective ? theme.positive : order.side === "BUY" ? theme.buy : theme.sell;
         const rReference = order.isProtective ? protectiveOrderRReference(paperSnapshot!, order) : null;
         const title = order.isProtective
           ? (protectiveQuantityMode(order) === "ALL" ? copy.paperTrading.exitAllLabel(formatNumber(order.quantity)) : copy.paperTrading.exitQuantityLabel(formatNumber(order.quantity))) + " · " + bracketPriceLineTitle(rReference, order.price, priceTickSize)
@@ -441,27 +457,27 @@ export function useReplayChartSetup(core: ReturnType<typeof useReplayChartCore>)
       if (!order.isProtective && order.stopLoss !== null) {
         const reference = order.price === null ? null : createBracketRReference(order.side, order.price, order.stopLoss);
         const title = bracketPriceLineTitle(reference, order.stopLoss, priceTickSize);
-        addLine({ key: `${order.id}:sl`, price: order.stopLoss, kind: "order", field: "stopLoss", orderId: order.id, rReference: reference ?? undefined }, order.stopLoss, "#dc2626", title, true);
+        addLine({ key: `${order.id}:sl`, price: order.stopLoss, kind: "order", field: "stopLoss", orderId: order.id, rReference: reference ?? undefined }, order.stopLoss, theme.negative, title, true);
       }
       if (!order.isProtective && order.takeProfit !== null) {
         const reference = order.price === null || order.stopLoss === null ? null : createBracketRReference(order.side, order.price, order.stopLoss);
         const title = bracketPriceLineTitle(reference, order.takeProfit, priceTickSize);
-        addLine({ key: `${order.id}:tp`, price: order.takeProfit, kind: "order", field: "takeProfit", orderId: order.id, rReference: reference ?? undefined }, order.takeProfit, "#16a34a", title, true);
+        addLine({ key: `${order.id}:tp`, price: order.takeProfit, kind: "order", field: "takeProfit", orderId: order.id, rReference: reference ?? undefined }, order.takeProfit, theme.positive, title, true);
       }
     }
     if (draft && paperSnapshot) {
       const side = draft.side === "BUY" ? copy.paperTrading.buy : copy.paperTrading.sell;
       const reference = createBracketRReference(draft.side, draft.entryPrice, draft.stopLoss);
-      addLine({ key: "draft:entry", price: draft.entryPrice, kind: "draft", field: "entryPrice" }, draft.entryPrice, "rgba(37,99,235,0.5)", copy.paperTrading.orderLine(side, orderTypeLabel(draft.type)), true);
-      addLine({ key: "draft:sl", price: draft.stopLoss, kind: "draft", field: "stopLoss" }, draft.stopLoss, "rgba(220,38,38,0.5)", bracketPriceLineTitle(reference, draft.stopLoss, priceTickSize), true);
-      addLine({ key: "draft:tp", price: draft.takeProfit, kind: "draft", field: "takeProfit" }, draft.takeProfit, "rgba(22,163,74,0.5)", bracketPriceLineTitle(reference, draft.takeProfit, priceTickSize), true);
+      addLine({ key: "draft:entry", price: draft.entryPrice, kind: "draft", field: "entryPrice" }, draft.entryPrice, theme.buy + "80", copy.paperTrading.orderLine(side, orderTypeLabel(draft.type)), true);
+      addLine({ key: "draft:sl", price: draft.stopLoss, kind: "draft", field: "stopLoss" }, draft.stopLoss, theme.negative + "80", bracketPriceLineTitle(reference, draft.stopLoss, priceTickSize), true);
+      addLine({ key: "draft:tp", price: draft.takeProfit, kind: "draft", field: "takeProfit" }, draft.takeProfit, theme.positive + "80", bracketPriceLineTitle(reference, draft.takeProfit, priceTickSize), true);
     }
     for (const [key, line] of priceLinesRef.current) if (!nextKeys.has(key)) {
       series.removePriceLine(line);
       priceLinesRef.current.delete(key);
     }
     setLineActions((current) => sameLineActions(current, nextLineActions) ? current : nextLineActions);
-  }, [draft, paperSnapshot, priceTickSize, candleRef, lineTargetsRef, priceLinesRef, setLineActions]);
+  }, [theme, draft, paperSnapshot, priceTickSize, candleRef, lineTargetsRef, priceLinesRef, setLineActions]);
 
   const moveDraftLine = useCallback((current: DraftOrder, field: LineTarget["field"], price: number): DraftOrder => {
     price = snapPriceToTick(price, priceTickSize);

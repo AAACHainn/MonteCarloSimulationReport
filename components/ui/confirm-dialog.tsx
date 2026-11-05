@@ -49,7 +49,7 @@ export function ConfirmDialog({
   if (!open || !mounted) return null;
 
   return createPortal(
-    <div className={cn("fixed inset-0 z-50 flex items-center justify-center bg-slate-950/35 px-4 py-6 backdrop-blur-sm", layerClassName)}>
+    <div className={cn("fixed inset-0 z-50 flex items-center justify-center bg-slate-950/35 dark:bg-[var(--overlay)] px-4 py-6 backdrop-blur-sm", layerClassName)}>
       <div
         ref={panelRef}
         tabIndex={-1}
@@ -58,25 +58,25 @@ export function ConfirmDialog({
         aria-modal="true"
         aria-labelledby={titleId}
         aria-describedby={descriptionId}
-        className="flex max-h-[calc(100dvh-2rem)] w-full max-w-md flex-col overflow-hidden rounded-lg border border-slate-200 bg-white shadow-2xl"
+        className="flex max-h-[calc(100dvh-2rem)] w-full max-w-md flex-col overflow-hidden rounded-lg border border-slate-200 dark:border-border bg-white dark:bg-surface-raised shadow-2xl"
       >
         <div className="flex min-h-0 items-start gap-3 overflow-y-auto border-b px-5 py-4">
-          <div className={cn("mt-0.5 flex h-9 w-9 shrink-0 items-center justify-center rounded-md", confirmVariant === "destructive" ? "bg-red-50 text-red-700" : "bg-amber-50 text-amber-800")}>
+          <div className={cn("mt-0.5 flex h-9 w-9 shrink-0 items-center justify-center rounded-md", confirmVariant === "destructive" ? "bg-red-50 dark:bg-negative-background text-red-700 dark:text-negative" : "bg-amber-50 dark:bg-warning-background text-amber-800 dark:text-warning")}>
             <AlertTriangle className="h-5 w-5" aria-hidden="true" />
           </div>
           <div className="min-w-0 flex-1">
-            <h2 id={titleId} className="text-base font-semibold text-slate-950">
+            <h2 id={titleId} className="text-base font-semibold text-slate-950 dark:text-foreground">
               {title}
             </h2>
-            <p id={descriptionId} className="mt-1 text-sm leading-6 text-slate-600">
+            <p id={descriptionId} className="mt-1 text-sm leading-6 text-slate-600 dark:text-secondary-text">
               {description}
             </p>
             {children}
-            {error ? <p className="mt-2 text-sm text-red-700" role="alert">{error}</p> : null}
+            {error ? <p className="mt-2 text-sm text-red-700 dark:text-negative" role="alert">{error}</p> : null}
           </div>
           <button
             type="button"
-            className="rounded-md p-1 text-slate-400 hover:bg-slate-100 hover:text-slate-700 disabled:pointer-events-none disabled:opacity-50"
+            className="rounded-md p-1 text-slate-400 dark:text-muted-foreground hover:bg-slate-100 dark:hover:bg-hover hover:text-slate-700 dark:hover:text-secondary-text disabled:pointer-events-none disabled:opacity-50"
             onClick={onCancel}
             disabled={isLoading}
             aria-label={cancelLabel}
@@ -84,7 +84,7 @@ export function ConfirmDialog({
             <X className="h-4 w-4" />
           </button>
         </div>
-        <div className="flex shrink-0 flex-wrap justify-end gap-2 bg-slate-50 px-5 py-4">
+        <div className="flex shrink-0 flex-wrap justify-end gap-2 bg-slate-50 dark:bg-muted px-5 py-4">
           <Button type="button" variant="outline" onClick={onCancel} disabled={isLoading}>
             {cancelLabel}
           </Button>

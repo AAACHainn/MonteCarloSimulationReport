@@ -40,9 +40,9 @@ export default async function ReplayTradeHistoryPage({ params, searchParams }: {
       { label: copy.paperTrading.journalHistory },
     ]} /></UserContextHeader>
     <section className="border-b pb-5">
-      <p className="font-mono text-sm uppercase tracking-wide text-blue-700">{dataset.symbol}</p>
-      <h1 className="text-3xl font-semibold tracking-tight text-slate-950">{copy.paperTrading.journalHistory}</h1>
-      <p className="mt-2 text-sm text-slate-600">{copy.paperTrading.journalHistoryDescription}</p>
+      <p className="font-mono text-sm uppercase tracking-wide text-blue-700 dark:text-link">{dataset.symbol}</p>
+      <h1 className="text-3xl font-semibold tracking-tight text-slate-950 dark:text-foreground">{copy.paperTrading.journalHistory}</h1>
+      <p className="mt-2 text-sm text-slate-600 dark:text-secondary-text">{copy.paperTrading.journalHistoryDescription}</p>
     </section>
     {isProp ? <PropRoundHistory datasetId={id} sessionId={session.id} rounds={rounds} selected={number!} /> : null}
     {snapshot?.propAccount ? <PropAccountPanel sessionId={session.id} runtime={snapshot.propAccount} tradingSnapshot={snapshot} readOnly /> : null}

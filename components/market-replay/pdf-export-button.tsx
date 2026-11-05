@@ -60,12 +60,12 @@ export function PdfExportButton({ datasetId, sessionId, filters, loading, count 
     </Button>
     <Dialog open={open} title={t.title} description={t.description} onClose={close}>
       <div className="space-y-4" aria-busy={reading}>
-        {reading ? <p role="status" className="flex items-center gap-2 text-sm text-slate-600"><Loader2 className="h-4 w-4 animate-spin" />{t.loading}</p> : null}
-        {error ? <p role="alert" className="text-sm text-red-600">{error}</p> : null}
+        {reading ? <p role="status" className="flex items-center gap-2 text-sm text-slate-600 dark:text-secondary-text"><Loader2 className="h-4 w-4 animate-spin" />{t.loading}</p> : null}
+        {error ? <p role="alert" className="text-sm text-red-600 dark:text-negative">{error}</p> : null}
         {snapshot ? <>
-          <p className="text-sm tabular-nums text-slate-600">{t.counts(snapshot.session.totalCount, snapshot.entries.length)}</p>
-          <p className="text-xs text-slate-500">{t.filters}: {snapshot.filterDescription}</p>
-          {!snapshot.entries.length ? <p role="status" className="text-sm text-slate-600">{t.empty}</p> : null}
+          <p className="text-sm tabular-nums text-slate-600 dark:text-secondary-text">{t.counts(snapshot.session.totalCount, snapshot.entries.length)}</p>
+          <p className="text-xs text-slate-500 dark:text-muted-foreground">{t.filters}: {snapshot.filterDescription}</p>
+          {!snapshot.entries.length ? <p role="status" className="text-sm text-slate-600 dark:text-secondary-text">{t.empty}</p> : null}
           <div className="grid gap-4 sm:grid-cols-2">
             <div className="space-y-2">
               <Label htmlFor="pdf-period">{t.period}</Label>
@@ -82,10 +82,10 @@ export function PdfExportButton({ datasetId, sessionId, filters, loading, count 
               </Select>
             </div> : null}
           </div>
-          <p className="text-xs text-slate-500">{t.context}</p><p className="text-xs text-slate-500">{t.preferenceHint}</p>
+          <p className="text-xs text-slate-500 dark:text-muted-foreground">{t.context}</p><p className="text-xs text-slate-500 dark:text-muted-foreground">{t.preferenceHint}</p>
           <CheckboxField checked={options.includeDetails} onChange={(value) => setOptions((o) => ({ ...o, includeDetails: value }))}>{t.includeDetails}</CheckboxField>
           {options.includeDetails ? <div className="space-y-3">
-            <p className="text-xs text-slate-500">{t.fieldHint}</p>
+            <p className="text-xs text-slate-500 dark:text-muted-foreground">{t.fieldHint}</p>
             <div className="flex flex-wrap gap-2">
               <Button type="button" variant="ghost" size="sm" onClick={() => setOptions((o) => ({ ...o, detailFieldIds: [...availableFieldIds] }))}>{t.all}</Button>
               <Button type="button" variant="ghost" size="sm" onClick={() => setOptions((o) => ({ ...o, detailFieldIds: [] }))}>{t.clear}</Button>

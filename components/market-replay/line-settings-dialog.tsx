@@ -71,35 +71,35 @@ export function LineSettingsDialog({ drawing, draft: styleDraft, onDraftChange: 
             onChange={color => setStyleDraft(current => current && "color" in current ? { ...current, color } : current)} /> : null}
           {!isFibonacci && "opacity" in styleDraft ? <StyleOpacityField label={copy.marketReplay.lineOpacity} value={styleDraft.opacity}
             onChange={opacity => setStyleDraft(current => current && "opacity" in current ? { ...current, opacity } : current)} /> : null}
-          {isFibonacci ? <p className="text-sm font-medium text-slate-800">{copy.marketReplay.horizontalLineStyle}</p> : null}
+          {isFibonacci ? <p className="text-sm font-medium text-slate-800 dark:text-foreground">{copy.marketReplay.horizontalLineStyle}</p> : null}
           <StyleLineWidthField label={copy.marketReplay.lineWidth} value={styleDraft.width}
             onChange={width => setStyleDraft(current => current ? { ...current, width } : current)} />
           <StyleChoiceField label={copy.marketReplay.lineStyle} value={styleDraft.lineStyle} options={LINE_STYLE_OPTIONS}
             onChange={lineStyle => setStyleDraft(current => current ? { ...current, lineStyle } : current)} />
-          {!isFibonacci && "showStartPrice" in styleDraft ? <div className="space-y-2 rounded-md border bg-slate-50 p-3">
-            <label className="flex items-center gap-2 text-sm text-slate-700">
+          {!isFibonacci && "showStartPrice" in styleDraft ? <div className="space-y-2 rounded-md border bg-slate-50 dark:bg-muted p-3">
+            <label className="flex items-center gap-2 text-sm text-slate-700 dark:text-secondary-text">
               <input
                 type="checkbox"
                 checked={styleDraft.showStartPrice}
                 onChange={(event) => setStyleDraft((current) => current && "showStartPrice" in current ? { ...current, showStartPrice: event.target.checked } : current)}
-                className="h-4 w-4 rounded border-slate-300"
+                className="h-4 w-4 rounded border-slate-300 dark:border-input"
               />
               {copy.marketReplay.showStartPrice}
             </label>
-            <label className="flex items-center gap-2 text-sm text-slate-700">
+            <label className="flex items-center gap-2 text-sm text-slate-700 dark:text-secondary-text">
               <input
                 type="checkbox"
                 checked={styleDraft.showEndPrice}
                 onChange={(event) => setStyleDraft((current) => current && "showEndPrice" in current ? { ...current, showEndPrice: event.target.checked } : current)}
-                className="h-4 w-4 rounded border-slate-300"
+                className="h-4 w-4 rounded border-slate-300 dark:border-input"
               />
               {copy.marketReplay.showEndPrice}
             </label>
           </div> : null}
           {isFibonacci && "levels" in styleDraft ? (
             <div className="space-y-2">
-              <p className="text-sm font-medium text-slate-800">{copy.marketReplay.fibonacciLevels}</p>
-              <div className="grid grid-cols-1 gap-2 rounded-md border bg-slate-50 p-3 sm:grid-cols-2">
+              <p className="text-sm font-medium text-slate-800 dark:text-foreground">{copy.marketReplay.fibonacciLevels}</p>
+              <div className="grid grid-cols-1 gap-2 rounded-md border bg-slate-50 dark:bg-muted p-3 sm:grid-cols-2">
                 {styleDraft.levels.map((level, index) => (
                   <div key={index} className="flex items-center gap-2">
                     <input
@@ -113,7 +113,7 @@ export function LineSettingsDialog({ drawing, draft: styleDraft, onDraftChange: 
                           levels: current.levels.map((item, itemIndex) => itemIndex === index ? { ...item, enabled: event.target.checked } : item),
                         } : current);
                       }}
-                      className="h-4 w-4 shrink-0 rounded border-slate-300"
+                      className="h-4 w-4 shrink-0 rounded border-slate-300 dark:border-input"
                     />
                     <Input
                       type="number"
@@ -153,16 +153,16 @@ export function LineSettingsDialog({ drawing, draft: styleDraft, onDraftChange: 
                   mixedLabel={copy.marketReplay.fibonacciMixedColors} resetLabel={copy.marketReplay.fibonacciRestoreColors}
                   onChange={singleColor => setStyleDraft(current => current && "levels" in current ? { ...current, singleColor } : current)} />
                 <div className="flex flex-wrap items-center gap-x-6 gap-y-2">
-                  <label className="flex min-h-10 items-center gap-2 text-sm text-slate-700">
+                  <label className="flex min-h-10 items-center gap-2 text-sm text-slate-700 dark:text-secondary-text">
                     <input type="checkbox" checked={styleDraft.showPrices}
                       onChange={event => setStyleDraft(current => current && "levels" in current ? { ...current, showPrices: event.target.checked } : current)}
-                      className="h-4 w-4 rounded border-slate-300 focus-visible:ring-2 focus-visible:ring-ring" />
+                      className="h-4 w-4 rounded border-slate-300 dark:border-input focus-visible:ring-2 focus-visible:ring-ring" />
                     {copy.marketReplay.fibonacciShowPrices}
                   </label>
-                  <label className="flex min-h-10 items-center gap-2 text-sm text-slate-700">
+                  <label className="flex min-h-10 items-center gap-2 text-sm text-slate-700 dark:text-secondary-text">
                     <input type="checkbox" checked={styleDraft.showLevels}
                       onChange={event => setStyleDraft(current => current && "levels" in current ? { ...current, showLevels: event.target.checked } : current)}
-                      className="h-4 w-4 rounded border-slate-300 focus-visible:ring-2 focus-visible:ring-ring" />
+                      className="h-4 w-4 rounded border-slate-300 dark:border-input focus-visible:ring-2 focus-visible:ring-ring" />
                     {copy.marketReplay.fibonacciShowLevels}
                   </label>
                 </div>
@@ -170,8 +170,8 @@ export function LineSettingsDialog({ drawing, draft: styleDraft, onDraftChange: 
             </div>
           ) : null}
         </fieldset>
-        {styleDraftError || !valid ? <p role="alert" className="text-sm text-red-600">{styleDraftError || validationError}</p> : null}
-        <p className="text-xs text-slate-500">{isFibonacci ? copy.marketReplay.nextFibonacciStyleHint : copy.marketReplay.nextTrendLineStyleHint}</p>
+        {styleDraftError || !valid ? <p role="alert" className="text-sm text-red-600 dark:text-negative">{styleDraftError || validationError}</p> : null}
+        <p className="text-xs text-slate-500 dark:text-muted-foreground">{isFibonacci ? copy.marketReplay.nextFibonacciStyleHint : copy.marketReplay.nextTrendLineStyleHint}</p>
         <div className="flex flex-wrap items-center justify-between gap-3 border-t pt-4">
           <Button type="button" variant="outline" disabled={busy || !valid} onClick={() => {
             setTemplateName(""); setTemplateError(null); setTemplateDialogOpen(true);
@@ -199,7 +199,7 @@ export function LineSettingsDialog({ drawing, draft: styleDraft, onDraftChange: 
             onChange={event => setTemplateName(event.target.value)}
             onKeyDown={event => { if (event.key === "Enter" && event.nativeEvent.isComposing) event.preventDefault(); }} />
         </div>
-        {templateError ? <p id={`${prefix}-template-error`} role="alert" className="text-sm text-red-600">{templateError}</p> : null}
+        {templateError ? <p id={`${prefix}-template-error`} role="alert" className="text-sm text-red-600 dark:text-negative">{templateError}</p> : null}
         <div className="flex justify-end gap-2 border-t pt-4">
           <Button type="button" variant="outline" onClick={() => { setTemplateDialogOpen(false); setTemplateError(null); }}>{copy.marketReplay.drawingCancel}</Button>
           <Button type="submit" disabled={!templateName.trim() || !valid}>{copy.marketReplay.saveDrawingTemplate}</Button>

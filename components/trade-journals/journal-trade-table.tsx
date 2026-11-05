@@ -279,7 +279,7 @@ export function JournalTradeTable({
   return (
     <div className="space-y-4">
       <div className="flex flex-wrap items-center justify-between gap-3">
-        <p className="text-sm text-slate-600">
+        <p className="text-sm text-slate-600 dark:text-secondary-text">
           {viewMode === "table" ? copy.tradeJournals.detailDescription : copy.tradeJournals.browser.description}
         </p>
         {viewMode === "table" ? (
@@ -294,15 +294,15 @@ export function JournalTradeTable({
           </Button>
         ) : null}
       </div>
-      {error ? <p className="rounded-md border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-700">{error}</p> : null}
+      {error ? <p className="rounded-md border border-red-200 dark:border-negative/40 bg-red-50 dark:bg-negative-background px-3 py-2 text-sm text-red-700 dark:text-negative">{error}</p> : null}
       {hiddenNewTradeId ? (
-        <div className="flex flex-wrap items-center gap-2 rounded-md border border-blue-200 bg-blue-50 px-3 py-2 text-sm text-blue-800">
+        <div className="flex flex-wrap items-center gap-2 rounded-md border border-blue-200 dark:border-link/40 bg-blue-50 dark:bg-info-background px-3 py-2 text-sm text-blue-800 dark:text-link">
           <span>{copy.tradeJournals.newTradeHiddenByFilters}</span>
           <Button
             type="button"
             size="sm"
             variant="outline"
-            className="h-7 border-blue-200 bg-white px-2 text-xs text-blue-700 hover:bg-blue-100"
+            className="h-7 border-blue-200 dark:border-link/40 bg-white dark:bg-card px-2 text-xs text-blue-700 dark:text-link hover:bg-blue-100 dark:hover:bg-info-background"
             onClick={resetFilters}
             disabled={editingId !== null}
           >
@@ -312,8 +312,8 @@ export function JournalTradeTable({
         </div>
       ) : null}
       {hasActiveFilters ? (
-        <div className="rounded-lg border bg-slate-50/70 p-3">
-          <div className="mb-2 text-sm font-medium text-slate-700">{copy.tradeJournals.filteredStatistics}</div>
+        <div className="rounded-lg border bg-slate-50/70 dark:bg-muted/70 p-3">
+          <div className="mb-2 text-sm font-medium text-slate-700 dark:text-secondary-text">{copy.tradeJournals.filteredStatistics}</div>
           <div className="grid gap-2 sm:grid-cols-2 lg:grid-cols-7">
             <FilteredStat label={copy.tradeJournals.statTradeCount} value={String(filteredStats.tradeCount)} />
             <FilteredStat label={copy.tradeJournals.statWinRate} value={formatPercent(filteredStats.winRate)} />
@@ -331,13 +331,13 @@ export function JournalTradeTable({
       {viewMode === "table" ? (
         <>
           <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
-        <div className="text-sm text-slate-600">
+        <div className="text-sm text-slate-600 dark:text-secondary-text">
           {copy.tradeJournals.pagination.range
             .replace("{start}", startRow.toLocaleString("zh-CN"))
             .replace("{end}", endRow.toLocaleString("zh-CN"))
             .replace("{total}", filteredRows.length.toLocaleString("zh-CN"))}
           {hasActiveFilters ? (
-            <span className="ml-2 text-slate-500">
+            <span className="ml-2 text-slate-500 dark:text-muted-foreground">
               {copy.tradeJournals.filters.filteredFrom.replace("{total}", rows.length.toLocaleString("zh-CN"))}
             </span>
           ) : null}
@@ -377,7 +377,7 @@ export function JournalTradeTable({
             <Download className="h-4 w-4" />
             {copy.tradeJournals.exportFiltered}
           </Button>
-          <span className="text-sm text-slate-600">{copy.tradeJournals.pagination.rowsPerPage}</span>
+          <span className="text-sm text-slate-600 dark:text-secondary-text">{copy.tradeJournals.pagination.rowsPerPage}</span>
           <Select
             value={String(pageSize)}
             onValueChange={(value) => {
@@ -551,7 +551,7 @@ export function JournalTradeTable({
                 onClear={() => setFilter("tagIds", [])}
               />
             </FilterableHead>
-            <TableHead className="sticky right-0 z-20 min-w-40 border-l bg-white shadow-[-8px_0_12px_-12px_rgba(15,23,42,0.45)]">
+            <TableHead className="sticky right-0 z-20 min-w-40 border-l bg-white dark:bg-card shadow-[-8px_0_12px_-12px_rgba(15,23,42,0.45)]">
               {copy.tradeJournals.table.actions}
             </TableHead>
           </TableRow>
@@ -567,9 +567,9 @@ export function JournalTradeTable({
                 key={trade.id}
                 className={cn(
                   "transition-colors duration-500",
-                  trade.rMultiple > 0 && "bg-emerald-50/70 hover:bg-emerald-100/70",
-                  trade.rMultiple < 0 && "bg-red-50/70 hover:bg-red-100/70",
-                  trade.id === highlightedTradeId && "bg-blue-50 ring-2 ring-inset ring-blue-300 hover:bg-blue-50",
+                  trade.rMultiple > 0 && "bg-emerald-50/70 dark:bg-positive-background/70 hover:bg-emerald-100/70 dark:hover:bg-positive-background/70",
+                  trade.rMultiple < 0 && "bg-red-50/70 dark:bg-negative-background/70 hover:bg-red-100/70 dark:hover:bg-negative-background/70",
+                  trade.id === highlightedTradeId && "bg-blue-50 dark:bg-info-background ring-2 ring-inset ring-blue-300 hover:bg-blue-50 dark:hover:bg-info-background",
                 )}
               >
                 <TableCell className="whitespace-nowrap">{trade.date}</TableCell>
@@ -597,8 +597,8 @@ export function JournalTradeTable({
                 <TableCell
                   className={cn(
                     "text-right font-mono font-medium",
-                    trade.rMultiple > 0 && "text-emerald-700",
-                    trade.rMultiple < 0 && "text-red-700",
+                    trade.rMultiple > 0 && "text-emerald-700 dark:text-positive",
+                    trade.rMultiple < 0 && "text-red-700 dark:text-negative",
                   )}
                 >
                   {formatNumber(trade.rMultiple)}
@@ -627,10 +627,10 @@ export function JournalTradeTable({
                 </TableCell>
                 <TableCell
                   className={cn(
-                    "sticky right-0 z-10 min-w-40 border-l bg-white shadow-[-8px_0_12px_-12px_rgba(15,23,42,0.45)]",
-                    trade.rMultiple > 0 && "bg-emerald-50",
-                    trade.rMultiple < 0 && "bg-red-50",
-                    trade.id === highlightedTradeId && "bg-blue-50",
+                    "sticky right-0 z-10 min-w-40 border-l bg-white dark:bg-card shadow-[-8px_0_12px_-12px_rgba(15,23,42,0.45)]",
+                    trade.rMultiple > 0 && "bg-emerald-50 dark:bg-positive-background",
+                    trade.rMultiple < 0 && "bg-red-50 dark:bg-negative-background",
+                    trade.id === highlightedTradeId && "bg-blue-50 dark:bg-info-background",
                   )}
                 >
                   <div className="flex gap-1">
@@ -656,7 +656,7 @@ export function JournalTradeTable({
                       aria-label={copy.tradeJournals.deleteTrade}
                       title={copy.tradeJournals.deleteTrade}
                     >
-                      <Trash2 className="h-4 w-4 text-red-600" />
+                      <Trash2 className="h-4 w-4 text-red-600 dark:text-negative" />
                     </Button>
                   </div>
                 </TableCell>
@@ -666,13 +666,13 @@ export function JournalTradeTable({
         </TableBody>
       </Table>
       {rows.length === 0 && editingId !== "new" ? (
-        <p className="rounded-md border border-dashed p-6 text-center text-sm text-slate-500">{copy.datasets.noTrades}</p>
+        <p className="rounded-md border border-dashed p-6 text-center text-sm text-slate-500 dark:text-muted-foreground">{copy.datasets.noTrades}</p>
       ) : null}
       {rows.length > 0 && filteredRows.length === 0 && editingId !== "new" ? (
-        <p className="rounded-md border border-dashed p-6 text-center text-sm text-slate-500">{copy.tradeJournals.filters.noResults}</p>
+        <p className="rounded-md border border-dashed p-6 text-center text-sm text-slate-500 dark:text-muted-foreground">{copy.tradeJournals.filters.noResults}</p>
       ) : null}
       <div className="flex flex-col gap-3 border-t pt-4 sm:flex-row sm:items-center sm:justify-between">
-        <div className="text-sm text-slate-600">
+        <div className="text-sm text-slate-600 dark:text-secondary-text">
           {copy.tradeJournals.pagination.page
             .replace("{page}", page.toLocaleString("zh-CN"))
             .replace("{totalPages}", totalPages.toLocaleString("zh-CN"))}

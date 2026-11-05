@@ -1,3 +1,4 @@
+import { chartThemes, type ChartTheme } from "@/lib/chart-theme";
 import {
   type IPrimitivePaneRenderer,
   type IPrimitivePaneView,
@@ -181,7 +182,7 @@ function drawPriceLabel(
 }
 
 class TrendLinePaneRenderer implements IPrimitivePaneRenderer {
-  constructor(private readonly snapshot: () => ProjectedSnapshot) {}
+  constructor(private readonly snapshot: () => ProjectedSnapshot, private readonly theme: () => ChartTheme) {}
 
   draw(target: Parameters<IPrimitivePaneRenderer["draw"]>[0]): void {
     target.useMediaCoordinateSpace(({ context }) => {
@@ -191,7 +192,7 @@ class TrendLinePaneRenderer implements IPrimitivePaneRenderer {
         if (item.selected) {
           context.save();
           context.globalAlpha = 0.9;
-          context.strokeStyle = "#ffffff";
+          context.strokeStyle = this.theme().handle;
           context.lineWidth = item.drawing.style.width + 3;
           context.lineCap = "round";
           context.setLineDash([]);
@@ -208,8 +209,8 @@ class TrendLinePaneRenderer implements IPrimitivePaneRenderer {
         if (item.selected) {
           for (const point of [item.start, item.end]) {
             context.save();
-            context.fillStyle = "#ffffff";
-            context.strokeStyle = item.drawing.style.color;
+            context.fillStyle = this.theme().handle;
+            context.strokeStyle = this.theme() === chartThemes.light ? item.drawing.style.color : this.theme().selection;
             context.lineWidth = 2;
             context.beginPath();
             context.arc(point.x, point.y, HANDLE_RADIUS, 0, Math.PI * 2);
@@ -234,8 +235,8 @@ class TrendLinePaneRenderer implements IPrimitivePaneRenderer {
 class TrendLinePaneView implements IPrimitivePaneView {
   private readonly paneRenderer: TrendLinePaneRenderer;
 
-  constructor(snapshot: () => ProjectedSnapshot) {
-    this.paneRenderer = new TrendLinePaneRenderer(snapshot);
+  constructor(snapshot: () => ProjectedSnapshot, theme: () => ChartTheme) {
+    this.paneRenderer = new TrendLinePaneRenderer(snapshot, theme);
   }
 
   zOrder() {
@@ -248,6 +249,8 @@ class TrendLinePaneView implements IPrimitivePaneView {
 }
 
 export class TrendLinePrimitive implements ISeriesPrimitive<Time> {
+  private theme: ChartTheme = chartThemes.light;
+  setTheme(theme: ChartTheme) { this.theme = theme; this.requestUpdate?.(); }
   private chart: SeriesAttachedParameter<Time>["chart"] | null = null;
   private series: SeriesAttachedParameter<Time>["series"] | null = null;
   private requestUpdate: (() => void) | null = null;
@@ -265,7 +268,7 @@ export class TrendLinePrimitive implements ISeriesPrimitive<Time> {
   };
   private readonly timeline = new DrawingTimelineLocator();
   private projected: ProjectedSnapshot = EMPTY_PROJECTED_SNAPSHOT;
-  private readonly views = [new TrendLinePaneView(() => this.projected)];
+  private readonly views = [new TrendLinePaneView(() => this.projected, () => this.theme)];
 
   attached(param: SeriesAttachedParameter<Time>) {
     this.chart = param.chart;

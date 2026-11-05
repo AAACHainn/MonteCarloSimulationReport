@@ -45,7 +45,7 @@ export default async function MarketReplayDetailPage({ params, searchParams }: {
     ? dataset.progress.find((progress) => progress.replaySessionId === selected.id) ?? null : null });
   if (!selected) return <div className="space-y-6">
     <UserContextHeader><Breadcrumbs items={[{ label: copy.marketReplay.title, href: "/market-replay" }, { label: dataset.name }]} /></UserContextHeader>
-    <section className="border-b pb-6"><h1 className="text-3xl font-semibold tracking-tight text-slate-950">{dataset.name} · {copy.replaySessions.title}</h1></section>
+    <section className="border-b pb-6"><h1 className="text-3xl font-semibold tracking-tight text-slate-950 dark:text-foreground">{dataset.name} · {copy.replaySessions.title}</h1></section>
     <ReplaySessionsDashboard dataset={serialized} initialSessions={sessions} initialCreateOpen={query.create === "1"} />
   </div>;
   if (selected.status === "ARCHIVED") {
@@ -54,7 +54,7 @@ export default async function MarketReplayDetailPage({ params, searchParams }: {
     return <ReplaySessionGate key={`${selected.id}:${selected.activeProjectionId}:${selected.status}`} session={selected}><ReplaySessionProvider session={selected}><div className="space-y-6">
       <UserContextHeader session={selected}><Breadcrumbs items={[{ label: copy.marketReplay.title, href: "/market-replay" }, { label: dataset.name, href: `/market-replay/${id}` }, { label: selected.name }]} /></UserContextHeader>
       <section className="flex items-center justify-between gap-4 border-b pb-6">
-        <div><h1 className="text-3xl font-semibold tracking-tight text-slate-950">{selected.name}</h1><div className="mt-2 flex gap-2"><Badge>{copy.replaySessions.archived}</Badge><Badge>{selected.mode === "TRAINING" ? copy.replaySessions.training : copy.replaySessions.liveReplay}</Badge></div><p className="mt-2 text-sm text-slate-600">{copy.replaySessions.readOnly} · {copy.replaySessions.source}</p></div>
+        <div><h1 className="text-3xl font-semibold tracking-tight text-slate-950 dark:text-foreground">{selected.name}</h1><div className="mt-2 flex gap-2"><Badge>{copy.replaySessions.archived}</Badge><Badge>{selected.mode === "TRAINING" ? copy.replaySessions.training : copy.replaySessions.liveReplay}</Badge></div><p className="mt-2 text-sm text-slate-600 dark:text-secondary-text">{copy.replaySessions.readOnly} · {copy.replaySessions.source}</p></div>
         <Button asChild variant="outline"><Link href={`/market-replay/${id}`}>{copy.replaySessions.allSessions}</Link></Button>
       </section>
       {selected.propAccount ? <PropAccountPanel sessionId={selected.id} runtime={selected.propAccount} tradingSnapshot={snapshot} /> : <PaperAccountStrip snapshot={snapshot} />}

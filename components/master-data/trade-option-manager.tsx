@@ -141,10 +141,10 @@ export function TradeOptionManager({
             <Input name="name" required maxLength={80} placeholder={text.placeholder} />
             <Button type="submit" size="sm">{copy.masterData.options.add}</Button>
           </form>
-          {error ? <p className="text-sm text-red-600">{error}</p> : null}
+          {error ? <p className="text-sm text-red-600 dark:text-negative">{error}</p> : null}
           <div className="max-h-72 space-y-2 overflow-auto pr-1">
             {visibleOptions.length === 0 ? (
-              <p className="text-sm text-slate-500">{text.empty}</p>
+              <p className="text-sm text-slate-500 dark:text-muted-foreground">{text.empty}</p>
             ) : (
               visibleOptions.map((option) => {
                 const isEditing = editingOptionId === option.id;
@@ -164,7 +164,7 @@ export function TradeOptionManager({
                           type="button"
                           variant="ghost"
                           size="icon"
-                          className="h-8 w-8 shrink-0 text-blue-700 hover:bg-blue-50 hover:text-blue-800"
+                          className="h-8 w-8 shrink-0 text-blue-700 dark:text-link hover:bg-blue-50 dark:hover:bg-info-background hover:text-blue-800 dark:hover:text-link"
                           onClick={() => saveOption(option)}
                           disabled={isSavingOption}
                           aria-label={copy.masterData.options.save}
@@ -187,7 +187,7 @@ export function TradeOptionManager({
                       </>
                     ) : (
                       <>
-                        <span className={`min-w-0 flex-1 truncate ${option.active ? "text-slate-900" : "text-slate-400"}`}>
+                        <span className={`min-w-0 flex-1 truncate ${option.active ? "text-slate-900 dark:text-foreground" : "text-slate-400 dark:text-muted-foreground"}`}>
                           {option.name}
                         </span>
                         <Button
@@ -214,7 +214,7 @@ export function TradeOptionManager({
                           type="button"
                           variant="ghost"
                           size="icon"
-                          className="h-8 w-8 shrink-0 text-red-600 hover:bg-red-50 hover:text-red-700"
+                          className="h-8 w-8 shrink-0 text-red-600 dark:text-negative hover:bg-red-50 dark:hover:bg-negative-background hover:text-red-700 dark:hover:text-negative"
                           onClick={() => setDeleteOption(option)}
                           aria-label={copy.masterData.options.delete}
                           title={copy.masterData.options.delete}

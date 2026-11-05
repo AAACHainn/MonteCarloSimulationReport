@@ -53,7 +53,7 @@ const ContextSources = memo(function ContextSources({ context }: { context: Fixe
   return <details className="text-xs" onToggle={(event) => {
     if (event.currentTarget.open) void aiApi<typeof images>("contexts/" + context.id + "/assets").then(setImages).catch(() => undefined);
   }}>
-    <summary className="cursor-pointer text-blue-700">{copy.ai.sources}</summary>
+    <summary className="cursor-pointer text-blue-700 dark:text-link">{copy.ai.sources}</summary>
     <div className="space-y-2 pt-2">
       {context.warnings.map((w) => <p key={w}>{w}</p>)}
       {!context.selectedEntryId ? <dl className="grid grid-cols-2 gap-2 rounded-md border p-3 tabular-nums">
@@ -62,7 +62,7 @@ const ContextSources = memo(function ContextSources({ context }: { context: Fixe
         <dt>{copy.ai.winRate}</dt><dd>{context.metrics.winRatePercent === null ? copy.common.dash : formatPercent(context.metrics.winRatePercent)}</dd>
         <dt>{copy.ai.missingRisk}</dt><dd>{context.metrics.missingRiskTrades}</dd>
       </dl> : null}
-      {context.entries.map((entry) => <p key={entry.id}><Link href={entry.href} className="text-blue-700 underline">{copy.ai.tradeNumber(entry.no)}</Link><span className="ml-2 text-slate-500">{new Date(entry.openedAt).toLocaleString("zh-CN")}</span></p>)}
+      {context.entries.map((entry) => <p key={entry.id}><Link href={entry.href} className="text-blue-700 dark:text-link underline">{copy.ai.tradeNumber(entry.no)}</Link><span className="ml-2 text-slate-500 dark:text-muted-foreground">{new Date(entry.openedAt).toLocaleString("zh-CN")}</span></p>)}
       {images.map((asset) => <div key={asset.id} className="space-y-1"><Image unoptimized loading="lazy" width={1200} height={600} className="h-auto w-full rounded-md border" src={"/api/ai/assets/" + asset.id} alt={copy.ai.snapshotHint} /><p className="break-all">chart:{asset.chartHash}</p></div>)}
       {!images.length ? context.charts.map((chart) => <p key={chart.hash} className="break-all">{chart.sourceId} · {chart.window.bars[0]?.timestamp}</p>) : null}
     </div>
@@ -392,16 +392,16 @@ export function AiAssistantProvider({ children }: { children: ReactNode }) {
             { label: copy.ai.delete, icon: <Trash2 className="h-4 w-4" aria-hidden="true" />, destructive: true, disabled: !conversationId || busy, onSelect: () => setConfirmation("delete") },
           ]} />
         </div>
-        <div ref={contentRef} className="min-h-0 flex-1 space-y-4 overflow-y-auto overscroll-contain bg-white p-4">
+        <div ref={contentRef} className="min-h-0 flex-1 space-y-4 overflow-y-auto overscroll-contain bg-white dark:bg-card p-4">
           {messages.length >= 30 ? <Button variant="ghost" size="sm" onClick={() => void loadMessages(conversationId, messages[0].id)}>{copy.ai.older}</Button> : null}
-          {loadingChat ? <p role="status" className="flex items-center gap-2 text-sm text-slate-500"><Loader2 className="h-4 w-4 animate-spin motion-reduce:animate-none" aria-hidden="true" />{copy.ai.loadingChat}</p> : null}
+          {loadingChat ? <p role="status" className="flex items-center gap-2 text-sm text-slate-500 dark:text-muted-foreground"><Loader2 className="h-4 w-4 animate-spin motion-reduce:animate-none" aria-hidden="true" />{copy.ai.loadingChat}</p> : null}
           {!loadingChat && !messages.length && !stream ? <div className="space-y-4 py-4 sm:py-6">
-            <div className="flex items-start gap-3"><span className="rounded-lg border border-blue-100 bg-blue-50 p-2 text-blue-700"><Bot className="h-5 w-5" aria-hidden="true" /></span><div className="space-y-2"><h3 className="text-base font-semibold text-slate-950">{copy.ai.welcome}</h3><p className="text-sm leading-6 text-slate-600">{copy.ai.empty}</p></div></div>
+            <div className="flex items-start gap-3"><span className="rounded-lg border border-blue-100 dark:border-link/40 bg-blue-50 dark:bg-info-background p-2 text-blue-700 dark:text-link"><Bot className="h-5 w-5" aria-hidden="true" /></span><div className="space-y-2"><h3 className="text-base font-semibold text-slate-950 dark:text-foreground">{copy.ai.welcome}</h3><p className="text-sm leading-6 text-slate-600 dark:text-secondary-text">{copy.ai.empty}</p></div></div>
             <div className="grid gap-2">{[
               { icon: <MessageSquare className="h-4 w-4 shrink-0" aria-hidden="true" />, text: (automaticPage?.entryId || context?.selectedEntryId) ? copy.ai.suggestTrade : (automaticPage?.includeCurrentChart ? copy.ai.suggestChart : copy.ai.suggestConcept) },
               { icon: <FileText className="h-4 w-4 shrink-0" aria-hidden="true" />, text: (automaticPage?.entryId || context?.selectedEntryId) ? copy.ai.suggestDraft : copy.ai.suggestNumberedTrade },
               { icon: <ChartNoAxesCombined className="h-4 w-4 shrink-0" aria-hidden="true" />, text: copy.ai.suggestReport },
-            ].map((item) => <Button key={item.text} variant="outline" className="h-auto min-h-10 justify-start whitespace-normal py-2 text-left text-slate-700" disabled={busy} onClick={() => { setDrafts((s) => ({ ...s, [conversationId]: item.text })); document.getElementById("ai-input")?.focus(); }}>{item.icon}{item.text}</Button>)}</div>
+            ].map((item) => <Button key={item.text} variant="outline" className="h-auto min-h-10 justify-start whitespace-normal py-2 text-left text-slate-700 dark:text-secondary-text" disabled={busy} onClick={() => { setDrafts((s) => ({ ...s, [conversationId]: item.text })); document.getElementById("ai-input")?.focus(); }}>{item.icon}{item.text}</Button>)}</div>
           </div> : null}
           {messages.map((m) => <AiMessageCard key={m.id} assistantName={assistantName} role={m.role} text={m.content} createdAt={m.createdAt} reference={m.reference} response={m.response} reads={m.reads} budget={m.budget} images={m.images}>
             <div className="flex flex-wrap gap-2">
@@ -417,23 +417,23 @@ export function AiAssistantProvider({ children }: { children: ReactNode }) {
             </div>
           </AiMessageCard>)}
           {stream?.chat === conversationId && !messages.some((m) => m.role === "assistant" && m.runId === stream.runId) ? <AiMessageCard assistantName={assistantName} text={stream.text} createdAt={stream.startedAt} reasoning={stream.reasoning} reasoningMs={stream.response?.reasoningMs ?? stream.reasoningMs} response={stream.response} reads={stream.reads} images={mergeDisplayedImages(stream.images ?? [], run?.id === stream.runId ? run.images ?? [] : [])} budget={run?.id === stream.runId ? run.budget : undefined} live={!stream.response} /> : null}
-          {activeRunId && stream?.chat !== conversationId ? <AiMessageCard assistantName={assistantName} text="" reads={run?.reads} budget={run?.budget} images={run?.images} live><p role="status" className="text-xs text-slate-600">{run?.task === "sessionReview" ? copy.ai.processedBatches(run.completedBatches) : copy.ai.running}</p></AiMessageCard> : null}
-          {!activeRunId && run && ["FAILED", "CANCELLED", "INTERRUPTED"].includes(run.status) ? <AiMessageCard assistantName={assistantName} text="" createdAt={run.response?.startedAt} response={run.response} reads={run.reads} images={messages.some((m) => m.role === "assistant" && m.runId === run.id) ? [] : run.images} budget={run.budget}><p className="text-xs text-slate-600">{copy.ai.unfinishedAnswer}</p><Button variant="outline" disabled={busy || loadingChat} onClick={() => adjustLimits(run)}>{run.task === "sessionReview" ? copy.ai.adjustAndContinue : copy.ai.adjustAndRetry}</Button></AiMessageCard> : null}
-          {run?.task === "sessionReview" && ["INTERRUPTED", "FAILED", "CANCELLED", "INVALID_RESULT"].includes(run.status) ? <div className="space-y-2"><p className="text-xs text-slate-500">{copy.ai.continuingHint}</p><Button variant="outline" disabled={busy || Boolean(activeRunId)} onClick={() => void retry(run.id, undefined, true)}>{copy.ai.continue}</Button></div> : null}
+          {activeRunId && stream?.chat !== conversationId ? <AiMessageCard assistantName={assistantName} text="" reads={run?.reads} budget={run?.budget} images={run?.images} live><p role="status" className="text-xs text-slate-600 dark:text-secondary-text">{run?.task === "sessionReview" ? copy.ai.processedBatches(run.completedBatches) : copy.ai.running}</p></AiMessageCard> : null}
+          {!activeRunId && run && ["FAILED", "CANCELLED", "INTERRUPTED"].includes(run.status) ? <AiMessageCard assistantName={assistantName} text="" createdAt={run.response?.startedAt} response={run.response} reads={run.reads} images={messages.some((m) => m.role === "assistant" && m.runId === run.id) ? [] : run.images} budget={run.budget}><p className="text-xs text-slate-600 dark:text-secondary-text">{copy.ai.unfinishedAnswer}</p><Button variant="outline" disabled={busy || loadingChat} onClick={() => adjustLimits(run)}>{run.task === "sessionReview" ? copy.ai.adjustAndContinue : copy.ai.adjustAndRetry}</Button></AiMessageCard> : null}
+          {run?.task === "sessionReview" && ["INTERRUPTED", "FAILED", "CANCELLED", "INVALID_RESULT"].includes(run.status) ? <div className="space-y-2"><p className="text-xs text-slate-500 dark:text-muted-foreground">{copy.ai.continuingHint}</p><Button variant="outline" disabled={busy || Boolean(activeRunId)} onClick={() => void retry(run.id, undefined, true)}>{copy.ai.continue}</Button></div> : null}
         </div>
-        <div className="max-h-[60dvh] shrink-0 space-y-3 overflow-y-auto border-t bg-slate-50 p-3">
-          <div className="flex items-center gap-2"><Layers className="h-4 w-4 shrink-0 text-slate-500" aria-hidden="true" /><div className="min-w-0 flex-1"><p className="truncate text-sm font-medium text-slate-700" title={scopeTitle}>{scopeTitle}</p><p className="text-xs text-slate-500">{scopeCaption}</p></div>
+        <div className="max-h-[60dvh] shrink-0 space-y-3 overflow-y-auto border-t bg-slate-50 dark:bg-muted p-3">
+          <div className="flex items-center gap-2"><Layers className="h-4 w-4 shrink-0 text-slate-500 dark:text-muted-foreground" aria-hidden="true" /><div className="min-w-0 flex-1"><p className="truncate text-sm font-medium text-slate-700 dark:text-secondary-text" title={scopeTitle}>{scopeTitle}</p><p className="text-xs text-slate-500 dark:text-muted-foreground">{scopeCaption}</p></div>
             <ActionMenu label={copy.ai.contextOptions} trigger={<Button variant="ghost" className="shrink-0 px-2" disabled={busy || Boolean(activeRunId)}>{copy.ai.changeContext}<ChevronDown className="h-4 w-4" aria-hidden="true" /></Button>} items={[
               { label: copy.ai.followPage, onSelect: () => { setScopeMode("page"); setClarification(""); } },
               { label: copy.ai.chooseOtherContext, onSelect: () => setPickerOpen(true) },
               { label: copy.ai.generalChat, onSelect: () => { setScopeMode("none"); setClarification(""); } },
             ]} />
           </div>
-          <div className="flex flex-wrap items-center justify-between gap-x-3 gap-y-1 text-xs text-slate-600"><span className="tabular-nums">{copy.ai.nextOutputLimit(formatInteger(effectiveLimits.outputTokens))}{temporaryLimits[conversationId] ? " · " + copy.ai.temporaryActive : ""}</span><Button variant="ghost" size="sm" disabled={busy || loadingChat || Boolean(activeRunId)} onClick={() => adjustLimits()}>{copy.ai.adjustLimits}</Button></div>
-          {clarification ? <div className="rounded-md border border-amber-200 bg-amber-50 p-3 text-sm text-amber-800" role="status"><p>{clarification}</p><Button variant="ghost" className="mt-1 px-0 text-blue-700" onClick={() => setPickerOpen(true)}>{copy.ai.chooseOtherContext}</Button></div> : null}
-          {error ? <p role="alert" className="rounded-md border border-red-200 bg-red-50 p-3 text-sm text-red-700">{error}</p> : null}
-          {status ? <p role="status" aria-live="polite" className="flex items-center gap-2 text-xs text-slate-600">{busy ? <Loader2 className="h-4 w-4 animate-spin motion-reduce:animate-none" aria-hidden="true" /> : null}{status}</p> : null}
-          {capturingRun && capturingRun === activeRunId ? <p role="status" className="flex items-center gap-2 text-xs text-slate-600"><Loader2 className="h-4 w-4 animate-spin motion-reduce:animate-none" aria-hidden="true" />{copy.ai.preparingChartImages}</p> : null}
+          <div className="flex flex-wrap items-center justify-between gap-x-3 gap-y-1 text-xs text-slate-600 dark:text-secondary-text"><span className="tabular-nums">{copy.ai.nextOutputLimit(formatInteger(effectiveLimits.outputTokens))}{temporaryLimits[conversationId] ? " · " + copy.ai.temporaryActive : ""}</span><Button variant="ghost" size="sm" disabled={busy || loadingChat || Boolean(activeRunId)} onClick={() => adjustLimits()}>{copy.ai.adjustLimits}</Button></div>
+          {clarification ? <div className="rounded-md border border-amber-200 dark:border-warning/40 bg-amber-50 dark:bg-warning-background p-3 text-sm text-amber-800 dark:text-warning" role="status"><p>{clarification}</p><Button variant="ghost" className="mt-1 px-0 text-blue-700 dark:text-link" onClick={() => setPickerOpen(true)}>{copy.ai.chooseOtherContext}</Button></div> : null}
+          {error ? <p role="alert" className="rounded-md border border-red-200 dark:border-negative/40 bg-red-50 dark:bg-negative-background p-3 text-sm text-red-700 dark:text-negative">{error}</p> : null}
+          {status ? <p role="status" aria-live="polite" className="flex items-center gap-2 text-xs text-slate-600 dark:text-secondary-text">{busy ? <Loader2 className="h-4 w-4 animate-spin motion-reduce:animate-none" aria-hidden="true" /> : null}{status}</p> : null}
+          {capturingRun && capturingRun === activeRunId ? <p role="status" className="flex items-center gap-2 text-xs text-slate-600 dark:text-secondary-text"><Loader2 className="h-4 w-4 animate-spin motion-reduce:animate-none" aria-hidden="true" />{copy.ai.preparingChartImages}</p> : null}
           {assets.length ? <div className="flex max-h-24 gap-2 overflow-x-auto">{assets.map((id) => <Button key={id} variant="outline" className="h-auto p-1" aria-label={copy.ai.removeImage} onClick={() => setAssets((s) => s.filter((a) => a !== id))}><Image unoptimized width={96} height={64} className="h-16 max-w-24 object-contain" src={"/api/ai/assets/" + id} alt={copy.ai.imageHint} /></Button>)}</div> : null}
           <div className="space-y-2">
           <Label htmlFor="ai-input" className="sr-only">{assistantName}</Label>
@@ -444,28 +444,28 @@ export function AiAssistantProvider({ children }: { children: ReactNode }) {
           <div className="flex items-center justify-between gap-2">
             <Button size="icon" variant="ghost" aria-label={copy.ai.attachImage} disabled={busy || Boolean(activeRunId) || assets.length >= 6} onClick={() => fileInput.current?.click()}><Paperclip className="h-4 w-4" aria-hidden="true" /></Button>
             <input ref={fileInput} type="file" className="hidden" accept="image/png,image/jpeg,image/webp" multiple onChange={(e) => { if (e.target.files) void upload(e.target.files); e.target.value = ""; }} />
-            <div className="flex items-center gap-3"><span className="hidden text-xs text-slate-500 sm:inline">{copy.ai.sendHint}</span>{activeRunId || busy ? <Button variant="destructive" onClick={() => void stop()}><Square className="h-4 w-4" aria-hidden="true" />{copy.ai.stop}</Button> : <Button disabled={loadingChat || !sendDraft.trim() || !endpoint} onClick={() => void send()}><Send className="h-4 w-4" aria-hidden="true" />{copy.ai.send}</Button>}</div>
+            <div className="flex items-center gap-3"><span className="hidden text-xs text-slate-500 dark:text-muted-foreground sm:inline">{copy.ai.sendHint}</span>{activeRunId || busy ? <Button variant="destructive" onClick={() => void stop()}><Square className="h-4 w-4" aria-hidden="true" />{copy.ai.stop}</Button> : <Button disabled={loadingChat || !sendDraft.trim() || !endpoint} onClick={() => void send()}><Send className="h-4 w-4" aria-hidden="true" />{copy.ai.send}</Button>}</div>
           </div>
           </div>
-          <p id="ai-composer-hint" className="text-xs leading-5 text-slate-500">{copy.ai.autoSendHint}</p>
+          <p id="ai-composer-hint" className="text-xs leading-5 text-slate-500 dark:text-muted-foreground">{copy.ai.autoSendHint}</p>
         </div>
       </div>
     </Dialog>
     <AiContextPicker open={pickerOpen} initialSessionId={pageScope?.replaySessionId ?? context?.replaySessionId} onClose={() => setPickerOpen(false)} onAttach={attach} />
     <Dialog open={Boolean(limitsDialog)} title={copy.ai.temporaryLimits} description={limitsDialog?.target ? copy.ai.retryLimitsHint : copy.ai.temporaryLimitsHint} onClose={() => setLimitsDialog(null)} layerClassName="z-[80]">
       {limitsDialog ? <form noValidate className="space-y-4" onSubmit={(e) => { e.preventDefault(); void applyLimits(); }}>
-        {limitsDialog.target?.error ? <p className="rounded-md border border-amber-200 bg-amber-50 p-3 text-sm leading-6 text-amber-800">{limitsDialog.target.error}</p> : null}
+        {limitsDialog.target?.error ? <p className="rounded-md border border-amber-200 dark:border-warning/40 bg-amber-50 dark:bg-warning-background p-3 text-sm leading-6 text-amber-800 dark:text-warning">{limitsDialog.target.error}</p> : null}
         <AiLimitsFields value={limitsDialog.value} initialExpanded={Boolean(limitsDialog.target?.budget?.blocked && limitsDialog.target.budget.blocked.resource !== "outputTokens")} onChange={(value) => { setLimitsError(""); setLimitsDialog({ ...limitsDialog, value }); }} />
-        {limitsError ? <p role="alert" className="text-sm text-red-700">{limitsError}</p> : null}
+        {limitsError ? <p role="alert" className="text-sm text-red-700 dark:text-negative">{limitsError}</p> : null}
         <Button type="button" variant="ghost" onClick={() => { setLimitsError(""); setLimitsDialog({ ...limitsDialog, value: resolveLimits(config?.limits) }); }}>{copy.ai.resetLimits}</Button>
         <div className="flex flex-wrap justify-end gap-2 border-t pt-4"><Button type="button" variant="outline" onClick={() => setLimitsDialog(null)}>{copy.ai.cancel}</Button><Button type="submit" disabled={busy || Boolean(activeRunId)}>{limitsDialog.target ? limitsDialog.target.task === "sessionReview" ? copy.ai.adjustAndContinue : copy.ai.adjustAndRetry : copy.ai.applyLimits}</Button></div>
       </form> : null}
     </Dialog>
     <Dialog open={optionsOpen} title={copy.ai.compatibilityOptions} onClose={() => setOptionsOpen(false)} layerClassName="z-[80]">
-      <div className="space-y-3"><CheckboxField checked={fixedMode} onChange={setFixedMode} disabled={busy || Boolean(activeRunId)}>{copy.ai.fixedMode}</CheckboxField><p className="text-xs text-slate-500">{copy.ai.fixedModeHint}</p></div>
+      <div className="space-y-3"><CheckboxField checked={fixedMode} onChange={setFixedMode} disabled={busy || Boolean(activeRunId)}>{copy.ai.fixedMode}</CheckboxField><p className="text-xs text-slate-500 dark:text-muted-foreground">{copy.ai.fixedModeHint}</p></div>
     </Dialog>
     <Dialog open={Boolean(sourceContext)} title={copy.ai.sources} layerClassName="z-[80]" onClose={() => setSourceContext(null)}>
-      {sourceContext ? <div className="space-y-4"><p className="text-sm font-medium">{sourceContext.sessionName} · {sourceContext.symbol}</p><p className="text-xs text-slate-500">{copy.ai.frozenAt(sourceContext.asOfTime)} · {sourceContext.timezone}</p><ContextSources key={sourceContext.id} context={sourceContext} /><div className="flex justify-end border-t pt-4"><Button variant="outline" disabled={busy || Boolean(activeRunId)} onClick={() => { setContext(sourceContext); setScopeMode("pinned"); setSourceContext(null); }}>{copy.ai.useTheseSources}</Button></div></div> : null}
+      {sourceContext ? <div className="space-y-4"><p className="text-sm font-medium">{sourceContext.sessionName} · {sourceContext.symbol}</p><p className="text-xs text-slate-500 dark:text-muted-foreground">{copy.ai.frozenAt(sourceContext.asOfTime)} · {sourceContext.timezone}</p><ContextSources key={sourceContext.id} context={sourceContext} /><div className="flex justify-end border-t pt-4"><Button variant="outline" disabled={busy || Boolean(activeRunId)} onClick={() => { setContext(sourceContext); setScopeMode("pinned"); setSourceContext(null); }}>{copy.ai.useTheseSources}</Button></div></div> : null}
     </Dialog>
     <ConfirmDialog open={Boolean(confirmation)} title={confirmation === "clear" ? copy.ai.clear : copy.ai.delete}
       description={confirmation === "clear" ? copy.ai.clearConfirm : copy.ai.deleteConfirm} layerClassName="z-[90]"
@@ -481,9 +481,9 @@ export function AiAssistantProvider({ children }: { children: ReactNode }) {
       </form>
     </Dialog>
     <Dialog open={showReports} title={copy.ai.history} layerClassName="z-[80]" onClose={() => setShowReports(false)}>
-      <div className="space-y-4">{!reports.length ? <p className="text-sm text-slate-600">{copy.ai.noReports}</p> : reports.map((report) => <details key={report.id} className="rounded-lg border p-3" onToggle={(e) => {
+      <div className="space-y-4">{!reports.length ? <p className="text-sm text-slate-600 dark:text-secondary-text">{copy.ai.noReports}</p> : reports.map((report) => <details key={report.id} className="rounded-lg border p-3" onToggle={(e) => {
         if (e.currentTarget.open) void aiApi<{ stale: boolean }>("reports/" + report.id).then((r) => setStaleReports((s) => ({ ...s, [report.id]: r.stale })));
-      }}><summary className="cursor-pointer text-sm">{new Date(report.createdAt).toLocaleString("zh-CN")}</summary>{staleReports[report.id] ? <p className="my-2 text-xs text-amber-800">{copy.ai.sourceChanged}</p> : null}<Markdown text={report.content} /><Button variant="outline" onClick={() => { viewSources(report.contextId); setShowReports(false); }}>{copy.ai.sources}</Button></details>)}</div>
+      }}><summary className="cursor-pointer text-sm">{new Date(report.createdAt).toLocaleString("zh-CN")}</summary>{staleReports[report.id] ? <p className="my-2 text-xs text-amber-800 dark:text-warning">{copy.ai.sourceChanged}</p> : null}<Markdown text={report.content} /><Button variant="outline" onClick={() => { viewSources(report.contextId); setShowReports(false); }}>{copy.ai.sources}</Button></details>)}</div>
     </Dialog>
   </Assistant.Provider>;
 }

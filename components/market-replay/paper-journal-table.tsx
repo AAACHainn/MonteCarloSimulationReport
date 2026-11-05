@@ -124,7 +124,7 @@ export function PaperJournalTable({
       }}
       disabled={loading || switchingSession || sessionEntry.busy || renaming || savingSetupIds.size > 0 || savingTradeReasonIds.size > 0 || savingReviewIds.size > 0}
     >
-      <SelectTrigger id="replay-journal-session" className="w-full bg-white">
+      <SelectTrigger id="replay-journal-session" className="w-full bg-white dark:bg-card">
         <SelectValue placeholder={copy.paperTrading.journalSessionSelectPlaceholder} />
       </SelectTrigger>
       <SelectContent className="max-w-[min(40rem,calc(100vw-2rem))]">
@@ -133,16 +133,16 @@ export function PaperJournalTable({
         </SelectItem>)}
       </SelectContent>
     </Select>
-    {switchingSession ? <p className="flex items-center gap-2 text-xs text-slate-500" role="status"><Loader2 className="h-4 w-4 animate-spin" aria-hidden="true" />{copy.paperTrading.journalSessionSwitching}</p> : null}
+    {switchingSession ? <p className="flex items-center gap-2 text-xs text-slate-500 dark:text-muted-foreground" role="status"><Loader2 className="h-4 w-4 animate-spin" aria-hidden="true" />{copy.paperTrading.journalSessionSwitching}</p> : null}
   </div> : null;
 
-  if (loading && items.length === 0 && sessions.length === 0) return <div className="space-y-4">{sessionEntry.ui}{sessionPicker}<div className="flex items-center gap-2 py-8 text-sm text-slate-500"><Loader2 className="h-4 w-4 animate-spin" />{copy.paperTrading.journalLoading}</div></div>;
-  if (error && items.length === 0 && sessions.length === 0) return <div className="space-y-4">{sessionEntry.ui}{sessionPicker}<p className="py-6 text-sm text-red-600" role="alert">{error}</p></div>;
+  if (loading && items.length === 0 && sessions.length === 0) return <div className="space-y-4">{sessionEntry.ui}{sessionPicker}<div className="flex items-center gap-2 py-8 text-sm text-slate-500 dark:text-muted-foreground"><Loader2 className="h-4 w-4 animate-spin" />{copy.paperTrading.journalLoading}</div></div>;
+  if (error && items.length === 0 && sessions.length === 0) return <div className="space-y-4">{sessionEntry.ui}{sessionPicker}<p className="py-6 text-sm text-red-600 dark:text-negative" role="alert">{error}</p></div>;
   const canShowCalendar = scope === "history" && Boolean(replaySession);
   const showCalendar = canShowCalendar && calendarView;
   const noEntries = items.length === 0 && sessions.length === 0;
   const viewCopy = copy.paperTrading.journalCalendar;
-  if (noEntries && !canShowCalendar) return <div className="space-y-4">{sessionEntry.ui}{sessionPicker}<p className="rounded-md border border-dashed p-6 text-center text-sm text-slate-500">{copy.paperTrading.noJournalEntries}</p></div>;
+  if (noEntries && !canShowCalendar) return <div className="space-y-4">{sessionEntry.ui}{sessionPicker}<p className="rounded-md border border-dashed p-6 text-center text-sm text-slate-500 dark:text-muted-foreground">{copy.paperTrading.noJournalEntries}</p></div>;
   return <div className="space-y-4" aria-busy={loading || switchingSession || sessionEntry.busy}>
     {sessionEntry.ui}
     {scope === "history" && selectedSession ? <>
@@ -169,8 +169,8 @@ export function PaperJournalTable({
           </Button> : null}
         </div>
       </div>
-      <div className="flex flex-wrap items-center gap-x-3 gap-y-2 rounded-md bg-slate-50 px-3 py-2 text-xs text-slate-600">
-        <span className="font-medium text-slate-800">{selectedSession.name}</span>
+      <div className="flex flex-wrap items-center gap-x-3 gap-y-2 rounded-md bg-slate-50 dark:bg-muted px-3 py-2 text-xs text-slate-600 dark:text-secondary-text">
+        <span className="font-medium text-slate-800 dark:text-foreground">{selectedSession.name}</span>
         <span className="tabular-nums">{new Date(selectedSession.createdAt).toLocaleString("zh-CN")}</span>
         <span>{selectedSession.entryCount} {copy.paperTrading.journalRows}</span>
         <span>{selectedSession.archivedAt ? copy.paperTrading.journalArchived : copy.paperTrading.journalCurrent}</span>
@@ -192,17 +192,17 @@ export function PaperJournalTable({
             losingTradeCount={summary.losingTradeCount}
             breakEvenTradeCount={summary.breakEvenTradeCount}
           />
-          <div className="rounded-md border bg-slate-50 p-3">
+          <div className="rounded-md border bg-slate-50 dark:bg-muted p-3">
             <div className="grid grid-cols-2 gap-4">
               <JournalStatValue
                 label={copy.paperTrading.totalProfitPoints}
                 value={formatNumber(summary.totalProfitPoints)}
-                valueClassName="text-emerald-700"
+                valueClassName="text-emerald-700 dark:text-positive"
               />
               <JournalStatValue
                 label={copy.paperTrading.totalLossPoints}
                 value={formatNumber(summary.totalLossPoints)}
-                valueClassName="text-red-700"
+                valueClassName="text-red-700 dark:text-negative"
               />
             </div>
           </div>
@@ -217,12 +217,12 @@ export function PaperJournalTable({
     {canShowCalendar && <Card className="shadow-none">
       <CardHeader className="flex-row flex-wrap items-center justify-between gap-3 space-y-0 px-5 py-3">
         <CardTitle>{copy.paperTrading.records}</CardTitle>
-        <div role="group" aria-label={copy.paperTrading.records} className="inline-flex rounded-lg border bg-slate-50 p-0.5">
+        <div role="group" aria-label={copy.paperTrading.records} className="inline-flex rounded-lg border bg-slate-50 dark:bg-muted p-0.5">
           <Button type="button" variant="ghost" aria-pressed={!showCalendar}
-            className="border border-transparent text-slate-600 aria-pressed:border-blue-200 aria-pressed:bg-blue-50 aria-pressed:text-blue-700"
+            className="border border-transparent text-slate-600 dark:text-secondary-text aria-pressed:border-blue-200 dark:aria-pressed:border-link/40 aria-pressed:bg-blue-50 dark:aria-pressed:bg-info-background aria-pressed:text-blue-700 dark:aria-pressed:text-link"
             onClick={() => setCalendarView(false)}><Table2 aria-hidden="true" />{viewCopy.table}</Button>
           <Button type="button" variant="ghost" aria-pressed={showCalendar}
-            className="border border-transparent text-slate-600 aria-pressed:border-blue-200 aria-pressed:bg-blue-50 aria-pressed:text-blue-700"
+            className="border border-transparent text-slate-600 dark:text-secondary-text aria-pressed:border-blue-200 dark:aria-pressed:border-link/40 aria-pressed:bg-blue-50 dark:aria-pressed:bg-info-background aria-pressed:text-blue-700 dark:aria-pressed:text-link"
             onClick={() => setCalendarView(true)}><CalendarDays aria-hidden="true" />{viewCopy.calendar}</Button>
         </div>
       </CardHeader>
@@ -234,11 +234,11 @@ export function PaperJournalTable({
           filters={appliedFilters} journalSessionId={selectedSession?.id} />
       </CardContent>}
     </Card>}
-    {!showCalendar && noEntries && <p className="rounded-md border border-dashed p-6 text-center text-sm text-slate-500">{copy.paperTrading.noJournalEntries}</p>}
+    {!showCalendar && noEntries && <p className="rounded-md border border-dashed p-6 text-center text-sm text-slate-500 dark:text-muted-foreground">{copy.paperTrading.noJournalEntries}</p>}
     {!showCalendar && !noEntries && <>
     {scope === "history" && selectedSession ? <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
         <div className="flex flex-wrap items-center gap-2">
-          <p className="flex items-center gap-2 text-sm text-slate-600">
+          <p className="flex items-center gap-2 text-sm text-slate-600 dark:text-secondary-text">
             {loading ? <Loader2 className="h-4 w-4 animate-spin" aria-hidden="true" /> : null}
             {copy.paperTrading.journalPaginationRange
               .replace("{start}", startRow.toLocaleString("zh-CN"))
@@ -258,7 +258,7 @@ export function PaperJournalTable({
           </Button> : null}
         </div>
         <div className="flex items-center gap-2">
-          <span className="text-sm text-slate-600">{copy.tradeJournals.pagination.rowsPerPage}</span>
+          <span className="text-sm text-slate-600 dark:text-secondary-text">{copy.tradeJournals.pagination.rowsPerPage}</span>
           <Select
             value={String(pageSize)}
             onValueChange={(value) => {
@@ -279,7 +279,7 @@ export function PaperJournalTable({
         </div>
       </div> : null}
     {scope === "current" ? <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
-      <p className="flex items-center gap-2 text-sm text-slate-600">
+      <p className="flex items-center gap-2 text-sm text-slate-600 dark:text-secondary-text">
         {loading ? <Loader2 className="h-4 w-4 animate-spin" aria-hidden="true" /> : null}
         {copy.paperTrading.journalPaginationRange
           .replace("{start}", startRow.toLocaleString("zh-CN"))
@@ -291,7 +291,7 @@ export function PaperJournalTable({
           <Settings2 className="h-4 w-4" aria-hidden="true" />
           {copy.paperTrading.setVisibleColumns}
         </Button>
-        <span className="text-sm text-slate-600">{copy.tradeJournals.pagination.rowsPerPage}</span>
+        <span className="text-sm text-slate-600 dark:text-secondary-text">{copy.tradeJournals.pagination.rowsPerPage}</span>
         <Select
           value={String(pageSize)}
           onValueChange={(value) => {
@@ -311,14 +311,14 @@ export function PaperJournalTable({
         </Select>
       </div>
     </div> : null}
-    {error ? <p className="rounded-md border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-700" role="alert">{error}</p> : null}
-    {status ? <p className="rounded-md border border-emerald-200 bg-emerald-50 px-3 py-2 text-sm text-emerald-700" role="status" aria-live="polite">{status}</p> : null}
-    {setupError ? <p className="rounded-md border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-700" role="alert">{setupError}</p> : null}
-    {tradeReasonsError ? <p className="rounded-md border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-700" role="alert">{tradeReasonsError}</p> : null}
-    {reviewError && reviewDialogEntryId === null ? <p className="rounded-md border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-700" role="alert">{reviewError}</p> : null}
+    {error ? <p className="rounded-md border border-red-200 dark:border-negative/40 bg-red-50 dark:bg-negative-background px-3 py-2 text-sm text-red-700 dark:text-negative" role="alert">{error}</p> : null}
+    {status ? <p className="rounded-md border border-emerald-200 dark:border-positive/40 bg-emerald-50 dark:bg-positive-background px-3 py-2 text-sm text-emerald-700 dark:text-positive" role="status" aria-live="polite">{status}</p> : null}
+    {setupError ? <p className="rounded-md border border-red-200 dark:border-negative/40 bg-red-50 dark:bg-negative-background px-3 py-2 text-sm text-red-700 dark:text-negative" role="alert">{setupError}</p> : null}
+    {tradeReasonsError ? <p className="rounded-md border border-red-200 dark:border-negative/40 bg-red-50 dark:bg-negative-background px-3 py-2 text-sm text-red-700 dark:text-negative" role="alert">{tradeReasonsError}</p> : null}
+    {reviewError && reviewDialogEntryId === null ? <p className="rounded-md border border-red-200 dark:border-negative/40 bg-red-50 dark:bg-negative-background px-3 py-2 text-sm text-red-700 dark:text-negative" role="alert">{reviewError}</p> : null}
     <section ref={setTableViewportElement} className="space-y-2">
       <div
-        className={`relative rounded-md border bg-white ${resizingTarget ? "select-none" : ""}`}
+        className={`relative rounded-md border bg-white dark:bg-card ${resizingTarget ? "select-none" : ""}`}
         style={{ width: visibleTableWidth, minWidth: visibleTableWidth, marginLeft: visibleTableLeftOffset }}
       >
         <div
@@ -364,7 +364,7 @@ export function PaperJournalTable({
           />
         ))}
         <table
-          className="table-fixed border-collapse border-r border-slate-200 text-right text-sm tabular-nums [&_td]:overflow-hidden [&_td]:whitespace-nowrap"
+          className="table-fixed border-collapse border-r border-slate-200 dark:border-border text-right text-sm tabular-nums [&_td]:overflow-hidden [&_td]:whitespace-nowrap"
           style={{ width: visibleTableWidth, minWidth: visibleTableWidth }}
         >
           <colgroup>
@@ -376,7 +376,7 @@ export function PaperJournalTable({
             ))}
             {canDeleteCycle ? <col style={{ width: correctionColumnWidth }} /> : null}
           </colgroup>
-          <thead className="bg-blue-50 text-xs text-slate-700"><tr>
+          <thead className="bg-blue-50 dark:bg-info-background text-xs text-slate-700 dark:text-secondary-text"><tr>
             {visibleColumns.map((column) => (
                 <th
                   key={column.id}
@@ -413,21 +413,21 @@ export function PaperJournalTable({
             {canDeleteCycle ? <th className="border-b px-3 py-2 text-right">{copy.replaySessions.correction}</th> : null}
           </tr></thead>
           <tbody>{items.length === 0 && scope === "history" ? <tr>
-            <td colSpan={visibleColumns.length + Number(canDeleteCycle)} className="px-4 py-8 text-center text-sm text-slate-500">
+            <td colSpan={visibleColumns.length + Number(canDeleteCycle)} className="px-4 py-8 text-center text-sm text-slate-500 dark:text-muted-foreground">
               {hasActiveFilters ? copy.paperTrading.noFilteredJournalEntries : copy.paperTrading.noJournalEntries}
             </td>
           </tr> : items.map((entry) => {
             const checklist = journalSetupChecklist(entry, setupOptions);
-            return <tr key={entry.id} className="border-b last:border-b-0 hover:bg-slate-50">
+            return <tr key={entry.id} className="border-b last:border-b-0 hover:bg-slate-50 dark:hover:bg-hover">
             {visibleColumnSet.has("no") ? <td className="border-r px-3 py-2 last:border-r-0">{onFocus ? <button
               type="button"
-              className="cursor-pointer font-medium text-blue-700 underline-offset-2 hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-600"
+              className="cursor-pointer font-medium text-blue-700 dark:text-link underline-offset-2 hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-600"
               onClick={() => onFocus(entry)}
             >{entry.no}</button> : <Link
               href={replayJournalTradeHref(datasetId, entry.journalSessionId, entry.globalNo)}
-              className="font-medium text-blue-700 underline-offset-2 hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-600"
+              className="font-medium text-blue-700 dark:text-link underline-offset-2 hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-600"
               aria-label={copy.paperTrading.openHistoricalReplay(entry.no)}
-            >{entry.no}</Link>}{entry.propRoundNumber ? <span className="ml-2 whitespace-nowrap text-xs text-slate-500">{copy.propPractice.roundLabel(entry.propRoundNumber)}</span> : null}</td> : null}
+            >{entry.no}</Link>}{entry.propRoundNumber ? <span className="ml-2 whitespace-nowrap text-xs text-slate-500 dark:text-muted-foreground">{copy.propPractice.roundLabel(entry.propRoundNumber)}</span> : null}</td> : null}
             {visibleColumnSet.has("date") ? <td className="border-r px-3 py-2 last:border-r-0">{date(entry)}</td> : null}
             {visibleColumnSet.has("direction") ? <td className="border-r px-3 py-2 last:border-r-0">{entry.direction === "LONG" ? copy.paperTrading.long : copy.paperTrading.short}</td> : null}
             {visibleColumnSet.has("setup") ? <td className="border-r p-1 text-left last:border-r-0">
@@ -442,7 +442,7 @@ export function PaperJournalTable({
                   selectedTooltip={checklist ? journalSetupChecklistTitle(checklist) : undefined}
                   searchPlaceholder={copy.paperTrading.searchSetup}
                   ariaLabel={copy.paperTrading.editSetup(entry.no)}
-                  className="h-8 min-w-0 max-w-full overflow-hidden border-transparent bg-transparent px-2 text-left shadow-none hover:border-slate-300 hover:bg-white data-[state=open]:border-blue-300 data-[state=open]:bg-white"
+                  className="h-8 min-w-0 max-w-full overflow-hidden border-transparent bg-transparent px-2 text-left shadow-none hover:border-slate-300 dark:hover:border-input hover:bg-white dark:hover:bg-card data-[state=open]:border-blue-300 dark:data-[state=open]:border-link/40 data-[state=open]:bg-white dark:data-[state=open]:bg-card"
                   options={[
                     { value: noSetupValue, label: copy.paperTrading.clearSetup },
                     ...setupOptions.filter((option) => option.active).map((option) => ({
@@ -475,7 +475,7 @@ export function PaperJournalTable({
             {visibleColumnSet.has("actualRisk") ? <td className="border-r px-3 py-2 last:border-r-0">{number(entry.actualRisk)}</td> : null}
             {visibleColumnSet.has("actualRiskAbr") ? <td className="border-r px-3 py-2 last:border-r-0">{ratio(entry.actualRiskAbr)}</td> : null}
             {visibleColumnSet.has("actualInitialRiskRatio") ? <td className="border-r px-3 py-2 last:border-r-0">{ratio(entry.actualInitialRiskRatio)}</td> : null}
-            {visibleColumnSet.has("gainLoss") ? <td className={`border-r px-3 py-2 font-medium last:border-r-0 ${entry.gainLoss > 0 ? "text-emerald-700" : entry.gainLoss < 0 ? "text-red-700" : ""}`}>{number(entry.gainLoss)}</td> : null}
+            {visibleColumnSet.has("gainLoss") ? <td className={`border-r px-3 py-2 font-medium last:border-r-0 ${entry.gainLoss > 0 ? "text-emerald-700 dark:text-positive" : entry.gainLoss < 0 ? "text-red-700 dark:text-negative" : ""}`}>{number(entry.gainLoss)}</td> : null}
             {visibleColumnSet.has("result") ? <td className="border-r px-3 py-2 last:border-r-0">{entry.result}</td> : null}
             {visibleColumnSet.has("abrRr") ? <td className="border-r px-3 py-2 last:border-r-0">{ratio(entry.abrRr)}</td> : null}
             {visibleColumnSet.has("initialRiskRr") ? <td className="border-r px-3 py-2 last:border-r-0">{ratio(entry.initialRiskRr)}</td> : null}
@@ -514,9 +514,9 @@ export function PaperJournalTable({
                   aria-busy={savingReviewIds.has(entry.id)}
                   title={(reviewDrafts[entry.id] ?? entry.review) || copy.paperTrading.reviewEditHint}
                   disabled={savingReviewIds.has(entry.id)}
-                  className="h-8 min-w-0 truncate border-transparent bg-transparent px-2 pr-8 text-left shadow-none hover:border-slate-300 hover:bg-white focus-visible:bg-white"
+                  className="h-8 min-w-0 truncate border-transparent bg-transparent px-2 pr-8 text-left shadow-none hover:border-slate-300 dark:hover:border-input hover:bg-white dark:hover:bg-card focus-visible:bg-white dark:focus-visible:bg-card"
                 />
-                {savingReviewIds.has(entry.id) ? <Loader2 className="pointer-events-none absolute right-2 top-2 h-4 w-4 animate-spin text-slate-500" aria-hidden="true" /> : null}
+                {savingReviewIds.has(entry.id) ? <Loader2 className="pointer-events-none absolute right-2 top-2 h-4 w-4 animate-spin text-slate-500 dark:text-muted-foreground" aria-hidden="true" /> : null}
               </div>
             </td> : null}
             {canDeleteCycle ? <td className="px-3 py-2 text-right"><Button type="button" variant="destructive" size="icon" disabled={loading || correction?.pending || !entry.cycleKey} aria-label={copy.replaySessions.deleteCycle} title={copy.replaySessions.deleteCycle} onClick={() => correction?.onDeleteCycle(entry)}><Trash2 className="h-4 w-4" aria-hidden="true" /></Button></td> : null}
@@ -526,7 +526,7 @@ export function PaperJournalTable({
       </div>
     </section>
     {(scope === "current" || selectedSession) && totalItems > 0 ? <div className="flex flex-col gap-3 border-t pt-4 sm:flex-row sm:items-center sm:justify-between">
-      <p className="text-sm text-slate-600">
+      <p className="text-sm text-slate-600 dark:text-secondary-text">
         {copy.tradeJournals.pagination.page
           .replace("{page}", page.toLocaleString("zh-CN"))
           .replace("{totalPages}", totalPages.toLocaleString("zh-CN"))}
@@ -556,7 +556,7 @@ export function PaperJournalTable({
             </CheckboxField>
           ))}
         </div>
-        {!scopedJournalColumns.some((column) => draftVisibleColumnIds.includes(column.id)) ? <p className="text-xs text-red-600" role="alert">{copy.paperTrading.visibleColumnsRequired}</p> : null}
+        {!scopedJournalColumns.some((column) => draftVisibleColumnIds.includes(column.id)) ? <p className="text-xs text-red-600 dark:text-negative" role="alert">{copy.paperTrading.visibleColumnsRequired}</p> : null}
         <div className="flex flex-wrap justify-between gap-2 border-t pt-4">
           <Button type="button" variant="ghost" onClick={() => setDraftVisibleColumnIds(defaultVisibleColumnIds)}>
             {copy.paperTrading.visibleColumnsReset}
@@ -572,8 +572,8 @@ export function PaperJournalTable({
     </Dialog>
     <Dialog open={Boolean(disciplineEntry)} title={disciplineEntry?.discipline?.mode === "PLAN" ? copy.trainingGate.planSnapshot : copy.trainingGate.snapshot} onClose={() => setDisciplineEntry(null)}>
       {disciplineEntry?.discipline ? disciplineEntry.discipline.mode === "PLAN"
-        ? <div className="space-y-3 text-sm"><p className="font-medium">{copy.trainingGate.marketContexts[disciplineEntry.discipline.context]}</p><p className="whitespace-pre-wrap break-words">{disciplineEntry.discipline.plan}</p><p className="text-xs text-slate-500">{copy.trainingGate.planSequence(disciplineEntry.discipline.confirmedSequence)} · {formatInterval(disciplineEntry.discipline.displayIntervalSeconds)} · {new Date(disciplineEntry.discipline.confirmedAt).toLocaleString("zh-CN")}</p></div>
-        : <div className="space-y-4"><p className="text-sm font-medium">{disciplineEntry.discipline.strategyName}</p><p className="text-xs text-slate-500">{copy.trainingGate.confirmedAt} · {new Date(disciplineEntry.discipline.confirmedAt).toLocaleString("zh-CN")}</p>{disciplineEntry.discipline.checklist.map((item) => <CheckboxField key={item.id} checked disabled onChange={() => undefined}>{item.text}</CheckboxField>)}</div> : null}
+        ? <div className="space-y-3 text-sm"><p className="font-medium">{copy.trainingGate.marketContexts[disciplineEntry.discipline.context]}</p><p className="whitespace-pre-wrap break-words">{disciplineEntry.discipline.plan}</p><p className="text-xs text-slate-500 dark:text-muted-foreground">{copy.trainingGate.planSequence(disciplineEntry.discipline.confirmedSequence)} · {formatInterval(disciplineEntry.discipline.displayIntervalSeconds)} · {new Date(disciplineEntry.discipline.confirmedAt).toLocaleString("zh-CN")}</p></div>
+        : <div className="space-y-4"><p className="text-sm font-medium">{disciplineEntry.discipline.strategyName}</p><p className="text-xs text-slate-500 dark:text-muted-foreground">{copy.trainingGate.confirmedAt} · {new Date(disciplineEntry.discipline.confirmedAt).toLocaleString("zh-CN")}</p>{disciplineEntry.discipline.checklist.map((item) => <CheckboxField key={item.id} checked disabled onChange={() => undefined}>{item.text}</CheckboxField>)}</div> : null}
     </Dialog>
     <ReviewEditorDialog
       open={reviewDialogEntryId !== null}
@@ -618,9 +618,9 @@ function JournalStat({
   description?: string;
 }) {
   return (
-    <div className="rounded-md border bg-slate-50 p-3">
+    <div className="rounded-md border bg-slate-50 dark:bg-muted p-3">
       <JournalStatValue label={label} value={value} />
-      {description ? <p className="mt-1 text-xs text-slate-500">{description}</p> : null}
+      {description ? <p className="mt-1 text-xs text-slate-500 dark:text-muted-foreground">{description}</p> : null}
     </div>
   );
 }
@@ -640,27 +640,27 @@ function JournalWinRateStat({
     {
       label: copy.paperTrading.journalTakeProfitTrades,
       value: winningTradeCount,
-      className: "text-emerald-700",
+      className: "text-emerald-700 dark:text-positive",
     },
     {
       label: copy.paperTrading.journalStopLossTrades,
       value: losingTradeCount,
-      className: "text-red-700",
+      className: "text-red-700 dark:text-negative",
     },
     {
       label: copy.paperTrading.journalBreakEvenTrades,
       value: breakEvenTradeCount,
-      className: "text-slate-700",
+      className: "text-slate-700 dark:text-secondary-text",
     },
   ];
 
   return (
-    <div className="rounded-md border bg-slate-50 p-3">
+    <div className="rounded-md border bg-slate-50 dark:bg-muted p-3">
       <JournalStatValue label={copy.paperTrading.journalWinRate} value={winRate} />
-      <div className="mt-3 grid grid-cols-3 gap-2 border-t border-slate-200 pt-2">
+      <div className="mt-3 grid grid-cols-3 gap-2 border-t border-slate-200 dark:border-border pt-2">
         {counts.map((count) => (
           <div key={count.label} className="min-w-0">
-            <p className="truncate text-xs text-slate-500">{count.label}</p>
+            <p className="truncate text-xs text-slate-500 dark:text-muted-foreground">{count.label}</p>
             <p className={`mt-0.5 truncate text-xs font-semibold tabular-nums ${count.className}`}>
               {copy.paperTrading.journalTradeCountValue(count.value)}
             </p>
@@ -674,7 +674,7 @@ function JournalWinRateStat({
 function JournalStatValue({
   label,
   value,
-  valueClassName = "text-slate-950",
+  valueClassName = "text-slate-950 dark:text-foreground",
 }: {
   label: string;
   value: string;
@@ -682,7 +682,7 @@ function JournalStatValue({
 }) {
   return (
     <div className="min-w-0">
-      <p className="text-xs font-medium text-slate-600">{label}</p>
+      <p className="text-xs font-medium text-slate-600 dark:text-secondary-text">{label}</p>
       <p className={`mt-1 text-xl font-semibold tabular-nums ${valueClassName}`}>{value}</p>
     </div>
   );

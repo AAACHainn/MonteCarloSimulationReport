@@ -32,3 +32,16 @@
 .settlementToast { animation: settlement-notice 5s ease-out forwards; }
 @keyframes settlement-notice { 0%, 72% { opacity: 1; } 100% { opacity: 0; } }
 @media (prefers-reduced-motion: reduce) { .settlementToast { animation: none; } }
+
+:global(.dark) .theme {
+  --growth-paper: #171E25;
+  --growth-jade: #7CC7AF;
+  --growth-jade-soft: #1B322D;
+  --growth-gold: #DDBA74;
+  --growth-gold-soft: #332C1C;
+}
+:global(.dark) .milestoneLine, :global(.dark) .milestoneDot { background: hsl(var(--input)); }
+:global(.dark) .milestoneReached { background: var(--growth-jade); }
+:global(.dark) .avatar[data-preset="1"] { background: #242D40; color: #B0BFD9; }
+:global(.dark) .avatar[data-preset="2"] { background: #332C20; color: #DDBA8E; }
+:global(.dark) .avatar[data-preset="3"] { background: #332636; color: #D8B3D0; }

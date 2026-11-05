@@ -18,7 +18,7 @@ export function RectangleToolOption({ shortcut, onArm }: {
 }) {
   return <Button type="button" variant="ghost" className="w-full justify-start gap-3" aria-keyshortcuts="Shift+R" onClick={onArm}>
     <Square className="h-4 w-4 shrink-0" aria-hidden="true" />{copy.marketReplay.rectangle}
-    <kbd className="ml-auto whitespace-nowrap font-mono text-xs text-slate-500">{shortcut}</kbd>
+    <kbd className="ml-auto whitespace-nowrap font-mono text-xs text-slate-500 dark:text-muted-foreground">{shortcut}</kbd>
   </Button>;
 }
 
@@ -79,9 +79,9 @@ export function RectangleSettingsDialog({ drawing, templates, onTemplatesChange,
             <StyleLineWidthField label={copy.marketReplay.rectangleBorderWidth} value={draft.borderWidth} onChange={borderWidth => setDraft(s => ({ ...s, borderWidth }))} />
           </> : null}
         </fieldset>
-        {error || !valid ? <p id={`${prefix}-error`} role="alert" className="text-sm text-red-600">{error || copy.marketReplay.rectangleInvisible}</p> : null}
-        {status ? <p role="status" className="text-sm text-emerald-700">{status}</p> : null}
-        <p className="text-xs text-slate-500">{copy.marketReplay.rectangleTemplateHint}</p>
+        {error || !valid ? <p id={`${prefix}-error`} role="alert" className="text-sm text-red-600 dark:text-negative">{error || copy.marketReplay.rectangleInvisible}</p> : null}
+        {status ? <p role="status" className="text-sm text-emerald-700 dark:text-positive">{status}</p> : null}
+        <p className="text-xs text-slate-500 dark:text-muted-foreground">{copy.marketReplay.rectangleTemplateHint}</p>
         <div className="flex flex-wrap items-center justify-between gap-3 border-t pt-4">
           <Button type="button" variant="outline" disabled={busy || !valid} onClick={() => {
             setName(""); setTemplateError(null); setTemplateDialogOpen(true);
@@ -108,7 +108,7 @@ export function RectangleSettingsDialog({ drawing, templates, onTemplatesChange,
             onChange={event => setName(event.target.value)}
             onKeyDown={event => { if (event.key === "Enter" && event.nativeEvent.isComposing) event.preventDefault(); }} />
         </fieldset>
-        {templateError ? <p id={`${prefix}-template-error`} role="alert" className="text-sm text-red-600">{templateError}</p> : null}
+        {templateError ? <p id={`${prefix}-template-error`} role="alert" className="text-sm text-red-600 dark:text-negative">{templateError}</p> : null}
         <div className="flex justify-end gap-2 border-t pt-4">
           <Button type="button" variant="outline" disabled={Boolean(confirmation)} onClick={() => { setTemplateDialogOpen(false); setName(""); setTemplateError(null); }}>{copy.marketReplay.drawingCancel}</Button>
           <Button type="submit" disabled={!name.trim() || name.trim().length > 50 || !valid || Boolean(confirmation)}>{copy.marketReplay.saveDrawingTemplate}</Button>

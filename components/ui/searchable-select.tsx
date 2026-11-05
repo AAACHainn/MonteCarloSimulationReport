@@ -113,7 +113,7 @@ export function SearchableSelect({
           {busy ? <Loader2 className="h-3.5 w-3.5 shrink-0 animate-spin" aria-hidden="true" /> : null}
           <span className="min-w-0 flex-1 truncate">{label}</span>
         </span>
-        <ChevronDown className="h-4 w-4 shrink-0 text-slate-500" aria-hidden="true" />
+        <ChevronDown className="h-4 w-4 shrink-0 text-slate-500 dark:text-muted-foreground" aria-hidden="true" />
       </Button>
     </PopoverPrimitive.Trigger>
     {selectedTooltip ? <span id={descriptionId} className="sr-only">{selectedTooltip}</span> : null}
@@ -133,7 +133,7 @@ export function SearchableSelect({
           onKeyDown={onOptionsKeyDown}
           className="min-h-0 space-y-0.5 overflow-y-auto overscroll-contain p-0.5"
         >
-          {filteredOptions.length === 0 ? <p className="px-2 py-4 text-center text-sm text-slate-500" role="status" aria-live="polite">{copy.common.noSearchResults}</p> : filteredOptions.map((option) => (
+          {filteredOptions.length === 0 ? <p className="px-2 py-4 text-center text-sm text-slate-500 dark:text-muted-foreground" role="status" aria-live="polite">{copy.common.noSearchResults}</p> : filteredOptions.map((option) => (
             <Button
               key={option.value}
               type="button"
@@ -143,7 +143,7 @@ export function SearchableSelect({
               aria-selected={option.value === value}
               disabled={option.disabled}
               onClick={() => choose(option)}
-              className="h-auto min-h-10 w-full justify-start whitespace-normal rounded-sm px-2 py-2 text-left font-normal focus:bg-slate-100 sm:min-h-8 sm:py-1.5"
+              className="h-auto min-h-10 w-full justify-start whitespace-normal rounded-sm px-2 py-2 text-left font-normal focus:bg-slate-100 dark:focus:bg-hover sm:min-h-8 sm:py-1.5"
             >
               <Check className={cn("h-4 w-4 shrink-0", option.value !== value && "invisible")} aria-hidden="true" />
               <span className="min-w-0 flex-1 break-words">{option.label}</span>

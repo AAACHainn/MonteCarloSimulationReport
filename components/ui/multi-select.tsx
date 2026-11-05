@@ -88,15 +88,15 @@ export function MultiSelect({
         <button
           type="button"
           className={cn(
-            "flex h-8 w-full min-w-0 items-center justify-between gap-2 overflow-hidden rounded-md border border-transparent bg-transparent px-2 text-left text-sm shadow-none hover:border-slate-300 hover:bg-white focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring disabled:cursor-not-allowed disabled:opacity-50 data-[state=open]:border-blue-300 data-[state=open]:bg-white",
+            "flex h-8 w-full min-w-0 items-center justify-between gap-2 overflow-hidden rounded-md border border-transparent bg-transparent px-2 text-left text-sm shadow-none hover:border-slate-300 dark:hover:border-input hover:bg-white dark:hover:bg-surface-raised focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring disabled:cursor-not-allowed disabled:opacity-50 data-[state=open]:border-blue-300 dark:data-[state=open]:border-link/40 data-[state=open]:bg-white dark:data-[state=open]:bg-surface-raised",
             className,
           )}
           disabled={disabled}
           aria-label={ariaLabel}
           title={selectedLabels.join("、") || undefined}
         >
-          <span className={cn("min-w-0 flex-1 truncate", selectedLabels.length === 0 && "text-slate-500")}>{summary}</span>
-          <ChevronDown className="h-4 w-4 shrink-0 text-slate-500" aria-hidden="true" />
+          <span className={cn("min-w-0 flex-1 truncate", selectedLabels.length === 0 && "text-slate-500 dark:text-muted-foreground")}>{summary}</span>
+          <ChevronDown className="h-4 w-4 shrink-0 text-slate-500 dark:text-muted-foreground" aria-hidden="true" />
         </button>
       </PopoverPrimitive.Trigger>
       <PopoverPrimitive.Portal>
@@ -105,9 +105,9 @@ export function MultiSelect({
             <OptionSearch value={query} onChange={setQuery} placeholder={searchPlaceholder} disabled={saving} />
           </div> : null}
           {options.length === 0 ? (
-            <p className="px-2 py-4 text-center text-sm text-slate-500">{emptyMessage}</p>
+            <p className="px-2 py-4 text-center text-sm text-slate-500 dark:text-muted-foreground">{emptyMessage}</p>
           ) : filteredOptions.length === 0 ? (
-            <p className="px-2 py-4 text-center text-sm text-slate-500" role="status" aria-live="polite">{copy.common.noSearchResults}</p>
+            <p className="px-2 py-4 text-center text-sm text-slate-500 dark:text-muted-foreground" role="status" aria-live="polite">{copy.common.noSearchResults}</p>
           ) : (
             <div key={query} className="min-h-0 space-y-0.5 overflow-y-auto overscroll-contain p-0.5">
               {filteredOptions.map((option) => {
@@ -118,13 +118,13 @@ export function MultiSelect({
                     type="button"
                     role="checkbox"
                     aria-checked={selected}
-                    className="flex min-h-10 w-full items-center gap-2 rounded-sm px-2 py-2 text-left text-sm outline-none hover:bg-slate-100 focus-visible:ring-2 focus-visible:ring-ring sm:min-h-8 sm:py-1.5"
+                    className="flex min-h-10 w-full items-center gap-2 rounded-sm px-2 py-2 text-left text-sm outline-none hover:bg-slate-100 dark:hover:bg-hover focus-visible:ring-2 focus-visible:ring-ring sm:min-h-8 sm:py-1.5"
                     onClick={() => toggle(option.value)}
                     disabled={saving}
                   >
                     <span className={cn(
                       "flex h-4 w-4 shrink-0 items-center justify-center rounded border",
-                      selected ? "border-blue-600 bg-blue-600 text-white" : "border-slate-300 bg-white text-transparent",
+                      selected ? "border-blue-600 dark:border-link bg-blue-600 text-white" : "border-slate-300 dark:border-input bg-white dark:bg-surface-raised text-transparent",
                     )}>
                       <Check className="h-3 w-3" aria-hidden="true" />
                     </span>

@@ -10,7 +10,7 @@
 
 ## 1. 产品视觉基线
 
-- 默认语言为简体中文，整体是浅色、紧凑、专业的交易分析工具，不使用营销站式的大面积装饰、渐变或夸张动效。
+- 默认语言为简体中文，默认浅色，可切换石墨蓝暗色；整体保持紧凑、专业，不使用营销站式的大面积装饰、渐变或夸张动效。
 - 蓝色表示主要操作、当前选择和导航；Slate 表示背景、边框和中性文字；绿色表示盈利或成功；红色表示亏损、错误或危险操作；琥珀色表示警告和需要注意的状态。
 - 信息层级依靠标题、间距、边框和字重共同建立。颜色不能成为传递状态的唯一方式，必须同时有文案、图标、符号或位置语义。
 - 业务页面优先保证数据可读、操作可预测和高信息密度，再考虑装饰效果。
@@ -39,16 +39,31 @@
 - 禁止新增无语义的十六进制颜色、相近但不同的蓝色或临时渐变。
 - 图表可以使用独立序列色，但同一业务含义在所有图表中必须保持一致，并保证浅色背景下可辨认。
 
-### 2.2 字体和数据
+### 2.2 外观偏好与图表边界
 
-- 页面主标题：标准内容页使用 `text-3xl font-semibold tracking-tight text-slate-950`；首页主标题可使用 `text-4xl`；全屏工作区为节省空间可使用 `text-xl`。
+- 外观使用 64px 宽的紧凑滑动开关，太阳 / 月亮图标置于滑块内，“浅色 / 暗色”文字置于轨道内；滑块在左表示浅色、在右表示暗色。开关使用“暗色外观”辅助标签与 aria-checked，支持点击、Space / Enter 及清晰焦点，尊重减少动画偏好。普通页右上角、实时回放顶部工具栏（含网页全屏）、历史回放共享同一入口组件。
+- 默认浅色，不跟随系统；站点浏览器存储键 `trading-workbench-appearance-v1` 只接受 `light` / `dark`。未保存、非法值或读失败回退浅色；写失败保留当前页选择。合法 storage 事件同步其他标签页，非法事件忽略。
+- 根布局首屏脚本在绘制前应用主题与 color-scheme；Provider 不用 hydration 的浅色初值覆盖已存暗色。隔离设计预览仍不加载业务数据。
+- 根节点 `.dark` 覆盖 body 下的 Portal。不全局重定义 `bg-white` 或 Slate 色阶，浅色旧类需补显式暗色语义类。DOM 的 HSL 变量由[共享 HEX 色板](../../lib/appearance-palette.ts)生成；Canvas / Recharts 使用 [ChartTheme](../../lib/chart-theme.ts) 的明确颜色，不读取 DOM 猜测主题。
+- 暗色层级：页面 `#0F141B`、图表/输入 `#111820`、卡片/工具栏 `#151C26`、浮层 `#1B2533`、hover/选中 `#243244`；文字 `#E6EDF5`、次文字 `#A8B4C5`、辅助文字 `#8796AA`。普通边框 `#2B384A`，必要输入轮廓 `#64748B`。
+- 暗色优先使用 `surface-raised`、`input-background`、`secondary-text`、`hover`、`link`、`positive`、`negative`、`warning` 及对应的 `*-background` token。实心主按钮与危险按钮配白字；普通正文至少 4.5:1，必要控件轮廓与图形至少 3:1。
+- 外观不绑定档案、数据集或会话。切换不刷新页面、不重建图表，不改交易状态、视口、播放、绘图选择或订单草稿。图表只 applyOptions，primitive 显式更新色板并请求重绘；保留网格、成交量与指标开关。
+- 用户 K 线六色与三个可见性开关、EMA、绘图和模板原色保留。四组 K 线预设按当前主题展示，点击才更新草稿六色，取消/确认沿用既有规则。草稿匹配另一主题预设时标明版本，不高亮当前版本按钮。
+- PDF / AI 图像固定独立浅色；预设映射、冻结与版本兼容由 [PDF 规范](../replay/replay-pdf-export.md)和 [AI 图片契约](../ai/ai-chart-images.md)定义。
+- 用户自定义的深色绘图/指标可能在暗底对比不足；第一版保留改色入口，不自动反色或回写，也不对图片使用 invert/filter。
+
+已知实现缺口：现有回放交易日志的自定义表格宽度会使页面产生横向滚动（1440px 窗口、默认全部列时约 2504px）。本次皮肤改造保留其列宽与拖拽行为；这不改变下文“页面主体不得横向滚动”的设计目标，容器滚动修复另行处理。
+
+### 2.3 字体和数据
+
+- 页面主标题：标准内容页使用 `text-3xl font-semibold tracking-tight text-foreground`；首页主标题可使用 `text-4xl`；全屏工作区为节省空间可使用 `text-xl`。
 - 区块标题：主要区块使用 `text-2xl font-semibold tracking-tight`，卡片标题统一使用 `CardTitle` 的 `text-base font-semibold`。
-- 正文和表单：默认 `text-sm`；页面说明通常为 `text-sm text-slate-600`；元数据和补充说明使用 `text-xs text-slate-500`。
-- Eyebrow：统一使用 `font-mono text-sm uppercase tracking-wide text-blue-700`。
+- 正文和表单：默认 `text-sm`；页面说明通常为 `text-sm text-secondary-text`；元数据和补充说明使用 `text-xs text-muted-foreground`。
+- Eyebrow：统一使用 `font-mono text-sm uppercase tracking-wide text-link`。
 - 金额、百分比、R 倍数、价格、数量和时间序列值使用 `tabular-nums`；需要强调代码、序号或精确数据时可增加 `font-mono`。
 - 不使用小于 `text-xs` 的字号，图表内空间受限的辅助标注例外可使用 `text-[11px]`，但不得承载关键操作或唯一说明。
 
-### 2.3 间距、圆角和阴影
+### 2.4 间距、圆角和阴影
 
 - 标准页面区块间距使用 `space-y-6`，首页等展示型页面可使用 `space-y-8`。
 - 卡片之间使用 `gap-3` 或 `gap-4`，大型并列区域使用 `gap-6`；表单字段内部使用 `space-y-2`，表单分组通常使用 `space-y-4`。
@@ -71,9 +86,9 @@
   <Breadcrumbs items={items} />
   <section className="flex items-end justify-between gap-4 border-b pb-6">
     <div>
-      <p className="font-mono text-sm uppercase tracking-wide text-blue-700">...</p>
-      <h1 className="text-3xl font-semibold tracking-tight text-slate-950">...</h1>
-      <p className="mt-2 max-w-3xl text-sm text-slate-600">...</p>
+      <p className="font-mono text-sm uppercase tracking-wide text-link">...</p>
+      <h1 className="text-3xl font-semibold tracking-tight text-foreground">...</h1>
+      <p className="mt-2 max-w-3xl text-sm text-secondary-text">...</p>
     </div>
     <div className="flex flex-wrap items-center gap-2">...</div>
   </section>
@@ -241,8 +256,8 @@ if (window.confirm("确定吗？")) {
 
 ### 代码审查与交付
 
-- [ ] 视觉层级、操作层级和业务颜色语义一致。
+- [ ] 两种主题的视觉层级、操作层级和业务颜色语义一致，检查普通页、回放、历史回放、网页全屏及 Portal。
 - [ ] 基础组件可以覆盖的样式没有散落在业务组件中。
 - [ ] `corepack pnpm lint` 通过；复杂交互的相关测试通过。
-- [ ] 完成必要尺寸的视觉检查，并在交付说明中记录例外及原因。
+- [ ] 两种主题完成必要尺寸的视觉检查；回放/宽表覆盖 1280 / 1440 / 1920px、低高度弹窗、hover/selected/focus/disabled、Recharts Tooltip 和 Canvas 重绘；记录未覆盖项与例外。
 - [ ] 若同类例外已重复出现，已抽象基础组件或同步更新本规范。

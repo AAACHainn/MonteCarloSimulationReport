@@ -20,7 +20,7 @@ export function PropRoundHistory({ datasetId, sessionId, rounds, selected }: { d
   </CardDescription></CardHeader><CardContent className="space-y-3">
     <Button asChild variant={selected === 0 ? "secondary" : "outline"}><Link href={href(0)}>{t.allRounds}</Link></Button>
     <Table><TableHeader><TableRow><TableHead>{t.round}</TableHead><TableHead>{t.pause}</TableHead><TableHead className="text-right">{t.equity}</TableHead><TableHead className="text-right">{t.totalReceived}</TableHead><TableHead className="text-right">{copy.paperTrading.journalTab}</TableHead><TableHead /></TableRow></TableHeader><TableBody>
-      {rounds.map(round => <TableRow key={round.number} className={selected === round.number ? "bg-blue-50" : undefined}>
+      {rounds.map(round => <TableRow key={round.number} className={selected === round.number ? "bg-blue-50 dark:bg-info-background" : undefined}>
         <TableCell>{t.roundLabel(round.number)}{round.current ? ` · ${t.currentRound}` : ""}</TableCell>
         <TableCell>{round.phase === "EVALUATION" ? t.evaluation : t.funded} · {round.result === "FAILED" ? t.FAILED : round.result === "STOPPED" ? t.roundStopped : t[round.pause]}</TableCell>
         <TableCell className="text-right tabular-nums">{formatMoney(round.equity, round.currency)}</TableCell><TableCell className="text-right tabular-nums">{formatMoney(round.totalReceived, round.currency)}</TableCell>
@@ -37,7 +37,7 @@ export function PropRoundTradingRecords({ snapshot }: { snapshot: PaperSessionSn
       <CardContent className="space-y-4"><section className="space-y-2"><h3 className="text-sm font-medium">{t.openPositions}</h3>
         {snapshot.openLots?.length ? <Table><TableHeader><TableRow><TableHead>{p.time} · UTC</TableHead><TableHead>{p.side}</TableHead><TableHead className="text-right">{p.quantity}</TableHead><TableHead className="text-right">{p.price}</TableHead></TableRow></TableHeader><TableBody>{snapshot.openLots.map(lot => <TableRow key={lot.id}>
           <TableCell className="tabular-nums">{new Date(lot.openedAt).toLocaleString("zh-CN", { timeZone: "UTC" })}</TableCell><TableCell>{lot.side === "LONG" ? p.buy : p.sell}</TableCell><TableCell className="text-right tabular-nums">{formatQuantity(lot.remainingQuantity)}</TableCell><TableCell className="text-right tabular-nums">{formatPriceForTick(lot.entryPrice, lot.priceTickSize)}</TableCell>
-        </TableRow>)}</TableBody></Table> : <p className="text-sm text-slate-500">{t.noOpenPositions}</p>}
+        </TableRow>)}</TableBody></Table> : <p className="text-sm text-slate-500 dark:text-muted-foreground">{t.noOpenPositions}</p>}
       </section><section className="space-y-2 border-t pt-4"><h3 className="text-sm font-medium">{t.retainedOrders}</h3><OrderHistory snapshot={{ ...snapshot, recentOrders: [] }} /></section></CardContent>
     </Card>
     <Dialog open={fillsOpen} onClose={() => setFillsOpen(false)} title={p.fillsTab} className="max-w-4xl"><FillHistory snapshot={snapshot} /></Dialog>

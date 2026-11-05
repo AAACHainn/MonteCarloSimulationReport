@@ -69,15 +69,15 @@ export function OptionFilterPanel({
 }) {
   return (
     <div className="space-y-2">
-      <p className="text-xs font-medium text-slate-500">{copy.tradeJournals.filters.chooseValue}</p>
+      <p className="text-xs font-medium text-slate-500 dark:text-muted-foreground">{copy.tradeJournals.filters.chooseValue}</p>
       <div className="max-h-64 overflow-auto rounded-md border p-1">
         {options.map((option) => (
           <button
             key={option.value}
             type="button"
             className={cn(
-              "flex w-full items-center gap-2 rounded-sm px-2 py-1.5 text-left text-sm outline-none hover:bg-slate-100 focus:bg-slate-100",
-              option.value === value && "font-medium text-slate-950",
+              "flex w-full items-center gap-2 rounded-sm px-2 py-1.5 text-left text-sm outline-none hover:bg-slate-100 dark:hover:bg-hover focus:bg-slate-100 dark:focus:bg-hover",
+              option.value === value && "font-medium text-slate-950 dark:text-foreground",
             )}
             onClick={() => onChange(option.value)}
           >
@@ -117,20 +117,20 @@ export function MultiOptionFilterPanel({
 
   return (
     <div className="space-y-2">
-      <p className="text-xs font-medium text-slate-500">{copy.tradeJournals.filters.chooseValue}</p>
+      <p className="text-xs font-medium text-slate-500 dark:text-muted-foreground">{copy.tradeJournals.filters.chooseValue}</p>
       <div className="max-h-64 overflow-auto rounded-md border p-1">
         <button
           type="button"
           className={cn(
-            "flex w-full items-center gap-2 rounded-sm px-2 py-1.5 text-left text-sm outline-none hover:bg-slate-100 focus:bg-slate-100",
-            values.length === 0 && "font-medium text-slate-950",
+            "flex w-full items-center gap-2 rounded-sm px-2 py-1.5 text-left text-sm outline-none hover:bg-slate-100 dark:hover:bg-hover focus:bg-slate-100 dark:focus:bg-hover",
+            values.length === 0 && "font-medium text-slate-950 dark:text-foreground",
           )}
           onClick={onClear}
         >
           <span
             className={cn(
               "flex h-4 w-4 shrink-0 items-center justify-center rounded border",
-              values.length === 0 ? "border-blue-600 bg-blue-600 text-white" : "border-slate-300 bg-white text-transparent",
+              values.length === 0 ? "border-blue-600 dark:border-link bg-blue-600 text-white" : "border-slate-300 dark:border-input bg-white dark:bg-card text-transparent",
             )}
           >
             <Check className="h-3 w-3" />
@@ -145,15 +145,15 @@ export function MultiOptionFilterPanel({
               key={option.value}
               type="button"
               className={cn(
-                "flex w-full items-center gap-2 rounded-sm px-2 py-1.5 text-left text-sm outline-none hover:bg-slate-100 focus:bg-slate-100",
-                isSelected && "font-medium text-slate-950",
+                "flex w-full items-center gap-2 rounded-sm px-2 py-1.5 text-left text-sm outline-none hover:bg-slate-100 dark:hover:bg-hover focus:bg-slate-100 dark:focus:bg-hover",
+                isSelected && "font-medium text-slate-950 dark:text-foreground",
               )}
               onClick={() => toggle(option.value)}
             >
               <span
                 className={cn(
                   "flex h-4 w-4 shrink-0 items-center justify-center rounded border",
-                  isSelected ? "border-blue-600 bg-blue-600 text-white" : "border-slate-300 bg-white text-transparent",
+                  isSelected ? "border-blue-600 dark:border-link bg-blue-600 text-white" : "border-slate-300 dark:border-input bg-white dark:bg-card text-transparent",
                 )}
               >
                 <Check className="h-3 w-3" />
@@ -183,7 +183,7 @@ export function DateFilterPanel({
 }) {
   return (
     <div className="space-y-3">
-      <p className="text-xs font-medium text-slate-500">{copy.tradeJournals.filters.dateRange}</p>
+      <p className="text-xs font-medium text-slate-500 dark:text-muted-foreground">{copy.tradeJournals.filters.dateRange}</p>
       <div className="space-y-2">
         <FilterPanelField label={copy.tradeJournals.filters.dateFrom}>
           <DatePicker value={dateFrom} onChange={onDateFromChange} className="h-9 w-full justify-start" />
@@ -215,11 +215,11 @@ export function StrategyCodeRegexFilterPanel({
   return (
     <div className="space-y-3">
       <div>
-        <p className="text-xs font-medium text-slate-500">{copy.tradeJournals.filters.strategyCodeRegex}</p>
-        <p className="mt-1 text-xs text-slate-500">{copy.tradeJournals.filters.strategyCodeRegexHint}</p>
+        <p className="text-xs font-medium text-slate-500 dark:text-muted-foreground">{copy.tradeJournals.filters.strategyCodeRegex}</p>
+        <p className="mt-1 text-xs text-slate-500 dark:text-muted-foreground">{copy.tradeJournals.filters.strategyCodeRegexHint}</p>
       </div>
       <div>
-        <p className="text-xs font-medium text-slate-500">
+        <p className="text-xs font-medium text-slate-500 dark:text-muted-foreground">
           {copy.tradeJournals.filters.strategyCodeQuickFilters}
         </p>
         <div className="mt-2 flex flex-wrap gap-2">
@@ -250,10 +250,10 @@ export function StrategyCodeRegexFilterPanel({
         onChange={(event) => onExpressionChange(event.target.value)}
         placeholder={copy.tradeJournals.filters.strategyCodeRegexPlaceholder}
         maxLength={MAX_STRATEGY_CODE_REGEX_LENGTH + 1}
-        className={cn("h-9 font-mono", hasError && "border-red-300 focus-visible:ring-red-100")}
+        className={cn("h-9 font-mono", hasError && "border-red-300 dark:border-negative/40 focus-visible:ring-red-100")}
         aria-invalid={hasError}
       />
-      {hasError ? <p className="text-xs text-red-600">{errorMessage}</p> : null}
+      {hasError ? <p className="text-xs text-red-600 dark:text-negative">{errorMessage}</p> : null}
       <ClearColumnButton onClick={onClear} disabled={expression.trim() === ""} />
     </div>
   );
@@ -262,7 +262,7 @@ export function StrategyCodeRegexFilterPanel({
 export function FilterPanelField({ label, children }: { label: string; children: React.ReactNode }) {
   return (
     <label className="space-y-1">
-      <span className="text-xs font-medium text-slate-500">{label}</span>
+      <span className="text-xs font-medium text-slate-500 dark:text-muted-foreground">{label}</span>
       {children}
     </label>
   );
@@ -310,8 +310,8 @@ export function SortableHead({
         <button
           type="button"
           className={cn(
-            "inline-flex h-8 items-center gap-1 rounded px-1.5 text-sm font-medium text-muted-foreground transition-colors hover:bg-slate-100 hover:text-slate-950 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring disabled:pointer-events-none disabled:opacity-60",
-            isActive && "text-slate-950",
+            "inline-flex h-8 items-center gap-1 rounded px-1.5 text-sm font-medium text-muted-foreground transition-colors hover:bg-slate-100 dark:hover:bg-hover hover:text-slate-950 dark:hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring disabled:pointer-events-none disabled:opacity-60",
+            isActive && "text-slate-950 dark:text-foreground",
           )}
           onClick={() => onSort(sortKey)}
           disabled={disabled}
@@ -351,7 +351,7 @@ export function EditableRow({
   }
 
   return (
-    <TableRow className="bg-blue-50/50 align-top">
+    <TableRow className="bg-blue-50/50 dark:bg-info-background/50 align-top">
       <TableCell><DatePicker value={draft.date} onChange={(value) => setField("date", value)} /></TableCell>
       <TableCell><OptionSelect value={draft.instrumentOptionId} onChange={(value) => setField("instrumentOptionId", value)} options={options.filter((option) => option.type === "INSTRUMENT")} placeholder={copy.tradeJournals.chooseInstrument} /></TableCell>
       <TableCell><OptionSelect value={draft.strategyOptionId} onChange={(value) => setField("strategyOptionId", value)} options={options.filter((option) => option.type === "STRATEGY")} placeholder={copy.tradeJournals.chooseStrategy} /></TableCell>
@@ -364,15 +364,15 @@ export function EditableRow({
           />
         </TableCell>
       ) : null}
-      <TableCell className="text-slate-400">{copy.common.dash}</TableCell>
+      <TableCell className="text-slate-400 dark:text-muted-foreground">{copy.common.dash}</TableCell>
       <NumberInput value={draft.entryPrice} onChange={(value) => setField("entryPrice", value)} />
       <NumberInput value={draft.stopLossPrice} onChange={(value) => setField("stopLossPrice", value)} />
       <NumberInput value={draft.riskAmount} onChange={(value) => setField("riskAmount", value)} />
       <NumberInput value={draft.targetPrice} onChange={(value) => setField("targetPrice", value)} />
       <NumberInput value={draft.exitPrice} onChange={(value) => setField("exitPrice", value)} />
-      <TableCell className="text-right text-slate-400">{copy.common.dash}</TableCell>
+      <TableCell className="text-right text-slate-400 dark:text-muted-foreground">{copy.common.dash}</TableCell>
       <TableCell><ScreenshotInput value={draft.screenshot} onChange={(value) => setField("screenshot", value)} /></TableCell>
-      <TableCell className="sticky right-0 z-10 min-w-40 border-l bg-blue-50 shadow-[-8px_0_12px_-12px_rgba(15,23,42,0.45)]">
+      <TableCell className="sticky right-0 z-10 min-w-40 border-l bg-blue-50 dark:bg-info-background shadow-[-8px_0_12px_-12px_rgba(15,23,42,0.45)]">
         <div className="flex gap-1">
           <Button type="button" size="sm" onClick={onSave} disabled={loading || !strategyCodeValidation.valid}><Check className="h-4 w-4" />{copy.tradeJournals.save}</Button>
           <Button type="button" size="sm" variant="outline" onClick={onCancel} disabled={loading}><X className="h-4 w-4" />{copy.tradeJournals.cancel}</Button>
@@ -401,34 +401,34 @@ export function StrategyCodeInput({
         onChange={(event) => onChange(event.target.value)}
         onBlur={onBlur}
         placeholder={copy.tradeJournals.strategyCodePlaceholder}
-        className={cn("font-mono uppercase", !validation.valid && "border-red-300 focus-visible:ring-red-100")}
+        className={cn("font-mono uppercase", !validation.valid && "border-red-300 dark:border-negative/40 focus-visible:ring-red-100")}
         aria-invalid={!validation.valid}
       />
-      <div className="rounded-md border bg-white p-2 text-xs">
+      <div className="rounded-md border bg-white dark:bg-card p-2 text-xs">
         <div className="flex flex-wrap items-center gap-x-3 gap-y-1">
-          <span className="text-slate-500">
+          <span className="text-slate-500 dark:text-muted-foreground">
             {copy.tradeJournals.strategyCodeNormalized}：
-            <span className="ml-1 font-mono text-slate-800">
+            <span className="ml-1 font-mono text-slate-800 dark:text-foreground">
               {validation.normalized || copy.common.dash}
             </span>
           </span>
           {evaluation ? <StrategyCodeBadge status={evaluation.status} /> : null}
           {evaluation ? (
-            <span className="text-slate-600">
+            <span className="text-slate-600 dark:text-secondary-text">
               {copy.tradeJournals.strategyCodeBCount}：{evaluation.bCount}
             </span>
           ) : null}
           {evaluation ? (
-            <span className="text-slate-600">
+            <span className="text-slate-600 dark:text-secondary-text">
               {copy.tradeJournals.strategyCodeCItems}：
               {evaluation.cKeys.length > 0 ? evaluation.cKeys.join("、") : copy.tradeJournals.strategyCodeNone}
             </span>
           ) : null}
         </div>
-        {!validation.valid ? <p className="mt-1 text-red-600">{validation.error}</p> : null}
-        {evaluation ? <p className="mt-1 text-slate-500">{evaluation.reason}</p> : null}
+        {!validation.valid ? <p className="mt-1 text-red-600 dark:text-negative">{validation.error}</p> : null}
+        {evaluation ? <p className="mt-1 text-slate-500 dark:text-muted-foreground">{evaluation.reason}</p> : null}
         {evaluation?.status === "FAIL" ? (
-          <p className="mt-1 font-medium text-red-700">{copy.tradeJournals.strategyCodeFailWarning}</p>
+          <p className="mt-1 font-medium text-red-700 dark:text-negative">{copy.tradeJournals.strategyCodeFailWarning}</p>
         ) : null}
       </div>
     </div>
@@ -446,9 +446,9 @@ export function StrategyCodeBadge({ status }: { status: StrategyCodeStatus }) {
     <Badge
       className={cn(
         "shrink-0 px-1.5 py-0",
-        status === "PASS" && "border-emerald-200 bg-emerald-50 text-emerald-700",
-        status === "FAIL" && "border-red-200 bg-red-50 text-red-700",
-        status === "UNRATED" && "border-slate-200 bg-slate-100 text-slate-600",
+        status === "PASS" && "border-emerald-200 dark:border-positive/40 bg-emerald-50 dark:bg-positive-background text-emerald-700 dark:text-positive",
+        status === "FAIL" && "border-red-200 dark:border-negative/40 bg-red-50 dark:bg-negative-background text-red-700 dark:text-negative",
+        status === "UNRATED" && "border-slate-200 dark:border-border bg-slate-100 dark:bg-muted text-slate-600 dark:text-secondary-text",
       )}
     >
       {label}
@@ -491,7 +491,7 @@ export function ScreenshotInput({ value, onChange }: { value: File | null; onCha
 
   return (
     <div
-      className="w-64 space-y-1 rounded-md border border-dashed border-slate-300 bg-white px-2 py-2 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+      className="w-64 space-y-1 rounded-md border border-dashed border-slate-300 dark:border-input bg-white dark:bg-card px-2 py-2 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
       tabIndex={0}
       aria-label={copy.tradeJournals.screenshotPasteHint}
       onPaste={(event) => {
@@ -506,12 +506,12 @@ export function ScreenshotInput({ value, onChange }: { value: File | null; onCha
         className="h-8 w-full text-xs"
         onChange={(event) => chooseScreenshot(event.target.files?.[0] ?? null)}
       />
-      <p className="text-xs text-slate-500">
+      <p className="text-xs text-slate-500 dark:text-muted-foreground">
         {value
           ? copy.tradeJournals.screenshotSelected.replace("{name}", value.name || copy.tradeJournals.pastedScreenshot)
           : copy.tradeJournals.screenshotPasteHint}
       </p>
-      {pasteError ? <p className="text-xs text-red-600">{pasteError}</p> : null}
+      {pasteError ? <p className="text-xs text-red-600 dark:text-negative">{pasteError}</p> : null}
     </div>
   );
 }
@@ -541,9 +541,9 @@ export function PriceCell({ value }: { value: number | null }) {
 
 export function FilteredStat({ label, value }: { label: ReactNode; value: string }) {
   return (
-    <div className="rounded-md border bg-white px-3 py-2">
-      <div className="text-xs text-slate-500">{label}</div>
-      <div className="mt-1 font-mono text-sm font-semibold text-slate-950">{value}</div>
+    <div className="rounded-md border bg-white dark:bg-card px-3 py-2">
+      <div className="text-xs text-slate-500 dark:text-muted-foreground">{label}</div>
+      <div className="mt-1 font-mono text-sm font-semibold text-slate-950 dark:text-foreground">{value}</div>
     </div>
   );
 }

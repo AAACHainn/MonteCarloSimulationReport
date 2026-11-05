@@ -132,12 +132,12 @@ export function QuickIntervalDialog({
             </Select>
           </div>
         </div>
-        <p id="quick-display-interval-help" className="text-xs text-slate-500">
+        <p id="quick-display-interval-help" className="text-xs text-slate-500 dark:text-muted-foreground">
           {range
             ? copy.marketReplay.quickIntervalRange(range.minimum, range.maximum, range.step, unitLabel(unit))
             : copy.marketReplay.quickIntervalUnitUnavailable}
         </p>
-        {error ? <p id="quick-display-interval-error" className="text-xs text-red-600" role="alert">{error}</p> : null}
+        {error ? <p id="quick-display-interval-error" className="text-xs text-red-600 dark:text-negative" role="alert">{error}</p> : null}
         <div className="flex justify-end gap-2 border-t pt-4">
           <Button type="button" variant="outline" disabled={busy} onClick={onClose}>{copy.common.cancel}</Button>
           <Button type="submit" disabled={busy || !range}>

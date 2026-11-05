@@ -75,10 +75,10 @@ export function ProtectiveOrderDialog({ order, creating, netQuantity, currentPri
         <div className="space-y-2"><Label htmlFor={id + "-quantity"}>{copy.paperTrading.quantity}</Label>
           <Input id={id + "-quantity"} type="number" step="any" min="0" max={maximum} value={mode === "ALL" ? String(maximum) : quantity} disabled={mode === "ALL"} onChange={(event) => setQuantity(event.target.value)} aria-describedby={id + "-error"} />
           <div className="flex gap-2">{[25, 50, 100].map((percent) => <Button key={percent} type="button" variant="outline" size="sm" onClick={() => { setMode("FIXED"); setQuantity(String(maximum * percent / 100)); }}>{percent}%</Button>)}</div>
-          <p className="text-xs text-slate-600">{mode === "ALL" ? copy.paperTrading.exitAllHint : copy.paperTrading.exitFixedHint}</p>
+          <p className="text-xs text-slate-600 dark:text-secondary-text">{mode === "ALL" ? copy.paperTrading.exitAllHint : copy.paperTrading.exitFixedHint}</p>
         </div>
       </fieldset>
-      <p id={id + "-error"} role="alert" className="text-sm text-red-700">{!available ? copy.paperTrading.exitOrderUnavailable : localError ?? error}</p>
+      <p id={id + "-error"} role="alert" className="text-sm text-red-700 dark:text-negative">{!available ? copy.paperTrading.exitOrderUnavailable : localError ?? error}</p>
       <div className="flex flex-wrap justify-end gap-2 border-t pt-4">
         {!creating ? <Button type="button" variant="outline" disabled={locked || !available} onClick={onAdd}><Plus className="h-4 w-4" aria-hidden="true" />{copy.paperTrading.addPartialExit}</Button> : null}
         <Button type="button" variant="outline" disabled={locked} onClick={close}>{copy.common.cancel}</Button>

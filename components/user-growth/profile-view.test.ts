@@ -82,7 +82,7 @@ describe("growth profile presentation contract", () => {
   it("groups the nickname and realm badge in one row", () => {
     const profile = makePreviewProfile(previewUsers[0], 3);
     const html = renderProfile(profile);
-    const name = html.indexOf(`<h1 class="max-w-full break-words text-3xl font-semibold tracking-tight text-slate-950">${profile.user.nickname}</h1>`);
+    const name = html.indexOf(`>${profile.user.nickname}</h1>`);
     const realm = html.indexOf(`<h2`);
     const row = html.lastIndexOf('<div class="flex flex-wrap items-center gap-3">', name);
     expect(row).toBeGreaterThan(-1);

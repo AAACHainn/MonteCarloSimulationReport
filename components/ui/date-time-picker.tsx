@@ -92,20 +92,20 @@ export const DateTimePicker = forwardRef<DateTimePickerHandle, {
             onBlur={finishTime} onChange={(event) => update(selected.date, event.target.value)} />
         </div>
       </div>
-      <p id={`${id}-format`} className="text-xs text-slate-500">{copy.dateTimePicker.formatHint}</p>
-      {error ? <p id={errorId} role="alert" className="text-xs text-red-600">{copy.dateTimePicker.errors[error]}</p> : null}
+      <p id={`${id}-format`} className="text-xs text-slate-500 dark:text-muted-foreground">{copy.dateTimePicker.formatHint}</p>
+      {error ? <p id={errorId} role="alert" className="text-xs text-red-600 dark:text-negative">{copy.dateTimePicker.errors[error]}</p> : null}
       {!calendarDefaultOpen || calendarActions ? <div className="flex flex-wrap items-center gap-2">
       {!calendarDefaultOpen ? <Button type="button" variant="outline" disabled={disabled} aria-expanded={calendarOpen} aria-controls={`${id}-calendar`} onClick={() => setCalendarOpen(open => !open)}>
         <CalendarDays className="h-4 w-4" aria-hidden="true" />{calendarOpen ? copy.dateTimePicker.hideCalendar : copy.dateTimePicker.showCalendar}
       </Button> : null}
       {calendarActions}
       </div> : null}
-      {calendarOpen ? <div id={`${id}-calendar`} className="rounded-lg border border-slate-200 p-3">
+      {calendarOpen ? <div id={`${id}-calendar`} className="rounded-lg border border-slate-200 dark:border-border p-3">
         <div className="mb-2 flex items-center justify-between">
           <Button type="button" variant="ghost" size="icon" aria-label={copy.marketReplay.previousMonth} disabled={disabled || monthStart <= firstMonth} onClick={() => setDisplayMonth(new Date(displayMonth.getFullYear(), displayMonth.getMonth() - 1, 1))}>
             <ChevronLeft className="h-4 w-4" aria-hidden="true" />
           </Button>
-          <span className="text-sm font-semibold tabular-nums text-slate-950">{format(displayMonth, "M月 yyyy", { locale: zhCN })}</span>
+          <span className="text-sm font-semibold tabular-nums text-slate-950 dark:text-foreground">{format(displayMonth, "M月 yyyy", { locale: zhCN })}</span>
           <Button type="button" variant="ghost" size="icon" aria-label={copy.marketReplay.nextMonth} disabled={disabled || monthStart >= lastMonth} onClick={() => setDisplayMonth(new Date(displayMonth.getFullYear(), displayMonth.getMonth() + 1, 1))}>
             <ChevronRight className="h-4 w-4" aria-hidden="true" />
           </Button>
@@ -127,13 +127,13 @@ export const DateTimePicker = forwardRef<DateTimePickerHandle, {
             month_caption: "sr-only",
             nav: "hidden",
             month_grid: "w-full border-collapse text-sm",
-            weekdays: "text-slate-500",
+            weekdays: "text-slate-500 dark:text-muted-foreground",
             weekday: "h-8 text-xs font-medium",
             day: "h-10 p-0 text-center",
-            day_button: "mx-auto h-10 w-full max-w-10 rounded-md text-slate-900 hover:bg-slate-100 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring",
+            day_button: "mx-auto h-10 w-full max-w-10 rounded-md text-slate-900 dark:text-foreground hover:bg-slate-100 dark:hover:bg-hover focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring",
             selected: "[&_button]:bg-primary [&_button]:font-semibold [&_button]:text-primary-foreground [&_button]:hover:bg-blue-700",
-            outside: "text-slate-300",
-            disabled: "[&_button]:cursor-not-allowed [&_button]:text-slate-300",
+            outside: "text-slate-300 dark:text-muted-foreground",
+            disabled: "[&_button]:cursor-not-allowed [&_button]:text-slate-300 dark:[&_button]:text-muted-foreground",
           }}
         />
       </div> : null}

@@ -62,20 +62,20 @@ export function AbcdSettingsDialog({ draft, onDraftChange, templates, onTemplate
           <StyleChoiceField label={copy.marketReplay.lineStyle} value={style.lineStyle} options={LINE_STYLE_OPTIONS}
             onChange={lineStyle => change({ ...style, lineStyle })} />
           <div className="flex flex-wrap gap-x-6 gap-y-2">
-            <label className="flex min-h-10 items-center gap-2 text-sm text-slate-700">
+            <label className="flex min-h-10 items-center gap-2 text-sm text-slate-700 dark:text-secondary-text">
               <input type="checkbox" checked={style.showPrices} onChange={event => change({ ...style, showPrices: event.target.checked })}
-                className="h-4 w-4 rounded border-slate-300 focus-visible:ring-2 focus-visible:ring-ring" />
+                className="h-4 w-4 rounded border-slate-300 dark:border-input focus-visible:ring-2 focus-visible:ring-ring" />
               {copy.marketReplay.abcdShowPrices}
             </label>
-            <label className="flex min-h-10 items-center gap-2 text-sm text-slate-700">
+            <label className="flex min-h-10 items-center gap-2 text-sm text-slate-700 dark:text-secondary-text">
               <input type="checkbox" checked={style.showLevels} onChange={event => change({ ...style, showLevels: event.target.checked })}
-                className="h-4 w-4 rounded border-slate-300 focus-visible:ring-2 focus-visible:ring-ring" />
+                className="h-4 w-4 rounded border-slate-300 dark:border-input focus-visible:ring-2 focus-visible:ring-ring" />
               {copy.marketReplay.abcdShowLabels}
             </label>
           </div>
         </fieldset>
-        {saveError || !valid ? <p role="alert" className="text-sm text-red-600">{saveError || copy.marketReplay.invalidDrawing}</p> : null}
-        <p className="text-xs text-slate-500">{copy.marketReplay.abcdNextStyleHint}</p>
+        {saveError || !valid ? <p role="alert" className="text-sm text-red-600 dark:text-negative">{saveError || copy.marketReplay.invalidDrawing}</p> : null}
+        <p className="text-xs text-slate-500 dark:text-muted-foreground">{copy.marketReplay.abcdNextStyleHint}</p>
         <div className="flex flex-wrap items-center justify-between gap-3 border-t pt-4">
           <Button type="button" variant="outline" disabled={busy || !valid} onClick={() => {
             setTemplateName(""); setTemplateError(null); setTemplateDialogOpen(true);
@@ -103,7 +103,7 @@ export function AbcdSettingsDialog({ draft, onDraftChange, templates, onTemplate
             onChange={event => setTemplateName(event.target.value)}
             onKeyDown={event => { if (event.key === "Enter" && event.nativeEvent.isComposing) event.preventDefault(); }} />
         </div>
-        {templateError ? <p id={`${prefix}-template-error`} role="alert" className="text-sm text-red-600">{templateError}</p> : null}
+        {templateError ? <p id={`${prefix}-template-error`} role="alert" className="text-sm text-red-600 dark:text-negative">{templateError}</p> : null}
         <div className="flex justify-end gap-2 border-t pt-4">
           <Button type="button" variant="outline" onClick={() => { setTemplateDialogOpen(false); setTemplateError(null); }}>{copy.marketReplay.drawingCancel}</Button>
           <Button type="submit" disabled={!templateName.trim() || !valid}>{copy.marketReplay.saveDrawingTemplate}</Button>

@@ -1,6 +1,7 @@
+import { chartThemes, type ChartTheme } from "@/lib/chart-theme";
 import type { IPrimitivePaneRenderer, IPrimitivePaneView, ISeriesPrimitive, PrimitiveHoveredItem,
   SeriesAttachedParameter, Time } from "lightweight-charts";
-import { DEFAULT_RECTANGLE_STYLE, trendLineCanvasDashArray, type RectangleDrawing,
+import { trendLineCanvasDashArray, type RectangleDrawing,
   type RectangleStyle, type TrendLineGeometry, type DrawingAnchor } from "./chart-drawings";
 import { DrawingTimelineLocator, type DrawingTimelineBar } from "./drawing-timeline";
 import type { TradingSessionConfig } from "./types";
@@ -85,6 +86,8 @@ export function hitTestRectangles(drawings: readonly ProjectedRectangle[], point
 }
 
 export class RectanglePrimitive implements ISeriesPrimitive<Time> {
+  private theme: ChartTheme = chartThemes.light;
+  setTheme(theme: ChartTheme) { this.theme = theme; this.attachedTo?.requestUpdate(); }
   private attachedTo: SeriesAttachedParameter<Time> | null = null;
   private snapshot: RectanglePrimitiveSnapshot | null = null;
   private readonly timeline = new DrawingTimelineLocator();
@@ -116,11 +119,11 @@ export class RectanglePrimitive implements ISeriesPrimitive<Time> {
               context.strokeRect(b.left, b.top, b.right - b.left, b.bottom - b.top);
             }
             if (selected || draft) {
-              context.strokeStyle = DEFAULT_RECTANGLE_STYLE.borderColor; context.lineWidth = 1; context.setLineDash([4, 4]);
+              context.strokeStyle = this.theme.selection; context.lineWidth = 1; context.setLineDash([4, 4]);
               context.strokeRect(b.left, b.top, b.right - b.left, b.bottom - b.top);
               context.setLineDash([]);
               if (selected) for (const p of Object.values(rectangleHandles(start, end))) {
-                context.fillStyle = "#ffffff"; context.lineWidth = 2;
+                context.fillStyle = this.theme.handle; context.lineWidth = 2;
                 context.fillRect(p.x - 4, p.y - 4, 8, 8); context.strokeRect(p.x - 4, p.y - 4, 8, 8);
               }
             }

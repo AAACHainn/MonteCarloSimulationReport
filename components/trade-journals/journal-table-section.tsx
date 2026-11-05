@@ -88,7 +88,7 @@ export function JournalTableSection({
           <CardTitle>{copy.tradeJournals.statistics}</CardTitle>
           <div className="flex flex-wrap items-center gap-2">
             <div
-              className="inline-flex rounded-md border bg-slate-50 p-1"
+              className="inline-flex rounded-md border bg-slate-50 dark:bg-muted p-1"
               role="group"
               aria-label={copy.tradeJournals.viewMode}
             >
@@ -119,9 +119,9 @@ export function JournalTableSection({
             </div>
             {viewMode === "table" ? (
               <>
-                <span className="text-xs font-medium text-slate-500">{copy.tradeJournals.tableWidth}</span>
+                <span className="text-xs font-medium text-slate-500 dark:text-muted-foreground">{copy.tradeJournals.tableWidth}</span>
                 <div
-                  className="inline-flex rounded-md border bg-slate-50 p-1"
+                  className="inline-flex rounded-md border bg-slate-50 dark:bg-muted p-1"
                   role="group"
                   aria-label={copy.tradeJournals.tableWidth}
                 >

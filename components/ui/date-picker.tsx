@@ -161,7 +161,7 @@ export function DatePicker({
     <Popover.Root open={isOpen} onOpenChange={setIsOpen}>
       <Popover.Trigger asChild>
         <Button type="button" variant="outline" className={cn("w-36 justify-start px-3 font-normal", className)} disabled={disabled}>
-          <CalendarDays className="h-4 w-4 text-slate-500" />
+          <CalendarDays className="h-4 w-4 text-slate-500 dark:text-muted-foreground" />
           {selected ? format(selected, "yyyy-MM-dd") : copy.tradeJournals.chooseDate}
         </Button>
       </Popover.Trigger>
@@ -170,12 +170,12 @@ export function DatePicker({
           data-date-picker-popover
           align="start"
           sideOffset={6}
-          className="z-[150] w-[18rem] rounded-md border bg-white p-3 shadow-lg"
+          className="z-[150] w-[18rem] rounded-md border bg-white dark:bg-surface-raised p-3 shadow-lg"
         >
-          <div className="mb-3 flex items-center gap-2 rounded-md bg-slate-50 p-1.5">
+          <div className="mb-3 flex items-center gap-2 rounded-md bg-slate-50 dark:bg-muted p-1.5">
             <button
               type="button"
-              className="flex h-8 w-8 shrink-0 items-center justify-center rounded-md text-slate-600 transition-colors hover:bg-white hover:text-slate-950 disabled:pointer-events-none disabled:text-slate-300"
+              className="flex h-8 w-8 shrink-0 items-center justify-center rounded-md text-slate-600 dark:text-secondary-text transition-colors hover:bg-white dark:hover:bg-surface-raised hover:text-slate-950 dark:hover:text-foreground disabled:pointer-events-none disabled:text-slate-300 dark:disabled:text-muted-foreground"
               onClick={goToPreviousMonth}
               disabled={!canGoPrevious}
               aria-label={copy.tradeJournals.datePicker.previousMonth}
@@ -203,20 +203,20 @@ export function DatePicker({
                   }}
                   placeholder={copy.tradeJournals.datePicker.yearInputPlaceholder}
                   aria-label={copy.tradeJournals.datePicker.yearInputPlaceholder}
-                  className="h-8 w-full rounded-md border border-slate-200 bg-white px-2 text-center text-sm font-medium tabular-nums text-slate-950 outline-none transition-colors placeholder:font-normal focus:border-blue-500 focus:ring-2 focus:ring-blue-100"
+                  className="h-8 w-full rounded-md border border-slate-200 dark:border-input bg-white dark:bg-input-background px-2 text-center text-sm font-medium tabular-nums text-slate-950 dark:text-foreground outline-none transition-colors placeholder:font-normal focus:border-blue-500 dark:focus:border-link focus:ring-2 focus:ring-blue-100"
                 />
                 {isYearListOpen ? (
                   <div
                     data-date-picker-popover
-                    className="absolute left-0 top-9 z-[200] max-h-52 w-full overflow-auto rounded-md border bg-white p-1 text-sm shadow-md"
+                    className="absolute left-0 top-9 z-[200] max-h-52 w-full overflow-auto rounded-md border bg-white dark:bg-surface-raised p-1 text-sm shadow-md"
                   >
                     {yearOptions.map((year) => (
                       <button
                         key={year}
                         type="button"
                         className={cn(
-                          "flex h-8 w-full items-center justify-center rounded-sm px-2 font-medium tabular-nums text-slate-700 outline-none transition-colors hover:bg-slate-100",
-                          year === displayMonth.getFullYear() && "bg-blue-50 text-blue-700",
+                          "flex h-8 w-full items-center justify-center rounded-sm px-2 font-medium tabular-nums text-slate-700 dark:text-secondary-text outline-none transition-colors hover:bg-slate-100 dark:hover:bg-hover",
+                          year === displayMonth.getFullYear() && "bg-blue-50 dark:bg-info-background text-blue-700 dark:text-link",
                         )}
                         onMouseDown={(event) => event.preventDefault()}
                         onClick={() => handleYearSelect(year)}
@@ -233,7 +233,7 @@ export function DatePicker({
               >
                 <SelectTrigger
                   aria-label={copy.tradeJournals.datePicker.monthSelect}
-                  className="h-8 min-w-0 border-slate-200 bg-white px-2 text-sm font-medium focus:ring-blue-100"
+                  className="h-8 min-w-0 border-slate-200 dark:border-input bg-white dark:bg-input-background px-2 text-sm font-medium focus:ring-blue-100"
                 >
                   <SelectValue />
                 </SelectTrigger>
@@ -257,7 +257,7 @@ export function DatePicker({
             </div>
             <button
               type="button"
-              className="flex h-8 w-8 shrink-0 items-center justify-center rounded-md text-slate-600 transition-colors hover:bg-white hover:text-slate-950 disabled:pointer-events-none disabled:text-slate-300"
+              className="flex h-8 w-8 shrink-0 items-center justify-center rounded-md text-slate-600 dark:text-secondary-text transition-colors hover:bg-white dark:hover:bg-surface-raised hover:text-slate-950 dark:hover:text-foreground disabled:pointer-events-none disabled:text-slate-300 dark:disabled:text-muted-foreground"
               onClick={goToNextMonth}
               disabled={!canGoNext}
               aria-label={copy.tradeJournals.datePicker.nextMonth}
@@ -280,17 +280,17 @@ export function DatePicker({
               root: "w-full",
               month_caption: "sr-only",
               nav: "hidden",
-              button_previous: "rounded-md p-1 hover:bg-slate-100",
-              button_next: "rounded-md p-1 hover:bg-slate-100",
+              button_previous: "rounded-md p-1 hover:bg-slate-100 dark:hover:bg-hover",
+              button_next: "rounded-md p-1 hover:bg-slate-100 dark:hover:bg-hover",
               month_grid: "w-full border-collapse text-sm",
-              weekdays: "text-slate-500",
+              weekdays: "text-slate-500 dark:text-muted-foreground",
               weekday: "h-8 text-xs font-medium",
               week: "mt-1",
               day: "h-8 p-0 text-center",
-              day_button: "mx-auto h-8 w-8 rounded-md text-slate-900 transition-colors hover:bg-slate-100",
+              day_button: "mx-auto h-8 w-8 rounded-md text-slate-900 dark:text-foreground transition-colors hover:bg-slate-100 dark:hover:bg-hover",
               selected: "[&_button]:bg-blue-600 [&_button]:text-white [&_button]:hover:bg-blue-700",
-              today: "[&_button]:font-semibold [&_button]:text-blue-700",
-              outside: "text-slate-300",
+              today: "[&_button]:font-semibold [&_button]:text-blue-700 dark:[&_button]:text-link",
+              outside: "text-slate-300 dark:text-muted-foreground",
             }}
           />
         </Popover.Content>

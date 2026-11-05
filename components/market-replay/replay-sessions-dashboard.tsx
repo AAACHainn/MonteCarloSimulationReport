@@ -143,12 +143,12 @@ export function ReplaySessionsDashboard({ dataset, initialSessions, initialCreat
   const visibleSessions = sessions.filter(session => !currentUser.selectedId || session.userId === currentUser.selectedId);
   return <div className="space-y-6">
     <div className="flex items-center justify-between gap-4">
-      <p className="text-sm text-slate-600">{t.source}</p>
+      <p className="text-sm text-slate-600 dark:text-secondary-text">{t.source}</p>
       <div className="flex flex-wrap gap-2"><Button asChild variant="outline"><Link href="/prop-practice-templates">{copy.propPractice.templates}</Link></Button><Button onClick={() => { setError(null); setStatus(null); setCreateOpen(true); }} disabled={busy || !dataset.sourceIntervalSeconds}><Plus className="h-4 w-4" />{t.create}</Button></div>
     </div>
-    {sessionsLoading && <p role="status" className="text-sm text-slate-600">{t.loadingSessions}</p>}
-    {(error ?? refreshError) && !createOpen ? <Alert className="border-red-200 bg-red-50" role="alert"><AlertDescription>{error ?? refreshError}</AlertDescription></Alert> : null}
-    {status ? <Alert className="border-emerald-200 bg-emerald-50" role="status" aria-live="polite"><AlertDescription>{status}</AlertDescription></Alert> : null}
+    {sessionsLoading && <p role="status" className="text-sm text-slate-600 dark:text-secondary-text">{t.loadingSessions}</p>}
+    {(error ?? refreshError) && !createOpen ? <Alert className="border-red-200 dark:border-negative/40 bg-red-50 dark:bg-negative-background" role="alert"><AlertDescription>{error ?? refreshError}</AlertDescription></Alert> : null}
+    {status ? <Alert className="border-emerald-200 dark:border-positive/40 bg-emerald-50 dark:bg-positive-background" role="status" aria-live="polite"><AlertDescription>{status}</AlertDescription></Alert> : null}
     <Card><CardHeader><CardTitle>{t.title}</CardTitle></CardHeader><CardContent>
       {visibleSessions.length ? <Table><TableHeader><TableRow>
         <TableHead>{t.name}</TableHead><TableHead>{t.mode}</TableHead><TableHead>{t.progress}</TableHead>
@@ -157,9 +157,9 @@ export function ReplaySessionsDashboard({ dataset, initialSessions, initialCreat
         <TableCell><div className="flex items-center gap-2"><span className="font-medium">{session.name}</span>
           <Button type="button" variant="ghost" size="icon" disabled={busy || Boolean(session.pendingCorrectionId)} aria-label={t.renameLabel(session.name)} title={t.rename}
             onClick={() => beginRename(session)}><Pencil className="h-4 w-4" aria-hidden="true" /></Button>
-        </div><p className="mt-1 text-xs text-slate-600">{copy.userGrowth.owner}：{session.owner?.nickname ?? copy.userGrowth.unowned} · {eligibilityLabel(session)}</p><Badge className="mt-1">{session.status === "ACTIVE" ? t.active : t.archived}</Badge>
-          {session.propAccount ? <div className="mt-1 space-y-1 text-xs text-slate-600"><p>{copy.propPractice.title} · {propResultLabel(session.propAccount.state, session.propAccount.snapshot.currency, formatMoney)}</p><p>{copy.propPractice.totalReceived}: {formatMoney(session.propAccount.state.totalReceived, session.propAccount.snapshot.currency)}</p></div> : null}
-          {session.pendingCorrectionId ? <p className="mt-1 text-xs text-slate-600">{t.deleteCorrectionPending}</p> : null}
+        </div><p className="mt-1 text-xs text-slate-600 dark:text-secondary-text">{copy.userGrowth.owner}：{session.owner?.nickname ?? copy.userGrowth.unowned} · {eligibilityLabel(session)}</p><Badge className="mt-1">{session.status === "ACTIVE" ? t.active : t.archived}</Badge>
+          {session.propAccount ? <div className="mt-1 space-y-1 text-xs text-slate-600 dark:text-secondary-text"><p>{copy.propPractice.title} · {propResultLabel(session.propAccount.state, session.propAccount.snapshot.currency, formatMoney)}</p><p>{copy.propPractice.totalReceived}: {formatMoney(session.propAccount.state.totalReceived, session.propAccount.snapshot.currency)}</p></div> : null}
+          {session.pendingCorrectionId ? <p className="mt-1 text-xs text-slate-600 dark:text-secondary-text">{t.deleteCorrectionPending}</p> : null}
         </TableCell>
         <TableCell>{session.mode === "TRAINING" ? t.training : t.liveReplay}</TableCell>
         <TableCell className="tabular-nums">{session.progress ? formatNumber(Math.max(0, session.progress.currentSequence - session.progress.startSequence + 1)) : copy.common.dash}</TableCell>
@@ -170,7 +170,7 @@ export function ReplaySessionsDashboard({ dataset, initialSessions, initialCreat
           <Button type="button" variant="destructive" size="sm" aria-label={t.deleteLabel(session.name)} disabled={busy || Boolean(session.pendingCorrectionId)}
             onClick={() => { setStatus(null); setError(null); setDeleteError(null); setDeleteTarget(session); }}><Trash2 className="h-4 w-4" aria-hidden="true" />{t.delete}</Button>
         </div></TableCell>
-      </TableRow>)}</TableBody></Table> : <div className="rounded-md border border-dashed p-6 text-sm text-slate-600">{copy.userGrowth.emptyScope}</div>}
+      </TableRow>)}</TableBody></Table> : <div className="rounded-md border border-dashed p-6 text-sm text-slate-600 dark:text-secondary-text">{copy.userGrowth.emptyScope}</div>}
     </CardContent></Card>
     {entry.ui}
     <ReplayStartDialog open={createOpen} title={t.create} description={t.createDescription} confirmLabel={t.create} value={start}

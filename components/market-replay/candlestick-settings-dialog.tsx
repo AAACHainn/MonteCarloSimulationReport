@@ -1,5 +1,6 @@
 "use client";
 
+import { useAppearance } from "@/components/appearance-provider";
 import { useId } from "react";
 import { Check } from "lucide-react";
 import { Button } from "@/components/ui/button";
@@ -7,7 +8,8 @@ import { Dialog } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
 import { copy } from "@/lib/i18n";
 import {
-  CANDLESTICK_COLOR_PRESETS,
+  candlestickColorPresets,
+  matchingCandlestickPresetVersion,
   DEFAULT_CANDLESTICK_STYLE,
   applyCandlestickColorPreset,
   matchingCandlestickColorPreset,
@@ -43,7 +45,10 @@ type CandlestickSettingsDialogProps = {
 
 export function CandlestickSettingsDialog({ open, draft, onDraftChange, onClose, onConfirm }: CandlestickSettingsDialogProps) {
   const id = useId();
-  const selectedPreset = draft ? matchingCandlestickColorPreset(draft) : undefined;
+  const { mode } = useAppearance();
+  const presets = candlestickColorPresets(mode);
+  const matchedVersion = draft ? matchingCandlestickPresetVersion(draft) : undefined;
+  const selectedPreset = draft ? matchingCandlestickColorPreset(draft, mode) : undefined;
   return (
     <Dialog open={open} title={copy.marketReplay.candlestickSettings}
       description={copy.marketReplay.candlestickSettingsDescription}
@@ -52,39 +57,39 @@ export function CandlestickSettingsDialog({ open, draft, onDraftChange, onClose,
         <div className="min-h-0 flex-1 space-y-5 overflow-y-auto p-5">
           <section aria-labelledby={`${id}-presets`} className="space-y-3">
             <div className="flex items-center justify-between gap-3">
-              <h3 id={`${id}-presets`} className="text-sm font-semibold text-slate-950">{copy.marketReplay.candlestickPresets}</h3>
-              <p className="text-xs text-slate-500">{copy.marketReplay.candlestickPresetsHint}</p>
+              <h3 id={`${id}-presets`} className="text-sm font-semibold text-slate-950 dark:text-foreground">{copy.marketReplay.candlestickPresets}</h3>
+              <p className="text-xs text-slate-500 dark:text-muted-foreground">{copy.marketReplay.candlestickPresetsHint}</p>
             </div>
             <div className="grid grid-cols-4 gap-2" role="group" aria-labelledby={`${id}-presets`}>
-              {CANDLESTICK_COLOR_PRESETS.map(preset => {
+              {presets.map(preset => {
                 const selected = selectedPreset?.id === preset.id;
                 return <Button key={preset.id} type="button" variant="outline" aria-pressed={selected}
                   onClick={() => onDraftChange(applyCandlestickColorPreset(draft, preset))}
-                  className={`relative h-auto flex-col gap-1 px-2 py-3 text-xs ${selected ? "border-primary bg-blue-50 text-blue-700 ring-1 ring-primary hover:bg-blue-50 hover:text-blue-700" : "text-slate-700"}`}>
+                  className={`relative h-auto flex-col gap-1 px-2 py-3 text-xs ${selected ? "border-primary bg-blue-50 dark:bg-info-background text-blue-700 dark:text-link ring-1 ring-primary hover:bg-blue-50 dark:hover:bg-info-background hover:text-blue-700 dark:hover:text-link" : "text-slate-700 dark:text-secondary-text"}`}>
                   {selected ? <Check className="absolute right-1.5 top-1.5 h-4 w-4" aria-hidden="true" /> : null}
                   <CandlePair style={{ ...DEFAULT_CANDLESTICK_STYLE, ...preset.colors }} className="h-9 w-14" />
                   {copy.marketReplay.candlestickPresetNames[preset.id]}
                 </Button>;
               })}
             </div>
-            <p className="text-xs text-slate-500">{copy.marketReplay.candlestickPresetsDescription}</p>
+            <p className="text-xs text-slate-500 dark:text-muted-foreground">{copy.appearance.presetHint}</p>
           </section>
 
           <section aria-labelledby={`${id}-custom`} className="space-y-3 border-t pt-4">
             <div className="flex items-center justify-between gap-3">
-              <h3 id={`${id}-custom`} className="text-sm font-semibold text-slate-950">{copy.marketReplay.candlestickCustomStyle}</h3>
-              <p className="text-xs text-slate-500" role="status" aria-live="polite">
-                {copy.marketReplay.candlestickCurrentStyle(selectedPreset ? copy.marketReplay.candlestickPresetNames[selectedPreset.id] : copy.marketReplay.candlestickCustomColors)}
+              <h3 id={`${id}-custom`} className="text-sm font-semibold text-slate-950 dark:text-foreground">{copy.marketReplay.candlestickCustomStyle}</h3>
+              <p className="text-xs text-slate-500 dark:text-muted-foreground" role="status" aria-live="polite">
+                {copy.marketReplay.candlestickCurrentStyle(matchedVersion ? copy.appearance.presetVersion(copy.marketReplay.candlestickPresetNames[matchedVersion.preset.id], copy.appearance[matchedVersion.mode]) : copy.marketReplay.candlestickCustomColors)}
               </p>
             </div>
-            <div className="flex items-center rounded-md border bg-slate-50 px-3 py-2">
+            <div className="flex items-center rounded-md border bg-slate-50 dark:bg-muted px-3 py-2">
               <div className="min-w-0 flex-1">
-                <p className="text-sm font-semibold text-slate-700">{copy.marketReplay.candlestickPreview}</p>
-                <p className="mt-1 text-xs text-slate-600">{copy.marketReplay.candlestickPreviewSides}</p>
+                <p className="text-sm font-semibold text-slate-700 dark:text-secondary-text">{copy.marketReplay.candlestickPreview}</p>
+                <p className="mt-1 text-xs text-slate-600 dark:text-secondary-text">{copy.marketReplay.candlestickPreviewSides}</p>
               </div>
               <div className="w-56 shrink-0 px-5"><CandlePair style={draft} className="h-14 w-full" /></div>
             </div>
-            <div className="grid grid-cols-[minmax(0,1fr)_6.5rem_6.5rem] gap-2 px-3 text-center text-xs text-slate-500">
+            <div className="grid grid-cols-[minmax(0,1fr)_6.5rem_6.5rem] gap-2 px-3 text-center text-xs text-slate-500 dark:text-muted-foreground">
               <span /><span>{copy.marketReplay.bullishCandle}</span><span>{copy.marketReplay.bearishCandle}</span>
             </div>
             <div className="space-y-2">
@@ -93,10 +98,10 @@ export function CandlestickSettingsDialog({ open, draft, onDraftChange, onClose,
                 { visible: "borderVisible", up: "borderUpColor", down: "borderDownColor", label: copy.marketReplay.candleBorder },
                 { visible: "wickVisible", up: "wickUpColor", down: "wickDownColor", label: copy.marketReplay.candleWick },
               ] as const).map(row => <div key={row.visible} className="grid grid-cols-[minmax(0,1fr)_6.5rem_6.5rem] items-center gap-2 rounded-md border px-3 py-2">
-                <label htmlFor={`${id}-${row.visible}`} className="flex cursor-pointer items-center gap-2 text-sm font-medium text-slate-700">
+                <label htmlFor={`${id}-${row.visible}`} className="flex cursor-pointer items-center gap-2 text-sm font-medium text-slate-700 dark:text-secondary-text">
                   <input id={`${id}-${row.visible}`} type="checkbox" checked={draft[row.visible]}
                     onChange={event => onDraftChange({ ...draft, [row.visible]: event.target.checked })}
-                    className="h-4 w-4 rounded border-slate-300 accent-primary focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring" />
+                    className="h-4 w-4 rounded border-slate-300 dark:border-input accent-primary focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring" />
                   {row.label}
                 </label>
                 {([row.up, row.down] as const).map((key, index) => <div key={key} className="flex justify-center">

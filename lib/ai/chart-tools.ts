@@ -1,3 +1,4 @@
+import { chartImageVariantVersion, snapshotRendererVersion, CURRENT_CHART_RENDERER_VERSION } from "@/lib/market-replay/snapshot-version";
 import { retrySqliteWrite } from "@/lib/sqlite-write";
 import { z } from "zod";
 import { prisma } from "@/lib/db";
@@ -32,6 +33,7 @@ export async function executeChartTool(scope: ToolScope, contextId: string, raw:
   const fail = (code: string) => ({ result: toolFailure(scope, code), images: [] });
   const parsed = chartArguments.safeParse(raw); if (!parsed.success) return fail("INVALID_ARGUMENTS");
   const a = parsed.data, c = scope.context;
+  const rendererVersion = snapshotRendererVersion(c.rendererVersion);
   const subject = a.chartRef ? [...c.entries, ...(c.currentChart ? [c.currentChart] : [])].find((e) => chartRef(scope, e) === a.chartRef)
     : c.currentChart ?? c.entries.find((e) => e.id === c.selectedEntryId);
   if (!subject) return fail("NOT_FOUND_IN_SCOPE");
@@ -63,7 +65,7 @@ export async function executeChartTool(scope: ToolScope, contextId: string, raw:
         plan = { entryId: subject.id, intervalSeconds, fromSequence: before.fromSequence, endSequence: Math.min(entry.closedSequence, c.endSequence), historyAvailable: Math.max(0, before.count - 1) };
       }
       // A window's identity never depends on the number of requested periods.
-      const variantId = hashValue([contextId, subject.id, intervalSeconds, offset, AI_CHART_MAX_BARS, c.chartPreferences, c.display, plan.endSequence, "image:3"]);
+      const variantId = hashValue([contextId, subject.id, intervalSeconds, offset, AI_CHART_MAX_BARS, c.chartPreferences, c.display, plan.endSequence, chartImageVariantVersion(c.rendererVersion)]);
       const frozen = await prisma.aiChartVariant.findUnique({ where: { id: variantId } });
       let chart: ContextChart;
       if (frozen) chart = JSON.parse(frozen.value);
@@ -82,8 +84,8 @@ export async function executeChartTool(scope: ToolScope, contextId: string, raw:
             if (page < offset) { if (!window.bars.length || window.nextSequence === null) { window = undefined; break; } anchor = window.nextSequence; }
           }
           if (!window?.bars.length) { charts.push({ timeframe: normalized[index], imageStatus: "NO_MORE_IMAGES" }); continue; }
-          const hash = hashValue({ entryId: subject.id, displaySeconds: intervalSeconds, displaySession: c.display.displaySession, window, preferencesHash: hashValue(c.chartPreferences), rendererVersion: 1 });
-          chart = { hash, sourceId: "chart:" + hash, entryId: subject.id, intervalSeconds, window, preferencesHash: hashValue(c.chartPreferences), variantRef: "variant:" + hash, sourceTimes: await chartSourceTimes(c.datasetId, window) };
+          const hash = hashValue({ entryId: subject.id, displaySeconds: intervalSeconds, displaySession: c.display.displaySession, window, preferencesHash: hashValue(c.chartPreferences), rendererVersion: rendererVersion === CURRENT_CHART_RENDERER_VERSION ? rendererVersion : 1 });
+          chart = { rendererVersion, hash, sourceId: "chart:" + hash, entryId: subject.id, intervalSeconds, window, preferencesHash: hashValue(c.chartPreferences), variantRef: "variant:" + hash, sourceTimes: await chartSourceTimes(c.datasetId, window) };
           if (!await versionValid()) throw new Error("STALE_CONTEXT");
         }
         chart = annotatedChart(c, chart);

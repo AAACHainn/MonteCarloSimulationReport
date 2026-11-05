@@ -78,8 +78,8 @@ export function ColumnFilterPopover({
         ref={triggerRef}
         type="button"
         className={cn(
-          "inline-flex h-6 w-6 shrink-0 items-center justify-center rounded text-slate-400 transition-colors hover:bg-slate-100 hover:text-slate-950 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring disabled:pointer-events-none disabled:opacity-50",
-          (active || isOpen) && "bg-blue-50 text-blue-700 hover:bg-blue-100 hover:text-blue-800",
+          "inline-flex h-6 w-6 shrink-0 items-center justify-center rounded text-slate-400 dark:text-muted-foreground transition-colors hover:bg-slate-100 dark:hover:bg-hover hover:text-slate-950 dark:hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring disabled:pointer-events-none disabled:opacity-50",
+          (active || isOpen) && "bg-blue-50 dark:bg-info-background text-blue-700 dark:text-link hover:bg-blue-100 dark:hover:bg-info-background hover:text-blue-800 dark:hover:text-link",
         )}
         disabled={disabled}
         aria-label={copy.tradeJournals.filters.openColumnFilter.replace("{field}", label)}
@@ -96,7 +96,7 @@ export function ColumnFilterPopover({
         ? createPortal(
           <div
             ref={panelRef}
-            className="fixed z-[100] w-72 rounded-md border bg-white p-3 text-left text-slate-950 shadow-lg"
+            className="fixed z-[100] w-72 rounded-md border bg-white dark:bg-surface-raised p-3 text-left text-slate-950 dark:text-foreground shadow-lg"
             style={{ left: panelPosition.left, top: panelPosition.top }}
           >
             {children}

@@ -18,7 +18,7 @@ export function UserAvatar({ avatar, size = "list", realm }: { avatar: AvatarVal
   const src = avatar.src ?? presetAvatarUrl(avatar.preset);
   const sizes = { compact: "h-5 w-5", entry: "h-7 w-7", control: "h-10 w-10", list: "h-8 w-8", profile: "h-20 w-20", crop: "h-40 w-40" };
   const frame = realm ? realmFrames[realm] : undefined;
-  const portrait = <span data-preset={avatar.preset} className={cn(styles.theme, styles.avatar, "relative inline-flex h-full w-full shrink-0 items-center justify-center overflow-hidden rounded-full border border-slate-300")}>
+  const portrait = <span data-preset={avatar.preset} className={cn(styles.theme, styles.avatar, "relative inline-flex h-full w-full shrink-0 items-center justify-center overflow-hidden rounded-full border border-slate-300 dark:border-input")}>
     {src && failedSrc !== src ?
       // Local image drafts cannot use the Next image loader. Upload is not persisted by this view.
       // eslint-disable-next-line @next/next/no-img-element

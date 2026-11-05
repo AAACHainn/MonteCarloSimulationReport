@@ -47,14 +47,14 @@ export function TradeTableClient({ trades }: { trades: SerializableTradeRow[] })
   return (
     <div className="space-y-4">
       <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
-        <div className="text-sm text-slate-600">
+        <div className="text-sm text-slate-600 dark:text-secondary-text">
           {copy.datasets.pagination.range
             .replace("{start}", startRow.toLocaleString("zh-CN"))
             .replace("{end}", endRow.toLocaleString("zh-CN"))
             .replace("{total}", trades.length.toLocaleString("zh-CN"))}
         </div>
         <div className="flex flex-wrap items-center gap-2">
-          <span className="text-sm text-slate-600">{copy.datasets.pagination.rowsPerPage}</span>
+          <span className="text-sm text-slate-600 dark:text-secondary-text">{copy.datasets.pagination.rowsPerPage}</span>
           <Select
             value={String(pageSize)}
             onValueChange={(value) => {
@@ -108,7 +108,7 @@ export function TradeTableClient({ trades }: { trades: SerializableTradeRow[] })
       </Table>
 
       <div className="flex flex-col gap-3 border-t pt-4 sm:flex-row sm:items-center sm:justify-between">
-        <div className="text-sm text-slate-600">
+        <div className="text-sm text-slate-600 dark:text-secondary-text">
           {copy.datasets.pagination.page
             .replace("{page}", page.toLocaleString("zh-CN"))
             .replace("{totalPages}", totalPages.toLocaleString("zh-CN"))}

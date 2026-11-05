@@ -209,20 +209,20 @@ export function ReviewEditorDialog({ open, no, value, initialValue, saving, erro
               <Button type="button" variant="destructive" onClick={() => { if (selectedTemplate) { setDeleteError(null); setDeletingTemplate(selectedTemplate); } }} disabled={!selectedTemplate || managementBusy || templatesLoading}><Trash2 className="h-4 w-4" aria-hidden="true" />{copy.paperTrading.deleteReviewTemplate}</Button>
             </div>
           </div>
-          {deleteError ? <p className="text-xs text-red-600" role="alert">{deleteError}</p> : null}
-          <p id="replay-review-template-hint" className="text-xs text-slate-500">{!templatesLoading && !templatesError && templates.length === 0 ? copy.paperTrading.noReviewTemplates : copy.paperTrading.reviewTemplateHint}</p>
-          {templatesError ? <div className="flex flex-wrap items-center gap-2"><p className="text-xs text-red-600" role="alert">{templatesError}</p><Button type="button" variant="ghost" size="sm" onClick={() => void loadTemplates()} disabled={templatesLoading}>{copy.paperTrading.retryReviewTemplates}</Button></div> : null}
+          {deleteError ? <p className="text-xs text-red-600 dark:text-negative" role="alert">{deleteError}</p> : null}
+          <p id="replay-review-template-hint" className="text-xs text-slate-500 dark:text-muted-foreground">{!templatesLoading && !templatesError && templates.length === 0 ? copy.paperTrading.noReviewTemplates : copy.paperTrading.reviewTemplateHint}</p>
+          {templatesError ? <div className="flex flex-wrap items-center gap-2"><p className="text-xs text-red-600 dark:text-negative" role="alert">{templatesError}</p><Button type="button" variant="ghost" size="sm" onClick={() => void loadTemplates()} disabled={templatesLoading}>{copy.paperTrading.retryReviewTemplates}</Button></div> : null}
         </div>
         <div className="flex flex-1 flex-col gap-2">
           <Label htmlFor="replay-journal-review">{copy.paperTrading.review}</Label>
           <Textarea id="replay-journal-review" value={value} onChange={(event) => { onChange(limitReview(event.target.value)); setStatus(null); }}
             placeholder={copy.paperTrading.reviewPlaceholder} className="min-h-64 flex-1 resize-none" disabled={saving} aria-describedby="replay-journal-review-count replay-journal-review-error" autoFocus />
           <div className="flex items-start justify-between gap-3">
-            {error ? <p id="replay-journal-review-error" className="text-xs text-red-600" role="alert">{error}</p> : <span />}
-            <p id="replay-journal-review-count" className="shrink-0 text-xs text-slate-500">{copy.paperTrading.reviewCharacterCount(reviewLength(value))}</p>
+            {error ? <p id="replay-journal-review-error" className="text-xs text-red-600 dark:text-negative" role="alert">{error}</p> : <span />}
+            <p id="replay-journal-review-count" className="shrink-0 text-xs text-slate-500 dark:text-muted-foreground">{copy.paperTrading.reviewCharacterCount(reviewLength(value))}</p>
           </div>
         </div>
-        {status ? <p className="text-xs text-emerald-700" role="status" aria-live="polite">{status}</p> : null}
+        {status ? <p className="text-xs text-emerald-700 dark:text-positive" role="status" aria-live="polite">{status}</p> : null}
         <div className="flex shrink-0 flex-wrap justify-end gap-2 border-t pt-4">
           {onAi ? <Button type="button" variant="outline" disabled={managementBusy} onClick={() => onAi(selectedTemplateId || undefined)}>{copy.ai.toAi}</Button> : null}
           <Button type="button" variant="outline" onClick={openNameDialog} disabled={saving || !value.trim()}>{copy.paperTrading.saveReviewTemplate}</Button>
@@ -238,7 +238,7 @@ export function ReviewEditorDialog({ open, no, value, initialValue, saving, erro
           <Label htmlFor="replay-review-template-name">{copy.paperTrading.reviewTemplateName}</Label>
           <Input id="replay-review-template-name" value={name} onChange={(event) => { setName(event.target.value); setTemplateError(null); }}
             placeholder={copy.paperTrading.reviewTemplateNamePlaceholder} disabled={templateSaving} autoFocus aria-invalid={Boolean(templateError)} aria-describedby={templateError ? "replay-review-template-name-error" : undefined} />
-          {templateError ? <p id="replay-review-template-name-error" className="text-xs text-red-600" role="alert">{templateError}</p> : null}
+          {templateError ? <p id="replay-review-template-name-error" className="text-xs text-red-600 dark:text-negative" role="alert">{templateError}</p> : null}
         </div>
         <div className="flex justify-end gap-2 border-t pt-4">
           <Button type="button" variant="outline" onClick={() => setNameOpen(false)} disabled={templateSaving}>{copy.common.cancel}</Button>

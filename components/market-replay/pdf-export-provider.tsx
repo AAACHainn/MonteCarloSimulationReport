@@ -1,5 +1,6 @@
 "use client";
 
+import { CURRENT_CHART_RENDERER_VERSION } from "@/lib/market-replay/snapshot-version";
 import { createContext, useContext, useEffect, useRef, useState, type ReactNode } from "react";
 import { Loader2, X } from "lucide-react";
 import { Button } from "@/components/ui/button";
@@ -125,7 +126,7 @@ export function PdfExportProvider({ children }: { children: ReactNode }) {
       const { createPdfChartRenderer, waitForVisible } = await import("@/lib/paper-trading/pdf-renderer");
       await waitForVisible(signal);
       if (!containerRef.current) throw new Error(t.failed);
-      renderer = createPdfChartRenderer(containerRef.current, preferences, snapshot.dataset.priceTickSize, { ...options, session });
+      renderer = createPdfChartRenderer(containerRef.current, preferences, snapshot.dataset.priceTickSize, { ...options, session }, CURRENT_CHART_RENDERER_VERSION);
       worker = connectWorker(signal);
       const font = job.font.slice(0);
       await worker.send({ id: 0, type: "init", font, metadata: { snapshot, options, preferences, volume: job.volume + 1, volumes, totalCharts: job.pages.length, chartOffset: offset, pages } }, [font]);
@@ -180,7 +181,7 @@ export function PdfExportProvider({ children }: { children: ReactNode }) {
         <Button type="button" variant="ghost" size="icon" aria-label={active ? t.cancel : t.dismiss} onClick={cancel}><X className="h-4 w-4" /></Button>
       </CardHeader>
       <CardContent className="space-y-3 p-3 pt-0">
-        <p role={error ? "alert" : "status"} aria-live="polite" className={error ? "max-h-40 overflow-y-auto break-words text-sm text-red-600" : "text-sm text-slate-600"}>
+        <p role={error ? "alert" : "status"} aria-live="polite" className={error ? "max-h-40 overflow-y-auto break-words text-sm text-red-600 dark:text-negative" : "text-sm text-slate-600 dark:text-secondary-text"}>
           {!ready && !error && status.phase !== "complete" ? <Loader2 className="mr-2 inline h-4 w-4 animate-spin" aria-hidden="true" /> : null}
           {background && status.phase === "generating" ? t.paused : status.message}
         </p>

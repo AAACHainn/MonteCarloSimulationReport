@@ -21,9 +21,9 @@ export default async function TradeJournalsPage() {
     <div className="space-y-6">
       <Breadcrumbs items={[{ label: copy.tradeJournals.title }]} />
       <section className="border-b pb-6">
-        <p className="font-mono text-sm uppercase tracking-wide text-blue-700">{copy.tradeJournals.eyebrow}</p>
-        <h1 className="text-3xl font-semibold tracking-tight text-slate-950">{copy.tradeJournals.title}</h1>
-        <p className="mt-2 max-w-3xl text-sm text-slate-600">{copy.tradeJournals.subtitle}</p>
+        <p className="font-mono text-sm uppercase tracking-wide text-blue-700 dark:text-link">{copy.tradeJournals.eyebrow}</p>
+        <h1 className="text-3xl font-semibold tracking-tight text-slate-950 dark:text-foreground">{copy.tradeJournals.title}</h1>
+        <p className="mt-2 max-w-3xl text-sm text-slate-600 dark:text-secondary-text">{copy.tradeJournals.subtitle}</p>
       </section>
       <JournalDashboard
         journals={journals.map((journal) => ({

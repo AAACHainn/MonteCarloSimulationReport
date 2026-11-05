@@ -33,9 +33,9 @@ export default async function SimulationHistoryPage({ searchParams }: PageProps)
     <div className="space-y-6">
       <Breadcrumbs items={[{ label: copy.simulations.historyTitle }]} />
       <section className="border-b pb-6">
-        <p className="font-mono text-sm uppercase tracking-wide text-blue-700">{copy.simulations.historyEyebrow}</p>
-        <h1 className="text-3xl font-semibold tracking-tight text-slate-950">{copy.simulations.historyTitle}</h1>
-        <p className="mt-2 text-sm text-slate-600">
+        <p className="font-mono text-sm uppercase tracking-wide text-blue-700 dark:text-link">{copy.simulations.historyEyebrow}</p>
+        <h1 className="text-3xl font-semibold tracking-tight text-slate-950 dark:text-foreground">{copy.simulations.historyTitle}</h1>
+        <p className="mt-2 text-sm text-slate-600 dark:text-secondary-text">
           {dataset
             ? copy.simulations.filteredHistoryDescription.replace("{dataset}", dataset.name)
             : copy.simulations.historyDescription}
@@ -51,7 +51,7 @@ export default async function SimulationHistoryPage({ searchParams }: PageProps)
           {dataset ? (
             <Link
               href="/simulations/history"
-              className="text-sm font-medium text-blue-700 hover:text-blue-900 hover:underline"
+              className="text-sm font-medium text-blue-700 dark:text-link hover:text-blue-900 dark:hover:text-link hover:underline"
             >
               {copy.simulations.viewAllRuns}
             </Link>

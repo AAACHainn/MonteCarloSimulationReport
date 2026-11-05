@@ -54,7 +54,7 @@ export function useReplaySessionEntry() {
   const owner = pending?.session.owner?.nickname ?? (pending?.session.userId ? t.loadingOwner : t.unowned);
   const ui = <>
     <ConfirmDialog open={!!pending} title={t.entryTitle} description={t.entryConfirm(owner, pending?.session.name ?? "")} confirmLabel={t.entryConfirmLabel} confirmVariant="default" isLoading={busy} error={error} onCancel={cancel} onConfirm={() => { if (pending) void open(pending.request, pending.session); }} />
-    {!pending && error && <Alert role="alert" className="border-red-200 bg-red-50"><AlertDescription>{error}</AlertDescription></Alert>}
+    {!pending && error && <Alert role="alert" className="border-red-200 dark:border-negative/40 bg-red-50 dark:bg-negative-background"><AlertDescription>{error}</AlertDescription></Alert>}
   </>;
   return { open, busy, pending: !!pending, error, ui };
 }
@@ -72,7 +72,7 @@ export function ReplaySessionGate({ session, children }: { session: ReplaySessio
   if (entered) return children;
   return <div className="space-y-6">
     <Card className="max-w-xl"><CardHeader><CardTitle>{t.entryTitle}</CardTitle><CardDescription>{session.name}</CardDescription></CardHeader><CardContent className="space-y-4">
-      <p className="text-sm text-slate-600" role="status">{!current.hydrated || entry.busy ? t.entryChecking : t.entryPending}</p>
+      <p className="text-sm text-slate-600 dark:text-secondary-text" role="status">{!current.hydrated || entry.busy ? t.entryChecking : t.entryPending}</p>
       <div className="flex flex-wrap gap-2"><Button disabled={!current.hydrated || entry.busy} onClick={request}>{t.entryRetry}</Button><Button asChild variant="outline"><Link href={`/market-replay/${encodeURIComponent(session.datasetId)}`}>{copy.replaySessions.allSessions}</Link></Button></div>
     </CardContent></Card>{entry.ui}
   </div>;

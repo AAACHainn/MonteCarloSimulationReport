@@ -55,8 +55,8 @@ export function MergeJournalImport({ journalId }: { journalId: string }) {
         <ArchiveRestore className="h-4 w-4" />
         {copy.tradeJournals.mergeImport}
       </Button>
-      {message ? <p className="text-xs text-emerald-700">{message}</p> : null}
-      {error ? <p className="text-xs text-red-600">{error}</p> : null}
+      {message ? <p className="text-xs text-emerald-700 dark:text-positive">{message}</p> : null}
+      {error ? <p className="text-xs text-red-600 dark:text-negative">{error}</p> : null}
     </div>
   );
 }

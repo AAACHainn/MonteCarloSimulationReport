@@ -23,7 +23,12 @@ const aiLimitLabels = {
   maxAnalysisCalls: "会话归纳模型请求（次）", maxAnalysisChars: "会话归纳累计输入（字符）", modelSeconds: "单次模型等待（秒）", runSeconds: "整次运行等待（秒）",
   outputChars: "响应字符保护", protocolBytes: "响应与工具记录大小保护",
 };
-export const copy = { ...dictionaries[defaultLocale], ai: {
+export const copy = { ...dictionaries[defaultLocale], appearance: {
+  darkAppearance: "暗色外观", light: "浅色", dark: "暗色",
+  toggleHint: (current: string, next: string) => `当前为${current}，切换为${next}`,
+  presetVersion: (name: string, version: string) => `${name} · ${version}版`,
+  presetHint: "点击预设应用当前外观的配色；已有颜色保持不变。",
+}, ai: {
   chartAnnotationLegend: {
     number: "n) 是图中交易标注编号。按 annotationMapping 的 chartNo 对应日志显示编号 displayNo、内部全局编号 globalNo、账户 journalAccount 和可读取的 tradeRef；chartRef 仅为图表引用，不是交易编号。同一交易的标注同色，颜色循环用于区分交易，不表示买卖或盈亏。",
     entry: "LMT=限价委托，MKT=市价委托，STP=止损委托，?=委托类型未记录；B=做多入场，S=做空入场。STP 表示入场委托类型，不表示退出原因。",

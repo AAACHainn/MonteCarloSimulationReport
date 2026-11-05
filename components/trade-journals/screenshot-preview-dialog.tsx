@@ -44,21 +44,21 @@ export function ScreenshotPreviewDialog({
         className="relative flex max-h-[92vh] max-w-[94vw] flex-col overflow-hidden rounded-lg border border-slate-700 bg-slate-950 shadow-2xl"
         onClick={(event) => event.stopPropagation()}
       >
-        <div className="flex w-full flex-col gap-3 border-b border-slate-700 bg-slate-900 px-3 py-3 sm:flex-row sm:items-start sm:justify-between">
+        <div className="flex w-full flex-col gap-3 border-b border-slate-700 dark:border-input bg-slate-900 px-3 py-3 sm:flex-row sm:items-start sm:justify-between">
           <div className="min-w-0">
-            <div className="flex items-center gap-2 text-xs font-medium text-slate-300">
+            <div className="flex items-center gap-2 text-xs font-medium text-slate-300 dark:text-muted-foreground">
               <Tag className="h-4 w-4" />
               {copy.tradeJournals.tags.currentTradeTags}
             </div>
             <div className="mt-2 flex flex-wrap gap-1.5">
               {tags.length > 0 ? (
                 tags.map((tag) => (
-                  <Badge key={tag.id} className="border-blue-400/40 bg-blue-500/15 text-blue-100">
+                  <Badge key={tag.id} className="border-blue-400/40 dark:border-link/40 bg-blue-500/15 text-blue-100">
                     {tag.name}
                   </Badge>
                 ))
               ) : (
-                <span className="text-sm text-slate-400">{copy.tradeJournals.tags.none}</span>
+                <span className="text-sm text-slate-400 dark:text-muted-foreground">{copy.tradeJournals.tags.none}</span>
               )}
             </div>
           </div>
@@ -67,14 +67,14 @@ export function ScreenshotPreviewDialog({
               href={screenshotUrl}
               target="_blank"
               rel="noreferrer"
-              className="inline-flex items-center gap-2 rounded-md bg-slate-800 px-3 py-2 text-sm font-medium text-white shadow hover:bg-slate-700 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-white"
+              className="inline-flex items-center gap-2 rounded-md bg-slate-800 px-3 py-2 text-sm font-medium text-white shadow hover:bg-slate-700 dark:hover:bg-secondary-text focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-white"
             >
               <ExternalLink className="h-4 w-4" />
               {copy.tradeJournals.openOriginalScreenshot}
             </a>
             <button
               type="button"
-              className="rounded-md bg-slate-800 p-2 text-white shadow hover:bg-slate-700 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-white"
+              className="rounded-md bg-slate-800 p-2 text-white shadow hover:bg-slate-700 dark:hover:bg-secondary-text focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-white"
               onClick={onClose}
               aria-label={copy.tradeJournals.closePreview}
             >

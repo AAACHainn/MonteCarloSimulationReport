@@ -27,7 +27,7 @@ export function GrowthRulesBody({ tab, onTabChange, current }: { tab: GrowthRule
   ];
   return <div className="space-y-4">
     <div role="tablist" aria-label={guide.title} className="flex gap-2 border-b pb-2">
-      {tabs.map((key, index) => <Button key={key} ref={element => { tabRefs.current[index] = element; }} type="button" role="tab" id={`${id}-tab-${key}`} aria-selected={tab === key} aria-controls={`${id}-panel-${key}`} tabIndex={tab === key ? 0 : -1} data-dialog-initial-focus={tab === key ? "" : undefined} variant="ghost" className={cn(tab === key && "bg-blue-50 text-blue-700")} onClick={() => onTabChange(key)} onKeyDown={event => {
+      {tabs.map((key, index) => <Button key={key} ref={element => { tabRefs.current[index] = element; }} type="button" role="tab" id={`${id}-tab-${key}`} aria-selected={tab === key} aria-controls={`${id}-panel-${key}`} tabIndex={tab === key ? 0 : -1} data-dialog-initial-focus={tab === key ? "" : undefined} variant="ghost" className={cn(tab === key && "bg-blue-50 dark:bg-info-background text-blue-700 dark:text-link")} onClick={() => onTabChange(key)} onKeyDown={event => {
         const next = event.key === "Home" ? 0 : event.key === "End" ? tabs.length - 1 : event.key === "ArrowRight" ? (index + 1) % tabs.length : event.key === "ArrowLeft" ? (index + tabs.length - 1) % tabs.length : null;
         if (next === null) return;
         event.preventDefault(); onTabChange(tabs[next]); tabRefs.current[next]?.focus();
@@ -36,18 +36,18 @@ export function GrowthRulesBody({ tab, onTabChange, current }: { tab: GrowthRule
     <div role="tabpanel" id={`${id}-panel-${tab}`} aria-labelledby={`${id}-tab-${tab}`} tabIndex={0} className="space-y-4 rounded-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring">
       {tab === "experience" ? <>
         <Table aria-label={guide.experience}><TableHeader><TableRow><TableHead>{guide.activity}</TableHead><TableHead className="whitespace-nowrap text-right">{guide.reward}</TableHead><TableHead>{guide.limits}</TableHead></TableRow></TableHeader><TableBody>
-          {rewardKeys.map(key => <TableRow key={key}><TableCell className="min-w-32 font-medium text-slate-950">{guide.rewards[key].title}</TableCell><TableCell className="whitespace-nowrap text-right font-mono tabular-nums text-emerald-700">+{formatInteger(GROWTH_XP[key])}</TableCell><TableCell className="min-w-56 leading-6 text-slate-600">{guide.rewards[key].detail}</TableCell></TableRow>)}
+          {rewardKeys.map(key => <TableRow key={key}><TableCell className="min-w-32 font-medium text-slate-950 dark:text-foreground">{guide.rewards[key].title}</TableCell><TableCell className="whitespace-nowrap text-right font-mono tabular-nums text-emerald-700 dark:text-positive">+{formatInteger(GROWTH_XP[key])}</TableCell><TableCell className="min-w-56 leading-6 text-slate-600 dark:text-secondary-text">{guide.rewards[key].detail}</TableCell></TableRow>)}
         </TableBody></Table>
-        <section className="space-y-2 border-t pt-4"><h3 className="text-sm font-semibold text-slate-950">{guide.notesTitle}</h3><ul className="list-disc space-y-2 pl-5 text-sm leading-6 text-slate-600">{guide.notes.map(note => <li key={note}>{note}</li>)}</ul></section>
+        <section className="space-y-2 border-t pt-4"><h3 className="text-sm font-semibold text-slate-950 dark:text-foreground">{guide.notesTitle}</h3><ul className="list-disc space-y-2 pl-5 text-sm leading-6 text-slate-600 dark:text-secondary-text">{guide.notes.map(note => <li key={note}>{note}</li>)}</ul></section>
       </> : <>
-        <p className="text-sm leading-6 text-slate-600">{guide.thresholdHint}</p>
+        <p className="text-sm leading-6 text-slate-600 dark:text-secondary-text">{guide.thresholdHint}</p>
         <Table aria-label={guide.realms}><TableHeader><TableRow><TableHead>{guide.realm}</TableHead><TableHead className="text-right">{guide.cumulative}</TableHead><TableHead className="text-right">{guide.increment}</TableHead></TableRow></TableHeader><TableBody>
           {levels.map(level => {
             const active = current?.realm === level.realm && (level.realm !== "qi" || current.layer === level.layer);
-            return <TableRow key={level.label} aria-current={active ? "step" : undefined} className={cn(active && "bg-blue-50 hover:bg-blue-50")}><TableCell className="py-2 font-medium text-slate-950"><div className="flex flex-wrap items-center gap-2">{level.label}{active && <Badge className="border-blue-200 bg-white text-blue-700">{guide.current}</Badge>}</div></TableCell><TableCell className="py-2 text-right tabular-nums">{formatInteger(level.threshold)}</TableCell><TableCell className="py-2 text-right tabular-nums">{level.increment === null ? copy.common.dash : formatInteger(level.increment)}</TableCell></TableRow>;
+            return <TableRow key={level.label} aria-current={active ? "step" : undefined} className={cn(active && "bg-blue-50 dark:bg-info-background hover:bg-blue-50 dark:hover:bg-info-background")}><TableCell className="py-2 font-medium text-slate-950 dark:text-foreground"><div className="flex flex-wrap items-center gap-2">{level.label}{active && <Badge className="border-blue-200 dark:border-link/40 bg-white dark:bg-card text-blue-700 dark:text-link">{guide.current}</Badge>}</div></TableCell><TableCell className="py-2 text-right tabular-nums">{formatInteger(level.threshold)}</TableCell><TableCell className="py-2 text-right tabular-nums">{level.increment === null ? copy.common.dash : formatInteger(level.increment)}</TableCell></TableRow>;
           })}
         </TableBody></Table>
-        <p className="rounded-md border border-amber-200 bg-amber-50 p-3 text-sm leading-6 text-amber-800">{guide.foundationHint(formatInteger(FOUNDATION_REQUIREMENTS.totalXp))}</p>
+        <p className="rounded-md border border-amber-200 dark:border-warning/40 bg-amber-50 dark:bg-warning-background p-3 text-sm leading-6 text-amber-800 dark:text-warning">{guide.foundationHint(formatInteger(FOUNDATION_REQUIREMENTS.totalXp))}</p>
       </>}
     </div>
   </div>;

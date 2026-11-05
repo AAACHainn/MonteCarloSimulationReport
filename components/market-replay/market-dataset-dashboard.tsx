@@ -306,17 +306,17 @@ export function MarketDatasetDashboard({ datasets }: { datasets: MarketDatasetSu
               <div className="space-y-2">
                 <Label htmlFor="market-symbol">{copy.marketReplay.symbol}</Label>
                 <Input id="market-symbol" name="symbol" required maxLength={80} placeholder={copy.marketReplay.symbolPlaceholder} />
-                <p className="text-xs text-slate-500">{copy.marketReplay.symbolHint}</p>
+                <p className="text-xs text-slate-500 dark:text-muted-foreground">{copy.marketReplay.symbolHint}</p>
               </div>
               <div className="space-y-2">
                 <Label htmlFor="market-source-interval">{copy.marketReplay.sourceInterval}</Label>
                 <Input id="market-source-interval" name="sourceIntervalSeconds" type="number" min="1" max="86400" step="1" placeholder={copy.marketReplay.sourceIntervalPlaceholder} />
-                <p className="text-xs text-slate-500">{copy.marketReplay.sourceIntervalHint}</p>
+                <p className="text-xs text-slate-500 dark:text-muted-foreground">{copy.marketReplay.sourceIntervalHint}</p>
               </div>
               <div className="space-y-2">
                 <Label htmlFor="market-price-tick-size">{copy.marketReplay.priceTickSize}</Label>
                 <Input id="market-price-tick-size" name="priceTickSize" type="number" min="0" step="any" required defaultValue="0.01" />
-                <p className="text-xs text-slate-500">{copy.marketReplay.priceTickSizeHint}</p>
+                <p className="text-xs text-slate-500 dark:text-muted-foreground">{copy.marketReplay.priceTickSizeHint}</p>
               </div>
               <div className="space-y-2">
                 <Label htmlFor="market-timezone">{copy.marketReplay.timezone}</Label>
@@ -328,7 +328,7 @@ export function MarketDatasetDashboard({ datasets }: { datasets: MarketDatasetSu
                     ))}
                   </SelectContent>
                 </Select>
-                <p className="text-xs text-slate-500">{copy.marketReplay.timezoneHint}</p>
+                <p className="text-xs text-slate-500 dark:text-muted-foreground">{copy.marketReplay.timezoneHint}</p>
               </div>
               <BarEmissionModeField id="market-bar-emission-mode" value={emissionMode} onChange={setEmissionMode} disabled={isImporting} />
               <div className="space-y-2">
@@ -339,7 +339,7 @@ export function MarketDatasetDashboard({ datasets }: { datasets: MarketDatasetSu
                 </Select>
               </div>
               {sessionMode === "DAILY_SESSION" ? (
-                <div className="space-y-3 rounded-lg border bg-slate-50 p-3">
+                <div className="space-y-3 rounded-lg border bg-slate-50 dark:bg-muted p-3">
                   <div className="grid grid-cols-2 gap-3">
                     <div><Label htmlFor="session-open">{copy.marketReplay.sessionOpen}</Label><Input id="session-open" name="sessionOpen" type="time" required defaultValue="09:30" /></div>
                     <div><Label htmlFor="session-close">{copy.marketReplay.sessionClose}</Label><Input id="session-close" name="sessionClose" type="time" required defaultValue="16:00" /></div>
@@ -352,7 +352,7 @@ export function MarketDatasetDashboard({ datasets }: { datasets: MarketDatasetSu
                 <Input ref={fileRef} id="market-file" name="file" type="file" accept=".csv,.csv.gz,text/csv,application/gzip" required />
               </div>
               {message ? (
-                <Alert role={messageIsError || issues.length ? "alert" : "status"} aria-live="polite" className={messageIsError || issues.length ? "border-red-200 bg-red-50" : "border-emerald-200 bg-emerald-50"}>
+                <Alert role={messageIsError || issues.length ? "alert" : "status"} aria-live="polite" className={messageIsError || issues.length ? "border-red-200 dark:border-negative/40 bg-red-50 dark:bg-negative-background" : "border-emerald-200 dark:border-positive/40 bg-emerald-50 dark:bg-positive-background"}>
                   <AlertTitle>{message}</AlertTitle>
                   {issues.length ? (
                     <AlertDescription className="mt-2 space-y-1">
@@ -380,30 +380,30 @@ export function MarketDatasetDashboard({ datasets }: { datasets: MarketDatasetSu
         <section className="space-y-4">
           <div className="flex flex-wrap items-center justify-between gap-3">
             <div>
-            <h2 className="text-2xl font-semibold tracking-tight text-slate-950">{copy.marketReplay.datasetsTitle}</h2>
-            <p className="text-sm text-slate-600">{copy.marketReplay.datasetsDescription}</p>
+            <h2 className="text-2xl font-semibold tracking-tight text-slate-950 dark:text-foreground">{copy.marketReplay.datasetsTitle}</h2>
+            <p className="text-sm text-slate-600 dark:text-secondary-text">{copy.marketReplay.datasetsDescription}</p>
             </div>
             <MarketDataConnectionControl />
           </div>
           <div className="grid gap-3">
             {datasets.length === 0 ? (
-              <p className="rounded-lg border bg-white p-6 text-sm text-slate-600">{copy.marketReplay.empty}</p>
+              <p className="rounded-lg border bg-white dark:bg-card p-6 text-sm text-slate-600 dark:text-secondary-text">{copy.marketReplay.empty}</p>
             ) : datasets.map((dataset) => (
               <Card key={dataset.id}>
                 <CardContent className="space-y-4 p-5">
                   <div className="flex items-start gap-3">
-                    <ChartCandlestick className="mt-1 h-5 w-5 shrink-0 text-blue-700" />
+                    <ChartCandlestick className="mt-1 h-5 w-5 shrink-0 text-blue-700 dark:text-link" />
                     <div className="min-w-0 flex-1">
                       <div className="flex flex-wrap items-baseline gap-x-2">
-                        <h3 className="font-semibold text-slate-950">{dataset.name}</h3>
-                        <span className="font-mono text-xs text-blue-700">{dataset.symbol} · {dataset.timeframe}</span>
+                        <h3 className="font-semibold text-slate-950 dark:text-foreground">{dataset.name}</h3>
+                        <span className="font-mono text-xs text-blue-700 dark:text-link">{dataset.symbol} · {dataset.timeframe}</span>
                       </div>
-                      <p className="mt-1 text-sm text-slate-600">{dataset.description || copy.datasets.noDescription}</p>
-                      <dl className="mt-3 grid gap-2 text-xs text-slate-500 sm:grid-cols-2">
-                        <div><dt className="inline font-medium text-slate-700">{copy.marketReplay.dateRange}：</dt><dd className="inline">{formatDatasetTime(dataset.startTime, dataset.timezone)} – {formatDatasetTime(dataset.endTime, dataset.timezone)}</dd></div>
-                        <div><dt className="inline font-medium text-slate-700">{copy.marketReplay.recentProgress}：</dt><dd className="inline">{dataset.progress ? copy.marketReplay.progress(Math.max(0, dataset.progress.currentSequence - dataset.progress.startSequence + 1), dataset.barCount - dataset.progress.startSequence) : copy.marketReplay.notStarted}</dd></div>
+                      <p className="mt-1 text-sm text-slate-600 dark:text-secondary-text">{dataset.description || copy.datasets.noDescription}</p>
+                      <dl className="mt-3 grid gap-2 text-xs text-slate-500 dark:text-muted-foreground sm:grid-cols-2">
+                        <div><dt className="inline font-medium text-slate-700 dark:text-secondary-text">{copy.marketReplay.dateRange}：</dt><dd className="inline">{formatDatasetTime(dataset.startTime, dataset.timezone)} – {formatDatasetTime(dataset.endTime, dataset.timezone)}</dd></div>
+                        <div><dt className="inline font-medium text-slate-700 dark:text-secondary-text">{copy.marketReplay.recentProgress}：</dt><dd className="inline">{dataset.progress ? copy.marketReplay.progress(Math.max(0, dataset.progress.currentSequence - dataset.progress.startSequence + 1), dataset.barCount - dataset.progress.startSequence) : copy.marketReplay.notStarted}</dd></div>
                       </dl>
-                      <p className="mt-2 text-xs text-slate-500">{dataset.barCount.toLocaleString("zh-CN")} {copy.marketReplay.bars} · {dataset.timezone} · {copy.marketReplay.priceTickSizeValue(formatPriceForTick(dataset.priceTickSize, dataset.priceTickSize))}</p>
+                      <p className="mt-2 text-xs text-slate-500 dark:text-muted-foreground">{dataset.barCount.toLocaleString("zh-CN")} {copy.marketReplay.bars} · {dataset.timezone} · {copy.marketReplay.priceTickSizeValue(formatPriceForTick(dataset.priceTickSize, dataset.priceTickSize))}</p>
                     </div>
                   </div>
                   <MarketSyncSummary dataset={dataset} />
@@ -424,7 +424,7 @@ export function MarketDatasetDashboard({ datasets }: { datasets: MarketDatasetSu
                       <PencilLine className="h-4 w-4" />{copy.marketReplay.editMarketSettings}
                     </Button>
                     <ReplaySessionEntry datasetId={dataset.id} />
-                    <Button type="button" variant="outline" size="sm" className="text-red-700" onClick={() => setDeleteDataset(dataset)}>
+                    <Button type="button" variant="outline" size="sm" className="text-red-700 dark:text-negative" onClick={() => setDeleteDataset(dataset)}>
                       <Trash2 className="h-4 w-4" />{copy.marketReplay.delete}
                     </Button>
                   </div>
@@ -437,17 +437,17 @@ export function MarketDatasetDashboard({ datasets }: { datasets: MarketDatasetSu
       <Dialog open={Boolean(appendDataset)} title={copy.marketReplay.appendTitle} description={copy.marketReplay.appendDescription}
         onClose={() => { if (!isImporting) setAppendDataset(null); }}>
         {appendDataset ? <form className="space-y-4" onSubmit={appendData} aria-busy={isImporting}>
-          <dl className="space-y-2 rounded-lg border bg-slate-50 p-3 text-sm">
-            <div><dt className="text-xs text-slate-500">{copy.marketReplay.appendTarget}</dt><dd className="font-medium">{appendDataset.name} · {appendDataset.symbol} · {appendDataset.timeframe}</dd></div>
-            <div><dt className="text-xs text-slate-500">{copy.marketReplay.appendEndTime} · {appendDataset.timezone}</dt><dd className="tabular-nums">{formatDatasetTime(appendDataset.endTime, appendDataset.timezone)}</dd></div>
+          <dl className="space-y-2 rounded-lg border bg-slate-50 dark:bg-muted p-3 text-sm">
+            <div><dt className="text-xs text-slate-500 dark:text-muted-foreground">{copy.marketReplay.appendTarget}</dt><dd className="font-medium">{appendDataset.name} · {appendDataset.symbol} · {appendDataset.timeframe}</dd></div>
+            <div><dt className="text-xs text-slate-500 dark:text-muted-foreground">{copy.marketReplay.appendEndTime} · {appendDataset.timezone}</dt><dd className="tabular-nums">{formatDatasetTime(appendDataset.endTime, appendDataset.timezone)}</dd></div>
           </dl>
           <div className="grid gap-4 sm:grid-cols-2">
             <div className="space-y-2"><Label htmlFor="append-symbol">{copy.marketReplay.appendFileSymbol}</Label><Input id="append-symbol" name="symbol" defaultValue={appendDataset.symbol} required maxLength={80} disabled={isImporting} aria-describedby="append-metadata-hint" /></div>
             <div className="space-y-2"><Label htmlFor="append-interval">{copy.marketReplay.appendFileInterval}</Label><Input id="append-interval" name="sourceIntervalSeconds" type="number" defaultValue={appendDataset.sourceIntervalSeconds ?? ""} required min={1} max={86400} step={1} disabled={isImporting} aria-describedby="append-metadata-hint" /></div>
           </div>
-          <p id="append-metadata-hint" className="text-xs text-slate-500">{copy.marketReplay.appendMetadataHint}</p>
+          <p id="append-metadata-hint" className="text-xs text-slate-500 dark:text-muted-foreground">{copy.marketReplay.appendMetadataHint}</p>
           <div className="space-y-2"><Label htmlFor="append-file">{copy.marketReplay.csvFile}</Label><Input id="append-file" name="file" type="file" accept=".csv,.csv.gz,text/csv,application/gzip" required disabled={isImporting} /></div>
-          {message ? <Alert className="border-red-200 bg-red-50" role="alert"><AlertDescription>{message}</AlertDescription></Alert> : null}
+          {message ? <Alert className="border-red-200 dark:border-negative/40 bg-red-50 dark:bg-negative-background" role="alert"><AlertDescription>{message}</AlertDescription></Alert> : null}
           {activeJobId ? importJobs.filter((job) => job.id === activeJobId).map((job) => <MarketImportProgress key={job.id} job={job} uploadPercent={uploadPercent} />) : null}
           <div className="flex justify-end gap-2 border-t pt-4"><Button type="button" variant="outline" disabled={isImporting} onClick={() => setAppendDataset(null)}>{copy.paperTrading.cancel}</Button><Button type="submit" disabled={isImporting}>{isImporting ? <Loader2 className="h-4 w-4 animate-spin" /> : <Upload className="h-4 w-4" />}{isImporting ? copy.marketReplay.importing : copy.marketReplay.append}</Button></div>
         </form> : null}
@@ -456,10 +456,10 @@ export function MarketDatasetDashboard({ datasets }: { datasets: MarketDatasetSu
         onClose={() => { if (!isImporting) setGapJobId(null); }}>
         {gapJob?.appendPreview ? <div className="space-y-4">
           <p className="text-sm font-medium">{copy.marketReplay.appendJobTarget(gapJob.targetName ?? "")}</p>
-          <Alert className="border-amber-200 bg-amber-50 text-amber-800"><AlertTitle>{copy.marketReplay.appendGapSummary(gapJob.appendPreview.gapCount, gapJob.appendPreview.missingBars)}</AlertTitle><AlertDescription className="mt-2">{copy.marketReplay.appendPendingBars(gapJob.importedBars)}</AlertDescription></Alert>
-          <ul className="space-y-2 text-sm tabular-nums">{gapJob.appendPreview.gaps.map((gap) => <li key={gap.after} className="rounded-md border bg-slate-50 p-3">{copy.marketReplay.appendGapRange(formatDatasetTime(gap.after, gapJob.timezone ?? "UTC"), formatDatasetTime(gap.before, gapJob.timezone ?? "UTC"), gap.missingBars)}</li>)}</ul>
-          <p className="text-xs text-slate-500">{gapJob.timezone}{gapJob.appendPreview.gapCount > 10 ? " · " + copy.marketReplay.appendGapMore : ""}</p>
-          {message ? <Alert className="border-red-200 bg-red-50" role="alert"><AlertDescription>{message}</AlertDescription></Alert> : null}
+          <Alert className="border-amber-200 dark:border-warning/40 bg-amber-50 dark:bg-warning-background text-amber-800 dark:text-warning"><AlertTitle>{copy.marketReplay.appendGapSummary(gapJob.appendPreview.gapCount, gapJob.appendPreview.missingBars)}</AlertTitle><AlertDescription className="mt-2">{copy.marketReplay.appendPendingBars(gapJob.importedBars)}</AlertDescription></Alert>
+          <ul className="space-y-2 text-sm tabular-nums">{gapJob.appendPreview.gaps.map((gap) => <li key={gap.after} className="rounded-md border bg-slate-50 dark:bg-muted p-3">{copy.marketReplay.appendGapRange(formatDatasetTime(gap.after, gapJob.timezone ?? "UTC"), formatDatasetTime(gap.before, gapJob.timezone ?? "UTC"), gap.missingBars)}</li>)}</ul>
+          <p className="text-xs text-slate-500 dark:text-muted-foreground">{gapJob.timezone}{gapJob.appendPreview.gapCount > 10 ? " · " + copy.marketReplay.appendGapMore : ""}</p>
+          {message ? <Alert className="border-red-200 dark:border-negative/40 bg-red-50 dark:bg-negative-background" role="alert"><AlertDescription>{message}</AlertDescription></Alert> : null}
           <div className="flex flex-wrap justify-end gap-2 border-t pt-4"><Button type="button" variant="outline" disabled={isImporting} onClick={() => void cancelImport(gapJob.id)}>{copy.marketReplay.cancelImport}</Button><Button type="button" disabled={isImporting} onClick={() => void retryImport(gapJob, true)}>{isImporting ? <Loader2 className="h-4 w-4 animate-spin" /> : null}{copy.marketReplay.appendConfirmGaps}</Button></div>
         </div> : null}
       </Dialog>
@@ -474,15 +474,15 @@ export function MarketDatasetDashboard({ datasets }: { datasets: MarketDatasetSu
           <div className="space-y-2">
             <Label htmlFor="edit-source-interval">{copy.marketReplay.sourceInterval}</Label>
             <Input id="edit-source-interval" name="sourceIntervalSeconds" type="number" min="1" max="86400" step="1" required value={settingsSourceInterval} onChange={(event) => setSettingsSourceInterval(event.target.value)} />
-            <p className="text-xs text-slate-500">{copy.marketReplay.editSourceIntervalHint}</p>
+            <p className="text-xs text-slate-500 dark:text-muted-foreground">{copy.marketReplay.editSourceIntervalHint}</p>
           </div>
           <BarEmissionModeField id="edit-bar-emission-mode" value={settingsEmissionMode} onChange={setSettingsEmissionMode} disabled={isSavingSettings || isSavingSyncSettings} />
           <div className="space-y-2">
             <Label htmlFor="edit-price-tick-size">{copy.marketReplay.priceTickSize}</Label>
             <Input id="edit-price-tick-size" name="priceTickSize" type="number" min="0" step="any" required value={settingsTickValue} onChange={(event) => setSettingsTickValue(event.target.value)} />
-            <p className="text-xs text-slate-500">{copy.marketReplay.priceTickSizeHint}</p>
+            <p className="text-xs text-slate-500 dark:text-muted-foreground">{copy.marketReplay.priceTickSizeHint}</p>
           </div>
-          {settingsError ? <p className="rounded-md border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-700">{settingsError}</p> : null}
+          {settingsError ? <p className="rounded-md border border-red-200 dark:border-negative/40 bg-red-50 dark:bg-negative-background px-3 py-2 text-sm text-red-700 dark:text-negative">{settingsError}</p> : null}
           <div className="flex justify-end gap-2">
             <Button type="button" variant="outline" disabled={isSavingSettings || isSavingSyncSettings} onClick={() => setSettingsDataset(null)}>{copy.paperTrading.cancel}</Button>
             <Button type="submit" disabled={isSavingSettings || isSavingSyncSettings}>{isSavingSettings ? <Loader2 className="h-4 w-4 animate-spin" /> : null}{copy.marketReplay.saveMarketSettings}</Button>

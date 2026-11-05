@@ -47,7 +47,7 @@ export function DatasetForm() {
         <Label htmlFor="description">{copy.datasets.description}</Label>
         <Textarea id="description" name="description" placeholder={copy.datasets.descriptionPlaceholder} />
       </div>
-      {error ? <p className="text-sm text-red-600">{error}</p> : null}
+      {error ? <p className="text-sm text-red-600 dark:text-negative">{error}</p> : null}
       <Button type="submit" disabled={isPending}>
         <Plus className="h-4 w-4" />
         {copy.datasets.create}

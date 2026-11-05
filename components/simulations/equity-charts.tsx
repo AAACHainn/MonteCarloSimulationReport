@@ -1,5 +1,9 @@
 "use client";
 
+import { useMemo } from "react";
+import { useAppearance } from "@/components/appearance-provider";
+import { resolveChartTheme, chartTooltipStyle } from "@/lib/chart-theme";
+
 import {
   CartesianGrid,
   Legend,
@@ -15,14 +19,6 @@ import { copy } from "@/lib/i18n";
 import type { PercentileCurves, SimulationPath } from "@/lib/monte-carlo/types";
 import type { ChartValueMode } from "./report-charts";
 
-const percentileColors = {
-  p5: "#dc2626",
-  p25: "#f59e0b",
-  p50: "#2563eb",
-  p75: "#0d9488",
-  p95: "#16a34a",
-};
-
 export function EquityCharts({
   samplePaths,
   percentileCurves,
@@ -34,15 +30,18 @@ export function EquityCharts({
   initialCapital: number;
   valueMode: ChartValueMode;
 }) {
-  const sampleData = buildSampleData(samplePaths, initialCapital, valueMode);
-  const percentileData = percentileCurves.p50.map((point, index) => ({
+  const { mode } = useAppearance();
+  const theme = resolveChartTheme(mode);
+  const percentileColors = theme.percentiles;
+  const sampleData = useMemo(() => buildSampleData(samplePaths, initialCapital, valueMode), [samplePaths, initialCapital, valueMode]);
+  const percentileData = useMemo(() => percentileCurves.p50.map((point, index) => ({
     tradeIndex: point.tradeIndex,
     p5: formatOptionalChartValue(percentileCurves.p5[index]?.equity, initialCapital, valueMode),
     p25: formatOptionalChartValue(percentileCurves.p25[index]?.equity, initialCapital, valueMode),
     p50: formatOptionalChartValue(percentileCurves.p50[index]?.equity, initialCapital, valueMode),
     p75: formatOptionalChartValue(percentileCurves.p75[index]?.equity, initialCapital, valueMode),
     p95: formatOptionalChartValue(percentileCurves.p95[index]?.equity, initialCapital, valueMode),
-  }));
+  })), [percentileCurves, initialCapital, valueMode]);
   const tickFormatter = (value: number) => formatAxisValue(value, valueMode);
   const tooltipFormatter = (value: number) => formatTooltipValue(value, valueMode);
 
@@ -55,18 +54,18 @@ export function EquityCharts({
         <CardContent className="h-96">
           <ResponsiveContainer width="100%" height="100%">
             <LineChart data={sampleData}>
-              <CartesianGrid strokeDasharray="3 3" />
-              <XAxis dataKey="tradeIndex" />
-              <YAxis tickFormatter={tickFormatter} />
-              <Tooltip formatter={(value) => tooltipFormatter(Number(value))} />
+              <CartesianGrid stroke={theme.grid} strokeDasharray="3 3" />
+              <XAxis stroke={theme.text} axisLine={{ stroke: theme.border }} tickLine={{ stroke: theme.border }} dataKey="tradeIndex" />
+              <YAxis stroke={theme.text} axisLine={{ stroke: theme.border }} tickLine={{ stroke: theme.border }} tickFormatter={tickFormatter} />
+              <Tooltip contentStyle={chartTooltipStyle(theme)} labelStyle={{ color: theme.tooltipText }} itemStyle={{ color: theme.tooltipText }} cursor={{ stroke: theme.crosshair, fill: theme.grid }} formatter={(value) => tooltipFormatter(Number(value))} />
               {samplePaths.map((path) => (
                 <Line
                   key={path.index}
                   type="monotone"
                   dataKey={`path${path.index}`}
                   dot={false}
-                  stroke="#64748b"
-                  strokeOpacity={0.22}
+                  stroke={theme.samplePath}
+                  strokeOpacity={theme.samplePathOpacity}
                   strokeWidth={1}
                   isAnimationActive={false}
                 />
@@ -83,11 +82,11 @@ export function EquityCharts({
         <CardContent className="h-96">
           <ResponsiveContainer width="100%" height="100%">
             <LineChart data={percentileData}>
-              <CartesianGrid strokeDasharray="3 3" />
-              <XAxis dataKey="tradeIndex" />
-              <YAxis tickFormatter={tickFormatter} />
-              <Tooltip formatter={(value) => tooltipFormatter(Number(value))} />
-              <Legend />
+              <CartesianGrid stroke={theme.grid} strokeDasharray="3 3" />
+              <XAxis stroke={theme.text} axisLine={{ stroke: theme.border }} tickLine={{ stroke: theme.border }} dataKey="tradeIndex" />
+              <YAxis stroke={theme.text} axisLine={{ stroke: theme.border }} tickLine={{ stroke: theme.border }} tickFormatter={tickFormatter} />
+              <Tooltip contentStyle={chartTooltipStyle(theme)} labelStyle={{ color: theme.tooltipText }} itemStyle={{ color: theme.tooltipText }} cursor={{ stroke: theme.crosshair, fill: theme.grid }} formatter={(value) => tooltipFormatter(Number(value))} />
+              <Legend wrapperStyle={{ color: theme.text }} />
               {Object.entries(percentileColors).map(([key, color]) => (
                 <Line
                   key={key}

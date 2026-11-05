@@ -11,7 +11,7 @@ export function InfoTooltip({ label, text }: { label: string; text: string }) {
 
   return <Popover.Root open={open} onOpenChange={setOpen}>
     <Popover.Anchor asChild>
-      <Button type="button" size="icon" variant="ghost" className="h-6 w-6 shrink-0 text-slate-500"
+      <Button type="button" size="icon" variant="ghost" className="h-6 w-6 shrink-0 text-slate-500 dark:text-muted-foreground"
         aria-label={label} aria-describedby={open ? id : undefined}
         onMouseEnter={() => setOpen(true)}
         onMouseLeave={event => { if (!event.currentTarget.matches(":focus-visible")) setOpen(false); }}
@@ -22,7 +22,7 @@ export function InfoTooltip({ label, text }: { label: string; text: string }) {
     <Popover.Portal>
       <Popover.Content id={id} role="tooltip" align="start" sideOffset={5} collisionPadding={12}
         onOpenAutoFocus={event => event.preventDefault()} onCloseAutoFocus={event => event.preventDefault()}
-        className="pointer-events-none z-50 w-72 max-w-[calc(100vw-2rem)] rounded-md border bg-white p-3 text-xs leading-5 text-slate-600 shadow-lg">
+        className="pointer-events-none z-50 w-72 max-w-[calc(100vw-2rem)] rounded-md border bg-white dark:bg-surface-raised p-3 text-xs leading-5 text-slate-600 dark:text-secondary-text shadow-lg">
         {text}
       </Popover.Content>
     </Popover.Portal>

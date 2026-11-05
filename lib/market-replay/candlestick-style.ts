@@ -1,3 +1,4 @@
+import type { AppearanceMode } from "@/lib/appearance";
 import { z } from "zod";
 
 export type CandlestickStyle = {
@@ -39,14 +40,37 @@ export const CANDLESTICK_COLOR_PRESETS = [
   { id: "purple-gold", colors: solidColors("#7C3AED", "#B45309") },
 ] as const;
 
-export type CandlestickColorPreset = typeof CANDLESTICK_COLOR_PRESETS[number];
+export type CandlestickColorPreset = { id: typeof CANDLESTICK_COLOR_PRESETS[number]["id"]; colors: CandlestickColors };
+
+export const DARK_CANDLESTICK_COLOR_PRESETS: readonly CandlestickColorPreset[] = [
+  { id: "monochrome", colors: { ...solidColors("#E6EDF5", "#E6EDF5"), upColor: "#111820" } },
+  { id: "green-up", colors: solidColors("#2DD4BF", "#F87171") },
+  { id: "red-up", colors: solidColors("#F87171", "#2DD4BF") },
+  { id: "purple-gold", colors: solidColors("#A78BFA", "#FBBF24") },
+];
+export const candlestickColorPresets = (mode: AppearanceMode): readonly CandlestickColorPreset[] =>
+  mode === "dark" ? DARK_CANDLESTICK_COLOR_PRESETS : CANDLESTICK_COLOR_PRESETS;
+
+export function matchingCandlestickPresetVersion(style: CandlestickStyle) {
+  for (const mode of ["light", "dark"] as const) {
+    const preset = matchingCandlestickColorPreset(style, mode);
+    if (preset) return { preset, mode };
+  }
+}
+
+/** Only the known six-color dark presets are normalized. Never mutates frozen preferences. */
+export function resolveSnapshotCandlestickStyle(style: CandlestickStyle): CandlestickStyle {
+  const dark = matchingCandlestickColorPreset(style, "dark");
+  const light = dark && CANDLESTICK_COLOR_PRESETS.find(preset => preset.id === dark.id);
+  return { ...style, ...(light?.colors ?? {}) };
+}
 
 export function applyCandlestickColorPreset(style: CandlestickStyle, preset: CandlestickColorPreset): CandlestickStyle {
   return { ...style, ...preset.colors };
 }
 
-export function matchingCandlestickColorPreset(style: CandlestickStyle): CandlestickColorPreset | undefined {
-  return CANDLESTICK_COLOR_PRESETS.find(preset => (
+export function matchingCandlestickColorPreset(style: CandlestickStyle, mode: AppearanceMode = "light"): CandlestickColorPreset | undefined {
+  return candlestickColorPresets(mode).find(preset => (
     Object.entries(preset.colors).every(([key, value]) => style[key as keyof CandlestickColors].toUpperCase() === value)
   ));
 }

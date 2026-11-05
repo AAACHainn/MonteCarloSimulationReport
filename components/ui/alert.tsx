@@ -2,7 +2,7 @@ import * as React from "react";
 import { cn } from "@/lib/utils";
 
 export function Alert({ className, ...props }: React.HTMLAttributes<HTMLDivElement>) {
-  return <div className={cn("rounded-lg border bg-white p-4 text-sm", className)} {...props} />;
+  return <div className={cn("rounded-lg border bg-white dark:bg-card p-4 text-sm", className)} {...props} />;
 }
 
 export function AlertTitle({ className, ...props }: React.HTMLAttributes<HTMLHeadingElement>) {

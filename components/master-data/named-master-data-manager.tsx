@@ -110,25 +110,25 @@ export function NamedMasterDataManager({
           </Button>
         </form>
 
-        {error ? <p className="rounded-md border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-700" role="alert">{error}</p> : null}
+        {error ? <p className="rounded-md border border-red-200 dark:border-negative/40 bg-red-50 dark:bg-negative-background px-3 py-2 text-sm text-red-700 dark:text-negative" role="alert">{error}</p> : null}
 
         {items.length === 0 ? (
-          <p className="rounded-md border border-dashed p-5 text-center text-sm text-slate-500">{text.empty}</p>
+          <p className="rounded-md border border-dashed p-5 text-center text-sm text-slate-500 dark:text-muted-foreground">{text.empty}</p>
         ) : (
           <div className="grid gap-2 md:grid-cols-2 xl:grid-cols-3">
             {items.map((item) => (
-              <div key={item.id} className="flex min-w-0 items-center gap-2 rounded-lg border bg-slate-50 p-3">
+              <div key={item.id} className="flex min-w-0 items-center gap-2 rounded-lg border bg-slate-50 dark:bg-muted p-3">
                 {editingId === item.id ? <>
                   <Input value={editName} maxLength={maxNameLength} onChange={(event) => setEditName(event.target.value)} className="h-8 min-w-0 flex-1" aria-label={text.editName} />
                   <Button type="button" size="sm" className="h-8 w-8 px-0" onClick={() => void saveItem(item.id)} disabled={isSaving} aria-label={text.save}><Check className="h-4 w-4" aria-hidden="true" /></Button>
                   <Button type="button" size="sm" variant="ghost" className="h-8 w-8 px-0" onClick={() => { setEditingId(null); setEditName(""); }} disabled={isSaving} aria-label={copy.common.cancel}><X className="h-4 w-4" aria-hidden="true" /></Button>
                 </> : <>
                   <div className="min-w-0 flex-1">
-                    <div className="truncate text-sm font-medium text-slate-950" title={item.name}>{item.name}</div>
-                    <div className="mt-1 text-xs text-slate-500">{text.usageCount.replace("{count}", String(item.usageCount))}</div>
+                    <div className="truncate text-sm font-medium text-slate-950 dark:text-foreground" title={item.name}>{item.name}</div>
+                    <div className="mt-1 text-xs text-slate-500 dark:text-muted-foreground">{text.usageCount.replace("{count}", String(item.usageCount))}</div>
                   </div>
                   <Button type="button" size="sm" variant="ghost" className="h-8 w-8 px-0" onClick={() => { setEditingId(item.id); setEditName(item.name); setError(null); }} disabled={editingId !== null} aria-label={text.edit}><Pencil className="h-4 w-4" aria-hidden="true" /></Button>
-                  <Button type="button" size="sm" variant="ghost" className="h-8 w-8 px-0" onClick={() => setDeleteItem(item)} disabled={editingId !== null || item.usageCount > 0} aria-label={text.delete} title={item.usageCount > 0 ? text.deleteInUse : text.delete}><Trash2 className="h-4 w-4 text-red-600" aria-hidden="true" /></Button>
+                  <Button type="button" size="sm" variant="ghost" className="h-8 w-8 px-0" onClick={() => setDeleteItem(item)} disabled={editingId !== null || item.usageCount > 0} aria-label={text.delete} title={item.usageCount > 0 ? text.deleteInUse : text.delete}><Trash2 className="h-4 w-4 text-red-600 dark:text-negative" aria-hidden="true" /></Button>
                 </>}
               </div>
             ))}

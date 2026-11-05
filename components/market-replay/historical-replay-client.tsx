@@ -1,4 +1,6 @@
 "use client";
+
+import { AppearanceToggle } from "@/components/appearance-toggle";
 import { ArrowSettingsDialog } from "./arrow-controls";
 import { useArrowPreferences } from "./use-arrow-preferences";
 import { useAbcdPreferences } from "./use-abcd-preferences";
@@ -477,7 +479,7 @@ export function HistoricalReplayClient({
   }
 
   if (loading) {
-    return <div className="flex h-full items-center justify-center gap-2 text-sm text-slate-500" aria-busy="true">
+    return <div className="flex h-full items-center justify-center gap-2 text-sm text-slate-500 dark:text-muted-foreground" aria-busy="true">
       <Loader2 className="h-4 w-4 animate-spin" aria-hidden="true" />
       {copy.marketReplay.loading}
     </div>;
@@ -485,7 +487,7 @@ export function HistoricalReplayClient({
 
   if (error) {
     return <div className="p-4">
-      <Alert className="border-red-200 bg-red-50" role="alert">
+      <Alert className="border-red-200 dark:border-negative/40 bg-red-50 dark:bg-negative-background" role="alert">
         <AlertTitle>{copy.common.error}</AlertTitle>
         <AlertDescription>{error}</AlertDescription>
       </Alert>
@@ -508,6 +510,7 @@ export function HistoricalReplayClient({
         <Button type="button" variant={settingsDialog === "indicators" ? "secondary" : "ghost"} size="sm" className="h-8" onClick={() => setSettingsDialog("indicators")}>
           <Settings2 className="h-4 w-4" />{copy.marketReplay.indicators}
         </Button>
+        <div className="ml-auto"><AppearanceToggle compact /></div>
       </div>
       <div className="flex min-h-0 flex-1">
         <ReplayDrawingToolbar cursorMode={cursorMode} onCursorChange={mode => void selectCursor(mode)} drawingTool={drawingTool} drawingDisabled={!drawingsLoaded || drawingBusy}
@@ -515,9 +518,9 @@ export function HistoricalReplayClient({
           onToggleMeasurement={() => { setDrawingTool(null); setMeasurementArmed(current => !current); }}
           drawingObjectsOpen={drawingObjectsOpen} onToggleDrawingObjects={() => setDrawingObjectsOpen(current => !current)} />
       <div className="relative min-h-0 min-w-0 flex-1" aria-busy={windowLoading || drawingBusy}>
-        {drawingError ? <Alert className="absolute left-3 top-3 z-50 w-auto border-red-200 bg-red-50" role="alert"><AlertTitle>{copy.marketReplay.drawingSyncErrorTitle}</AlertTitle><AlertDescription>{drawingError}</AlertDescription></Alert> : null}
-        {windowLoading ? <div className="absolute left-3 top-3 z-50 flex items-center gap-2 rounded-md border bg-white px-3 py-2 text-xs text-slate-600" role="status"><Loader2 className="h-4 w-4 animate-spin" aria-hidden="true" />{copy.marketReplay.loading}</div> : null}
-        {windowError ? <Alert className="absolute left-3 top-3 z-50 w-auto border-red-200 bg-red-50" role="alert"><AlertTitle>{copy.common.error}</AlertTitle><AlertDescription>{windowError}</AlertDescription></Alert> : null}
+        {drawingError ? <Alert className="absolute left-3 top-3 z-50 w-auto border-red-200 dark:border-negative/40 bg-red-50 dark:bg-negative-background" role="alert"><AlertTitle>{copy.marketReplay.drawingSyncErrorTitle}</AlertTitle><AlertDescription>{drawingError}</AlertDescription></Alert> : null}
+        {windowLoading ? <div className="absolute left-3 top-3 z-50 flex items-center gap-2 rounded-md border bg-white dark:bg-card px-3 py-2 text-xs text-slate-600 dark:text-secondary-text" role="status"><Loader2 className="h-4 w-4 animate-spin" aria-hidden="true" />{copy.marketReplay.loading}</div> : null}
+        {windowError ? <Alert className="absolute left-3 top-3 z-50 w-auto border-red-200 dark:border-negative/40 bg-red-50 dark:bg-negative-background" role="alert"><AlertTitle>{copy.common.error}</AlertTitle><AlertDescription>{windowError}</AlertDescription></Alert> : null}
         <ReplayChart
           cursorMode={cursorMode}
           datasetId={dataset.id}
@@ -578,26 +581,26 @@ export function HistoricalReplayClient({
           onDraftActiveChange={noOp}
           onOpenPaperAccount={noOp}
         />
-        {drawingObjectsOpen ? <aside className="absolute right-3 top-3 z-50 flex max-h-[calc(100%-1.5rem)] w-72 flex-col overflow-hidden rounded-lg border border-slate-200 bg-white/95 shadow-xl backdrop-blur">
+        {drawingObjectsOpen ? <aside className="absolute right-3 top-3 z-50 flex max-h-[calc(100%-1.5rem)] w-72 flex-col overflow-hidden rounded-lg border border-slate-200 dark:border-border bg-white/95 dark:bg-card/95 shadow-xl backdrop-blur">
           <header className="flex items-center gap-2 border-b px-3 py-2.5">
-            <ListTree className="h-4 w-4 text-slate-500" /><h3 className="text-sm font-semibold text-slate-950">{copy.marketReplay.drawingObjects}</h3>
+            <ListTree className="h-4 w-4 text-slate-500 dark:text-muted-foreground" /><h3 className="text-sm font-semibold text-slate-950 dark:text-foreground">{copy.marketReplay.drawingObjects}</h3>
             <Button type="button" variant="ghost" size="sm" disabled={!drawingsLoaded || drawingBusy || !drawings.length}
-              data-text-delete="all" aria-label={copy.marketReplay.clearDrawings} className="ml-auto text-red-600 hover:bg-red-50 hover:text-red-700"
+              data-text-delete="all" aria-label={copy.marketReplay.clearDrawings} className="ml-auto text-red-600 dark:text-negative hover:bg-red-50 dark:hover:bg-negative-background hover:text-red-700 dark:hover:text-negative"
               onClick={async () => { await discardText(); if (await drawingState.clear()) { setSelectedDrawingId(null); setRectangleStyleId(null); setStyleDrawingId(null); setStyleDraft(null); } }}>{copy.marketReplay.clearDrawingsShort}</Button>
-            <button type="button" className="ml-auto rounded p-1 text-slate-400 hover:bg-slate-100 hover:text-slate-700 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-600" aria-label={copy.marketReplay.closeDrawingObjects} onClick={() => setDrawingObjectsOpen(false)}><X className="h-4 w-4" /></button>
+            <button type="button" className="ml-auto rounded p-1 text-slate-400 dark:text-muted-foreground hover:bg-slate-100 dark:hover:bg-hover hover:text-slate-700 dark:hover:text-secondary-text focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-600" aria-label={copy.marketReplay.closeDrawingObjects} onClick={() => setDrawingObjectsOpen(false)}><X className="h-4 w-4" /></button>
           </header>
           <div className="min-h-0 flex-1 overflow-y-auto p-1.5">
-            {drawings.length ? drawings.map((drawing, index) => <div key={drawing.id} className={`flex items-center gap-2 rounded-md px-2 py-2 text-sm ${selectedDrawingId === drawing.id ? "bg-blue-50 text-blue-800" : "text-slate-700 hover:bg-slate-100"}`}>
+            {drawings.length ? drawings.map((drawing, index) => <div key={drawing.id} className={`flex items-center gap-2 rounded-md px-2 py-2 text-sm ${selectedDrawingId === drawing.id ? "bg-blue-50 dark:bg-info-background text-blue-800 dark:text-link" : "text-slate-700 dark:text-secondary-text hover:bg-slate-100 dark:hover:bg-hover"}`}>
               <button type="button" className="min-w-0 flex-1 truncate text-left font-medium focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-600" onClick={() => setSelectedDrawingId(drawing.id)} onDoubleClick={() => openDrawingStyle(drawing.id)}>
                 {drawingObjectName(drawing, index + 1)}
               </button>
               <Button type="button" disabled={drawingBusy} variant="ghost" size="icon"
                 data-text-settings={drawing.id} aria-label={drawingSettingsLabel(drawing)}
                 onClick={() => openDrawingStyle(drawing.id)}><Settings2 className="h-4 w-4" aria-hidden="true" /></Button>
-              <Button type="button" data-text-delete={drawing.id} disabled={drawingBusy} variant="ghost" size="icon" aria-label={drawingDeleteLabel(drawing)} className="text-slate-400 hover:bg-red-50 hover:text-red-600" onClick={() => void deleteDrawing(drawing.id)}><Trash2 className="h-4 w-4" aria-hidden="true" /></Button>
-            </div>) : <p className="p-3 text-xs text-slate-500">{copy.marketReplay.drawingObjectsEmpty}</p>}
+              <Button type="button" data-text-delete={drawing.id} disabled={drawingBusy} variant="ghost" size="icon" aria-label={drawingDeleteLabel(drawing)} className="text-slate-400 dark:text-muted-foreground hover:bg-red-50 dark:hover:bg-negative-background hover:text-red-600 dark:hover:text-negative" onClick={() => void deleteDrawing(drawing.id)}><Trash2 className="h-4 w-4" aria-hidden="true" /></Button>
+            </div>) : <p className="p-3 text-xs text-slate-500 dark:text-muted-foreground">{copy.marketReplay.drawingObjectsEmpty}</p>}
           </div>
-          {drawingBusy ? <p role="status" className="border-t px-3 py-2 text-xs text-slate-500">{copy.marketReplay.drawingSaving}</p> : null}
+          {drawingBusy ? <p role="status" className="border-t px-3 py-2 text-xs text-slate-500 dark:text-muted-foreground">{copy.marketReplay.drawingSaving}</p> : null}
           {!drawingsLoaded && !drawingBusy ? <Button type="button" variant="outline" className="m-3" onClick={() => void drawingState.refresh()}>{copy.marketReplay.drawingRetry}</Button> : null}
         </aside> : null}
       </div>

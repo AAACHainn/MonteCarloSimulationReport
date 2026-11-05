@@ -51,10 +51,10 @@ export default async function SimulationReportPage({ params }: PageProps) {
       />
       <ReportHeader config={config} />
 
-      <section className="flex flex-col gap-3 rounded-lg border bg-white p-5 md:flex-row md:items-center md:justify-between">
+      <section className="flex flex-col gap-3 rounded-lg border bg-white dark:bg-card p-5 md:flex-row md:items-center md:justify-between">
         <div>
-          <div className="text-xs font-medium uppercase tracking-wide text-slate-500">{copy.report.dataset}</div>
-          <div className="mt-1 font-semibold text-slate-950">{run.dataset.name}</div>
+          <div className="text-xs font-medium uppercase tracking-wide text-slate-500 dark:text-muted-foreground">{copy.report.dataset}</div>
+          <div className="mt-1 font-semibold text-slate-950 dark:text-foreground">{run.dataset.name}</div>
         </div>
         <div className="grid grid-cols-2 gap-4 md:grid-cols-4">
           <MiniStat
@@ -128,11 +128,11 @@ function MiniStat({
 }) {
   return (
     <div>
-      <div className="flex items-center gap-1.5 text-xs font-medium uppercase tracking-wide text-slate-500">
+      <div className="flex items-center gap-1.5 text-xs font-medium uppercase tracking-wide text-slate-500 dark:text-muted-foreground">
         <span>{label}</span>
         <span className="group relative inline-flex">
           <CircleAlert
-            className="h-3.5 w-3.5 cursor-help text-slate-400"
+            className="h-3.5 w-3.5 cursor-help text-slate-400 dark:text-muted-foreground"
             aria-label={tip}
           />
           <span className="pointer-events-none absolute bottom-full left-1/2 z-20 mb-2 hidden w-64 -translate-x-1/2 rounded-md border bg-slate-950 px-3 py-2 text-left text-xs font-normal leading-relaxed tracking-normal text-white shadow-lg group-hover:block">
@@ -141,8 +141,8 @@ function MiniStat({
         </span>
       </div>
       <div className="mt-1 flex flex-wrap items-baseline gap-x-2 gap-y-1">
-        <span className="font-mono text-sm font-semibold text-slate-950">{value}</span>
-        <span className="font-mono text-xs font-semibold text-slate-500">{subValue}</span>
+        <span className="font-mono text-sm font-semibold text-slate-950 dark:text-foreground">{value}</span>
+        <span className="font-mono text-xs font-semibold text-slate-500 dark:text-muted-foreground">{subValue}</span>
       </div>
     </div>
   );

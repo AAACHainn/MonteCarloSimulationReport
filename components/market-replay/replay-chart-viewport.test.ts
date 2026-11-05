@@ -3,6 +3,8 @@ import { useReplayChartSetup } from "./use-replay-chart-setup";
 import type { AggregatedMarketBarData } from "@/lib/market-replay/types";
 import type { ReplayViewportSnapshot } from "@/lib/market-replay/chart-range";
 
+vi.mock("@/components/appearance-provider", () => ({ useAppearance: () => ({ mode: "light" }) }));
+
 const harness = vi.hoisted(() => ({ revision: "viewport-window-fixture", effects: [] as Array<() => void>,
   layouts: [] as Array<() => void>, resetTimeline: null as (() => void) | null }));
 vi.mock("./use-replay-chart-ema", () => ({

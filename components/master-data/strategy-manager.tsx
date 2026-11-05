@@ -33,13 +33,13 @@ export function StrategyManager({ options }: { options: ManagedStrategy[] }) {
   return <>
     <Card><CardHeader><div className="flex flex-wrap items-start justify-between gap-3"><div><CardTitle>{copy.masterData.options.strategies.title}</CardTitle><CardDescription className="mt-2">{copy.trainingGate.checklistHint}</CardDescription></div><Button onClick={() => setEditing("NEW")} disabled={busy}><Plus className="h-4 w-4" />{copy.trainingGate.addStrategy}</Button></div></CardHeader>
       <CardContent className="space-y-3">
-        {error ? <p className="text-sm text-red-600" role="alert">{error}</p> : null}
-        {!options.length ? <p className="rounded-md border border-dashed p-6 text-sm text-slate-500">{copy.masterData.options.strategies.empty}</p> : options.map((option) => <div key={option.id} className="flex flex-wrap items-center gap-3 rounded-md border p-3">
-          <div className="min-w-0 flex-1"><p className="break-words text-sm font-medium">{option.name}</p><p className={`mt-1 text-xs ${option.checklist.length ? "text-slate-500" : "text-amber-800"}`}>{option.checklist.length ? copy.trainingGate.checklistCount(option.checklist.length) : copy.trainingGate.emptyChecklist}</p></div>
+        {error ? <p className="text-sm text-red-600 dark:text-negative" role="alert">{error}</p> : null}
+        {!options.length ? <p className="rounded-md border border-dashed p-6 text-sm text-slate-500 dark:text-muted-foreground">{copy.masterData.options.strategies.empty}</p> : options.map((option) => <div key={option.id} className="flex flex-wrap items-center gap-3 rounded-md border p-3">
+          <div className="min-w-0 flex-1"><p className="break-words text-sm font-medium">{option.name}</p><p className={`mt-1 text-xs ${option.checklist.length ? "text-slate-500 dark:text-muted-foreground" : "text-amber-800 dark:text-warning"}`}>{option.checklist.length ? copy.trainingGate.checklistCount(option.checklist.length) : copy.trainingGate.emptyChecklist}</p></div>
           {!option.active ? <Badge>{copy.trainingGate.inactive}</Badge> : null}
           <Button variant="outline" disabled={busy} onClick={() => setEditing(option)} aria-label={`${copy.trainingGate.editStrategy} ${option.name}`}><Pencil className="h-4 w-4" />{copy.masterData.options.edit}</Button>
           <Button variant="ghost" disabled={busy} onClick={() => void mutate(option.id, "PATCH", { active: !option.active })}>{option.active ? copy.masterData.options.deactivate : copy.masterData.options.reactivate}</Button>
-          <Button variant="ghost" size="icon" disabled={busy} onClick={() => setDeleting(option)} aria-label={`${copy.masterData.options.delete} ${option.name}`}><Trash2 className="h-4 w-4 text-red-600" /></Button>
+          <Button variant="ghost" size="icon" disabled={busy} onClick={() => setDeleting(option)} aria-label={`${copy.masterData.options.delete} ${option.name}`}><Trash2 className="h-4 w-4 text-red-600 dark:text-negative" /></Button>
         </div>)}
       </CardContent>
     </Card>
@@ -69,14 +69,14 @@ function StrategyEditor({ strategy, onClose, onSaved }: { strategy: ManagedStrat
   return <Dialog open title={strategy ? copy.trainingGate.editStrategy : copy.trainingGate.addStrategy} onClose={() => { if (!busy) onClose(); }}>
     <form onSubmit={(event) => void save(event)} className="space-y-4" aria-busy={busy}>
       <div className="space-y-2"><Label htmlFor="strategy-name">{copy.trainingGate.strategyName}</Label><Input id="strategy-name" value={name} onChange={(event) => setName(event.target.value)} required maxLength={80} disabled={busy} /></div>
-      <div className="space-y-2"><Label>{copy.trainingGate.checklist}</Label><p className="text-xs text-slate-500">{copy.trainingGate.checklistHint}</p>
+      <div className="space-y-2"><Label>{copy.trainingGate.checklist}</Label><p className="text-xs text-slate-500 dark:text-muted-foreground">{copy.trainingGate.checklistHint}</p>
         {checklist.map((item, index) => <div key={item.id} className="space-y-2 rounded-md border p-3"><Label htmlFor={`check-${item.id}`}>{copy.trainingGate.itemLabel(index + 1)}</Label><div className="flex flex-wrap gap-2"><Input id={`check-${item.id}`} value={item.text} onChange={(event) => setChecklist((items) => items.map((value) => value.id === item.id ? { ...value, text: event.target.value } : value))} maxLength={1000} required disabled={busy} className="min-w-0 flex-[1_1_180px]" />
           <Button variant="outline" size="icon" type="button" disabled={busy || index === 0} onClick={() => move(index, index - 1)} aria-label={copy.trainingGate.moveUp}><ArrowUp className="h-4 w-4" /></Button>
           <Button variant="outline" size="icon" type="button" disabled={busy || index === checklist.length - 1} onClick={() => move(index, index + 1)} aria-label={copy.trainingGate.moveDown}><ArrowDown className="h-4 w-4" /></Button>
-          <Button variant="ghost" size="icon" type="button" disabled={busy} onClick={() => setChecklist((items) => items.filter((value) => value.id !== item.id))} aria-label={copy.trainingGate.removeItem}><Trash2 className="h-4 w-4 text-red-600" /></Button></div></div>)}
+          <Button variant="ghost" size="icon" type="button" disabled={busy} onClick={() => setChecklist((items) => items.filter((value) => value.id !== item.id))} aria-label={copy.trainingGate.removeItem}><Trash2 className="h-4 w-4 text-red-600 dark:text-negative" /></Button></div></div>)}
         <Button variant="outline" type="button" disabled={busy || checklist.length >= 100} onClick={() => setChecklist((items) => [...items, { id: createUuid(), text: "" }])}><Plus className="h-4 w-4" />{copy.trainingGate.addItem}</Button>
       </div>
-      {error ? <p role="alert" className="text-sm text-red-600">{error}</p> : null}
+      {error ? <p role="alert" className="text-sm text-red-600 dark:text-negative">{error}</p> : null}
       <div className="flex justify-end gap-2 border-t pt-4"><Button type="button" variant="outline" disabled={busy} onClick={onClose}>{copy.common.cancel}</Button><Button type="submit" disabled={busy || !name.trim()}>{busy ? <Loader2 className="h-4 w-4 animate-spin" /> : null}{copy.masterData.options.save}</Button></div>
     </form>
   </Dialog>;

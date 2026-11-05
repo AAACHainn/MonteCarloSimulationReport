@@ -16,9 +16,9 @@ export function GrowthRecordsDialog({ records, onPageChange, onSource, onClose, 
   const pages = Math.max(1, Math.ceil(records.total / records.pageSize));
   return <Dialog open title={t.historyRecords} description={t.recordsHint} contentClassName="flex flex-col overflow-hidden" onClose={onClose}>
     <div className="flex min-h-0 flex-col gap-4" aria-busy={state === "loading"}>
-      {state === "loading" && <p role="status" className="text-sm text-slate-600">{t.loadingRecords}</p>}
-      {state === "error" && <div role="alert" className="flex items-center gap-3 text-sm text-red-700">{error ?? t.failedRecords}<Button variant="outline" onClick={onRetry}>{t.retry}</Button></div>}
-      <p className="shrink-0 text-sm tabular-nums text-slate-700">{t.recordCount(formatInteger(records.total))} · {t.recordPageSize(formatInteger(records.pageSize))} · {t.settlementTime}</p>
+      {state === "loading" && <p role="status" className="text-sm text-slate-600 dark:text-secondary-text">{t.loadingRecords}</p>}
+      {state === "error" && <div role="alert" className="flex items-center gap-3 text-sm text-red-700 dark:text-negative">{error ?? t.failedRecords}<Button variant="outline" onClick={onRetry}>{t.retry}</Button></div>}
+      <p className="shrink-0 text-sm tabular-nums text-slate-700 dark:text-secondary-text">{t.recordCount(formatInteger(records.total))} · {t.recordPageSize(formatInteger(records.pageSize))} · {t.settlementTime}</p>
       <div className="min-h-0 overflow-y-auto pr-2">{state !== "normal" && !records.items.length ? null : <GrowthRecordList records={records.items} onSource={onSource} />}</div>
       <div className="flex shrink-0 flex-wrap items-center justify-between gap-3 border-t pt-4">
         <p role="status" aria-live="polite" className="text-sm tabular-nums">{t.page(formatInteger(records.page), formatInteger(pages))}</p>
