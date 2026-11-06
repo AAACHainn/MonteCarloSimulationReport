@@ -97,6 +97,13 @@ export function useReplayChartDrawingPointer(core: ReturnType<typeof useReplayCh
       event.stopImmediatePropagation();
       setContextMenu(null);
     };
+    const selectDrawing = (id: string) => {
+      // Default pointer focus is prevented. Transfer it only after this drawing
+      // wins hit testing and order-line priority checks.
+      interaction.focus?.({ preventScroll: true });
+      onSelectedDrawingIdChangeRef.current(id);
+      selectedDrawingIdRef.current = id;
+    };
     const hitDrawingAt = (point: { x: number; y: number }) => {
       const trend = trendLinePrimitiveRef.current?.hitTestAt(point) ?? null;
       const fibonacci = fibonacciPrimitiveRef.current?.hitTestAt(point) ?? null;
@@ -201,7 +208,7 @@ export function useReplayChartDrawingPointer(core: ReturnType<typeof useReplayCh
         })) return;
         if (abcdReleaseFrame !== null) { cancelAnimationFrame(abcdReleaseFrame); abcdReleaseFrame = null; }
         abcdPreviewRef.current = null;
-        stopEvent(event); onSelectedDrawingIdChangeRef.current(id); selectedDrawingIdRef.current = id;
+        stopEvent(event); selectDrawing(id);
         abcdDragging = { id, clientX: event.clientX, clientY: event.clientY, geometry: drawing.geometry, coordinates, part: hit.part as AbcdHitPart };
         capturedPointer = event.pointerId; interaction.setPointerCapture(event.pointerId);
         chart.applyOptions({ handleScroll: false }); setChartCursor(hit.part === "line" ? "move" : "crosshair"); return;
@@ -213,7 +220,7 @@ export function useReplayChartDrawingPointer(core: ReturnType<typeof useReplayCh
         if ([...lineTargetsRef.current.values()].some(target => {
           const y = series.priceToCoordinate(target.price); return y !== null && Math.abs(Number(y) - (event.clientY - rect.top)) <= 8;
         })) return;
-        stopEvent(event); onSelectedDrawingIdChangeRef.current(id); selectedDrawingIdRef.current = id;
+        stopEvent(event); selectDrawing(id);
         arrowDragging = { id, clientX: event.clientX, clientY: event.clientY, geometry: drawing.geometry,
           x: coordinate.x, y: coordinate.y, moved: false };
         capturedPointer = event.pointerId; interaction.setPointerCapture(event.pointerId);
@@ -225,7 +232,7 @@ export function useReplayChartDrawingPointer(core: ReturnType<typeof useReplayCh
         if ([...lineTargetsRef.current.values()].some(target => {
           const y = series.priceToCoordinate(target.price); return y !== null && Math.abs(Number(y) - (event.clientY - rect.top)) <= 8;
         })) return;
-        stopEvent(event); onSelectedDrawingIdChangeRef.current(id); selectedDrawingIdRef.current = id;
+        stopEvent(event); selectDrawing(id);
         hoverText(id);
         textClicks.current!.clear();
         textDragging = { id, clientX: event.clientX, clientY: event.clientY, timeStamp: event.timeStamp, geometry: drawing.geometry, x: textCoordinate.x, y: textCoordinate.y, moved: false };
@@ -234,8 +241,7 @@ export function useReplayChartDrawingPointer(core: ReturnType<typeof useReplayCh
       const coordinate = drawing ? drawingCoordinates(drawing) : null;
       if (!drawing || !coordinate || id.startsWith("temporary-")) return;
       stopEvent(event);
-      onSelectedDrawingIdChangeRef.current(id);
-      selectedDrawingIdRef.current = id;
+      selectDrawing(id);
       dragging = {
         id,
         kind: hit.part as "start" | "end" | "line" | RectangleHandle,

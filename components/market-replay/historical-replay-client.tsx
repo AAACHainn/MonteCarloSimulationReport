@@ -19,6 +19,7 @@ import { ChartVisibilityMenu } from "@/components/market-replay/chart-visibility
 import { DisplayIntervalControls } from "@/components/market-replay/display-interval-controls";
 import { useReplayPreferences } from "@/components/market-replay/use-replay-preferences";
 import { useHistoricalDrawings } from "./use-historical-drawings";
+import { useDrawingTemplateShortcuts } from "./use-drawing-template-shortcuts";
 import { RectangleSettingsDialog } from "./rectangle-controls";
 import { AbcdSettingsDialog } from "./abcd-settings-dialog";
 import { LineSettingsDialog, cloneLineDrawingStyle, type LineDrawingStyle } from "./line-settings-dialog";
@@ -165,6 +166,13 @@ export function HistoricalReplayClient({
     chartVisibility.drawings, drawings, defaultTextStyle);
   const { open: openTextDrawing } = textDrawing;
   const { beforeExit: finishText, discard: discardText, requestSettings: requestTextSettings } = textDrawing;
+  useDrawingTemplateShortcuts({ drawings, selectedDrawingId, drawingTool,
+    scope: dataset.id + ":" + replaySession?.id + ":" + replaySession?.activeProjectionId,
+    disabled: !chartVisibility.drawings || !drawingsLoaded || drawingBusy || measurementArmed || Boolean(textDrawing.editor) || Boolean(settingsDialog),
+    templates: { TREND_LINE: trendLineTemplates, FIB_RETRACEMENT: fibonacciTemplates, RECTANGLE: rectangleTemplates,
+      TEXT: textTemplates, AB_CD: abcdPreferences.templates, ARROW_UP: arrowPreferences.ARROW_UP.templates, ARROW_DOWN: arrowPreferences.ARROW_DOWN.templates },
+    apply: (id, style) => drawingState.update(id, { style }),
+  });
   async function selectCursor(mode: ReplayCursorMode) {
     if (!await finishText()) return;
     setDrawingTool(null);

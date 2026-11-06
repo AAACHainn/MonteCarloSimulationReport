@@ -27,7 +27,7 @@ function setup(tool: DrawingTool | null = null) {
   vi.stubGlobal("requestAnimationFrame", (fn: () => void) => { frames.set(++nextFrame, fn); return nextFrame; });
   vi.stubGlobal("cancelAnimationFrame", (id: number) => frames.delete(id));
   const flush = () => { const pending = [...frames.values()]; frames.clear(); pending.forEach(fn => fn()); };
-  const interaction = { contains: () => true, setPointerCapture: vi.fn(), hasPointerCapture: () => true, releasePointerCapture: vi.fn(),
+  const interaction = { contains: () => true, focus: vi.fn(), setPointerCapture: vi.fn(), hasPointerCapture: () => true, releasePointerCapture: vi.fn(),
     addEventListener: (type: string, fn: (event: never) => void) => listeners.set(type, fn), removeEventListener: (type: string) => listeners.delete(type) };
   const bars = Array.from({ length: 5 }, (_, index) => ({ timestamp: `2026-10-01T00:0${index}:00.000Z`,
     bucketEnd: `2026-10-01T00:0${index + 1}:00.000Z`, firstSequence: index, lastSequence: index }));
@@ -69,6 +69,7 @@ describe("arrow pointer interactions", () => {
   it("selects on click, opens settings only on double click, and uses existing deletion", () => {
     const s = setup(); s.emit("pointerdown", s.event()); s.emit("pointerup", s.event());
     expect(s.core.onSelectedDrawingIdChangeRef.current).toHaveBeenCalledWith("arrow");
+    expect(s.core.interactionRef.current.focus).toHaveBeenCalledWith({ preventScroll: true });
     expect(s.core.onUpdateDrawingRef.current).not.toHaveBeenCalled();
     expect(s.core.onOpenDrawingStyleRef.current).not.toHaveBeenCalled();
     s.emit("dblclick", s.event()); expect(s.core.onOpenDrawingStyleRef.current).toHaveBeenCalledWith("arrow");
@@ -85,6 +86,13 @@ describe("arrow pointer interactions", () => {
     expect(s.core.onUpdateDrawingRef.current).toHaveBeenCalledTimes(1);
     expect(s.core.onUpdateDrawingRef.current).toHaveBeenCalledWith("arrow", { anchor: { ...anchor, price: 205 } });
     s.flush(); expect(s.core.arrowDragRef.current).toBeNull();
+  });
+  it("does not steal input focus when an order line takes priority over an arrow", () => {
+    const s = setup();
+    s.core.lineTargetsRef.current.set("order", { price: 100 } as never);
+    s.emit("pointerdown", s.event());
+    expect(s.core.onSelectedDrawingIdChangeRef.current).not.toHaveBeenCalled();
+    expect(s.core.interactionRef.current.focus).not.toHaveBeenCalled();
   });
   it.each(["pointercancel", "blur", "Escape"])("cancels a drag on %s and restores scrolling without saving", reason => {
     const s = setup(); s.emit("pointerdown", s.event()); s.emit("pointermove", s.event(120, 160)); s.flush();

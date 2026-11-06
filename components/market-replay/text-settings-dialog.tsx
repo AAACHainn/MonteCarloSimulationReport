@@ -155,7 +155,7 @@ export function TextSettingsDialog({ editor, apiRef, templates, onTemplatesChang
       className="max-w-md" onClose={cancelSettings}>
       <div className="space-y-5" aria-busy={busy}>
         <fieldset disabled={busy} className="min-w-0 space-y-5">
-          <StyleTemplateField value={templateId} templates={templates} onChange={id => {
+          <StyleTemplateField templateType="TEXT" value={templateId} templates={templates} onChange={id => {
             const template = templates.find(item => item.id === id);
             if (template) { setTemplateId(id); setStyle({ ...template.style }); setWidth(String(template.style.wrapWidth)); setError(null); }
           }} onDelete={() => { onTemplatesChange(templates.filter(item => item.id !== templateId)); setTemplateId(""); }} />

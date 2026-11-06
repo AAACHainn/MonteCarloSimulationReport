@@ -56,7 +56,7 @@ export function LineSettingsDialog({ drawing, draft: styleDraft, onDraftChange: 
       className={isFibonacci ? "max-w-2xl" : "max-w-md"} onClose={() => { if (!saving.current) onClose(); }}>
       <div className="space-y-5" aria-busy={busy}>
         <fieldset disabled={busy} className="min-w-0 space-y-5">
-          <StyleTemplateField value={selectedTemplateId} templates={templates}
+          <StyleTemplateField templateType={drawing.type} value={selectedTemplateId} templates={templates}
                 onChange={(value) => {
                   if (value === "__none") return;
                   const template = templates.find((item) => item.id === value);

@@ -48,7 +48,7 @@ export function AbcdSettingsDialog({ draft, onDraftChange, templates, onTemplate
       className="max-w-md" onClose={() => { if (!saving.current) onClose(); }}>
       <div className="space-y-5" aria-busy={busy}>
         <fieldset disabled={busy} className="min-w-0 space-y-5">
-          <StyleTemplateField value={selectedTemplateId} templates={templates} onChange={id => {
+          <StyleTemplateField templateType="AB_CD" value={selectedTemplateId} templates={templates} onChange={id => {
             const template = templates.find(item => item.id === id);
             if (!template) return;
             setSelectedTemplateId(id); change(template.style);

@@ -5,7 +5,9 @@ import { RotateCcw, Trash2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
+import type { DrawingType } from "@/lib/market-replay/chart-drawings";
+import { DrawingTemplatePicker } from "@/components/market-replay/drawing-template-picker";
+import { setDrawingTemplateBinding } from "@/components/market-replay/use-drawing-template-bindings";
 import { formatPercent } from "@/lib/format";
 import { copy } from "@/lib/i18n";
 import { cn } from "@/lib/utils";
@@ -104,21 +106,15 @@ export function StyleLineWidthField({ label, value, onChange }: {
       preview: <span className="block w-5 bg-slate-700 dark:bg-secondary-text" style={{ height: width }} aria-hidden="true" /> }))} />;
 }
 
-export function StyleTemplateField({ value, templates, onChange, onDelete }: {
-  value: string; templates: readonly { id: string; name: string }[];
+export function StyleTemplateField({ value, templates, onChange, onDelete, templateType }: {
+  value: string; templates: readonly { id: string; name: string }[]; templateType: DrawingType;
   onChange: (id: string) => void; onDelete: () => void;
 }) {
   const id = useId();
   return <StyleFieldRow label={copy.marketReplay.drawingTemplate} htmlFor={id}>
     <div className="flex min-w-0 gap-2">
-      <Select value={value || "__none"} onValueChange={onChange}>
-        <SelectTrigger id={id} className="min-w-0 flex-1"><SelectValue /></SelectTrigger>
-        <SelectContent>
-          <SelectItem value="__none" disabled>{templates.length ? copy.marketReplay.chooseDrawingTemplate : copy.marketReplay.noDrawingTemplates}</SelectItem>
-          {templates.map(template => <SelectItem key={template.id} value={template.id}>{template.name}</SelectItem>)}
-        </SelectContent>
-      </Select>
-      <Button type="button" variant="ghost" size="icon" disabled={!value} onClick={onDelete}
+      <DrawingTemplatePicker id={id} type={templateType} value={value} templates={templates} onChange={onChange} />
+      <Button type="button" variant="ghost" size="icon" disabled={!value} onClick={() => { setDrawingTemplateBinding(templateType, value, null); onDelete(); }}
         aria-label={copy.marketReplay.deleteDrawingTemplate} className="shrink-0 text-slate-500 dark:text-muted-foreground hover:bg-red-50 dark:hover:bg-negative-background hover:text-red-600 dark:hover:text-negative">
         <Trash2 className="h-4 w-4" aria-hidden="true" />
       </Button>

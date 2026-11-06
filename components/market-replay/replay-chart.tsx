@@ -63,7 +63,8 @@ export function ReplayChart(props: ReplayChartProps) {
   return (
     <div
       ref={interactionRef}
-      className="relative h-full min-h-0 select-none"
+      tabIndex={-1}
+      className="relative h-full min-h-0 select-none focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring"
       onContextMenu={openContextMenu}
       onPointerDown={(event: ReactPointerEvent<HTMLDivElement>) => {
         if (!(event.target as HTMLElement).closest("[data-context-menu]")) setContextMenu(null);

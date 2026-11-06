@@ -58,7 +58,7 @@ export function RectangleSettingsDialog({ drawing, templates, onTemplatesChange,
       className="max-w-md" onClose={() => { if (!busy) onClose(); }}>
       <div className="space-y-5" aria-busy={busy}>
         <fieldset disabled={busy} className="min-w-0 space-y-5">
-          <StyleTemplateField value={templateId} templates={templates} onChange={value => {
+          <StyleTemplateField templateType="RECTANGLE" value={templateId} templates={templates} onChange={value => {
               const template = templates.find(t => t.id === value);
               if (template) {
                 setTemplateId(value); setDraft({ ...template.style });
