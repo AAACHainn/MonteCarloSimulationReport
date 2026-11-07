@@ -291,6 +291,7 @@ export const zhMarketReplay = {
         unsupported: "无法识别此按键，请换一个组合。",
         reserved: "此组合用于浏览器、系统或界面导航，请换一个组合。",
         toolConflict: (name: string) => `此组合已用于绘制${name}，请换一个组合。`,
+        lineWidthConflict: (increase: boolean) => `此组合已用于${increase ? "增加" : "减小"}趋势线线宽，不能绑定模板，请换一个组合。`,
         stepConflict: "此组合已用于推进下一根 K 线。", playbackConflict: "此组合已用于播放或暂停回放。",
         intervalConflict: "单独的数字键已用于切换显示周期。", deleteConflict: "此按键已用于删除绘图对象。",
         templateConflict: (name: string) => `此组合已绑定本类模板“${name}”，请先清除原绑定或换一个组合。`,

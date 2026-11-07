@@ -1,7 +1,7 @@
 import type { DrawingType, MarketDrawingStyle } from "./chart-drawings";
 import { DRAWING_TYPES, drawingStyleMatchesType } from "./chart-drawings";
 import { abcdSettingsStyle } from "./abcd-style";
-import { isReplayDrawingDeleteShortcut, isReplayPlaybackShortcut, replayDrawingShortcutKey, type ReplayShortcutPlatform } from "./keyboard-shortcuts";
+import { isReplayDrawingDeleteShortcut, isReplayPlaybackShortcut, replayDrawingShortcutKey, replayTrendLineWidthShortcut, type ReplayShortcutPlatform } from "./keyboard-shortcuts";
 
 export type DrawingTemplateShortcut = {
   code: string; ctrlKey: boolean; altKey: boolean; shiftKey: boolean; metaKey: boolean;
@@ -29,6 +29,7 @@ export function sameDrawingTemplateShortcut(a: DrawingTemplateShortcut, b: Drawi
 }
 
 export type DrawingShortcutConflict = { kind: "tool"; tool: DrawingType } | { kind: "playback"; key: "ArrowRight" | "ArrowDown" }
+  | { kind: "lineWidth"; delta: -1 | 1 }
   | { kind: "interval" | "delete" | "reserved" };
 
 /** Conservative reservation of page controls and common browser/OS shortcuts.
@@ -39,6 +40,8 @@ export function drawingShortcutConflict(shortcut: DrawingTemplateShortcut, platf
   const event = { ...shortcut, key, isComposing: false, defaultPrevented: false };
   const tool = replayDrawingShortcutKey(event);
   if (tool) return { kind: "tool", tool };
+  const widthDelta = replayTrendLineWidthShortcut(event);
+  if (widthDelta !== null) return { kind: "lineWidth", delta: widthDelta };
   for (const arrow of ["ArrowRight", "ArrowDown"] as const) {
     if (isReplayPlaybackShortcut(event, arrow, "windows") || isReplayPlaybackShortcut(event, arrow, "mac")) return { kind: "playback", key: arrow };
   }

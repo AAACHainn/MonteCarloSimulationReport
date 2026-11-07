@@ -63,7 +63,7 @@ import { useReplayCore } from "./use-replay-core";
 import { useReplayDrawingWindow } from "./use-replay-drawing-window";
 import { useReplayEngine } from "./use-replay-engine";
 import { useReplayActions } from "./use-replay-actions";
-import { useDrawingTemplateShortcuts } from "./use-drawing-template-shortcuts";
+import { useDrawingStyleShortcuts } from "./use-drawing-style-shortcuts";
 
 export function MarketReplayClient({ dataset: initialDataset, initialJournalFocus = null }: { dataset: MarketDatasetSummary; initialJournalFocus?: JournalFocus | null }) {
   const [cursorMode, setCursorMode] = useReplayCursorPreference();
@@ -111,7 +111,7 @@ export function MarketReplayClient({ dataset: initialDataset, initialJournalFocu
     gateButton, gateNoticeBlock, updatePaperOrder, cancelPaperOrder, cancelPaperScope, closePaperPosition, createPartialExit, prepareProtectiveEdit,
     currentBar, revealedCount, replayCount, statusText,
   } = actions;
-  useDrawingTemplateShortcuts({ drawings: visibleDrawings, selectedDrawingId, drawingTool, scope: drawingWriteScope,
+  useDrawingStyleShortcuts({ drawings: visibleDrawings, selectedDrawingId, drawingTool, scope: drawingWriteScope,
     disabled: !chartVisibility.drawings || clearingDrawings || pendingDrawingIds.size > 0 || isLoading || correctionPending
       || measurementArmed || draftActive || Boolean(textDrawing.editor) || Boolean(settingsDialog) || Boolean(checkingOrder)
       || gateDialogOpen || startDialogOpen || Boolean(confirmAction),

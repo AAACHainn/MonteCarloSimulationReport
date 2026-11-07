@@ -28,6 +28,17 @@ describe("drawing template shortcut normalization and conflicts", () => {
   it.each(["ArrowRight", "ArrowDown"])("reserves playback %s on both platforms", code => {
     for (const modifier of ["ctrlKey", "metaKey"] as const) expect(drawingShortcutConflict({ ...shortcut, code, altKey: false, [modifier]: true }, "windows")?.kind).toBe("playback");
   });
+  it.each([["Minus", false, -1], ["Equal", false, 1], ["Equal", true, 1]] as const)(
+    "reserves the fixed line width shortcut %s (shift=%s)", (code, shiftKey, delta) => {
+      for (const platform of ["windows", "mac"] as const) {
+        expect(drawingShortcutConflict({ ...shortcut, code, shiftKey }, platform)).toEqual({ kind: "lineWidth", delta });
+      }
+    });
+  it("keeps other Alt combinations available for templates", () => {
+    for (const candidate of [shortcut, { ...shortcut, code: "Minus", shiftKey: true }, { ...shortcut, code: "Equal", ctrlKey: true }]) {
+      expect(drawingShortcutConflict(candidate, "windows")).toBeNull();
+    }
+  });
   it.each(["Tab", "Escape", "Enter", "F1", "F5", "F12", "Numpad1", "ArrowLeft", "F4"])("reserves browser/OS/navigation %s", code => {
     expect(drawingShortcutConflict({ ...shortcut, code }, "windows")?.kind).toBe("reserved");
   });

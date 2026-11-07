@@ -64,6 +64,7 @@ export function DrawingTemplatePicker({ id, type, value, templates, onChange }: 
         const toolNames: Record<string, string> = { TREND_LINE: copy.marketReplay.trendLine, FIB_RETRACEMENT: copy.marketReplay.fibonacciRetracement,
           RECTANGLE: copy.marketReplay.rectangle, TEXT: copy.marketReplay.textTool, AB_CD: copy.marketReplay.abcd };
         setError(conflict.kind === "tool" ? t.toolConflict(toolNames[conflict.tool])
+          : conflict.kind === "lineWidth" ? t.lineWidthConflict(conflict.delta > 0)
           : conflict.kind === "playback" ? conflict.key === "ArrowRight" ? t.stepConflict : t.playbackConflict
             : conflict.kind === "interval" ? t.intervalConflict : conflict.kind === "delete" ? t.deleteConflict : t.reserved);
         return;
@@ -98,9 +99,12 @@ export function DrawingTemplatePicker({ id, type, value, templates, onChange }: 
         onCloseAutoFocus={event => { if (preserveOutsideFocus.current) event.preventDefault(); }}
         onOpenAutoFocus={event => { event.preventDefault(); controls.current.get(value || templates[0]?.id)?.focus(); }}>
         <div className="min-h-0 overflow-y-auto overscroll-contain">
-          {templates.length ? templates.map(template => {
+          {templates.length ? templates.map((template, index) => {
             const shortcut = bindings[type]?.[template.id];
             const active = recording === template.id;
+            const conflict = shortcut && drawingShortcutConflict(shortcut, platform);
+            const message = active ? error : conflict?.kind === "lineWidth" ? t.lineWidthConflict(conflict.delta > 0) : null;
+            const rowErrorId = `${errorId}-${index}`;
             return <div key={template.id} className="rounded-md focus-within:bg-slate-50 dark:focus-within:bg-hover">
               <div className="flex min-w-0 items-center gap-1">
                 <Button ref={element => { if (element) controls.current.set(template.id, element); else controls.current.delete(template.id); }}
@@ -118,13 +122,13 @@ export function DrawingTemplatePicker({ id, type, value, templates, onChange }: 
                   {shortcut ? <Minus className="h-4 w-4" aria-hidden="true" /> : <Plus className="h-4 w-4" aria-hidden="true" />}
                 </Button>
                 <Button type="button" variant="ghost" className="h-auto min-h-10 max-w-[45%] shrink-0 px-1 font-normal" onClick={() => start(template)}
-                  aria-label={`${t.change}：${template.name}`} aria-describedby={active && error ? errorId : undefined}>
+                  aria-label={`${t.change}：${template.name}`} aria-describedby={message ? rowErrorId : undefined} aria-invalid={message ? true : undefined}>
                   <span aria-live="polite" className="min-w-0 whitespace-normal break-all rounded-md bg-slate-100 dark:bg-hover px-2 py-1 text-xs text-slate-600 dark:text-secondary-text">
                     {active ? t.recording : shortcut ? formatDrawingTemplateShortcut(shortcut, platform) : t.unset}
                   </span>
                 </Button>
               </div>
-              {active && error ? <p id={errorId} role="alert" className="px-3 pb-2 text-xs text-red-600 dark:text-negative">{error}</p> : null}
+              {message ? <p id={rowErrorId} role="alert" className="px-3 pb-2 text-xs text-red-600 dark:text-negative">{message}</p> : null}
             </div>;
           }) : <p className="p-3 text-sm text-slate-500 dark:text-muted-foreground">{copy.marketReplay.noDrawingTemplates}</p>}
         </div>

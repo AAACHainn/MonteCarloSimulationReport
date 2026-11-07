@@ -3,12 +3,12 @@
 import { useLayoutEffect, useRef } from "react";
 import type { DrawingTool, MarketDrawing, MarketDrawingStyle } from "@/lib/market-replay/chart-drawings";
 import { drawingShortcutConflict, drawingTemplateShortcut, drawingTemplateStyle, sameDrawingTemplateShortcut, type DrawingTemplateCatalog } from "@/lib/market-replay/drawing-template-shortcuts";
-import { hasVisibleReplayDialog, isReplayShortcutInputTarget } from "@/lib/market-replay/keyboard-shortcuts";
+import { hasVisibleReplayDialog, isReplayShortcutInputTarget, replayTrendLineWidthShortcut } from "@/lib/market-replay/keyboard-shortcuts";
 import { useDrawingTemplateBindings } from "./use-drawing-template-bindings";
 import { isDrawingShortcutRecording } from "./drawing-shortcut-recorder";
 import { useReplayShortcuts } from "./use-replay-shortcuts";
 
-export function useDrawingTemplateShortcuts(options: {
+export function useDrawingStyleShortcuts(options: {
   drawings: readonly MarketDrawing[]; selectedDrawingId: string | null; templates: DrawingTemplateCatalog;
   disabled: boolean; drawingTool: DrawingTool | null; scope: string;
   apply: (id: string, style: MarketDrawingStyle) => Promise<boolean>;
@@ -32,18 +32,28 @@ export function useDrawingTemplateShortcuts(options: {
         || document.querySelector("[data-context-menu], [role='menu'], [role='listbox'], [data-drawing-template-picker]")) return;
       const drawing = current.drawings.find(item => item.id === current.selectedDrawingId);
       if (!drawing || drawing.id.startsWith("temporary-")) return;
-      const shortcut = drawingTemplateShortcut(event);
-      if (!shortcut || drawingShortcutConflict(shortcut, current.platform)) return;
-      const template = current.templates[drawing.type]?.find(item => {
-        const binding = current.bindings[drawing.type]?.[item.id];
-        return binding && sameDrawingTemplateShortcut(binding, shortcut);
-      });
-      const style = template && drawingTemplateStyle(drawing.type, template.style);
+      const widthDelta = drawing.type === "TREND_LINE" ? replayTrendLineWidthShortcut(event) : null;
+      let style: MarketDrawingStyle | null | undefined;
+      let atWidthLimit = false;
+      if (drawing.type === "TREND_LINE" && widthDelta !== null) {
+        const width = Math.min(4, Math.max(1, drawing.style.width + widthDelta));
+        atWidthLimit = width === drawing.style.width;
+        style = { ...drawing.style, width };
+      } else {
+        const shortcut = drawingTemplateShortcut(event);
+        if (!shortcut || drawingShortcutConflict(shortcut, current.platform)) return;
+        const template = current.templates[drawing.type]?.find(item => {
+          const binding = current.bindings[drawing.type]?.[item.id];
+          return binding && sameDrawingTemplateShortcut(binding, shortcut);
+        });
+        style = template && drawingTemplateStyle(drawing.type, template.style);
+      }
       if (!style) return;
       event.preventDefault(); event.stopImmediatePropagation();
-      if (event.repeat || saving) return;
+      if (event.repeat || saving || atWidthLimit) return;
+      const nextStyle = style;
       saving = true;
-      void Promise.resolve().then(() => current.apply(drawing.id, style)).catch(() => false).finally(() => { saving = false; });
+      void Promise.resolve().then(() => current.apply(drawing.id, nextStyle)).catch(() => false).finally(() => { saving = false; });
     };
     window.addEventListener("keydown", key, true);
     window.addEventListener("pointerdown", down, true); window.addEventListener("pointerup", up, true);

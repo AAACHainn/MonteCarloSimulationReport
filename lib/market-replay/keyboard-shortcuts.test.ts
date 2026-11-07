@@ -1,7 +1,36 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { hasVisibleReplayDialog, replayDrawingShortcutKey } from "./keyboard-shortcuts";
+import { hasVisibleReplayDialog, replayDrawingShortcutKey, replayTrendLineWidthShortcut } from "./keyboard-shortcuts";
 
 afterEach(() => vi.unstubAllGlobals());
+describe("trend line width shortcuts", () => {
+  const key = { key: "-", code: "Minus", altKey: true, ctrlKey: false, metaKey: false, shiftKey: false, isComposing: false, defaultPrevented: false };
+  it("uses Alt+- and both Shift states of Alt+=, including Option characters", () => {
+    expect(replayTrendLineWidthShortcut(key)).toBe(-1);
+    expect(replayTrendLineWidthShortcut({ ...key, key: "–" })).toBe(-1);
+    expect(replayTrendLineWidthShortcut({ ...key, key: "=", code: "Equal" })).toBe(1);
+    expect(replayTrendLineWidthShortcut({ ...key, key: "+", code: "Equal", shiftKey: true })).toBe(1);
+    expect(replayTrendLineWidthShortcut({ ...key, key: "±", code: "Equal", shiftKey: true })).toBe(1);
+  });
+  it("falls back to symbols only for unidentified physical keys", () => {
+    for (const code of ["", "Unidentified"]) {
+      expect(replayTrendLineWidthShortcut({ ...key, code })).toBe(-1);
+      expect(replayTrendLineWidthShortcut({ ...key, code, key: "=" })).toBe(1);
+      expect(replayTrendLineWidthShortcut({ ...key, code, key: "+", shiftKey: true })).toBe(1);
+    }
+  });
+  it("ignores typing, extra modifiers, handled events and unrelated physical keys", () => {
+    expect(replayTrendLineWidthShortcut({ ...key, altKey: false })).toBeNull();
+    for (const flag of ["ctrlKey", "metaKey", "isComposing", "defaultPrevented"]) {
+      expect(replayTrendLineWidthShortcut({ ...key, [flag]: true })).toBeNull();
+    }
+    expect(replayTrendLineWidthShortcut({ ...key, shiftKey: true, key: "_" })).toBeNull();
+    for (const code of ["KeyT", "NumpadSubtract", "NumpadAdd"]) {
+      expect(replayTrendLineWidthShortcut({ ...key, code })).toBeNull();
+    }
+    expect(replayTrendLineWidthShortcut({ ...key, code: "Unidentified", key: "_", shiftKey: true })).toBeNull();
+  });
+});
+
 describe("AB=CD shortcut", () => {
   const key = { key: "w", code: "KeyW", altKey: true, ctrlKey: false, metaKey: false, shiftKey: false, isComposing: false, defaultPrevented: false };
   it("uses Alt+W, physical Option+W and the unidentified-key fallback", () => {

@@ -61,6 +61,19 @@ export function isReplayDrawingDeleteShortcut(event: ShortcutKeyEvent) {
     && (event.key === "Delete" || event.key === "Backspace");
 }
 
+/** The main keyboard's =/+ key accepts either Shift state; - excludes Shift (_).
+ * Use physical keys so Option-modified characters do not change the action. */
+export function replayTrendLineWidthShortcut(event: ShortcutKeyEvent): -1 | 1 | null {
+  if (event.defaultPrevented || event.isComposing || !event.altKey || event.ctrlKey || event.metaKey) return null;
+  if (event.code === "Minus") return event.shiftKey ? null : -1;
+  if (event.code === "Equal") return 1;
+  if (!event.code || event.code === "Unidentified") {
+    if (event.key === "-" && !event.shiftKey) return -1;
+    if (event.key === "=" || event.key === "+") return 1;
+  }
+  return null;
+}
+
 export function isReplayShortcutInputTarget(target: EventTarget | null) {
   return target instanceof Element && Boolean(target.closest(
     "input, textarea, select, [contenteditable]:not([contenteditable='false']), [role='textbox'], [role='combobox'], [role='dialog'], [role='alertdialog']",

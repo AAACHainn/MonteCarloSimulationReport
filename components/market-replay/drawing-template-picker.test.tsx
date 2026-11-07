@@ -73,6 +73,30 @@ describe("template picker binding controls", () => {
     rt.onKey!(key({ code: "KeyT", key: "t" })); expect(rt.bind).not.toHaveBeenCalled();
     rt.onCancel!(); render(); expect(rt.bindings.TREND_LINE.a).toEqual(shortcut);
   });
+  it.each([
+    [{ code: "Minus", key: "-" }, false], [{ code: "Equal", key: "=" }, true], [{ code: "Equal", key: "+", shiftKey: true }, true],
+  ] as const)("rejects fixed line width keys without replacing a template binding: %j", (extra, increase) => {
+    rt.bindings = { TREND_LINE: { a: shortcut } }; click("重新录入快捷键：阻力线"); render();
+    rt.onKey!(key(extra));
+    expect(rt.bind).not.toHaveBeenCalled(); expect(rt.bindings.TREND_LINE.a).toEqual(shortcut);
+    expect(nodes(render()).some(node => node.props.role === "alert" && node.props.children === copy.marketReplay.templateShortcuts.lineWidthConflict(increase))).toBe(true);
+    rt.onKey!(key({ code: "Digit2", key: "2" }));
+    expect(rt.bind).toHaveBeenCalledWith("TREND_LINE", "a", { ...shortcut, code: "Digit2" });
+    expect(onChange).not.toHaveBeenCalled();
+  });
+  it("marks a saved line width binding as conflicting and lets the user clear it", () => {
+    const stale = { ...shortcut, code: "Minus" };
+    rt.bindings = { TREND_LINE: { a: stale, b: shortcut } };
+    const tree = nodes(render());
+    const message = tree.find(node => node.props.role === "alert")!;
+    expect(message.props.children).toBe(copy.marketReplay.templateShortcuts.lineWidthConflict(false));
+    expect(button("重新录入快捷键：阻力线").props["aria-describedby"]).toBe(message.props.id);
+    expect(button("重新录入快捷键：阻力线").props["aria-invalid"]).toBe(true);
+    expect(rt.bind).not.toHaveBeenCalled();
+    click("清除快捷键：阻力线");
+    expect(rt.bindings.TREND_LINE.a).toBeUndefined(); expect(rt.bindings.TREND_LINE.b).toEqual(shortcut);
+    expect(nodes(render()).some(node => node.props.role === "alert")).toBe(false);
+  });
   it("supports free physical combinations and does not bind bare modifiers", () => {
     click("设置快捷键：阻力线"); render(); rt.onKey!(key({ code: "AltLeft", key: "Alt" }));
     expect(rt.bind).not.toHaveBeenCalled();
