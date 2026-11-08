@@ -1,7 +1,16 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { hasVisibleReplayDialog, replayDrawingShortcutKey, replayTrendLineWidthShortcut } from "./keyboard-shortcuts";
+import { hasVisibleReplayDialog, replayDrawingShortcutKey, replayTrendLineWidthShortcut, replayDrawingEditShortcut } from "./keyboard-shortcuts";
 
 afterEach(() => vi.unstubAllGlobals());
+describe("object copy, paste, undo and redo", () => {
+  const key = { key: "c", code: "KeyC", altKey: false, ctrlKey: true, metaKey: false, shiftKey: false, isComposing: false, defaultPrevented: false };
+  it.each([["KeyC", false, "copy"], ["KeyV", false, "paste"], ["KeyZ", false, "undo"], ["KeyZ", true, "redo"], ["KeyY", false, "redo"]] as const)(
+    "recognizes Windows %s (shift=%s)", (code, shiftKey, action) => expect(replayDrawingEditShortcut({ ...key, code, shiftKey }, "windows")).toBe(action));
+  it("uses Command on macOS and leaves unrelated modifiers and typing alone", () => {
+    expect(replayDrawingEditShortcut({ ...key, ctrlKey: false, metaKey: true, code: "KeyZ", shiftKey: true }, "mac")).toBe("redo");
+    for (const extra of [{ ctrlKey: false }, { altKey: true }, { shiftKey: true }, { isComposing: true }, { defaultPrevented: true }]) expect(replayDrawingEditShortcut({ ...key, ...extra }, "windows")).toBeNull();
+  });
+});
 describe("trend line width shortcuts", () => {
   const key = { key: "-", code: "Minus", altKey: true, ctrlKey: false, metaKey: false, shiftKey: false, isComposing: false, defaultPrevented: false };
   it("uses Alt+- and both Shift states of Alt+=, including Option characters", () => {

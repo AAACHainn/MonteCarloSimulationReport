@@ -20,6 +20,7 @@ import { DisplayIntervalControls } from "@/components/market-replay/display-inte
 import { useReplayPreferences } from "@/components/market-replay/use-replay-preferences";
 import { useHistoricalDrawings } from "./use-historical-drawings";
 import { useDrawingStyleShortcuts } from "./use-drawing-style-shortcuts";
+import { useDrawingCommands } from "./use-drawing-commands";
 import { RectangleSettingsDialog } from "./rectangle-controls";
 import { AbcdSettingsDialog } from "./abcd-settings-dialog";
 import { LineSettingsDialog, cloneLineDrawingStyle, type LineDrawingStyle } from "./line-settings-dialog";
@@ -166,12 +167,16 @@ export function HistoricalReplayClient({
     chartVisibility.drawings, drawings, defaultTextStyle);
   const { open: openTextDrawing } = textDrawing;
   const { beforeExit: finishText, discard: discardText, requestSettings: requestTextSettings } = textDrawing;
+  const drawingCommandsDisabled = !chartVisibility.drawings || !drawingsLoaded || drawingBusy || measurementArmed || Boolean(textDrawing.editor)
+    || Boolean(settingsDialog) || Boolean(drawingTool) || Boolean(rectangleStyleId) || Boolean(styleDrawingId) || Boolean(arrowStyleId);
+  const drawingCommands = useDrawingCommands({ datasetId: dataset.id, scope: dataset.id + ":" + replaySession?.id + ":" + replaySession?.activeProjectionId,
+    fetch, drawings, selectedDrawingId, setDrawings: drawingState.setDrawings, select: setSelectedDrawingId, disabled: drawingCommandsDisabled, editor: textDrawing.editor, chartApi: textDrawing.apiRef });
   useDrawingStyleShortcuts({ drawings, selectedDrawingId, drawingTool,
     scope: dataset.id + ":" + replaySession?.id + ":" + replaySession?.activeProjectionId,
-    disabled: !chartVisibility.drawings || !drawingsLoaded || drawingBusy || measurementArmed || Boolean(textDrawing.editor) || Boolean(settingsDialog),
+    disabled: drawingCommandsDisabled || drawingCommands.pasteUnconfirmed || drawingCommands.pending,
     templates: { TREND_LINE: trendLineTemplates, FIB_RETRACEMENT: fibonacciTemplates, RECTANGLE: rectangleTemplates,
       TEXT: textTemplates, AB_CD: abcdPreferences.templates, ARROW_UP: arrowPreferences.ARROW_UP.templates, ARROW_DOWN: arrowPreferences.ARROW_DOWN.templates },
-    apply: (id, style) => drawingState.update(id, { style }),
+    apply: (id, style, action) => drawingState.update(id, { style }, action),
   });
   async function selectCursor(mode: ReplayCursorMode) {
     if (!await finishText()) return;
@@ -521,9 +526,9 @@ export function HistoricalReplayClient({
 
       </div>
       <div className="flex min-h-0 flex-1">
-        <ReplayDrawingToolbar cursorMode={cursorMode} onCursorChange={mode => void selectCursor(mode)} drawingTool={drawingTool} drawingDisabled={!drawingsLoaded || drawingBusy}
-          onArmDrawing={tool => void armDrawing(tool)} measurementArmed={measurementArmed}
-          onToggleMeasurement={() => { setDrawingTool(null); setMeasurementArmed(current => !current); }}
+        <ReplayDrawingToolbar cursorMode={cursorMode} onCursorChange={mode => { if (!drawingCommands.pending && !drawingCommands.pasteUnconfirmed) void selectCursor(mode); }} drawingTool={drawingTool} drawingDisabled={!drawingsLoaded || drawingBusy || drawingCommands.pending || drawingCommands.pasteUnconfirmed}
+          history={drawingCommands} onArmDrawing={tool => void armDrawing(tool)} measurementArmed={measurementArmed}
+          onToggleMeasurement={() => { if (!drawingCommands.pending && !drawingCommands.pasteUnconfirmed) { setDrawingTool(null); setMeasurementArmed(current => !current); } }}
           drawingObjectsOpen={drawingObjectsOpen} onToggleDrawingObjects={() => setDrawingObjectsOpen(current => !current)} />
       <div className="relative min-h-0 min-w-0 flex-1" aria-busy={windowLoading || drawingBusy}>
         {drawingError ? <Alert className="absolute left-3 top-3 z-50 w-auto border-red-200 dark:border-negative/40 bg-red-50 dark:bg-negative-background" role="alert"><AlertTitle>{copy.marketReplay.drawingSyncErrorTitle}</AlertTitle><AlertDescription>{drawingError}</AlertDescription></Alert> : null}
@@ -616,6 +621,7 @@ export function HistoricalReplayClient({
     </div>
 
       {textDrawing.editor ? <TextSettingsDialog key={textDrawing.editor.key} editor={textDrawing.editor}
+        onHistoryGroup={drawingCommands.textGroup}
         apiRef={textDrawing.apiRef}
         onAdopt={textDrawing.adopt} register={textDrawing.register} isCurrent={textDrawing.guard()}
         templates={textTemplates} onTemplatesChange={setTextTemplates} onPreview={textDrawing.preview} onClose={textDrawing.close}

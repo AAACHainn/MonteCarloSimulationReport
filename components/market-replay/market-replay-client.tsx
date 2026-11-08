@@ -64,6 +64,7 @@ import { useReplayDrawingWindow } from "./use-replay-drawing-window";
 import { useReplayEngine } from "./use-replay-engine";
 import { useReplayActions } from "./use-replay-actions";
 import { useDrawingStyleShortcuts } from "./use-drawing-style-shortcuts";
+import { useDrawingCommands } from "./use-drawing-commands";
 
 export function MarketReplayClient({ dataset: initialDataset, initialJournalFocus = null }: { dataset: MarketDatasetSummary; initialJournalFocus?: JournalFocus | null }) {
   const [cursorMode, setCursorMode] = useReplayCursorPreference();
@@ -111,13 +112,17 @@ export function MarketReplayClient({ dataset: initialDataset, initialJournalFocu
     gateButton, gateNoticeBlock, updatePaperOrder, cancelPaperOrder, cancelPaperScope, closePaperPosition, createPartialExit, prepareProtectiveEdit,
     currentBar, revealedCount, replayCount, statusText,
   } = actions;
-  useDrawingStyleShortcuts({ drawings: visibleDrawings, selectedDrawingId, drawingTool, scope: drawingWriteScope,
-    disabled: !chartVisibility.drawings || clearingDrawings || pendingDrawingIds.size > 0 || isLoading || correctionPending
+  const drawingCommandsDisabled = !chartVisibility.drawings || clearingDrawings || pendingDrawingIds.size > 0 || isLoading || correctionPending
       || measurementArmed || draftActive || Boolean(textDrawing.editor) || Boolean(settingsDialog) || Boolean(checkingOrder)
-      || gateDialogOpen || startDialogOpen || Boolean(confirmAction),
+      || gateDialogOpen || startDialogOpen || Boolean(confirmAction) || Boolean(drawingTool) || Boolean(rectangleStyleId) || Boolean(styleDrawingId) || Boolean(arrowStyleId);
+  const drawingCommands = useDrawingCommands({ datasetId: dataset.id, scope: drawingWriteScope, fetch, drawings, selectedDrawingId,
+    setDrawings: next => { const resolved = typeof next === "function" ? next(drawingsLive.current) : next; drawingsLive.current = resolved; setDrawings(resolved); },
+    select: setSelectedDrawingId, disabled: drawingCommandsDisabled, editor: textDrawing.editor, chartApi: textDrawing.apiRef });
+  useDrawingStyleShortcuts({ drawings: visibleDrawings, selectedDrawingId, drawingTool, scope: drawingWriteScope,
+    disabled: drawingCommandsDisabled || drawingCommands.pasteUnconfirmed || drawingCommands.pending,
     templates: { TREND_LINE: trendLineTemplates, FIB_RETRACEMENT: fibonacciTemplates, RECTANGLE: rectangleTemplates,
       TEXT: textTemplates, AB_CD: abcdPreferences.templates, ARROW_UP: arrowPreferences.ARROW_UP.templates, ARROW_DOWN: arrowPreferences.ARROW_DOWN.templates },
-    apply: (id, style) => updateDrawing(id, { style }),
+    apply: (id, style, action) => updateDrawing(id, { style }, action),
   });
   async function selectCursor(mode: ReplayCursorMode) {
     if (!await textDrawing.beforeExit()) return;
@@ -282,8 +287,8 @@ export function MarketReplayClient({ dataset: initialDataset, initialJournalFocu
           </Button>
         </div>
         <div className="flex min-h-0 flex-1">
-          <ReplayDrawingToolbar cursorMode={cursorMode} onCursorChange={mode => void selectCursor(mode)} drawingTool={drawingTool} onArmDrawing={tool => void armDrawing(tool)}
-            measurementArmed={measurementArmed} onToggleMeasurement={() => setMeasurementArmed(current => !current)}
+          <ReplayDrawingToolbar cursorMode={cursorMode} onCursorChange={mode => { if (!drawingCommands.pending && !drawingCommands.pasteUnconfirmed) void selectCursor(mode); }} drawingTool={drawingTool} onArmDrawing={tool => void armDrawing(tool)}
+            drawingDisabled={drawingCommands.pending || drawingCommands.pasteUnconfirmed} history={drawingCommands} measurementArmed={measurementArmed} onToggleMeasurement={() => { if (!drawingCommands.pending && !drawingCommands.pasteUnconfirmed) setMeasurementArmed(current => !current); }}
             drawingObjectsOpen={drawingObjectsOpen} onToggleDrawingObjects={() => setDrawingObjectsOpen(current => !current)}
             webFullscreen={webFullscreen} onToggleWebFullscreen={() => setWebFullscreen(current => !current)} />
         <div className="relative min-h-0 min-w-0 flex-1">
@@ -466,6 +471,7 @@ export function MarketReplayClient({ dataset: initialDataset, initialJournalFocu
       </div>
 
       {textDrawing.editor ? <TextSettingsDialog key={textDrawing.editor.key} editor={textDrawing.editor}
+        onHistoryGroup={drawingCommands.textGroup}
         apiRef={textDrawing.apiRef}
         onAdopt={textDrawing.adopt} register={textDrawing.register} isCurrent={textDrawing.guard()}
         templates={textTemplates} onTemplatesChange={setTextTemplates} onPreview={textDrawing.preview} onClose={textDrawing.close}

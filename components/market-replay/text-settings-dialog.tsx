@@ -36,7 +36,7 @@ function TextToggle({ label, checked, onChange, children }: { label: string; che
     {checked ? children : null}
   </div>;
 }
-export function TextSettingsDialog({ editor, apiRef, templates, onTemplatesChange, onPreview, onSave, onRemove, onClose, onAdopt, register, isCurrent }: {
+export function TextSettingsDialog({ editor, apiRef, templates, onTemplatesChange, onPreview, onSave, onRemove, onClose, onAdopt, register, isCurrent, onHistoryGroup }: {
   editor: TextEditor; templates: TextTemplate[]; onTemplatesChange: (templates: TextTemplate[]) => void;
   apiRef: RefObject<TextDrawingApi | null>;
   onPreview: (preview: TextEditPreview | null, owner: string) => void;
@@ -44,6 +44,7 @@ export function TextSettingsDialog({ editor, apiRef, templates, onTemplatesChang
   onRemove: (id: string, isCurrent: () => boolean) => Promise<void>;
   onAdopt: (id: string, owner: string) => void; register: (control: TextEditorControl | null, owner: string) => void;
   isCurrent: () => boolean;
+  onHistoryGroup?: (key: string | null, id?: string | null) => void;
 }) {
   const prefix = useId();
   const [text, setText] = useState(editor.geometry.text);
@@ -77,6 +78,8 @@ export function TextSettingsDialog({ editor, apiRef, templates, onTemplatesChang
   const widthValid = !style.wrapEnabled || /^\d+$/.test(width) && Number(width) >= 120 && Number(width) <= 800;
   const styleValid = textDrawingStyleSchema.safeParse(style).success && widthValid;
   const inline = Boolean(editor.inline && !settingsOpen && !naming);
+  useEffect(() => { onHistoryGroup?.(inline ? editor.key : null, saveState.id); }, [onHistoryGroup, inline, editor.key, saveState.id]);
+  useEffect(() => () => onHistoryGroup?.(null), [onHistoryGroup]);
   useEffect(() => {
     controller.suspend("settings", settingsOpen);
     controller.update({ geometry: { anchor: editor.geometry.anchor, text: normalized }, style });

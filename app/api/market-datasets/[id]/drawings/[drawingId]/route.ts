@@ -40,7 +40,7 @@ async function handlePATCH(request: Request, context: RouteContext) {
         ...(parsed.data.style ? { style: JSON.stringify(parsed.data.style) } : {}),
       },
     });
-    return NextResponse.json({ drawing: serializeMarketDrawing(drawing) });
+    return NextResponse.json({ drawing: serializeMarketDrawing(drawing), historyBefore: serializeMarketDrawing(existing) });
   });
 }
 
@@ -50,11 +50,10 @@ async function handleDELETE(_request: Request, context: RouteContext) {
     await assertReplayDrawingWritable(tx);
     const existing = await tx.marketDrawing.findFirst({
       where: { id: drawingId, datasetId: id, ...drawingScopeWhere() },
-      select: { id: true },
     });
     if (!existing) return NextResponse.json({ error: copy.marketReplay.drawingNotFound }, { status: 404 });
     await tx.marketDrawing.delete({ where: { id: drawingId } });
-    return NextResponse.json({ ok: true });
+    return NextResponse.json({ ok: true, historyBefore: serializeMarketDrawing(existing) });
   });
 }
 

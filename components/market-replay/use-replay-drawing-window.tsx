@@ -7,6 +7,7 @@ import { startTransition, useCallback, useEffect, useMemo } from "react";
 import { type ReplayVisibleSequenceRange } from "@/components/market-replay/replay-chart";
 import { copy } from "@/lib/i18n";
 import { runDrawingWrite } from "@/lib/market-replay/drawing-write-queue";
+import type { DrawingAction } from "@/lib/market-replay/drawing-history";
 import { createReplayState } from "@/lib/market-replay/engine";
 import { aggregateMarketBars } from "@/lib/market-replay/aggregation";
 import { closeAggregatedBar } from "@/lib/market-replay/bar-quality";
@@ -128,6 +129,7 @@ export function useReplayDrawingWindow(core: ReturnType<typeof useReplayCore>) {
   const updateDrawing = useCallback(async (
     id: string,
     patch: { geometry?: DrawingGeometry; style?: MarketDrawingStyle },
+    action?: DrawingAction,
   ) => {
     const currentScope = drawingScopeGuard();
     return runDrawingWrite(drawingWriteScope, async () => {
@@ -144,7 +146,7 @@ export function useReplayDrawingWindow(core: ReturnType<typeof useReplayCore>) {
       try {
         const response = await fetch(`/api/market-datasets/${dataset.id}/drawings/${id}`, {
           method: "PATCH",
-          headers: { "Content-Type": "application/json" },
+          headers: { "Content-Type": "application/json", "X-Drawing-Action": action ?? (patch.style ? "style" : "modify") },
           body: JSON.stringify(patch),
         });
         const data = await response.json() as { drawing?: MarketDrawing; error?: string };

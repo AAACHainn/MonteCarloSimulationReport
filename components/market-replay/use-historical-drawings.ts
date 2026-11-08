@@ -6,6 +6,7 @@ import { copy } from "@/lib/i18n";
 import type { MarketDrawing, MarketDrawingStyle, DrawingGeometry, NewMarketDrawing } from "@/lib/market-replay/chart-drawings";
 import { drawingGeometryMatchesType, drawingStyleMatchesType } from "@/lib/market-replay/chart-drawings";
 import { runDrawingWrite } from "@/lib/market-replay/drawing-write-queue";
+import type { DrawingAction } from "@/lib/market-replay/drawing-history";
 import { deleteTextDrawing, persistTextDrawing } from "@/lib/market-replay/text-persistence";
 import type { TextDraft } from "@/lib/market-replay/text-autosave";
 
@@ -23,7 +24,10 @@ export function useHistoricalDrawings({ datasetId, fetch, writeScope }: {
   const readGeneration = useRef(0);
   const [error, setError] = useState<string | null>(null);
   const url = `/api/market-datasets/${datasetId}/drawings`;
-  const publish = useCallback((next: MarketDrawing[]) => { current.current = next; setDrawings(next); }, []);
+  const publish = useCallback((next: MarketDrawing[] | ((current: MarketDrawing[]) => MarketDrawing[])) => {
+    const resolved = typeof next === "function" ? next(current.current) : next;
+    current.current = resolved; setDrawings(resolved);
+  }, []);
   const invalidateReads = useCallback(() => { readGeneration.current++; }, []);
   const refresh = useCallback(async (signal?: AbortSignal) => {
     if (locked.current && !signal) return false;
@@ -50,7 +54,7 @@ export function useHistoricalDrawings({ datasetId, fetch, writeScope }: {
   }, [refresh, invalidateReads]);
 
   const mutate = useCallback(async (next: () => MarketDrawing[], method: string, suffix: string, body: unknown,
-    reconcile: (payload: DrawingPayload) => MarketDrawing[], failure: string) => {
+    reconcile: (payload: DrawingPayload) => MarketDrawing[], failure: string, action?: DrawingAction) => {
     if (locked.current) return false;
     const requestedGeneration = readGeneration.current;
     return runDrawingWrite(writeScope ?? url, async () => {
@@ -62,7 +66,7 @@ export function useHistoricalDrawings({ datasetId, fetch, writeScope }: {
     try {
       const requestBody = typeof body === "function" ? body() : body;
       publish(next());
-      const response = await fetch(url + suffix, { method, headers: { "Content-Type": "application/json" },
+      const response = await fetch(url + suffix, { method, headers: { "Content-Type": "application/json", ...(action ? { "X-Drawing-Action": action } : {}) },
         ...(requestBody === undefined ? {} : { body: JSON.stringify(requestBody) }) });
       const data = await response.json() as DrawingPayload;
       if (generation !== readGeneration.current) return false;
@@ -89,7 +93,7 @@ export function useHistoricalDrawings({ datasetId, fetch, writeScope }: {
     }, copy.marketReplay.drawingSaveError);
     return ok ? saved : null;
   };
-  const update = async (id: string, patch: { geometry?: DrawingGeometry; style?: MarketDrawingStyle }) => {
+  const update = async (id: string, patch: { geometry?: DrawingGeometry; style?: MarketDrawingStyle }, action?: DrawingAction) => {
     const previous = current.current.find(item => item.id === id);
     if (!previous) return false;
     if (patch.geometry && !drawingGeometryMatchesType(previous.type, patch.geometry)) return false;
@@ -100,7 +104,7 @@ export function useHistoricalDrawings({ datasetId, fetch, writeScope }: {
     return mutate(next, "PATCH", `/${encodeURIComponent(id)}`, patch, payload => {
       if (!payload.drawing) throw new Error(copy.marketReplay.drawingSaveError);
       return current.current.map(item => item.id === id ? payload.drawing! : item);
-    }, copy.marketReplay.drawingSaveError);
+    }, copy.marketReplay.drawingSaveError, action ?? (patch.style ? "style" : "modify"));
   };
   const remove = (id: string) => mutate(() => current.current.filter(item => item.id !== id), "DELETE", `/${encodeURIComponent(id)}`, undefined,
     () => current.current.filter(item => item.id !== id), copy.marketReplay.drawingDeleteError);
@@ -126,5 +130,5 @@ export function useHistoricalDrawings({ datasetId, fetch, writeScope }: {
       publish(current.current.filter(item => item.id !== id)); setError(null);
     } finally { if (generation === readGeneration.current) { locked.current = false; setBusy(false); } }
   });
-  return { drawings, loaded, busy, error, refresh, create, update, remove, clear, saveText, removeText };
+  return { drawings, setDrawings: publish, loaded, busy, error, refresh, create, update, remove, clear, saveText, removeText };
 }

@@ -1,5 +1,5 @@
 "use client";
-import { DEFAULT_ABCD_STYLE, isArrowDrawing, type AbcdDrawing, type ArrowDrawing } from "@/lib/market-replay/chart-drawings";
+import { DEFAULT_ABCD_STYLE, isArrowDrawing, type AbcdDrawing, type ArrowDrawing, type MarketDrawing } from "@/lib/market-replay/chart-drawings";
 import { AbcdPrimitive, type AbcdPreview } from "@/lib/market-replay/abcd-primitive";
 import type { AbcdDraft } from "@/lib/market-replay/abcd-interaction";
 import { ArrowPrimitive, type ArrowDragPreview } from "@/lib/market-replay/arrow-primitive";
@@ -155,6 +155,7 @@ export function useReplayChartCore({
   const onMeasurementArmedChangeRef = useRef(onMeasurementArmedChange);
   const drawingToolRef = useRef(drawingTool);
   const drawingsRef = useRef(drawings);
+  const positionCopyRef = useRef<((source: MarketDrawing) => MarketDrawing | null) | null>(null);
   const drawingGroups = useMemo(() => {
     const trend: TrendLineDrawing[] = [], fibonacci: FibonacciRetracementDrawing[] = [], rectangle: RectangleDrawing[] = [], text: TextDrawing[] = [], arrow: ArrowDrawing[] = [], abcd: AbcdDrawing[] = [];
     for (const drawing of drawings) {
@@ -250,11 +251,12 @@ export function useReplayChartCore({
     drawingFrameRef.current = requestAnimationFrame(() => {
       drawingFrameRef.current = null;
       const timeline = drawingTimelineRef.current;
+      const groups = drawingGroupsRef.current;
       timeline.setTimeline(projectionBarsRef.current, displayIntervalSecondsRef.current, {
         sourceIntervalSeconds: sourceIntervalSecondsRef.current, session: drawingSessionRef.current,
       }, drawingScopeRef.current);
       trendLinePrimitiveRef.current?.setDrawings({
-        drawings: drawingGroupsRef.current.trend,
+        drawings: groups.trend,
         selectedDrawingId: selectedDrawingIdRef.current,
         preview: drawingPreviewRef.current,
         draft: drawingToolRef.current === DRAWING_TYPE_TREND_LINE ? drawingDraftRef.current : null,
@@ -267,7 +269,7 @@ export function useReplayChartCore({
         priceTickSize: priceTickSizeRef.current,
       });
       rectanglePrimitiveRef.current?.setDrawings({
-        drawings: drawingGroupsRef.current.rectangle,
+        drawings: groups.rectangle,
         selectedDrawingId: selectedDrawingIdRef.current,
         preview: drawingPreviewRef.current,
         draft: drawingToolRef.current === DRAWING_TYPE_RECTANGLE ? drawingDraftRef.current : null,
@@ -277,7 +279,7 @@ export function useReplayChartCore({
         sourceIntervalSeconds: sourceIntervalSecondsRef.current, session: drawingSessionRef.current,
       });
       fibonacciPrimitiveRef.current?.setDrawings({
-        drawings: drawingGroupsRef.current.fibonacci,
+        drawings: groups.fibonacci,
         selectedDrawingId: selectedDrawingIdRef.current,
         preview: drawingPreviewRef.current,
         draft: drawingToolRef.current === DRAWING_TYPE_FIB_RETRACEMENT ? drawingDraftRef.current : null,
@@ -291,11 +293,11 @@ export function useReplayChartCore({
       });
       // Volume has its own pane; price-scale margins remain usable price-pane space.
       const height = chartRef.current?.panes()[0]?.getHeight() ?? 0;
-      textPrimitiveRef.current?.setDrawings({ drawings: drawingGroupsRef.current.text, timeline,
+      textPrimitiveRef.current?.setDrawings({ drawings: groups.text, timeline,
         selectedDrawingId: selectedDrawingIdRef.current, edit: textEditRef.current, drag: textDragRef.current });
-      arrowPrimitiveRef.current?.setDrawings({ drawings: drawingGroupsRef.current.arrow, timeline,
+      arrowPrimitiveRef.current?.setDrawings({ drawings: groups.arrow, timeline,
         selectedDrawingId: selectedDrawingIdRef.current, preview: arrowDragRef.current });
-      abcdPrimitiveRef.current?.setDrawings({ drawings: drawingGroupsRef.current.abcd, timeline,
+      abcdPrimitiveRef.current?.setDrawings({ drawings: groups.abcd, timeline,
         selectedDrawingId: selectedDrawingIdRef.current, preview: abcdPreviewRef.current,
         draft: drawingToolRef.current === "AB_CD" ? abcdDraftRef.current : null,
         draftStyle: abcdDraftStyleRef.current, priceTickSize: priceTickSizeRef.current });
@@ -311,6 +313,7 @@ export function useReplayChartCore({
     });
   }, []);
   useImperativeHandle(drawingApiRef, () => ({
+    positionCopy(source) { return positionCopyRef.current?.(source) ?? null; },
     previewText(preview) {
       textEditRef.current = preview;
       if (preview?.inline || !preview) textPrimitiveRef.current?.setHovered(null);
@@ -504,7 +507,7 @@ export function useReplayChartCore({
     lastDataIntervalRef, lastDataSessionRef, displaySessionRef, barsRef, timelineBarsRef, projectionBars,
     projectionBarsRef, drawingTimelineRef, drawingScopeRef, drawingFrameRef, drawingSessionRef, requestedDrawingSessionRef,
     onFocusAppliedRef, tradeAnnotationsRef, tradeAnnotationsVisibleRef, candlestickStyleRef, measurementArmedRef, onMeasurementArmedChangeRef,
-    drawingToolRef, drawingsRef, drawingGroupsRef, selectedDrawingIdRef, onDrawingToolChangeRef, onSelectedDrawingIdChangeRef,
+    drawingToolRef, drawingsRef, drawingGroupsRef, positionCopyRef, selectedDrawingIdRef, onDrawingToolChangeRef, onSelectedDrawingIdChangeRef,
     onCreateDrawingRef, onUpdateDrawingRef, onDeleteDrawingRef, onOpenDrawingStyleRef, displayIntervalSecondsRef, requestedDisplayIntervalSecondsRef,
     sourceIntervalSecondsRef, gridVisibleRef, contextMenu, setContextMenu, contextMenuRef, abrTooltip,
     setAbrTooltip, measurement, setMeasurement, measurementRef, drawingDraftRef, drawingDraftCoordinateRef,

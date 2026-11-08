@@ -39,7 +39,7 @@ describe("selected drawing template application", () => {
     ["ARROW_UP", DEFAULT_ARROW_STYLES.ARROW_UP], ["ARROW_DOWN", DEFAULT_ARROW_STYLES.ARROW_DOWN],
   ] as const)("applies only the selected %s object's style", async (type, style) => {
     const { apply, drawing } = Setup({}, type, style); const key = event(); emit("keydown", key); await flush();
-    expect(apply).toHaveBeenCalledOnce(); expect(apply.mock.calls[0]).toEqual(["drawing", style]);
+    expect(apply).toHaveBeenCalledOnce(); expect(apply.mock.calls[0]).toEqual(["drawing", style, "template"]);
     expect(key.preventDefault).toHaveBeenCalledOnce(); expect(key.stopImmediatePropagation).toHaveBeenCalledOnce();
     expect(drawing.geometry).toEqual({ untouched: true });
   });
@@ -78,7 +78,7 @@ describe("selected trend line width adjustment", () => {
     const { apply } = Setup({ templates: { TREND_LINE: [{ id: "template", name: "样式", style: templateStyle }] } });
     rt.bindings.TREND_LINE.template = { ...binding, code: "Minus" };
     emit("keydown", widthEvent()); await flush();
-    expect(apply.mock.calls).toEqual([["drawing", { ...DEFAULT_TREND_LINE_STYLE, width: 1 }]]);
+    expect(apply.mock.calls).toEqual([["drawing", { ...DEFAULT_TREND_LINE_STYLE, width: 1 }, "line-width"]]);
   });
   it("does not apply a saved width-key template binding to another drawing type", async () => {
     const { apply } = Setup({}, "RECTANGLE", DEFAULT_RECTANGLE_STYLE);
@@ -91,7 +91,7 @@ describe("selected trend line width adjustment", () => {
     const original = { ...DEFAULT_TREND_LINE_STYLE, color: "#123456", opacity: 47, lineStyle: "DASHED" as const, showStartPrice: true };
     const { apply, drawing } = Setup({ templates: {} }, "TREND_LINE", original);
     const key = widthEvent(extra); emit("keydown", key); await flush();
-    expect(apply.mock.calls).toEqual([[drawing.id, { ...original, width }]]);
+    expect(apply.mock.calls).toEqual([[drawing.id, { ...original, width }, "line-width"]]);
     expect(drawing.geometry).toEqual({ untouched: true });
     expect(drawing.style).toBe(original); expect(original.width).toBe(2);
     expect(key.preventDefault).toHaveBeenCalledOnce(); expect(key.stopImmediatePropagation).toHaveBeenCalledOnce();
@@ -141,6 +141,6 @@ describe("selected trend line width adjustment", () => {
     await flush(); expect(apply).toHaveBeenCalledOnce();
     fail(new Error("save failed")); await flush();
     emit("keydown", widthEvent({ code: "Equal", key: "=" })); await flush(); expect(apply).toHaveBeenCalledTimes(2);
-    expect(apply.mock.calls[1]).toEqual(["drawing", { ...DEFAULT_TREND_LINE_STYLE, width: 3 }]);
+    expect(apply.mock.calls[1]).toEqual(["drawing", { ...DEFAULT_TREND_LINE_STYLE, width: 3 }, "line-width"]);
   });
 });

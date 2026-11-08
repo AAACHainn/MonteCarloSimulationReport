@@ -21,6 +21,7 @@ export type { ReplayVisibleSequenceRange } from "./replay-chart-shared";
 import { useReplayChartCore } from "./use-replay-chart-core";
 import { useReplayChartSetup } from "./use-replay-chart-setup";
 import { useReplayChartDrawingPointer } from "./use-replay-chart-drawing-pointer";
+import { useReplayChartClipboard } from "./use-replay-chart-clipboard";
 import { useReplayChartMeasurement } from "./use-replay-chart-measurement";
 import { useReplayChartOrderInteractions } from "./use-replay-chart-order-interactions";
 import { useReplayChartActions } from "./use-replay-chart-actions";
@@ -32,6 +33,7 @@ import { layoutPriceLineLabels } from "@/lib/market-replay/price-lines";
 export function ReplayChart(props: ReplayChartProps) {
   const core = useReplayChartCore(props);
   const setup = useReplayChartSetup(core);
+  useReplayChartClipboard(core);
   useReplayChartDrawingPointer(core);
   useReplayChartMeasurement(core);
   useReplayChartOrderInteractions(core, setup);

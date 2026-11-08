@@ -339,26 +339,29 @@ export const fibonacciRetracementPreferencesSchema = z.object({
 }).strict();
 
 export const createMarketDrawingSchema = z.discriminatedUnion("type", [
-  z.object({ type: z.literal(DRAWING_TYPE_ABCD), geometry: abcdGeometrySchema,
+  z.object({ type: z.literal(DRAWING_TYPE_ABCD), clientId: z.string().uuid().optional(), geometry: abcdGeometrySchema,
     style: fibonacciRetracementStyleSchema.default(DEFAULT_ABCD_STYLE) }).strict(),
-  z.object({ type: z.literal(DRAWING_TYPE_ARROW_UP), geometry: arrowGeometrySchema,
+  z.object({ type: z.literal(DRAWING_TYPE_ARROW_UP), clientId: z.string().uuid().optional(), geometry: arrowGeometrySchema,
     style: arrowStyleSchema.default(DEFAULT_ARROW_STYLES.ARROW_UP) }).strict(),
-  z.object({ type: z.literal(DRAWING_TYPE_ARROW_DOWN), geometry: arrowGeometrySchema,
+  z.object({ type: z.literal(DRAWING_TYPE_ARROW_DOWN), clientId: z.string().uuid().optional(), geometry: arrowGeometrySchema,
     style: arrowStyleSchema.default(DEFAULT_ARROW_STYLES.ARROW_DOWN) }).strict(),
   z.object({ type: z.literal(DRAWING_TYPE_TEXT), clientId: z.string().uuid().optional(), geometry: textGeometrySchema,
     style: textDrawingStyleSchema.default(DEFAULT_TEXT_STYLE) }).strict(),
   z.object({
     type: z.literal(DRAWING_TYPE_RECTANGLE),
+    clientId: z.string().uuid().optional(),
     geometry: trendLineGeometrySchema.refine(isValidRectangleGeometry),
     style: rectangleStyleSchema.default(DEFAULT_RECTANGLE_STYLE),
   }).strict(),
   z.object({
     type: z.literal(DRAWING_TYPE_TREND_LINE),
+    clientId: z.string().uuid().optional(),
     geometry: trendLineGeometrySchema,
     style: trendLineStyleSchema.default(DEFAULT_TREND_LINE_STYLE),
   }).strict(),
   z.object({
     type: z.literal(DRAWING_TYPE_FIB_RETRACEMENT),
+    clientId: z.string().uuid().optional(),
     geometry: trendLineGeometrySchema,
     style: fibonacciRetracementStyleSchema.default(DEFAULT_FIBONACCI_RETRACEMENT_STYLE),
   }).strict(),

@@ -1,12 +1,13 @@
 import { chartThemes, type ChartTheme } from "@/lib/chart-theme";
 import type { IPrimitivePaneRenderer, ISeriesPrimitive, SeriesAttachedParameter, Time, PrimitiveHoveredItem } from "lightweight-charts";
-import { TEXT_MAX_LENGTH, type DrawingAnchor, type TextDrawing, type TextGeometry, type TextDrawingStyle } from "./chart-drawings";
+import { TEXT_MAX_LENGTH, type DrawingAnchor, type MarketDrawing, type TextDrawing, type TextGeometry, type TextDrawingStyle } from "./chart-drawings";
 import { TextLayoutCache, TEXT_PADDING, type CachedTextLayout, type TextMeasure } from "./text-layout";
 import type { DrawingTimelineLocator } from "./drawing-timeline";
 
 export type TextEditPreview = { id: string | null; geometry: TextGeometry; style: TextDrawingStyle; inline?: boolean };
 export type TextEditorPosition = { host: HTMLElement; x: number; y: number; width: number; height: number };
 export type TextDrawingApi = {
+  positionCopy?: (source: MarketDrawing) => MarketDrawing | null;
   previewText: (preview: TextEditPreview | null) => void;
   subscribePosition: (anchor: DrawingAnchor, listener: (position: TextEditorPosition | null) => void) => () => void;
   consumeDoubleClick?: (pointer: PointerEvent) => boolean;

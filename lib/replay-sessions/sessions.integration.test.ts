@@ -103,7 +103,7 @@ describe("session drawing persistence", () => {
     expect((await drawingPOST(request(sibling, "POST", payload), context)).status).toBe(409);
     expect((await read(sibling)).drawings).toHaveLength(0);
     expect((await drawingPOST(request(session, "POST", { ...payload, clientId: "not-a-uuid" }), context)).status).toBe(400);
-    expect((await drawingPOST(request(session, "POST", { type: "RECTANGLE", clientId: randomUUID(), geometry }), context)).status).toBe(400);
+    expect((await drawingPOST(request(session, "POST", { type: "RECTANGLE", clientId: randomUUID(), geometry }), context)).status).toBe(201);
   });
   it("rejects text creation IDs owned by another type or dataset without returning or altering that record", async () => {
     const session = await create("TRAINING"), foreignId = randomUUID(), otherTypeId = randomUUID();

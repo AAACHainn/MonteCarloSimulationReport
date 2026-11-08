@@ -80,6 +80,17 @@ export function isReplayShortcutInputTarget(target: EventTarget | null) {
   ));
 }
 
+export function replayDrawingEditShortcut(event: ShortcutKeyEvent, platform: ReplayShortcutPlatform): "copy" | "paste" | "undo" | "redo" | null {
+  if (event.defaultPrevented || event.isComposing || event.altKey) return null;
+  if (platform === "mac" ? !event.metaKey || event.ctrlKey : !event.ctrlKey || event.metaKey) return null;
+  const code = event.code && event.code !== "Unidentified" ? event.code : `Key${event.key.toUpperCase()}`;
+  if (!event.shiftKey && code === "KeyC") return "copy";
+  if (!event.shiftKey && code === "KeyV") return "paste";
+  if (code === "KeyZ") return event.shiftKey ? "redo" : "undo";
+  if (platform === "windows" && !event.shiftKey && code === "KeyY") return "redo";
+  return null;
+}
+
 /** Retained floating windows stay in the DOM while closed. Only visible dialogs
  * should reserve page-wide shortcuts; modal and alert dialogs still block them. */
 export function hasVisibleReplayDialog() {
