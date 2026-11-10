@@ -30,15 +30,15 @@ export function TextInlineEditor({ apiRef, anchor, text, style, onChange, valid,
   useLayoutEffect(() => apiRef.current?.subscribePosition(anchor, next => setPosition(old =>
     old?.host === next?.host && old?.x === next?.x && old?.y === next?.y && old?.width === next?.width && old?.height === next?.height ? old : next)), [apiRef, anchor]);
   const host = position?.host;
-  useEffect(() => {
+  useLayoutEffect(() => {
     if (!host) return;
-    const previous = document.activeElement as HTMLElement | null;
     input.current?.focus(); input.current?.setSelectionRange(initialText.current.length, initialText.current.length);
     const panel = root.current;
     const cleanup = panel ? listenForTextEditorOutside(panel, () => { if (!composing.current && !resize.current) void latest.current.onFinish(); }) : undefined;
     return () => {
       cleanup?.();
-      if (panel?.contains(document.activeElement) && previous?.isConnected) previous.focus();
+      // Restore focus before React removes the focused textarea from the DOM.
+      if (panel?.contains(document.activeElement) && host.isConnected) host.focus({ preventScroll: true });
     };
   }, [host]);
   useEffect(() => { if (error) input.current?.focus(); }, [error]);
@@ -93,7 +93,7 @@ export function TextInlineEditor({ apiRef, anchor, text, style, onChange, valid,
     <p id={`${id}-hint`} className="sr-only">{copy.marketReplay.textInlineHint}</p>
     <div className={width > position.width - 16 ? "-m-1 overflow-x-auto overflow-y-hidden p-1" : "-m-1 p-1"}>
       <div className="relative outline outline-1 outline-blue-600" style={{ width, backgroundColor: background }}>
-        <Textarea ref={input} id={`${id}-input`} value={text} autoFocus rows={1} disabled={disabled}
+        <Textarea ref={input} id={`${id}-input`} value={text} rows={1} disabled={disabled}
           placeholder={copy.marketReplay.textInlinePlaceholder} wrap={style.wrapEnabled ? "soft" : "off"}
           aria-invalid={Boolean(text) && !valid} aria-describedby={`${id}-hint${error ? ` ${id}-error` : ""}`}
           className="block min-h-0 resize-none rounded-none border-0 bg-transparent shadow-none focus-visible:ring-0"

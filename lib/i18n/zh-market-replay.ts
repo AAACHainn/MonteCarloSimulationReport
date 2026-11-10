@@ -321,7 +321,10 @@ export const zhMarketReplay = {
       drawingEditing: {
         undo: "撤销", redo: "重做", nothingToUndo: "没有可撤销的操作", nothingToRedo: "没有可重做的操作",
         conflict: "绘图已被其他位置修改，撤销历史已失效。请重新加载绘图后继续。",
-        create: "新建", paste: "粘贴", modify: "调整", style: "修改样式", template: "应用模板", "line-width": "调整线宽", text: "编辑文字", delete: "删除", clear: "清空绘图",
+        nudgeRefreshed: "微调未能确认，已重新读取绘图位置和样式。",
+        nudgeRefreshFailed: "微调结果暂时无法确认。请重新加载页面后继续。",
+        nudgeTransitionFailed: "绘图微调未能保存。请检查绘图位置后重试。",
+        create: "新建", paste: "粘贴", modify: "调整", nudge: "微调位置", style: "修改样式", template: "应用模板", "line-width": "调整线宽", text: "编辑文字", delete: "删除", clear: "清空绘图",
         clearCount: (count: number) => `清空 ${count} 个绘图`,
         operation: (action: string, object: string) => `${action}：${object}`,
         tooltip: (direction: string, operation: string, shortcut: string) => `${direction}：${operation}（${shortcut}）`,

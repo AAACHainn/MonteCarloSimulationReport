@@ -52,7 +52,7 @@ function setup(tool: DrawingTool | null = null) {
     drawingDraftCoordinateRef: ref(null), drawingPreviewRef: ref(null), syncDrawingPrimitive: vi.fn(), setChartCursor: vi.fn(), priceTickSize: 0.25,
   };
   // eslint-disable-next-line react-hooks/rules-of-hooks
-  useReplayChartDrawingPointer(core as unknown as ReturnType<typeof useReplayChartCore>);
+  useReplayChartDrawingPointer({ ...core, drawingEditingLockedRef: { current: false } } as unknown as ReturnType<typeof useReplayChartCore>);
   const event = (x = 120, y = 100) => ({ clientX: x, clientY: y, pointerType: "mouse", button: 0, pointerId: 1,
     shiftKey: false, timeStamp: 100, target: { closest: () => null }, preventDefault: vi.fn(), stopImmediatePropagation: vi.fn() });
   const emit = (type: string, value: object) => { const fn = listeners.get(type) ?? windowListeners.get(type); if (!fn) throw new Error(`Missing listener ${type}`); fn(value as never); };

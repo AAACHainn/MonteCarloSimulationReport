@@ -194,6 +194,8 @@ export type ReplayChartProps = {
   fibonacciDraftStyle: FibonacciRetracementStyle;
   abcdDraftStyle?: FibonacciRetracementStyle;
   drawings: MarketDrawing[];
+  drawingNudgePreviews?: ReadonlyMap<string, MarketDrawing>;
+  drawingEditingLocked?: boolean;
   selectedDrawingId: string | null;
   onSelectedDrawingIdChange: (id: string | null) => void;
   onCreateDrawing: (type: TwoPointDrawingTool, geometry: TrendLineGeometry) => void;

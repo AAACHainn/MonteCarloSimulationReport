@@ -1,6 +1,6 @@
 import type { MarketDrawing } from "./chart-drawings";
 
-export type DrawingAction = "create" | "paste" | "modify" | "style" | "template" | "line-width" | "text" | "delete" | "clear";
+export type DrawingAction = "create" | "paste" | "modify" | "nudge" | "style" | "template" | "line-width" | "text" | "delete" | "clear";
 export type DrawingChange = { id: string; before: MarketDrawing | null; after: MarketDrawing | null };
 export type DrawingHistoryEntry = { action: DrawingAction; changes: DrawingChange[] };
 export type DrawingHistoryView = { undo: DrawingHistoryEntry | null; redo: DrawingHistoryEntry | null; busy: boolean; revision: number };
@@ -58,7 +58,7 @@ export class DrawingHistory {
       if (change.after) this.confirmed.set(change.id, change.after); else this.confirmed.delete(change.id);
     }
     const group = this.textGroup;
-    if (group && action !== "style" && action !== "template" && changed.length && changed.every(change => (change.after ?? change.before)?.type === "TEXT" && (!group.id || group.id === change.id))) {
+    if (group && action !== "style" && action !== "template" && action !== "nudge" && changed.length && changed.every(change => (change.after ?? change.before)?.type === "TEXT" && (!group.id || group.id === change.id))) {
       for (const change of changed) {
         group.id = change.id;
         group.changes.set(change.id, { ...change, before: group.changes.has(change.id) ? group.changes.get(change.id)!.before : change.before });

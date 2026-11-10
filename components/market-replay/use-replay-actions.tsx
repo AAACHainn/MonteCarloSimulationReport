@@ -8,7 +8,7 @@ import { type CorrectionTarget } from "./replay-correction-dialog";
 import { isClosingOrder, type TrainingGateMode } from "@/lib/paper-trading/training-gate";
 import type { GateApprovalInput, PaperOrderInput, OrderSubmitResult } from "@/lib/paper-trading/types";
 import { retainEntryCheckDraft } from "@/lib/paper-trading/entry-check-draft";
-import { startTransition, useCallback } from "react";
+import { startTransition, useCallback, useRef, useState } from "react";
 import { LayoutGrid, Loader2, X } from "lucide-react";
 import { DEFAULT_REPLAY_MAX_VISIBLE_BARS } from "@/lib/market-replay/chart-range";
 import { Button } from "@/components/ui/button";
@@ -27,7 +27,10 @@ import type { useReplayCore } from "./use-replay-core";
 import type { useReplayDrawingWindow } from "./use-replay-drawing-window";
 import type { useReplayEngine } from "./use-replay-engine";
 
-export function useReplayActions(core: ReturnType<typeof useReplayCore>, drawingWindow: ReturnType<typeof useReplayDrawingWindow>, engine: ReturnType<typeof useReplayEngine>) {
+export function useReplayActions(core: ReturnType<typeof useReplayCore>, drawingWindow: ReturnType<typeof useReplayDrawingWindow>,
+  engine: ReturnType<typeof useReplayEngine>, flushDrawingNudges: () => Promise<boolean>) {
+  const [confirmationBusy, setConfirmationBusy] = useState(false);
+  const confirmingAction = useRef(false);
   const {
     fetch, replaySession, router, setDateDialogOpen, dateDialogOpening, setDateDialogOpening,
     setDateDialogMinimum, dateForwarding, setDateForwarding, setForwardProgress, cancelForwardRef, setCorrectionTarget,
@@ -213,6 +216,10 @@ export function useReplayActions(core: ReturnType<typeof useReplayCore>, drawing
     manualStepsRef.current.cancel();
     try {
       await advanceCompletionRef.current;
+      if (!await flushDrawingNudges()) {
+        setStartError(copy.marketReplay.drawingEditing.nudgeTransitionFailed);
+        return;
+      }
       if (!(await flushVisible())) return;
       windowRequestRef.current += 1;
       if (saveTimerRef.current) clearTimeout(saveTimerRef.current);
@@ -233,10 +240,21 @@ export function useReplayActions(core: ReturnType<typeof useReplayCore>, drawing
   }
 
   async function applyConfirmedAction() {
-    if (!latestReplayRef.current || !confirmAction) return;
+    if (!latestReplayRef.current || !confirmAction || confirmingAction.current) return;
+    confirmingAction.current = true;
+    setConfirmationBusy(true);
+    try {
+      await completeConfirmedAction(confirmAction);
+    } finally {
+      confirmingAction.current = false;
+      setConfirmationBusy(false);
+    }
+  }
+
+  async function completeConfirmedAction(action: "reset" | "paper-clear") {
     manualStepsRef.current.cancel();
     await advanceCompletionRef.current;
-    if (!(await flushVisible())) {
+    if (!await flushDrawingNudges() || !await flushVisible()) {
       const suspension = confirmationSuspensionRef.current;
       confirmationSuspensionRef.current = null;
       restorePlayback(suspension);
@@ -244,7 +262,7 @@ export function useReplayActions(core: ReturnType<typeof useReplayCore>, drawing
       return;
     }
     windowRequestRef.current += 1;
-    if (confirmAction === "paper-clear") {
+    if (action === "paper-clear") {
       try {
         const response = await fetch(`/api/market-datasets/${dataset.id}/paper-session`, { method: "DELETE" });
         if (!response.ok) throw new Error(copy.paperTrading.requestFailed);
@@ -391,6 +409,7 @@ export function useReplayActions(core: ReturnType<typeof useReplayCore>, drawing
     if (!await finishText()) return false;
     cancelForwardRef.current = true; pausePlayback(); manualStepsRef.current.cancel();
     await paperMutationChainRef.current; await advanceCompletionRef.current;
+    if (!await flushDrawingNudges()) return false;
     pausePlayback(); return flushVisible();
   }
 
@@ -577,7 +596,7 @@ export function useReplayActions(core: ReturnType<typeof useReplayCore>, drawing
   return {
     changeSpeed, changeDisplayInterval, changeChartSession, setEmaLength, updateAbrLength, updateBarCountInterval,
     updateBarCountRecentTradingDays, addEma, requestConfirmation, openStartDialog, closeStartDialog, applyNewReplayStart,
-    applyConfirmedAction, openCorrectionTarget, openDateDialog, locateReplayDate, prepareSessionSwitch, createPaperAccount,
+    applyConfirmedAction, confirmationBusy, openCorrectionTarget, openDateDialog, locateReplayDate, prepareSessionSwitch, createPaperAccount,
     onChartDraftChange, submitPaperOrder, cancelEntryCheck, confirmEntryCheck, saveGateConfig, currentGate,
     gateButton, gateNoticeBlock, updatePaperOrder, cancelPaperOrder, cancelPaperScope, closePaperPosition, createPartialExit, prepareProtectiveEdit,
     currentBar, revealedCount, replayCount, statusText,

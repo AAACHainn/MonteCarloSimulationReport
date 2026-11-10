@@ -1,12 +1,23 @@
 const MAX_PRICE_DECIMALS = 12;
 
-export function priceDecimalsForTick(tickSize: number) {
-  if (!Number.isFinite(tickSize) || tickSize <= 0) return 2;
-  const text = tickSize.toString().toLowerCase();
-  const [coefficient, exponentText] = text.split("e");
+function decimalPlaces(value: number) {
+  const [coefficient, exponentText] = value.toString().split("e");
   const coefficientDecimals = coefficient.includes(".") ? coefficient.length - coefficient.indexOf(".") - 1 : 0;
   const exponent = exponentText === undefined ? 0 : Number(exponentText);
-  return Math.min(MAX_PRICE_DECIMALS, Math.max(0, coefficientDecimals - exponent));
+  return Math.max(0, coefficientDecimals - exponent);
+}
+
+export function priceDecimalsForTick(tickSize: number) {
+  if (!Number.isFinite(tickSize) || tickSize <= 0) return 2;
+  return Math.min(MAX_PRICE_DECIMALS, decimalPlaces(tickSize));
+}
+
+export function offsetPriceByTicks(price: number, tickSize: number, ticks: number) {
+  const sum = price + ticks * tickSize;
+  // Geometry can use finer prices than the chart labels display. Very small
+  // numbers can also exceed the 100 fractional digits supported by toFixed.
+  const decimals = Math.max(decimalPlaces(price), decimalPlaces(tickSize));
+  return decimals <= 100 ? Number(sum.toFixed(decimals)) : sum;
 }
 
 export function snapPriceToTick(price: number, tickSize: number) {

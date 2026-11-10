@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
-import { drawingAnchors, positionDrawingCopy } from "./drawing-clipboard";
+import { positionDrawingCopy } from "./drawing-clipboard";
+import { drawingAnchors, nudgeDrawing } from "./drawing-translation";
 import { anchorForLogicalIndex, createMarketDrawingSchema, DEFAULT_ABCD_STYLE, DEFAULT_ARROW_STYLES, DEFAULT_FIBONACCI_RETRACEMENT_STYLE, DEFAULT_RECTANGLE_STYLE, DEFAULT_TEXT_STYLE, DEFAULT_TREND_LINE_STYLE, type MarketDrawing } from "./chart-drawings";
 import { DrawingTimelineLocator } from "./drawing-timeline";
 import type { AggregatedMarketBarData, TradingSessionConfig } from "./types";
@@ -56,7 +57,7 @@ describe("drawing clipboard placement", () => {
   it("does not create a copy for an invalid position or unsupported timeline", () => {
     const { copy } = placement(); expect(copy(source("TREND_LINE"), NaN)).toBeNull(); expect(copy(source("TREND_LINE"), 100_000_000)).toBeNull();
   });
-  it.each(["RECTANGLE", "AB_CD"] as const)("keeps distinct source anchors in the same aggregate valid when pasting %s after changing interval", type => {
+  it.each(["RECTANGLE", "AB_CD"] as const)("keeps distinct source anchors in the same aggregate when pasting or nudging %s", type => {
     const start = Date.parse("2026-06-22T13:30:00Z");
     const aggregates = Array.from({ length: 8 }, (_, i) => ({ timestamp: new Date(start + i * 300_000).toISOString(),
       bucketEnd: new Date(start + (i + 1) * 300_000).toISOString(), firstSequence: i * 5, lastSequence: i * 5 + 4, expectedCount: 5 })) as AggregatedMarketBarData[];
@@ -67,13 +68,90 @@ describe("drawing clipboard placement", () => {
     timeline.setTimeline(aggregates, 300, { sourceIntervalSeconds: 60, session });
     const valid = (drawing: MarketDrawing) => createMarketDrawingSchema.safeParse({ type: drawing.type, geometry: drawing.geometry, style: drawing.style }).success;
     expect(valid(original)).toBe(true);
-    const result = positionDrawingCopy(original, { logicalIndex: 3, price: 200 }, timeline, (index, price) =>
-      anchorForLogicalIndex({ logicalIndex: index, price, bars: aggregates, displayIntervalSeconds: 300, timeline }));
+    const anchorAt = (index: number, price: number) => anchorForLogicalIndex({ logicalIndex: index, price, bars: aggregates, displayIntervalSeconds: 300, timeline });
+    const result = positionDrawingCopy(original, { logicalIndex: 3, price: 200 }, timeline, anchorAt);
     expect(result).not.toBeNull(); expect(valid(result!)).toBe(true); expect(original).toEqual(before);
     const oldAnchors = drawingAnchors(original), anchors = drawingAnchors(result!);
     const delta = timeline.logicalIndexForAnchor(anchors[0])! - timeline.logicalIndexForAnchor(oldAnchors[0])!;
     anchors.forEach((anchor, i) => expect(timeline.logicalIndexForAnchor(anchor)! - timeline.logicalIndexForAnchor(oldAnchors[i])!).toBe(delta));
     const first = type === "RECTANGLE" ? 0 : 1, second = first + 1;
     expect(Date.parse(anchors[second].timestamp) - Date.parse(anchors[first].timestamp)).toBe(60_000);
+    const moved = nudgeDrawing(original, "ArrowRight", 1, 0.25, timeline, anchorAt)!;
+    expect(valid(moved)).toBe(true);
+    const nudged = drawingAnchors(moved);
+    nudged.forEach((anchor, i) => expect(timeline.logicalIndexForAnchor(anchor)).toBe(timeline.logicalIndexForAnchor(oldAnchors[i])! + 1));
+    expect(Date.parse(nudged[second].timestamp) - Date.parse(nudged[first].timestamp)).toBe(60_000);
+    expect(nudgeDrawing(moved, "ArrowLeft", 1, 0.25, timeline, anchorAt)).not.toBeNull();
+  });
+});
+
+describe("drawing translation by keyboard", () => {
+  it.each(Object.keys(styles) as (keyof typeof styles)[])("moves %s exactly one logical bar across a compressed timeline", type => {
+    const original = source(type, 1, 2), { timeline, anchor } = placement();
+    const moved = nudgeDrawing(original, "ArrowRight", 1, 0.25, timeline, anchor)!;
+    const before = drawingAnchors(original), after = drawingAnchors(moved);
+    expect(after[0].timestamp).toBe(bars[2].timestamp);
+    after.forEach((point, i) => {
+      expect(timeline.logicalIndexForAnchor(point)).toBe(timeline.logicalIndexForAnchor(before[i])! + 1);
+      expect(point.price).toBe(before[i].price);
+    });
+    expect(moved.style).toEqual(original.style);
+    if (moved.type === "TEXT" && original.type === "TEXT") expect(moved.geometry.text).toBe(original.geometry.text);
+  });
+
+  it("translates legacy prices off the tick grid while keeping their anchors and price difference", () => {
+    const original = source("RECTANGLE");
+    const before = drawingAnchors(original);
+    before[0].price = -0.11;
+    before[1].price = 100.19;
+    const { timeline, anchor } = placement();
+    const moved = nudgeDrawing(original, "ArrowUp", 3, 0.25, timeline, anchor)!;
+    expect(drawingAnchors(moved)).toEqual([{ ...before[0], price: 0.64 }, { ...before[1], price: 100.94 }]);
+    expect(nudgeDrawing(moved, "ArrowDown", 3, 0.25, timeline, anchor)).toEqual(original);
+  });
+
+  it.each([[1, 1e-13, 1.0000000000001], [1e-110, 1e-112, 1.01e-110]])(
+    "moves price %s by a representable tick of %s", (price, tick, expected) => {
+      const original = source("TEXT"), { timeline, anchor } = placement();
+      drawingAnchors(original)[0].price = price;
+      const moved = nudgeDrawing(original, "ArrowUp", 1, tick, timeline, anchor);
+      expect(moved && drawingAnchors(moved)[0]).toEqual({ ...drawingAnchors(original)[0], price: expected });
+    },
+  );
+
+  it("validates the previous session's short final candle before that candle is loaded", () => {
+    const friday = { timestamp: "2026-06-19T19:30:00.000Z", bucketEnd: "2026-06-19T20:15:00.000Z", firstSequence: 0, lastSequence: 44 };
+    const monday = { timestamp: "2026-06-22T13:30:00.000Z", bucketEnd: "2026-06-22T14:30:00.000Z", firstSequence: 45, lastSequence: 104 };
+    const displayIntervalSeconds = 3600;
+    const timeline = new DrawingTimelineLocator();
+    let window = [monday];
+    timeline.setTimeline(window, displayIntervalSeconds, { sourceIntervalSeconds: 60, session });
+    const anchorAt = (logicalIndex: number, price: number) => anchorForLogicalIndex({
+      logicalIndex, price, bars: window as AggregatedMarketBarData[], displayIntervalSeconds, timeline,
+    });
+    const original = source("TEXT");
+    const point = drawingAnchors(original)[0];
+    point.sourceSequence = null;
+    point.timestamp = "2026-06-22T14:20:00.000Z";
+    expect(nudgeDrawing(original, "ArrowLeft", 1, 0.25, timeline, anchorAt)).toBeNull();
+    point.timestamp = "2026-06-22T14:15:00.000Z";
+    expect(nudgeDrawing(original, "ArrowLeft", 1, 0.25, timeline, anchorAt)).toBeNull();
+
+    point.timestamp = "2026-06-22T14:14:00.000Z";
+    const moved = nudgeDrawing(original, "ArrowLeft", 1, 0.25, timeline, anchorAt)!;
+    const movedPoint = drawingAnchors(moved)[0];
+    expect(movedPoint.timestamp).toBe("2026-06-19T20:14:00.000Z");
+    expect(timeline.logicalIndexForAnchor(movedPoint)).toBe(-1);
+    window = [friday, monday];
+    timeline.setTimeline(window, displayIntervalSeconds, { sourceIntervalSeconds: 60, session });
+    expect(timeline.logicalIndexForAnchor(movedPoint)).toBe(0);
+  });
+
+  it("rejects the whole horizontal step if one legacy anchor cannot be represented", () => {
+    const original = source("RECTANGLE"), { timeline, anchor } = placement();
+    drawingAnchors(original)[0].sourceSequence = 50;
+    const before = structuredClone(original);
+    expect(nudgeDrawing(original, "ArrowRight", 1, 0.25, timeline, anchor)).toBeNull();
+    expect(original).toEqual(before);
   });
 });

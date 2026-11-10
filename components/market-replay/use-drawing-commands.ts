@@ -6,10 +6,11 @@ import { createUuid } from "@/lib/uuid";
 import type { MarketDrawing } from "@/lib/market-replay/chart-drawings";
 import { cloneDrawingValue, DrawingHistory, type DrawingHistoryEntry } from "@/lib/market-replay/drawing-history";
 import { runDrawingWrite } from "@/lib/market-replay/drawing-write-queue";
-import { hasVisibleReplayDialog, isReplayShortcutInputTarget, replayDrawingEditShortcut, replayDrawingShortcutKey } from "@/lib/market-replay/keyboard-shortcuts";
+import { hasVisibleReplayDialog, isDrawingNudgeTarget, isReplayShortcutInputTarget, replayDrawingEditShortcut, replayDrawingNudgeKey, replayDrawingShortcutKey } from "@/lib/market-replay/keyboard-shortcuts";
 import { isDrawingShortcutRecording } from "./drawing-shortcut-recorder";
 import { useDrawingHistory } from "./replay-session-context";
 import { useReplayShortcuts } from "./use-replay-shortcuts";
+import { useDrawingNudge } from "./use-drawing-nudge";
 import type { TextDrawingApi } from "@/lib/market-replay/text-drawing-primitive";
 
 function entryLabel(entry: DrawingHistoryEntry | null) {
@@ -27,6 +28,8 @@ export function useDrawingCommands(options: {
   setDrawings: Dispatch<SetStateAction<MarketDrawing[]>>; select: (id: string | null) => void; disabled: boolean;
   editor: { key: string; id: string | null; inline?: boolean } | null;
   chartApi: RefObject<TextDrawingApi | null>;
+  displayKey?: string;
+  onNudgeError?: (error: string | null) => void;
 }) {
   const provided = useDrawingHistory();
   const fallback = useMemo(() => new DrawingHistory(), []);
@@ -34,6 +37,7 @@ export function useDrawingCommands(options: {
   const view = useSyncExternalStore(history.subscribe, history.getSnapshot, history.getSnapshot);
   const { platform } = useReplayShortcuts();
   const [pending, setPending] = useState(false);
+  const { busy: nudging, previews: nudgePreviews, isBusy: isNudging, finish: finishNudge, press: nudge, flush: flushNudges } = useDrawingNudge({ ...options, history });
   const clipboard = useRef<MarketDrawing | null>(null);
   const submitting = useRef(false);
   const frozenPaste = useRef<{ drawing: MarketDrawing; clientId: string } | null>(null);
@@ -44,12 +48,13 @@ export function useDrawingCommands(options: {
     lifetime.current++; history.reset(); clipboard.current = null; frozenPaste.current = null; setPending(false);
     return () => { lifetime.current++; history.reset(); };
   }, [options.scope, history]);
+  useLayoutEffect(() => { finishNudge(); }, [options.displayKey, options.selectedDrawingId, options.disabled, options.editor, finishNudge]);
   const textGroup = useCallback((key: string | null, id: string | null = null) => history.setTextGroup(key, id), [history]);
   useEffect(() => {
-    if (!pending && !frozenPaste.current) return;
+    if (!pending && !nudging && !frozenPaste.current) return;
     const warn = (event: BeforeUnloadEvent) => { event.preventDefault(); event.returnValue = ""; };
     window.addEventListener("beforeunload", warn); return () => window.removeEventListener("beforeunload", warn);
-  }, [pending]);
+  }, [pending, nudging]);
   const merge = useCallback((drawings: MarketDrawing[], deletedIds: string[]) => {
     const ids = new Set([...deletedIds, ...drawings.map(drawing => drawing.id)]);
     latest.current.setDrawings(current => [...current.filter(drawing => !ids.has(drawing.id)), ...drawings]
@@ -58,7 +63,7 @@ export function useDrawingCommands(options: {
   }, []);
   const travel = useCallback(async (direction: "undo" | "redo") => {
     const current = latest.current;
-    if (current.disabled || current.editor || frozenPaste.current || submitting.current || history.getSnapshot().busy) return;
+    if (current.disabled || current.editor || frozenPaste.current || submitting.current || isNudging() || history.getSnapshot().busy) return;
     const generation = epoch.current;
     submitting.current = true; setPending(true);
     try {
@@ -76,10 +81,10 @@ export function useDrawingCommands(options: {
         if (generation === epoch.current && Array.isArray(data?.drawings)) current.setDrawings(data.drawings);
       }
     } finally { submitting.current = false; if (generation === epoch.current) setPending(false); }
-  }, [history, merge]);
+  }, [history, isNudging, merge]);
   const placePaste = useCallback(async (drawing: MarketDrawing) => {
     const current = latest.current;
-    if (submitting.current || current.disabled) return;
+    if (submitting.current || isNudging() || current.disabled) return;
     const generation = epoch.current;
     // Freeze the first request and its UUID until the result is known. A retry
     // must not make another object or move a creation that already succeeded.
@@ -119,17 +124,31 @@ export function useDrawingCommands(options: {
       }
     }
     finally { submitting.current = false; if (generation === epoch.current) setPending(false); }
-  }, [merge, history]);
+  }, [merge, history, isNudging]);
   useLayoutEffect(() => {
     let pointerHeld = false;
-    const down = () => { pointerHeld = true; }, up = () => { pointerHeld = false; };
+    const down = () => { pointerHeld = true; finishNudge(); };
+    const up = () => { pointerHeld = false; };
+    const blur = () => { up(); finishNudge(); };
+    const release = (event: KeyboardEvent) => finishNudge(event.key);
+    const focusOut = () => finishNudge();
+    const visibility = () => { if (document.visibilityState === "hidden") blur(); };
     const key = (event: KeyboardEvent) => {
       const current = latest.current;
-      if (event.defaultPrevented || event.isComposing || event.keyCode === 229 || event.repeat || isDrawingShortcutRecording()
+      if (event.defaultPrevented || event.isComposing || event.keyCode === 229 || isDrawingShortcutRecording()
         || document.visibilityState === "hidden" || isReplayShortcutInputTarget(event.target) || hasVisibleReplayDialog()
         || document.querySelector("[data-context-menu], [role='menu'], [role='listbox'], [data-drawing-template-picker]")) return;
-      if (frozenPaste.current && replayDrawingShortcutKey(event)) { event.preventDefault(); event.stopImmediatePropagation(); return; }
+      if ((frozenPaste.current || isNudging()) && replayDrawingShortcutKey(event)) { event.preventDefault(); event.stopImmediatePropagation(); return; }
       if (current.disabled || current.editor || pointerHeld || submitting.current) return;
+      const direction = replayDrawingNudgeKey(event);
+      const id = current.selectedDrawingId;
+      if (direction && id && !id.startsWith("temporary-") && !frozenPaste.current && current.chartApi.current?.nudgeDrawing && isDrawingNudgeTarget(event.target, id)) {
+        event.preventDefault();
+        event.stopImmediatePropagation();
+        nudge(direction, event.repeat, id);
+        return;
+      }
+      if (event.repeat || isNudging()) return;
       const action = replayDrawingEditShortcut(event, current.platform);
       if (!action) return;
       if (action === "copy") {
@@ -148,15 +167,21 @@ export function useDrawingCommands(options: {
       event.preventDefault(); event.stopImmediatePropagation();
     };
     window.addEventListener("keydown", key, true); window.addEventListener("pointerdown", down, true); window.addEventListener("pointerup", up, true);
-    window.addEventListener("pointercancel", up, true); window.addEventListener("blur", up);
+    window.addEventListener("pointercancel", up, true); window.addEventListener("blur", blur);
+    window.addEventListener("keyup", release, true);
+    window.addEventListener("focusout", focusOut, true);
+    document.addEventListener("visibilitychange", visibility);
     return () => {
       window.removeEventListener("keydown", key, true); window.removeEventListener("pointerdown", down, true); window.removeEventListener("pointerup", up, true);
-      window.removeEventListener("pointercancel", up, true); window.removeEventListener("blur", up);
+      window.removeEventListener("pointercancel", up, true); window.removeEventListener("blur", blur);
+      window.removeEventListener("keyup", release, true);
+      window.removeEventListener("focusout", focusOut, true);
+      document.removeEventListener("visibilitychange", visibility);
     };
-  }, [history, placePaste, travel]);
-  return { pasteUnconfirmed: Boolean(frozenPaste.current), pending, textGroup,
+  }, [finishNudge, history, isNudging, nudge, placePaste, travel]);
+  return { pasteUnconfirmed: Boolean(frozenPaste.current), pending: pending || nudging, textGroup, nudging, nudgePreviews, flushNudges,
     undo: () => void travel("undo"), redo: () => void travel("redo"), undoLabel: entryLabel(view.undo), redoLabel: entryLabel(view.redo),
-    historyDisabled: options.disabled || Boolean(options.editor) || Boolean(frozenPaste.current) || pending || view.busy,
+    historyDisabled: options.disabled || Boolean(options.editor) || Boolean(frozenPaste.current) || pending || nudging || view.busy,
     undoShortcut: platform === "mac" ? "⌘+Z" : "Ctrl+Z", redoShortcut: platform === "mac" ? "⌘+Shift+Z" : "Ctrl+Y",
     undoAria: platform === "mac" ? "Meta+Z" : "Control+Z", redoAria: platform === "mac" ? "Meta+Shift+Z" : "Control+Y" };
 }

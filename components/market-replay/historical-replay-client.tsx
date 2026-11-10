@@ -170,7 +170,8 @@ export function HistoricalReplayClient({
   const drawingCommandsDisabled = !chartVisibility.drawings || !drawingsLoaded || drawingBusy || measurementArmed || Boolean(textDrawing.editor)
     || Boolean(settingsDialog) || Boolean(drawingTool) || Boolean(rectangleStyleId) || Boolean(styleDrawingId) || Boolean(arrowStyleId);
   const drawingCommands = useDrawingCommands({ datasetId: dataset.id, scope: dataset.id + ":" + replaySession?.id + ":" + replaySession?.activeProjectionId,
-    fetch, drawings, selectedDrawingId, setDrawings: drawingState.setDrawings, select: setSelectedDrawingId, disabled: drawingCommandsDisabled, editor: textDrawing.editor, chartApi: textDrawing.apiRef });
+    fetch, drawings, selectedDrawingId, setDrawings: drawingState.setDrawings, select: setSelectedDrawingId, disabled: drawingCommandsDisabled, editor: textDrawing.editor, chartApi: textDrawing.apiRef,
+    displayKey: `${displayIntervalSeconds}:${session.displaySession}`, onNudgeError: drawingState.setError });
   useDrawingStyleShortcuts({ drawings, selectedDrawingId, drawingTool,
     scope: dataset.id + ":" + replaySession?.id + ":" + replaySession?.activeProjectionId,
     disabled: drawingCommandsDisabled || drawingCommands.pasteUnconfirmed || drawingCommands.pending,
@@ -563,6 +564,8 @@ export function HistoricalReplayClient({
             if (drawing) setSelectedDrawingId(drawing.id);
           }}
           drawings={visibleDrawings}
+          drawingNudgePreviews={drawingCommands.nudgePreviews}
+          drawingEditingLocked={drawingCommands.nudging}
           selectedDrawingId={selectedDrawingId}
           onSelectedDrawingIdChange={setSelectedDrawingId}
           onCreateDrawing={createDrawing}
@@ -597,20 +600,23 @@ export function HistoricalReplayClient({
         {drawingObjectsOpen ? <aside className="absolute right-3 top-3 z-50 flex max-h-[calc(100%-1.5rem)] w-72 flex-col overflow-hidden rounded-lg border border-slate-200 dark:border-border bg-white/95 dark:bg-card/95 shadow-xl backdrop-blur">
           <header className="flex items-center gap-2 border-b px-3 py-2.5">
             <ListTree className="h-4 w-4 text-slate-500 dark:text-muted-foreground" /><h3 className="text-sm font-semibold text-slate-950 dark:text-foreground">{copy.marketReplay.drawingObjects}</h3>
-            <Button type="button" variant="ghost" size="sm" disabled={!drawingsLoaded || drawingBusy || !drawings.length}
+            <Button type="button" variant="ghost" size="sm" disabled={!drawingsLoaded || drawingBusy || drawingCommands.nudging || !drawings.length}
               data-text-delete="all" aria-label={copy.marketReplay.clearDrawings} className="ml-auto text-red-600 dark:text-negative hover:bg-red-50 dark:hover:bg-negative-background hover:text-red-700 dark:hover:text-negative"
               onClick={async () => { await discardText(); if (await drawingState.clear()) { setSelectedDrawingId(null); setRectangleStyleId(null); setStyleDrawingId(null); setStyleDraft(null); } }}>{copy.marketReplay.clearDrawingsShort}</Button>
             <button type="button" className="ml-auto rounded p-1 text-slate-400 dark:text-muted-foreground hover:bg-slate-100 dark:hover:bg-hover hover:text-slate-700 dark:hover:text-secondary-text focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-600" aria-label={copy.marketReplay.closeDrawingObjects} onClick={() => setDrawingObjectsOpen(false)}><X className="h-4 w-4" /></button>
           </header>
           <div className="min-h-0 flex-1 overflow-y-auto p-1.5">
             {drawings.length ? drawings.map((drawing, index) => <div key={drawing.id} className={`flex items-center gap-2 rounded-md px-2 py-2 text-sm ${selectedDrawingId === drawing.id ? "bg-blue-50 dark:bg-info-background text-blue-800 dark:text-link" : "text-slate-700 dark:text-secondary-text hover:bg-slate-100 dark:hover:bg-hover"}`}>
-              <button type="button" className="min-w-0 flex-1 truncate text-left font-medium focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-600" onClick={() => setSelectedDrawingId(drawing.id)} onDoubleClick={() => openDrawingStyle(drawing.id)}>
+              <button type="button" data-drawing-nudge-id={drawing.id} aria-pressed={selectedDrawingId === drawing.id}
+                className="min-w-0 flex-1 truncate text-left font-medium focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+                onClick={event => { event.currentTarget.focus({ preventScroll: true }); setSelectedDrawingId(drawing.id); }}
+                onDoubleClick={() => { if (!drawingCommands.nudging) void openDrawingStyle(drawing.id); }}>
                 {drawingObjectName(drawing, index + 1)}
               </button>
-              <Button type="button" disabled={drawingBusy} variant="ghost" size="icon"
+              <Button type="button" disabled={drawingBusy || drawingCommands.nudging} variant="ghost" size="icon"
                 data-text-settings={drawing.id} aria-label={drawingSettingsLabel(drawing)}
                 onClick={() => openDrawingStyle(drawing.id)}><Settings2 className="h-4 w-4" aria-hidden="true" /></Button>
-              <Button type="button" data-text-delete={drawing.id} disabled={drawingBusy} variant="ghost" size="icon" aria-label={drawingDeleteLabel(drawing)} className="text-slate-400 dark:text-muted-foreground hover:bg-red-50 dark:hover:bg-negative-background hover:text-red-600 dark:hover:text-negative" onClick={() => void deleteDrawing(drawing.id)}><Trash2 className="h-4 w-4" aria-hidden="true" /></Button>
+              <Button type="button" data-text-delete={drawing.id} disabled={drawingBusy || drawingCommands.nudging} variant="ghost" size="icon" aria-label={drawingDeleteLabel(drawing)} className="text-slate-400 dark:text-muted-foreground hover:bg-red-50 dark:hover:bg-negative-background hover:text-red-600 dark:hover:text-negative" onClick={() => void deleteDrawing(drawing.id)}><Trash2 className="h-4 w-4" aria-hidden="true" /></Button>
             </div>) : <p className="p-3 text-xs text-slate-500 dark:text-muted-foreground">{copy.marketReplay.drawingObjectsEmpty}</p>}
           </div>
           {drawingBusy ? <p role="status" className="border-t px-3 py-2 text-xs text-slate-500 dark:text-muted-foreground">{copy.marketReplay.drawingSaving}</p> : null}

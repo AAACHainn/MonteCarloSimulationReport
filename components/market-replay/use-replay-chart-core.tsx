@@ -1,5 +1,5 @@
 "use client";
-import { DEFAULT_ABCD_STYLE, isArrowDrawing, type AbcdDrawing, type ArrowDrawing, type MarketDrawing } from "@/lib/market-replay/chart-drawings";
+import { anchorForLogicalIndex, DEFAULT_ABCD_STYLE, isArrowDrawing, type AbcdDrawing, type ArrowDrawing, type MarketDrawing } from "@/lib/market-replay/chart-drawings";
 import { AbcdPrimitive, type AbcdPreview } from "@/lib/market-replay/abcd-primitive";
 import type { AbcdDraft } from "@/lib/market-replay/abcd-interaction";
 import { ArrowPrimitive, type ArrowDragPreview } from "@/lib/market-replay/arrow-primitive";
@@ -14,6 +14,7 @@ import type { AggregatedMarketBarData } from "@/lib/market-replay/types";
 import { calculateChartMeasurement } from "@/lib/market-replay/chart-measurement";
 import { DRAWING_TYPE_FIB_RETRACEMENT, DRAWING_TYPE_TREND_LINE, DRAWING_TYPE_RECTANGLE, DRAWING_TYPE_TEXT, type TextDrawing, type TextGeometry, type RectangleDrawing, type DrawingAnchor, type FibonacciRetracementDrawing, type TrendLineDrawing, type TrendLineGeometry } from "@/lib/market-replay/chart-drawings";
 import { drawingTimelineBars, DrawingTimelineLocator } from "@/lib/market-replay/drawing-timeline";
+import { nudgeDrawing } from "@/lib/market-replay/drawing-translation";
 import { RectanglePrimitive } from "@/lib/market-replay/rectangle-primitive";
 import { TrendLinePrimitive } from "@/lib/market-replay/trend-line-primitive";
 import { FibonacciRetracementPrimitive } from "@/lib/market-replay/fibonacci-retracement-primitive";
@@ -30,7 +31,8 @@ import { replayCrosshairVisible, resolveReplayCursor, type ReplayChartCursor } f
 export function useReplayChartCore({
   datasetId, dataRevision = "", priceTickSize, bars, warmupBars, displayUtcOffsetMinutes, displayIntervalSeconds, measurementArmed, cursorMode = "crosshair",
   candlestickStyle, gridVisible = true, onToggleGrid,
-  onMeasurementArmedChange, drawingTool, onDrawingToolChange, trendLineDraftStyle, fibonacciDraftStyle, rectangleDraftStyle, drawings, selectedDrawingId,
+  onMeasurementArmedChange, drawingTool, onDrawingToolChange, trendLineDraftStyle, fibonacciDraftStyle, rectangleDraftStyle, drawings: savedDrawings, selectedDrawingId,
+  drawingNudgePreviews, drawingEditingLocked = false,
   onSelectedDrawingIdChange, onCreateDrawing, onUpdateDrawing, onDeleteDrawing, onPlaceText, onPlaceArrow, onCreateAbcd, abcdDraftStyle = DEFAULT_ABCD_STYLE, drawingApiRef,
   onOpenDrawingStyle, viewportApiRef, viewportSnapshot = null, currentSourceSequence, liveWindow = true, emaEnabled, emaIndicators, abrEnabled, abrLength, volumeVisible,
   displaySession, barCountSession, barCountConfig, paperSnapshot,
@@ -154,6 +156,11 @@ export function useReplayChartCore({
   cursorModeRef.current = cursorMode;
   const onMeasurementArmedChangeRef = useRef(onMeasurementArmedChange);
   const drawingToolRef = useRef(drawingTool);
+  const drawingEditingLockedRef = useRef(drawingEditingLocked);
+  drawingEditingLockedRef.current = drawingEditingLocked;
+  const drawings = useMemo(() => drawingNudgePreviews?.size
+    ? savedDrawings.map(drawing => drawingNudgePreviews.get(drawing.id) ?? drawing)
+    : savedDrawings, [savedDrawings, drawingNudgePreviews]);
   const drawingsRef = useRef(drawings);
   const positionCopyRef = useRef<((source: MarketDrawing) => MarketDrawing | null) | null>(null);
   const drawingGroups = useMemo(() => {
@@ -246,15 +253,26 @@ export function useReplayChartCore({
     });
   }, []);
 
+  const getDrawingTimeline = useCallback(() => {
+    const timeline = drawingTimelineRef.current;
+    timeline.setTimeline(projectionBarsRef.current, displayIntervalSecondsRef.current, {
+      sourceIntervalSeconds: sourceIntervalSecondsRef.current, session: drawingSessionRef.current,
+    }, drawingScopeRef.current);
+    return timeline;
+  }, []);
+  const drawingAnchorAt = useCallback((index: number, price: number) => {
+    const timeline = drawingTimelineRef.current;
+    if (timeline.timestampForLogicalIndex(index) === null) return null;
+    return anchorForLogicalIndex({ logicalIndex: index, price, bars: barsRef.current,
+      displayIntervalSeconds: displayIntervalSecondsRef.current, sourceIntervalSeconds: sourceIntervalSecondsRef.current,
+      session: drawingSessionRef.current, timeline });
+  }, []);
   const syncDrawingPrimitive = useCallback(() => {
     if (drawingFrameRef.current !== null) return;
     drawingFrameRef.current = requestAnimationFrame(() => {
       drawingFrameRef.current = null;
-      const timeline = drawingTimelineRef.current;
+      const timeline = getDrawingTimeline();
       const groups = drawingGroupsRef.current;
-      timeline.setTimeline(projectionBarsRef.current, displayIntervalSecondsRef.current, {
-        sourceIntervalSeconds: sourceIntervalSecondsRef.current, session: drawingSessionRef.current,
-      }, drawingScopeRef.current);
       trendLinePrimitiveRef.current?.setDrawings({
         drawings: groups.trend,
         selectedDrawingId: selectedDrawingIdRef.current,
@@ -311,9 +329,13 @@ export function useReplayChartCore({
           ? { host, x: Number(x), y: Number(y), width: chart?.timeScale().width() ?? 0, height } : null);
       }
     });
-  }, []);
+  }, [getDrawingTimeline]);
   useImperativeHandle(drawingApiRef, () => ({
     positionCopy(source) { return positionCopyRef.current?.(source) ?? null; },
+    nudgeDrawing(source, key, steps) {
+      if (!chartRef.current || !barsRef.current.length || requestedDisplayIntervalSecondsRef.current !== displayIntervalSecondsRef.current) return null;
+      return nudgeDrawing(source, key, steps, priceTickSizeRef.current, getDrawingTimeline(), drawingAnchorAt);
+    },
     previewText(preview) {
       textEditRef.current = preview;
       if (preview?.inline || !preview) textPrimitiveRef.current?.setHovered(null);
@@ -325,7 +347,7 @@ export function useReplayChartCore({
       textPositionRef.current = subscription; syncDrawingPrimitive();
       return () => { if (textPositionRef.current === subscription) textPositionRef.current = null; };
     },
-  }), [syncDrawingPrimitive]);
+  }), [drawingAnchorAt, getDrawingTimeline, syncDrawingPrimitive]);
 
   const setChartCursor = useCallback((cursor: ReplayChartCursor) => {
     const container = containerRef.current;
@@ -508,6 +530,7 @@ export function useReplayChartCore({
     projectionBarsRef, drawingTimelineRef, drawingScopeRef, drawingFrameRef, drawingSessionRef, requestedDrawingSessionRef,
     onFocusAppliedRef, tradeAnnotationsRef, tradeAnnotationsVisibleRef, candlestickStyleRef, measurementArmedRef, onMeasurementArmedChangeRef,
     drawingToolRef, drawingsRef, drawingGroupsRef, positionCopyRef, selectedDrawingIdRef, onDrawingToolChangeRef, onSelectedDrawingIdChangeRef,
+    drawingEditingLockedRef, getDrawingTimeline, drawingAnchorAt,
     onCreateDrawingRef, onUpdateDrawingRef, onDeleteDrawingRef, onOpenDrawingStyleRef, displayIntervalSecondsRef, requestedDisplayIntervalSecondsRef,
     sourceIntervalSecondsRef, gridVisibleRef, contextMenu, setContextMenu, contextMenuRef, abrTooltip,
     setAbrTooltip, measurement, setMeasurement, measurementRef, drawingDraftRef, drawingDraftCoordinateRef,

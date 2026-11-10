@@ -72,7 +72,6 @@ export function MarketReplayClient({ dataset: initialDataset, initialJournalFocu
   const core = useReplayCore({ dataset: initialDataset, initialJournalFocus });
   const drawingWindow = useReplayDrawingWindow(core);
   const engine = useReplayEngine(core, drawingWindow);
-  const actions = useReplayActions(core, drawingWindow, engine);
   const {
     fetch, replaySession, dateDialogOpen, setDateDialogOpen, dateDialogOpening, dateDialogMinimum,
     dateForwarding, forwardProgress, cancelForwardRef, correctionTarget, setCorrectionTarget, correctionPending,
@@ -86,7 +85,7 @@ export function MarketReplayClient({ dataset: initialDataset, initialJournalFocu
     paperError, growthNotice, growthNoticeKey, journalReview, chartFocusSequence, setChartFocusSequence, reviewReturning, draftActive,
     setDraftActive, gateDialogOpen, setGateDialogOpen, gateBusy, gateError, checkingOrder,
     entryCheckDraft, setEntryCheckDraft, measurementArmed, setMeasurementArmed,
-    drawingTool, setDrawingTool, drawings, setDrawings, clearingDrawings, drawingError,
+    drawingTool, setDrawingTool, drawings, setDrawings, clearingDrawings, drawingError, setDrawingError,
     selectedDrawingId, setSelectedDrawingId, drawingObjectsOpen, setDrawingObjectsOpen, rectangleStyleId, setRectangleStyleId,
     styleDrawingId, setStyleDrawingId, styleDraft, setStyleDraft, pendingDrawingIds, candlestickStyle,
     setCandlestickStyle, emaEnabled, setEmaEnabled, emaIndicators, setEmaIndicators, abrEnabled,
@@ -104,20 +103,22 @@ export function MarketReplayClient({ dataset: initialDataset, initialJournalFocu
   const {
     beginReplay, returnToLiveWindow, togglePlayback, revealNextBar, enterJournalReview,
   } = engine;
-  const {
-    changeSpeed, changeDisplayInterval, changeChartSession, setEmaLength, updateAbrLength, updateBarCountInterval,
-    updateBarCountRecentTradingDays, addEma, requestConfirmation, openStartDialog, closeStartDialog, applyNewReplayStart,
-    applyConfirmedAction, openCorrectionTarget, openDateDialog, locateReplayDate, prepareSessionSwitch, createPaperAccount,
-    onChartDraftChange, submitPaperOrder, cancelEntryCheck, confirmEntryCheck, saveGateConfig, currentGate,
-    gateButton, gateNoticeBlock, updatePaperOrder, cancelPaperOrder, cancelPaperScope, closePaperPosition, createPartialExit, prepareProtectiveEdit,
-    currentBar, revealedCount, replayCount, statusText,
-  } = actions;
   const drawingCommandsDisabled = !chartVisibility.drawings || clearingDrawings || pendingDrawingIds.size > 0 || isLoading || correctionPending
       || measurementArmed || draftActive || Boolean(textDrawing.editor) || Boolean(settingsDialog) || Boolean(checkingOrder)
       || gateDialogOpen || startDialogOpen || Boolean(confirmAction) || Boolean(drawingTool) || Boolean(rectangleStyleId) || Boolean(styleDrawingId) || Boolean(arrowStyleId);
   const drawingCommands = useDrawingCommands({ datasetId: dataset.id, scope: drawingWriteScope, fetch, drawings, selectedDrawingId,
     setDrawings: next => { const resolved = typeof next === "function" ? next(drawingsLive.current) : next; drawingsLive.current = resolved; setDrawings(resolved); },
-    select: setSelectedDrawingId, disabled: drawingCommandsDisabled, editor: textDrawing.editor, chartApi: textDrawing.apiRef });
+    select: setSelectedDrawingId, disabled: drawingCommandsDisabled, editor: textDrawing.editor, chartApi: textDrawing.apiRef,
+    displayKey: `${chartDisplay?.displayIntervalSeconds ?? replay?.displayIntervalSeconds}:${chartDisplay?.displaySession ?? replay?.displaySession}`,
+    onNudgeError: setDrawingError });
+  const {
+    changeSpeed, changeDisplayInterval, changeChartSession, setEmaLength, updateAbrLength, updateBarCountInterval,
+    updateBarCountRecentTradingDays, addEma, requestConfirmation, openStartDialog, closeStartDialog, applyNewReplayStart,
+    applyConfirmedAction, confirmationBusy, openCorrectionTarget, openDateDialog, locateReplayDate, prepareSessionSwitch, createPaperAccount,
+    onChartDraftChange, submitPaperOrder, cancelEntryCheck, confirmEntryCheck, saveGateConfig, currentGate,
+    gateButton, gateNoticeBlock, updatePaperOrder, cancelPaperOrder, cancelPaperScope, closePaperPosition, createPartialExit, prepareProtectiveEdit,
+    currentBar, revealedCount, replayCount, statusText,
+  } = useReplayActions(core, drawingWindow, engine, drawingCommands.flushNudges);
   useDrawingStyleShortcuts({ drawings: visibleDrawings, selectedDrawingId, drawingTool, scope: drawingWriteScope,
     disabled: drawingCommandsDisabled || drawingCommands.pasteUnconfirmed || drawingCommands.pending,
     templates: { TREND_LINE: trendLineTemplates, FIB_RETRACEMENT: fibonacciTemplates, RECTANGLE: rectangleTemplates,
@@ -327,6 +328,8 @@ export function MarketReplayClient({ dataset: initialDataset, initialJournalFocu
             fibonacciDraftStyle={defaultFibonacciStyle}
             rectangleDraftStyle={defaultRectangleStyle}
             drawings={visibleDrawings}
+            drawingNudgePreviews={drawingCommands.nudgePreviews}
+            drawingEditingLocked={drawingCommands.nudging}
             selectedDrawingId={selectedDrawingId}
             onSelectedDrawingIdChange={setSelectedDrawingId}
             onCreateDrawing={(type, geometry) => void createDrawing(type, geometry)}
@@ -377,7 +380,7 @@ export function MarketReplayClient({ dataset: initialDataset, initialJournalFocu
               <header className="flex items-center gap-2 border-b px-3 py-2.5">
                 <ListTree className="h-4 w-4 text-slate-500 dark:text-muted-foreground" />
                 <h3 className="text-sm font-semibold text-slate-950 dark:text-foreground">{copy.marketReplay.drawingObjects}</h3>
-                <Button type="button" variant="ghost" size="sm" disabled={clearingDrawings || Boolean(pendingDrawingIds.size) || !drawings.length}
+                <Button type="button" variant="ghost" size="sm" disabled={clearingDrawings || drawingCommands.nudging || Boolean(pendingDrawingIds.size) || !drawings.length}
                   data-text-delete="all" aria-label={copy.marketReplay.clearDrawings} className="ml-auto text-red-600 dark:text-negative hover:bg-red-50 dark:hover:bg-negative-background hover:text-red-700 dark:hover:text-negative"
                   onClick={() => void clearDrawings()}>{copy.marketReplay.clearDrawingsShort}</Button>
                 <button
@@ -391,7 +394,7 @@ export function MarketReplayClient({ dataset: initialDataset, initialJournalFocu
               </header>
               <div className="min-h-0 flex-1 overflow-y-auto p-1.5">
                 {drawings.length ? drawings.map((drawing, index) => {
-                  const pending = clearingDrawings || pendingDrawingIds.has(drawing.id);
+                  const pending = clearingDrawings || drawingCommands.nudging || pendingDrawingIds.has(drawing.id);
                   const selected = selectedDrawingId === drawing.id;
                   const drawingColor = drawingObjectColor(drawing);
                   return (
@@ -399,11 +402,13 @@ export function MarketReplayClient({ dataset: initialDataset, initialJournalFocu
                       key={drawing.id}
                       role="button"
                       tabIndex={0}
-                      className={`group flex items-center gap-2 rounded-md px-2 py-2 text-sm outline-none transition-colors ${selected ? "bg-blue-50 dark:bg-info-background text-blue-800 dark:text-link" : "text-slate-700 dark:text-secondary-text hover:bg-slate-100 dark:hover:bg-hover"}`}
-                      onClick={() => setSelectedDrawingId(drawing.id)}
-                      onDoubleClick={() => openDrawingStyle(drawing.id)}
+                      data-drawing-nudge-id={drawing.id}
+                      aria-pressed={selected}
+                      className={`group flex items-center gap-2 rounded-md px-2 py-2 text-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring transition-colors ${selected ? "bg-blue-50 dark:bg-info-background text-blue-800 dark:text-link" : "text-slate-700 dark:text-secondary-text hover:bg-slate-100 dark:hover:bg-hover"}`}
+                      onClick={event => { event.currentTarget.focus({ preventScroll: true }); setSelectedDrawingId(drawing.id); }}
+                      onDoubleClick={() => { if (!drawingCommands.nudging) void openDrawingStyle(drawing.id); }}
                       onKeyDown={(event) => {
-                        if (event.key === "Enter" || event.key === " ") {
+                        if (event.target === event.currentTarget && (event.key === "Enter" || event.key === " ")) {
                           event.preventDefault();
                           setSelectedDrawingId(drawing.id);
                         }
@@ -583,6 +588,7 @@ export function MarketReplayClient({ dataset: initialDataset, initialJournalFocu
       })()}
       <ConfirmDialog
         open={Boolean(confirmAction)}
+        isLoading={confirmationBusy}
         title={confirmAction === "paper-clear" ? copy.replaySessions.archiveTitle : copy.replaySessions.restartTitle}
         description={confirmAction === "paper-clear" ? copy.replaySessions.archiveDescription : `${copy.replaySessions.restartDescription} ${restartWalletHint} ${replaySession ? copy.userGrowth.restartOwnership(replaySession.owner?.nickname ?? copy.userGrowth.unowned, eligibilityLabel(replaySession)) : ""}`}
         onCancel={() => {

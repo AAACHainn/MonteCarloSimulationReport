@@ -1,7 +1,6 @@
 "use client";
 
 import { useEffect } from "react";
-import { anchorForLogicalIndex } from "@/lib/market-replay/chart-drawings";
 import { positionDrawingCopy } from "@/lib/market-replay/drawing-clipboard";
 import { snapPriceToTick } from "@/lib/market-replay/price-ticks";
 import type { useReplayChartCore } from "./use-replay-chart-core";
@@ -9,8 +8,7 @@ import type { useReplayChartCore } from "./use-replay-chart-core";
 /** Track only the pointer. Resolve the current chart coordinates synchronously
  * when paste is pressed, so zoom/replay/layout changes cannot stale placement. */
 export function useReplayChartClipboard(core: ReturnType<typeof useReplayChartCore>) {
-  const { containerRef, interactionRef, chartRef, candleRef, positionCopyRef, drawingTimelineRef, barsRef,
-    displayIntervalSecondsRef, sourceIntervalSecondsRef, drawingSessionRef, visibilityScope, priceTickSize } = core;
+  const { containerRef, interactionRef, chartRef, candleRef, positionCopyRef, getDrawingTimeline, drawingAnchorAt, visibilityScope, priceTickSize } = core;
   useEffect(() => {
     const host = interactionRef.current, container = containerRef.current, chart = chartRef.current, series = candleRef.current;
     if (!host || !container || !chart || !series) return;
@@ -26,12 +24,7 @@ export function useReplayChartClipboard(core: ReturnType<typeof useReplayChartCo
       const logical = chart.timeScale().coordinateToLogical(x as never), rawPrice = series.coordinateToPrice(y as never);
       if (logical === null || rawPrice === null) return null;
       const price = snapPriceToTick(Number(rawPrice), priceTickSize);
-      return positionDrawingCopy(source, { logicalIndex: Number(logical), price }, drawingTimelineRef.current, (index, anchorPrice) => {
-        if (!Number.isSafeInteger(index) || drawingTimelineRef.current.timestampForLogicalIndex(index) === null) return null;
-        return anchorForLogicalIndex({ logicalIndex: index, price: anchorPrice, bars: barsRef.current,
-          displayIntervalSeconds: displayIntervalSecondsRef.current, sourceIntervalSeconds: sourceIntervalSecondsRef.current,
-          session: drawingSessionRef.current, timeline: drawingTimelineRef.current });
-      });
+      return positionDrawingCopy(source, { logicalIndex: Number(logical), price }, getDrawingTimeline(), drawingAnchorAt);
     };
     window.addEventListener("pointermove", move, true); window.addEventListener("pointerdown", move, true);
     host.addEventListener("pointerleave", leave); window.addEventListener("blur", leave);
@@ -40,6 +33,5 @@ export function useReplayChartClipboard(core: ReturnType<typeof useReplayChartCo
       host.removeEventListener("pointerleave", leave); window.removeEventListener("blur", leave);
       positionCopyRef.current = null;
     };
-  }, [visibilityScope, containerRef, interactionRef, chartRef, candleRef, positionCopyRef, drawingTimelineRef,
-    barsRef, displayIntervalSecondsRef, sourceIntervalSecondsRef, drawingSessionRef, priceTickSize]);
+  }, [visibilityScope, containerRef, interactionRef, chartRef, candleRef, positionCopyRef, getDrawingTimeline, drawingAnchorAt, priceTickSize]);
 }

@@ -66,6 +66,7 @@ export function ReplayChart(props: ReplayChartProps) {
     <div
       ref={interactionRef}
       tabIndex={-1}
+      data-drawing-nudge-chart
       className="relative h-full min-h-0 select-none focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring"
       onContextMenu={openContextMenu}
       onPointerDown={(event: ReactPointerEvent<HTMLDivElement>) => {

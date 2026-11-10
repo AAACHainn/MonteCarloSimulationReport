@@ -1,4 +1,4 @@
-import { AggregationCalendar } from "./aggregation";
+import { AggregationCalendar, getAggregationBucket } from "./aggregation";
 import type { ChartTimelineAnchor, ChartTimelineProjectionOptions } from "./chart-drawings";
 import type { AggregatedMarketBarData } from "./types";
 
@@ -144,6 +144,19 @@ export class DrawingTimelineLocator {
     const edge = index < 0 ? 0 : this.bars.length - 1;
     return remember(this.timestamps, index, this.calendar ? this.calendar.timestampAtOffset(this.bars[edge].time, index - edge)
       : this.bars[edge].time + (index - edge) * this.interval);
+  }
+
+  containsTimestampInBucket(index: number, timestamp: number): boolean {
+    if (!Number.isFinite(timestamp)) return false;
+    const start = this.timestampForLogicalIndex(index);
+    if (start === null || timestamp < start) return false;
+    const loaded = this.bars[index];
+    if (loaded) return timestamp < loaded.end;
+    if (!this.options) return timestamp < start + this.interval;
+    // Calendar projection can map closed-market times to an adjacent bucket.
+    // Use the actual session end even before that candle has been loaded.
+    const bucket = getAggregationBucket(start, this.options.sourceIntervalSeconds, this.interval / 1_000, this.options.session);
+    return bucket !== null && timestamp < bucket.end;
   }
 }
 

@@ -17,7 +17,7 @@ export function useReplayChartDrawingPointer(core: ReturnType<typeof useReplayCh
     rectanglePrimitiveRef, trendLinePrimitiveRef, fibonacciPrimitiveRef, textPrimitiveRef, textEditRef, textClicks,
     textDragRef, onPlaceTextRef, arrowPrimitiveRef, arrowDragRef, onPlaceArrowRef,
     abcdPrimitiveRef, abcdDraftRef, abcdPreviewRef, onCreateAbcdRef, barsRef, drawingTimelineRef, drawingSessionRef, measurementArmedRef,
-    drawingToolRef, drawingsRef, drawingGroupsRef, selectedDrawingIdRef, onDrawingToolChangeRef, onSelectedDrawingIdChangeRef,
+    drawingToolRef, drawingsRef, drawingGroupsRef, selectedDrawingIdRef, onDrawingToolChangeRef, onSelectedDrawingIdChangeRef, drawingEditingLockedRef,
     onCreateDrawingRef, onUpdateDrawingRef, onDeleteDrawingRef, onOpenDrawingStyleRef, displayIntervalSecondsRef, sourceIntervalSecondsRef,
     setContextMenu, drawingDraftRef, drawingDraftCoordinateRef, drawingPreviewRef, syncDrawingPrimitive,
     setChartCursor, priceTickSize,
@@ -122,6 +122,7 @@ export function useReplayChartDrawingPointer(core: ReturnType<typeof useReplayCh
     );
 
     const down = (event: PointerEvent) => {
+      if (drawingEditingLockedRef.current) return;
       if (event.pointerType !== "mouse" || event.button !== 0 || !interaction.contains(event.target as Node)) return;
       const target = event.target as HTMLElement;
       if (target.closest("button,input,textarea,[data-text-editor],[data-context-menu],[data-order-ticket],[data-line-action]")) return;
@@ -465,6 +466,7 @@ export function useReplayChartDrawingPointer(core: ReturnType<typeof useReplayCh
     };
     const leave = () => { if (!dragging && !textDragging && !arrowDragging && !abcdDragging) hoverText(null); };
     const doubleClick = (event: MouseEvent) => {
+      if (drawingEditingLockedRef.current) return;
       textClicks.current!.clear();
       if ((event.target as HTMLElement).closest("[data-text-editor]")) return;
       const rect = container.getBoundingClientRect();
@@ -497,7 +499,7 @@ export function useReplayChartDrawingPointer(core: ReturnType<typeof useReplayCh
         onSelectedDrawingIdChangeRef.current(null);
         return;
       }
-      if (isReplayDrawingDeleteShortcut(event) && selectedDrawingIdRef.current) {
+      if (!drawingEditingLockedRef.current && isReplayDrawingDeleteShortcut(event) && selectedDrawingIdRef.current) {
         stopEvent(event);
         onDeleteDrawingRef.current(selectedDrawingIdRef.current);
       }
@@ -532,6 +534,6 @@ export function useReplayChartDrawingPointer(core: ReturnType<typeof useReplayCh
       interaction.removeEventListener("dblclick", doubleClick, true);
       window.removeEventListener("keydown", key, true);
     };
-  }, [abcdPrimitiveRef, abcdDraftRef, abcdPreviewRef, onCreateAbcdRef, arrowPrimitiveRef, arrowDragRef, onPlaceArrowRef, priceTickSize, setChartCursor, syncDrawingPrimitive, visibilityScope, barsRef, candleRef, chartRef, containerRef, displayIntervalSecondsRef, drawingDraftCoordinateRef, drawingDraftRef, drawingGroupsRef, drawingPreviewRef, drawingSessionRef, drawingTimelineRef, drawingToolRef, drawingsRef, fibonacciPrimitiveRef, interactionRef, lineTargetsRef, measurementArmedRef, onCreateDrawingRef, onDeleteDrawingRef, onDrawingToolChangeRef, onOpenDrawingStyleRef, onPlaceTextRef, onSelectedDrawingIdChangeRef, onUpdateDrawingRef, rectanglePrimitiveRef, selectedDrawingIdRef, setContextMenu, sourceIntervalSecondsRef, textClicks, textDragRef, textEditRef, textPrimitiveRef, trendLinePrimitiveRef]);
+  }, [abcdPrimitiveRef, abcdDraftRef, abcdPreviewRef, onCreateAbcdRef, arrowPrimitiveRef, arrowDragRef, onPlaceArrowRef, priceTickSize, setChartCursor, syncDrawingPrimitive, visibilityScope, barsRef, candleRef, chartRef, containerRef, displayIntervalSecondsRef, drawingDraftCoordinateRef, drawingDraftRef, drawingEditingLockedRef, drawingGroupsRef, drawingPreviewRef, drawingSessionRef, drawingTimelineRef, drawingToolRef, drawingsRef, fibonacciPrimitiveRef, interactionRef, lineTargetsRef, measurementArmedRef, onCreateDrawingRef, onDeleteDrawingRef, onDrawingToolChangeRef, onOpenDrawingStyleRef, onPlaceTextRef, onSelectedDrawingIdChangeRef, onUpdateDrawingRef, rectanglePrimitiveRef, selectedDrawingIdRef, setContextMenu, sourceIntervalSecondsRef, textClicks, textDragRef, textEditRef, textPrimitiveRef, trendLinePrimitiveRef]);
 
 }

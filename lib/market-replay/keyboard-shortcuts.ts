@@ -80,6 +80,18 @@ export function isReplayShortcutInputTarget(target: EventTarget | null) {
   ));
 }
 
+export type DrawingNudgeKey = "ArrowLeft" | "ArrowRight" | "ArrowUp" | "ArrowDown";
+
+export function replayDrawingNudgeKey(event: ShortcutKeyEvent): DrawingNudgeKey | null {
+  if (event.altKey || event.ctrlKey || event.metaKey || event.shiftKey || event.defaultPrevented || event.isComposing) return null;
+  const { key } = event;
+  return key === "ArrowLeft" || key === "ArrowRight" || key === "ArrowUp" || key === "ArrowDown" ? key : null;
+}
+
+export function isDrawingNudgeTarget(target: EventTarget | null, selectedId: string) {
+  return target instanceof Element && (target.hasAttribute("data-drawing-nudge-chart") || target.getAttribute("data-drawing-nudge-id") === selectedId);
+}
+
 export function replayDrawingEditShortcut(event: ShortcutKeyEvent, platform: ReplayShortcutPlatform): "copy" | "paste" | "undo" | "redo" | null {
   if (event.defaultPrevented || event.isComposing || event.altKey) return null;
   if (platform === "mac" ? !event.metaKey || event.ctrlKey : !event.ctrlKey || event.metaKey) return null;
