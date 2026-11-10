@@ -7,9 +7,9 @@ import { MAX_MARKET_BARS } from "@/lib/market-replay/types";
 import { prepareAggregationAppend, publishAggregationAppend, writeAggregationChunk } from "@/lib/market-replay/aggregation-storage";
 import { budgetDay } from "./schedule";
 import { acquireDatasetLease, LEASE_MS, releaseDatasetLease } from "./lease";
-import { DatabentoProvider, type MarketProvider } from "./databento";
+import { DATABENTO_DATASET, DatabentoProvider, schemaFor, symbolFor, type MarketProvider } from "./databento";
 import { decryptKey, SyncError } from "./security";
-import { syncConfigSchema, type Charge, type SyncBar, type SyncSettings } from "./types";
+import { syncConfigSchema, type Charge, type SyncBar, type SyncRunMappings, type SyncSettings } from "./types";
 
 const DAY = 86400000;
 const BATCH = 2048;
@@ -40,7 +40,7 @@ async function heartbeat(run: MarketDataSyncRun, owner: string, controller: Abor
     });
   } catch { controller.abort(); }
 }
-async function publishSegment(run: MarketDataSyncRun, owner: string, target: MarketDataset, stagingId: string, count: number, last: Date | null, through: Date, mappings: Record<string, string>) {
+async function publishSegment(run: MarketDataSyncRun, owner: string, target: MarketDataset, stagingId: string, count: number, last: Date | null, through: Date, mappings: SyncRunMappings) {
   await prisma.$transaction(async (tx) => {
     const currentRun = await tx.marketDataSyncRun.findUniqueOrThrow({ where: { id: run.id } });
     const current = await tx.marketDataset.findUniqueOrThrow({ where: { id: target.id } });
@@ -57,7 +57,7 @@ async function publishSegment(run: MarketDataSyncRun, owner: string, target: Mar
     await tx.marketDataset.delete({ where: { id: stagingId } });
   }, { maxWait: 30000, timeout: 120000 });
 }
-async function downloadSegment(provider: MarketProvider, settings: SyncSettings, run: MarketDataSyncRun, owner: string, start: Date, end: Date, signal: AbortSignal, initialBinding: boolean) {
+async function downloadSegment(provider: MarketProvider, settings: SyncSettings, run: MarketDataSyncRun, owner: string, start: Date, end: Date, signal: AbortSignal, initialBinding: boolean, degradedDate?: string) {
   const stagingId = `market_sync_${run.id}_${owner}`;
   for (let attempt = 0; attempt <= 3; attempt++) {
     signal.throwIfAborted();
@@ -70,7 +70,7 @@ async function downloadSegment(provider: MarketProvider, settings: SyncSettings,
       await reserveCost(run.id, settings, cost, owner);
       await prisma.marketDataSyncRun.update({ where: { id: run.id }, data: { stage: "DOWNLOADING" } });
       let pending: SyncBar[] = []; let count = 0; let last: Date | null = null; let previous: SyncBar | null = null; let matched = 0;
-      const mappings = JSON.parse((await prisma.marketDataSyncRun.findUniqueOrThrow({ where: { id: run.id } })).mappings) as Record<string, string>;
+      const mappings = JSON.parse((await prisma.marketDataSyncRun.findUniqueOrThrow({ where: { id: run.id } })).mappings) as SyncRunMappings;
       const conflicts: Array<{ time: string; local: unknown; remote: unknown }> = [];
       const flush = async () => {
         if (!pending.length) return;
@@ -113,6 +113,7 @@ async function downloadSegment(provider: MarketProvider, settings: SyncSettings,
         throw new SyncError(copy.marketSync.conflict, 400, "CONFLICT");
       }
       signal.throwIfAborted();
+      if (degradedDate) (mappings.qualityWarnings ??= []).push({ dateUtc: degradedDate, addedBars: count });
       await prisma.marketDataSyncRun.update({ where: { id: run.id }, data: { stage: "PUBLISHING" } });
       await publishSegment(run, owner, target, stagingId, count, last, end, mappings);
       return;
@@ -184,9 +185,32 @@ export async function executeSyncRun(runId: string, externalSignal: AbortSignal,
       signal.throwIfAborted();
       const segmentEnd: Date = new Date(Math.min(fixedEnd.getTime(), (Math.floor(segmentStart.getTime() / DAY) + 1) * DAY));
       const conditions = await provider.conditions(segmentStart, segmentEnd, signal);
-      const condition = conditions.find((v) => v.date === segmentStart.toISOString().slice(0, 10));
-      if (!condition || condition.condition !== "available") throw new SyncError(copy.marketSync.quality, 400, "QUALITY");
-      await downloadSegment(provider, settings, run, workerOwner, segmentStart, segmentEnd, signal, initialBinding);
+      const segmentStartUtc = segmentStart.toISOString();
+      const conditionDate = segmentStartUtc.slice(0, 10);
+      const day = conditions.find((value) => value.date === conditionDate);
+      const allowDegraded = run.trigger === "MANUAL" && day?.condition === "degraded";
+      if (day?.condition !== "available") {
+        const condition = day?.condition;
+        const providerCondition = condition === "pending" || condition === "degraded" || condition === "missing"
+          ? condition
+          : day ? "unknown" : "not_reported";
+        console.warn(JSON.stringify({
+          event: "market-sync-quality",
+          runId,
+          datasetId: run.datasetId,
+          providerDataset: DATABENTO_DATASET,
+          symbol: symbolFor(settings.profile),
+          schema: schemaFor(settings.profile.interval),
+          segmentStartUtc,
+          segmentEndExclusiveUtc: segmentEnd.toISOString(),
+          conditionDate,
+          providerCondition,
+          action: allowDegraded ? "allowed" : "blocked",
+          providerLastModifiedDate: day?.lastModifiedDate ?? null,
+        }));
+        if (!allowDegraded) throw new SyncError(copy.marketSync.quality, 400, "QUALITY");
+      }
+      await downloadSegment(provider, settings, run, workerOwner, segmentStart, segmentEnd, signal, initialBinding, allowDegraded ? conditionDate : undefined);
       // publishSegment persists the successful binding. Later UTC days can contain
       // entirely new bars and must not be required to match existing history again.
       initialBinding = false;

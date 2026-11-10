@@ -82,7 +82,24 @@ export function MarketSyncSummary({ dataset }: { dataset: MarketDatasetSummary }
       <div className="flex flex-wrap items-center gap-2"><Button type="button" variant="outline" size="sm" className="min-h-10 sm:min-h-0" disabled={busy || view.active} onClick={() => void sync()}>{busy || view.active ? <Loader2 className="h-4 w-4 animate-spin" /> : <RefreshCw className="h-4 w-4" />}{busy || view.active ? c.syncing : view.pausedReason === c.conflict ? c.retry : c.sync}</Button><Button type="button" variant="ghost" size="sm" onClick={() => { setError(null); void jsonRequest<SyncRunView[]>(`/api/market-datasets/${dataset.id}/sync-runs`).then(setHistory).catch((error) => setError(error.message)); }}>{c.taskHistory}</Button></div>
     </> : null}
     {error ? <Feedback error>{error}</Feedback> : null}
-    <Dialog open={history !== null} title={c.taskHistory} onClose={() => setHistory(null)}><div className="space-y-3">{history?.length === 0 ? <p className="text-sm text-slate-500 dark:text-muted-foreground">{c.noRuns}</p> : null}{history?.map((run) => <div className="space-y-2 rounded-md border p-3" key={run.id}><p className="text-sm tabular-nums">{time(run.updatedAt, dataset.timezone)} · {c.statuses[run.status as keyof typeof c.statuses]} · {c.count(run.addedBars)}</p><p className="text-sm text-red-700 dark:text-negative">{run.error}</p>{run.conflicts !== "[]" ? <><p className="text-sm font-medium">{c.conflicts}</p><pre className="overflow-x-auto text-xs">{JSON.stringify(JSON.parse(run.conflicts), null, 2)}</pre></> : null}</div>)}</div></Dialog>
+    <Dialog open={history !== null} title={c.taskHistory} onClose={() => setHistory(null)}>
+      <div className="space-y-3">
+        {history?.length === 0 ? <p className="text-sm text-slate-500 dark:text-muted-foreground">{c.noRuns}</p> : null}
+        {history?.map((run) => <div className="space-y-2 rounded-md border p-3" key={run.id}>
+          <p className="text-sm tabular-nums">{time(run.updatedAt, dataset.timezone)} · {c.statuses[run.status as keyof typeof c.statuses]} · {c.count(run.addedBars)}</p>
+          {run.error ? <p className="text-sm text-red-700 dark:text-negative">{run.error}</p> : null}
+          {run.qualityWarnings?.length ? <Alert className="space-y-1 border-amber-200 dark:border-warning/40 bg-amber-50 dark:bg-warning-background p-3 text-amber-800 dark:text-warning">
+            <p className="font-medium">{c.qualityWarningTitle}</p>
+            <ul className="space-y-1 tabular-nums">
+              {run.qualityWarnings.map(({ dateUtc, addedBars }) => <li key={dateUtc}>
+                <time dateTime={dateUtc}>{c.qualityWarningDate(dateUtc)}</time> · {c.count(addedBars)}
+              </li>)}
+            </ul>
+          </Alert> : null}
+          {run.conflicts !== "[]" ? <><p className="text-sm font-medium">{c.conflicts}</p><pre className="overflow-x-auto text-xs">{JSON.stringify(JSON.parse(run.conflicts), null, 2)}</pre></> : null}
+        </div>)}
+      </div>
+    </Dialog>
   </div>;
 }
 export function MarketSyncSettings({ dataset, onBusyChange, onCancel }: { dataset: MarketDatasetSummary; onBusyChange?: (value: boolean) => void; onCancel?: () => void }) {

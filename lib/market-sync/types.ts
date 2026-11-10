@@ -34,5 +34,10 @@ export type SyncSettings = z.infer<typeof syncConfigSchema>;
 export type SyncBar = { timestamp: Date; open: number; high: number; low: number; close: number; volume: number | null; symbol: string };
 export type Charge = { at: string; cost: number };
 export const defaultSchedule = (): SyncSchedule => ({ unit: "DAY", every: 1, time: "09:00", timezone: "Asia/Shanghai", weekday: 1, monthDay: 1, monthEnd: false, anchor: new Date().toISOString() });
-export type SyncRunView = { id: string; status: string; stage: string; addedBars: number; estimatedCost: number; error: string | null; conflicts: string; updatedAt: string };
+export type SyncQualityWarning = { dateUtc: string; addedBars: number };
+// Keep the existing UTC date-to-contract keys and reserve a separate key for published warnings.
+export type SyncRunMappings = Record<string, string | SyncQualityWarning[] | undefined> & {
+  qualityWarnings?: SyncQualityWarning[];
+};
+export type SyncRunView = { id: string; status: string; stage: string; addedBars: number; estimatedCost: number; error: string | null; conflicts: string; qualityWarnings: SyncQualityWarning[]; updatedAt: string };
 export type SyncConfigView = SyncSettings & { nextRunAt: string | null; lastCheckedAt: string | null; pausedReason: string | null; availableThrough: string | null; active: boolean; latestRun: SyncRunView | null };

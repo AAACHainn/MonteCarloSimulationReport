@@ -114,6 +114,8 @@ export const zhStart = {
     },
     marketSync: {
       noRuns: "暂无同步记录。",
+      qualityWarningTitle: "已同步带数据源质量告警的区间",
+      qualityWarningDate: (dateUtc: string) => `${dateUtc}（UTC）`,
       providerError: (message: string, status: number, errorCase: string | null) => `${message}（HTTP ${status}${errorCase ? `，${errorCase}` : ""}）`,
       entitlement: "当前 Databento 订阅或许可无法访问请求的行情时段，请检查 CME 订阅或等待数据进入可用范围。",
       entitlementThrough: (time: string) => `当前许可可用截至 ${time}（UTC）。`,

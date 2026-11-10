@@ -8,6 +8,7 @@ import { SyncError } from "./security";
 import type { SyncBar, SyncProfile } from "./types";
 
 const API = "https://hist.databento.com/v0/";
+export const DATABENTO_DATASET = "GLBX.MDP3";
 type SymbolMapping = { d0: string; d1: string; s: string };
 function validDate(value: unknown): value is string {
   return typeof value === "string" && /^\d{4}-\d{2}-\d{2}$/.test(value) && Number.isFinite(Date.parse(value)) && new Date(value).toISOString().slice(0, 10) === value;
@@ -32,7 +33,7 @@ export function schemaFor(interval: number) { return ({ 1: "ohlcv-1s", 60: "ohlc
 export function symbolFor(profile: SyncProfile) { return profile.contractMode === "CONTINUOUS" ? `${profile.root}.v.0` : profile.contract; }
 export interface MarketProvider {
   range(profile: SyncProfile, signal: AbortSignal): Promise<{ start: Date; end: Date }>;
-  conditions(start: Date, end: Date, signal: AbortSignal): Promise<Array<{ date: string; condition: string }>>;
+  conditions(start: Date, end: Date, signal: AbortSignal): Promise<Array<{ date: string; condition: string; lastModifiedDate?: string | null }>>;
   cost(profile: SyncProfile, start: Date, end: Date, signal: AbortSignal): Promise<number>;
   bars(profile: SyncProfile, start: Date, end: Date, signal: AbortSignal): AsyncIterable<SyncBar>;
 }
@@ -67,16 +68,21 @@ export class DatabentoProvider implements MarketProvider {
     }
     return response;
   }
-  private params(profile: SyncProfile, start: Date, end: Date) { return { dataset: "GLBX.MDP3", symbols: symbolFor(profile), stype_in: profile.contractMode === "CONTINUOUS" ? "continuous" : "raw_symbol", schema: schemaFor(profile.interval), start: start.toISOString(), end: end.toISOString() }; }
+  private params(profile: SyncProfile, start: Date, end: Date) { return { dataset: DATABENTO_DATASET, symbols: symbolFor(profile), stype_in: profile.contractMode === "CONTINUOUS" ? "continuous" : "raw_symbol", schema: schemaFor(profile.interval), start: start.toISOString(), end: end.toISOString() }; }
   async range(profile: SyncProfile, signal: AbortSignal) {
-    const response = await this.request("metadata.get_dataset_range", { dataset: "GLBX.MDP3" }, signal);
+    const response = await this.request("metadata.get_dataset_range", { dataset: DATABENTO_DATASET }, signal);
     const result = await response.json(); const range = result.schema?.[schemaFor(profile.interval)] ?? result.schemas?.[schemaFor(profile.interval)];
     if (!range?.start || !range.end || !Number.isFinite(Date.parse(range.end)) || !Number.isFinite(Date.parse(range.start))) throw new SyncError(copy.marketSync.unavailable, 400, "RANGE");
     return { start: new Date(range.start), end: new Date(range.end) };
   }
   async conditions(start: Date, end: Date, signal: AbortSignal) {
-    const response = await this.request("metadata.get_dataset_condition", { dataset: "GLBX.MDP3", start_date: start.toISOString().slice(0, 10), end_date: new Date(end.getTime() - 1).toISOString().slice(0, 10) }, signal);
-    return await response.json() as Array<{ date: string; condition: string }>;
+    const response = await this.request("metadata.get_dataset_condition", { dataset: DATABENTO_DATASET, start_date: start.toISOString().slice(0, 10), end_date: new Date(end.getTime() - 1).toISOString().slice(0, 10) }, signal);
+    const conditions: Array<{ date: string; condition: string; last_modified_date?: unknown }> = await response.json();
+    return conditions.map(({ date, condition, last_modified_date }) => ({
+      date,
+      condition,
+      lastModifiedDate: validDate(last_modified_date) ? last_modified_date : null,
+    }));
   }
   async cost(profile: SyncProfile, start: Date, end: Date, signal: AbortSignal) {
     const response = await this.request("metadata.get_cost", this.params(profile, start, end), signal);
@@ -87,7 +93,7 @@ export class DatabentoProvider implements MarketProvider {
   private async resolveInstrument(instrumentId: string, profile: SyncProfile, start: Date, end: Date, signal: AbortSignal): Promise<SymbolMapping[]> {
     // The HTTP endpoint accepts precise timestamps and returns dated mappings.
     // Rounding the request to midnight can cross the account's intraday entitlement.
-    const response = await this.request("symbology.resolve", { dataset: "GLBX.MDP3", symbols: instrumentId, stype_in: "instrument_id", stype_out: "raw_symbol", start_date: start.toISOString(), end_date: end.toISOString() }, signal);
+    const response = await this.request("symbology.resolve", { dataset: DATABENTO_DATASET, symbols: instrumentId, stype_in: "instrument_id", stype_out: "raw_symbol", start_date: start.toISOString(), end_date: end.toISOString() }, signal);
     const result = await response.json(); const mappings = result?.result?.[instrumentId];
     if (!Array.isArray(mappings) || !mappings.length || mappings.some((value) => !validDate(value?.d0) || !validDate(value?.d1) || value.d0 >= value.d1 || typeof value.s !== "string" || !normalizeCmeOutrightSymbol(value.s, profile.root))) throw new SyncError(copy.marketSync.invalid, 400, "DATA");
     return mappings;

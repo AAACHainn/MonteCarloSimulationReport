@@ -8,7 +8,7 @@ vi.mock("@/lib/db", async () => {
 });
 import { queueAggregation, processAggregationJob } from "@/lib/market-replay/aggregation-jobs";
 import { prisma } from "@/lib/db";
-import { configView, enqueueSync, saveConfig, saveConnection, getConnection } from "./service";
+import { configView, enqueueSync, runView, saveConfig, saveConnection, getConnection } from "./service";
 import { executeSyncRun } from "./engine";
 import type { MarketProvider } from "./databento";
 import { DatabentoProvider } from "./databento";
@@ -180,10 +180,14 @@ describe("persistent incremental market synchronization", () => {
     expect(await prisma.marketDatasetSyncConfig.findUniqueOrThrow({ where: { datasetId: id } })).toMatchObject({ checkedThrough: through, availableThrough: through, pausedReason: null });
     expect(await prisma.marketDataset.findUniqueOrThrow({ where: { id } })).toMatchObject({ barCount: 4, endTime: new Date(through.getTime() - 60000), historyVersion: 1 });
   });
-  it("preserves history and does not publish staged rows when an overlap changes", async () => {
+  it.each(["available", "degraded"])("preserves history when an overlap changes on a %s day", async (condition) => {
     const id = await fixture(); const run = await enqueueSync(id); const revised = [bar(0), { ...bar(1), close: 100 }, bar(2)];
-    await executeSyncRun(run.id, new AbortController().signal, provider(revised));
-    expect((await prisma.marketDataSyncRun.findUnique({ where: { id: run.id } }))?.status).toBe("BLOCKED");
+    const source = provider(revised);
+    source.conditions = async () => [{ date: "2026-09-01", condition }];
+    await executeSyncRun(run.id, new AbortController().signal, source);
+    const saved = await prisma.marketDataSyncRun.findUniqueOrThrow({ where: { id: run.id } });
+    expect(runView(saved)).toMatchObject({ status: "BLOCKED", addedBars: 0, qualityWarnings: [] });
+    expect(saved.conflicts).not.toBe("[]");
     expect((await prisma.marketDataset.findUnique({ where: { id } }))?.barCount).toBe(2);
     expect((await prisma.marketDatasetSyncConfig.findUnique({ where: { datasetId: id } }))?.pausedReason).toBeTruthy();
   });
@@ -220,10 +224,76 @@ describe("persistent incremental market synchronization", () => {
     const downloads = vi.spyOn(source, "bars"); await executeSyncRun(second.id, new AbortController().signal, source);
     expect(downloads).not.toHaveBeenCalled(); expect((await prisma.marketDataSyncRun.findUnique({ where: { id: second.id } }))?.status).toBe("BLOCKED");
   });
-  it("does not advance the cursor when the provider marks a date pending", async () => {
-    const id = await fixture(); const run = await enqueueSync(id); const source = provider(); source.conditions = async (start) => [{ date: start.toISOString().slice(0, 10), condition: "pending" }];
-    const downloads = vi.spyOn(source, "bars"); await executeSyncRun(run.id, new AbortController().signal, source);
-    expect(downloads).not.toHaveBeenCalled(); expect((await prisma.marketDatasetSyncConfig.findUnique({ where: { datasetId: id } }))?.checkedThrough).toBeNull();
+  it.each([false, true])("publishes manual degraded days with per-day counts and continues (restart=%s)", async (restart) => {
+    const id = await fixture();
+    const run = await enqueueSync(id);
+    const source = provider([0, 1, 2, 1440, 1441, 2880].map(bar));
+    const firstDayEnd = new Date(base + 86400000);
+    const through = new Date(base + 2881 * 60000);
+    source.range = async () => ({ start: new Date(base), end: through });
+    source.conditions = async (start) => [{
+      date: start.toISOString().slice(0, 10),
+      condition: start.getTime() < base + 2 * 86400000 ? "degraded" : "available",
+    }];
+    const firstWarning = { dateUtc: "2026-09-01", addedBars: 1 };
+    if (restart) {
+      const controller = new AbortController();
+      const interrupted = { ...source, conditions: async (start: Date, end: Date, signal: AbortSignal) => {
+        if (start >= firstDayEnd) controller.abort();
+        signal.throwIfAborted();
+        return source.conditions(start, end, signal);
+      } };
+      await executeSyncRun(run.id, controller.signal, interrupted);
+      const partial = await prisma.marketDataSyncRun.findUniqueOrThrow({ where: { id: run.id } });
+      expect(partial).toMatchObject({ status: "INTERRUPTED", cursor: firstDayEnd, addedBars: 1 });
+      expect(runView(partial).qualityWarnings).toEqual([firstWarning]);
+    }
+    await executeSyncRun(run.id, new AbortController().signal, source);
+    const saved = await prisma.marketDataSyncRun.findUniqueOrThrow({ where: { id: run.id } });
+    expect(saved).toMatchObject({ status: "COMPLETED", cursor: through, addedBars: 4, error: null });
+    expect(runView(saved).qualityWarnings).toEqual([firstWarning, { dateUtc: "2026-09-02", addedBars: 2 }]);
+    expect(JSON.parse(saved.mappings)).toMatchObject({ "2026-09-01": "ESU6", "2026-09-02": "ESU6", "2026-09-03": "ESU6" });
+    expect(await prisma.marketDataset.findUniqueOrThrow({ where: { id } })).toMatchObject({ barCount: 6, historyVersion: 1 });
+  });
+  it.each([
+    { condition: "degraded", modified: "2026-09-02", expected: "degraded", expectedModified: "2026-09-02" },
+    { condition: "pending", modified: null, expected: "pending", expectedModified: null },
+    { condition: "missing", modified: null, expected: "missing", expectedModified: null },
+    { condition: undefined, modified: null, expected: "not_reported", expectedModified: null },
+    { condition: "secret-provider-payload", modified: "secret-provider-payload", expected: "unknown", expectedModified: null },
+  ])("logs a $expected day without downloading or advancing the cursor", async ({ condition, modified, expected, expectedModified }) => {
+    const id = await fixture();
+    const run = await enqueueSync(id, condition === "degraded" ? "SCHEDULED" : "MANUAL");
+    const start = new Date(base);
+    const end = new Date(base + 240000);
+    const date = start.toISOString().slice(0, 10);
+    const fetcher = vi.fn()
+      .mockResolvedValueOnce(Response.json({ schema: { "ohlcv-1m": { start: start.toISOString(), end: end.toISOString() } } }))
+      .mockResolvedValueOnce(Response.json(condition === undefined ? [] : [{ date, condition, last_modified_date: modified }]));
+    const log = vi.spyOn(console, "warn").mockImplementation(() => {});
+    try {
+      await executeSyncRun(run.id, new AbortController().signal, new DatabentoProvider("mock-databento-api-key", fetcher));
+      expect(fetcher).toHaveBeenCalledTimes(2);
+      expect(await prisma.marketDataSyncRun.findUniqueOrThrow({ where: { id: run.id } })).toMatchObject({ status: "BLOCKED", cursor: start, addedBars: 0, estimatedCost: 0 });
+      expect((await prisma.marketDatasetSyncConfig.findUniqueOrThrow({ where: { datasetId: id } })).checkedThrough).toBeNull();
+      expect(log).toHaveBeenCalledTimes(1);
+      const entry = log.mock.calls[0][0];
+      expect(JSON.parse(entry)).toEqual({
+        event: "market-sync-quality",
+        runId: run.id,
+        datasetId: id,
+        providerDataset: "GLBX.MDP3",
+        symbol: "ES.v.0",
+        schema: "ohlcv-1m",
+        segmentStartUtc: start.toISOString(),
+        segmentEndExclusiveUtc: end.toISOString(),
+        conditionDate: date,
+        providerCondition: expected,
+        action: "blocked",
+        providerLastModifiedDate: expectedModified,
+      });
+      expect(entry).not.toMatch(/secret-provider-payload|mock-databento-api-key/);
+    } finally { log.mockRestore(); }
   });
   it("persists licensing errors and logs structured diagnostics without advancing or publishing", async () => {
     const id = await fixture(); const run = await enqueueSync(id); const source = provider();

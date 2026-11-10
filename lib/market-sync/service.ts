@@ -2,12 +2,15 @@ import { prisma } from "@/lib/db";
 import { copy } from "@/lib/i18n";
 import { decryptKey, encryptKey, encryptionReady, SyncError } from "./security";
 import { DatabentoProvider } from "./databento";
-import { defaultSchedule, syncConfigSchema, type SyncConfigView, type SyncSettings } from "./types";
+import { defaultSchedule, syncConfigSchema, type SyncConfigView, type SyncRunMappings, type SyncRunView, type SyncSettings } from "./types";
 import { nextScheduledAt } from "./schedule";
 import { acquireDatasetLease, assertDatasetIdle, releaseDatasetLease } from "./lease";
 import type { MarketDataSyncRun } from "@prisma/client";
 
-export function runView(run: MarketDataSyncRun) { return { id: run.id, status: run.status, stage: run.stage, addedBars: run.addedBars, estimatedCost: run.estimatedCost, error: run.error, conflicts: run.conflicts, updatedAt: run.updatedAt.toISOString() }; }
+export function runView(run: MarketDataSyncRun): SyncRunView {
+  const { qualityWarnings = [] } = JSON.parse(run.mappings) as SyncRunMappings;
+  return { id: run.id, status: run.status, stage: run.stage, addedBars: run.addedBars, estimatedCost: run.estimatedCost, error: run.error, conflicts: run.conflicts, qualityWarnings, updatedAt: run.updatedAt.toISOString() };
+}
 export async function getConnection() {
   const connection = await prisma.marketDataConnection.findUnique({ where: { id: "databento" } });
   return { configured: Boolean(connection), encryptionReady: encryptionReady(), suffix: connection?.keySuffix ?? null, status: connection?.status ?? "UNCONFIGURED", testedAt: connection?.testedAt?.toISOString() ?? null, error: connection?.error ?? null };
