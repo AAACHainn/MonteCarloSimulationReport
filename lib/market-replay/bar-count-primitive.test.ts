@@ -62,11 +62,57 @@ describe("Bar Count primitive export scale", () => {
     const input = { bars, displaySession: "RTH" as const, displayIntervalSeconds: 300, session, config: DEFAULT_BAR_COUNT_CONFIG };
     primitive.setData(input); draw();
     expect(context.fillText).toHaveBeenCalled();
-    for (const overrides of [{ displaySession: "ETH" as const }, { displayIntervalSeconds: 7200 }, { config: { ...DEFAULT_BAR_COUNT_CONFIG, enabled: false } }]) {
+    for (const overrides of [{ displaySession: "ETH" as const, legacy: true }, { displayIntervalSeconds: 7200 }, { config: { ...DEFAULT_BAR_COUNT_CONFIG, enabled: false } }]) {
       context.fillText.mockClear();
       primitive.setData({ ...input, ...overrides }); draw();
       expect(context.fillText).not.toHaveBeenCalled();
     }
     primitive.detached();
   });
+});
+
+it("invalidates ETH labels on boundary color/session changes, appends, and trading-day rollover", () => {
+  const { primitive, context, draw } = mounted(2.8);
+  const eth = { ...session, mode: "OVERNIGHT_SESSION" as const, openMinute: 1020, closeMinute: 960 };
+  const input = { bars: bars.slice(0, 2), displaySession: "ETH" as const, displayIntervalSeconds: 300, session: eth, rthSession: session, config: { ...DEFAULT_BAR_COUNT_CONFIG, interval: 100 } };
+  primitive.setData(input); draw();
+  expect(context.fillText.mock.calls.map(([text]) => text)).toEqual(["187"]);
+  expect(context.fillStyle).toBe(DEFAULT_BAR_COUNT_CONFIG.rthBoundaryColor);
+  const config = { ...input.config, rthBoundaryColor: "#123ABC" };
+  context.fillText.mockClear();
+  primitive.setData({ ...input, config }); draw();
+  expect(context.fillStyle).toBe("#123ABC");
+  context.fillText.mockClear();
+  primitive.setData({ ...input, config, rthSession: { ...session, openMinute: 515 } }); draw();
+  expect(context.fillText.mock.calls.map(([text]) => text)).toEqual(["188"]);
+  context.fillText.mockClear();
+  primitive.setData({ ...input, config, bars: bars.slice(0, 3) }); draw();
+  expect(context.fillText.mock.calls.map(([text]) => text)).toEqual(["187"]);
+  context.fillText.mockClear();
+  primitive.setData({ ...input, config, rthSession: null }); draw();
+  expect(context.fillText).not.toHaveBeenCalled();
+  const nextOpen = { ...bars[0], timestamp: "2026-09-08T22:00:00Z", bucketEnd: "2026-09-08T22:05:00Z" };
+  primitive.setData({ ...input, config: { ...config, recentTradingDays: 1 }, bars: [...input.bars, nextOpen] }); draw();
+  expect(context.fillText.mock.calls.map(([text]) => text)).toEqual(["1"]);
+});
+
+it.each([1, 2.8])("updates and trims 24/7 labels over UTC midnight at scale %s", (scale) => {
+  const { primitive, context, draw } = mounted(scale);
+  const session = { mode: "TWENTY_FOUR_SEVEN" as const, timezone: "Asia/Shanghai", openMinute: null, closeMinute: null, weekdays: [1, 2, 3, 4, 5, 6, 7] };
+  const times = ["2026-11-13T23:55:00Z", "2026-11-14T00:00:00Z", "2026-11-14T00:05:00Z"];
+  const data = times.map((timestamp, i) => ({ ...bars[i], timestamp, bucketEnd: new Date(Date.parse(timestamp) + 300000).toISOString() }));
+  const input = { displaySession: "ETH" as const, displayIntervalSeconds: 300, session, config: { ...DEFAULT_BAR_COUNT_CONFIG, recentTradingDays: 1 } };
+  primitive.setData({ ...input, bars: data.slice(0, 1) }); draw();
+  expect(context.fillText.mock.calls.map(([text]) => text)).toEqual(["288"]);
+  context.fillText.mockClear();
+  primitive.setData({ ...input, bars: data.slice(0, 2) }); draw();
+  expect(context.fillText.mock.calls.map(([text]) => text)).toEqual(["1"]);
+  context.fillText.mockClear();
+  primitive.setData({ ...input, bars: data }); draw();
+  expect(context.fillText.mock.calls.map(([text]) => text)).toEqual(["1", "2"]);
+  context.fillText.mockClear();
+  primitive.setData({ ...input, bars: data, allowContinuous: false }); draw();
+  expect(context.fillText).not.toHaveBeenCalled();
+  primitive.setData({ ...input, bars: data }); draw();
+  expect(context.fillText.mock.calls.map(([text]) => text)).toEqual(["1", "2"]);
 });

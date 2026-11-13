@@ -278,6 +278,7 @@ export function IndicatorSettingsDialog({
                     ["regularColor", copy.marketReplay.barCountRegularColor],
                     ["bar18Color", copy.marketReplay.barCountBar18Color],
                     ["hourCloseColor", copy.marketReplay.barCountHourCloseColor],
+                    ["rthBoundaryColor", copy.marketReplay.barCountRthBoundaryColor],
                   ] as const).map(([key, label]) => (
                     <ColorField key={key} id={`indicator-bar-count-${key}`} label={label} value={barCountConfig[key]} onChange={(value) => setBarCountConfig((current) => ({ ...current, [key]: value }))} />
                   ))}

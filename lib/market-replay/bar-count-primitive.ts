@@ -11,26 +11,15 @@ import {
   buildBarCountLabels,
   buildBarCountLabelWindow,
   type BarCountLabel,
+  type BarCountInput,
 } from "./bar-count";
 import { tradingDayForTimestamp } from "./chunks";
-import type {
-  AggregatedMarketBarData,
-  BarCountIndicatorConfig,
-  DisplaySession,
-  TradingSessionConfig,
-} from "./types";
 
 const LABEL_OFFSET = 12;
 const LABEL_HEIGHT = 12;
 const MIN_LABEL_SPACING = 11;
 
-type PrimitiveSnapshot = {
-  bars: AggregatedMarketBarData[];
-  displaySession: DisplaySession;
-  displayIntervalSeconds: number;
-  session: TradingSessionConfig;
-  config: BarCountIndicatorConfig;
-};
+type PrimitiveSnapshot = BarCountInput;
 
 type ProjectedLabel = {
   kind: BarCountLabel["kind"];
@@ -149,6 +138,14 @@ export class BarCountPrimitive implements ISeriesPrimitive<Time> {
       snapshot.config.regularColor,
       snapshot.config.bar18Color,
       snapshot.config.hourCloseColor,
+      snapshot.config.rthBoundaryColor,
+      snapshot.legacy,
+      snapshot.allowContinuous,
+      snapshot.rthSession?.mode,
+      snapshot.rthSession?.timezone,
+      snapshot.rthSession?.openMinute,
+      snapshot.rthSession?.closeMinute,
+      snapshot.rthSession?.weekdays.join(","),
       snapshot.session.mode,
       snapshot.session.timezone,
       snapshot.session.openMinute,

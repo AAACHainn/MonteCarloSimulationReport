@@ -1,5 +1,5 @@
 import { CandlestickSeries, ColorType, createChart, CrosshairMode, HistogramSeries, LineSeries, type UTCTimestamp, type Time, type TickMarkType } from "lightweight-charts";
-import { CURRENT_CHART_RENDERER_VERSION } from "./snapshot-version";
+import { ETH_BAR_COUNT_RENDERER_VERSION, CONTINUOUS_BAR_COUNT_RENDERER_VERSION } from "./snapshot-version";
 import { chartThemes } from "@/lib/chart-theme";
 import { candlestickSeriesStyleOptions, resolveSnapshotCandlestickStyle } from "@/lib/market-replay/candlestick-style";
 import { calculateEmaSeries } from "@/lib/market-replay/ema";
@@ -39,10 +39,10 @@ export function createChartSnapshotRenderer(
   container: HTMLElement,
   preferences: PdfChartPreferences,
   tick: number,
-  display: Pick<PdfOptions, "displaySession" | "displayIntervalSeconds"> & { session: TradingSessionConfig },
+  display: Pick<PdfOptions, "displaySession" | "displayIntervalSeconds"> & { session: TradingSessionConfig; rthSession?: TradingSessionConfig | null },
   rendererVersion: number,
 ) {
-  const style = rendererVersion === CURRENT_CHART_RENDERER_VERSION
+  const style = rendererVersion >= 3
     ? resolveSnapshotCandlestickStyle(preferences.candlestickStyle) : { ...preferences.candlestickStyle };
   const theme = chartThemes.light;
   const chart = createChart(container, {
@@ -95,7 +95,10 @@ export function createChartSnapshotRenderer(
       if (priceMax <= priceMin) { priceMin -= tick; priceMax += tick; }
       candles.setData(bars.map(chartCandleData));
       volume?.setData(bars.filter((b) => b.volume !== null).map((b) => chartVolumeData(b, style.upColor + "55", style.downColor + "55")));
-      barCount.setData({ bars, ...display, config: preferences.barCountConfig });
+      barCount.setData({ bars, ...display,
+        legacy: rendererVersion < ETH_BAR_COUNT_RENDERER_VERSION,
+        allowContinuous: rendererVersion >= CONTINUOUS_BAR_COUNT_RENDERER_VERSION,
+        config: preferences.barCountConfig });
       primitive.setData({ bars, entries: annotations });
       chart.timeScale().setVisibleLogicalRange({ from: -0.5, to: bars.length + Math.max(3, Math.ceil(bars.length * 0.04)) });
       chart.priceScale("right").applyOptions({ autoScale: true });

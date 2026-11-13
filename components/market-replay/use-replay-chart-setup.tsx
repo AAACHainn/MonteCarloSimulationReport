@@ -43,7 +43,7 @@ export function useReplayChartSetup(core: ReturnType<typeof useReplayChartCore>)
     syncMeasurementCoordinates, syncVisibleSequenceRange, restoreCrosshair, setChartCursor, dataRevision, priceTickSize, bars,
     displayUtcOffsetMinutes, displayIntervalSeconds, candlestickStyle, gridVisible, trendLineDraftStyle, fibonacciDraftStyle,
     rectangleDraftStyle, emaEnabled, emaIndicators, volumeVisible, displaySession, barCountSession,
-    barCountConfig, paperSnapshot, tradeAnnotations, focusSequence, tradeAnnotationsVisible, candleCountdownEnabled,
+    barCountRthSession, barCountConfig, paperSnapshot, tradeAnnotations, focusSequence, tradeAnnotationsVisible, candleCountdownEnabled,
     playbackActive, currentSourceTimestamp, sourceIntervalSeconds, readOnly,
   } = core;
   const { mode } = useAppearance();
@@ -386,9 +386,10 @@ export function useReplayChartSetup(core: ReturnType<typeof useReplayChartCore>)
       displaySession,
       displayIntervalSeconds,
       session: barCountSession,
+      rthSession: barCountRthSession,
       config: barCountConfig,
     });
-  }, [barCountConfig, barCountSession, visibleBars, displayIntervalSeconds, displaySession, barCountPrimitiveRef]);
+  }, [barCountConfig, barCountSession, barCountRthSession, visibleBars, displayIntervalSeconds, displaySession, barCountPrimitiveRef]);
 
   useEffect(() => {
     candleCountdownPrimitiveRef.current?.setData({

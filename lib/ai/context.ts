@@ -20,7 +20,7 @@ import { ensureAiStorage } from "./config";
 import { AiError } from "./errors";
 import { displayIntervalOptions } from "@/lib/market-replay/display-interval";
 import { parseSourceInterval } from "@/lib/market-replay/types";
-import { defaultChartPreferences } from "./chart-contract";
+import { defaultChartPreferences, chartPreferencesSchema } from "./chart-contract";
 import type { PdfChartPreferences } from "@/lib/paper-trading/pdf-types";
 import type { StatisticInput } from "./statistics-v1";
 import { entryLotId, isFifoRowExit } from "@/lib/paper-trading/journal-identity";
@@ -56,7 +56,7 @@ export type ContextValue = {
   entries: ContextEntry[]; charts: ContextChart[];
   events: ContextEvent[];
   metrics: ReturnType<typeof sessionMetrics>; sourceHash: string;
-  display: { displayIntervalSeconds: number; displaySession: "ETH" | "RTH"; session: TradingSessionConfig };
+  display: { displayIntervalSeconds: number; displaySession: "ETH" | "RTH"; session: TradingSessionConfig; rthSession?: TradingSessionConfig | null };
   warnings: string[];
   chartPlans?: ChartPlan[]; chartPreferences?: PdfChartPreferences;
   statisticInput?: StatisticInput;
@@ -139,7 +139,9 @@ export async function createContext(input: z.input<typeof contextRequestSchema>)
   });
   const charts: ContextChart[] = [];
   const chartPlans: ChartPlan[] = [];
-  const chartPreferences = input.chartPreferences ?? defaultChartPreferences(selected?.displayUtcOffsetMinutes ?? 0);
+  const chartPreferences = input.chartPreferences
+    ? chartPreferencesSchema.parse(input.chartPreferences)
+    : defaultChartPreferences(selected?.displayUtcOffsetMinutes ?? 0);
   const lotFillById = new Map(fixed.lots.map((lot) => [lot.id, lot.entryFillId]));
   const events: ContextEvent[] = fixed.fills.map((fill) => ({
     sourceId: "fill:" + hashValue(logicalId(fill.id)).slice(0, 16), cycleKey: fill.cycleKey,
@@ -234,7 +236,7 @@ export async function createContext(input: z.input<typeof contextRequestSchema>)
     selectedEntryId: input.entryId, originalDraft: input.draft, depth: input.depth ?? "quick",
     template: fixed.template, entries, charts, events, metrics: sessionMetrics(fixed.trades, entries),
     sourceHash: hashValue(entries.map((e) => [e.logicalKey, e.review, e.setupOptionId, e.tradeReasons])),
-    display: { displayIntervalSeconds: displaySeconds, displaySession, session: tradingSession },
+    display: { displayIntervalSeconds: displaySeconds, displaySession, session: tradingSession, rthSession: resolveDisplaySession(dataset, "RTH") },
     chartPlans, chartPreferences, imageTimeframes: input.timeframes, chartAccess: input.chartAccess, currentChart, chartWindow: input.chartWindow,
     ...(!input.entryId && fixed.account ? { statisticInput: { specVersion: "1" as const, currency: fixed.account.currency, endSequence: fixed.session.activeProjection!.currentSequence,
       trades: fixed.trades.map((t) => ({ ...t, status: t.status as "CLOSED" | "OPEN" })) } } : {}),

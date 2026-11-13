@@ -15,7 +15,7 @@ afterEach(() => vi.unstubAllGlobals());
 
 describe("PDF chart preference capture", () => {
   it("captures every saved Bar Count setting without writing replay preferences", () => {
-    const config = { enabled: true, interval: 2, recentTradingDays: 4, regularColor: "#123456", bar18Color: "#AB1234", hourCloseColor: "#456789" };
+    const config = { enabled: true, interval: 2, recentTradingDays: 4, regularColor: "#123456", bar18Color: "#AB1234", hourCloseColor: "#456789", rthBoundaryColor: "#12AB34" };
     stored.set("market-replay-bar-count-settings-v1", JSON.stringify(config));
     const captured = capturePdfChartPreferences(dataset);
     expect(captured.barCountConfig).toEqual(config);

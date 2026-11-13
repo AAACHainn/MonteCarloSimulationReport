@@ -94,7 +94,7 @@ export function MarketReplayClient({ dataset: initialDataset, initialJournalFocu
     setDefaultRectangleStyle, rectangleTemplates, setRectangleTemplates, arrowStyleId, setArrowStyleId, arrowPreferences, setArrowPreferences, setDefaultTextStyle, textTemplates, setTextTemplates,
     defaultTrendLineStyle, setDefaultTrendLineStyle, trendLineTemplates, setTrendLineTemplates, defaultFibonacciStyle, setDefaultFibonacciStyle,
     fibonacciTemplates, setFibonacciTemplates, abcdPreferences, setAbcdPreferences, displayUtcOffsetMinutes, setDisplayUtcOffsetMinutes, textDrawing, drawingWriteScope,
-    drawingsLive, visibleBarCountConfig, chartMarketSession,
+    drawingsLive, visibleBarCountConfig, chartMarketSession, barCountRthSession,
   } = core;
   const {
     armDrawing, changeChartVisibility, createDrawing, updateDrawing,
@@ -345,6 +345,7 @@ export function MarketReplayClient({ dataset: initialDataset, initialJournalFocu
             onToggleGrid={() => setGridVisible((current) => !current)}
             displaySession={chartDisplay?.displaySession ?? replay.displaySession}
             barCountSession={chartMarketSession}
+            barCountRthSession={barCountRthSession}
             barCountConfig={visibleBarCountConfig}
             paperSnapshot={journalReview ? null : paperSnapshot}
             tradeAnnotations={tradeAnnotations}

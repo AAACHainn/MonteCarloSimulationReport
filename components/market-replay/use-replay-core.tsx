@@ -247,6 +247,7 @@ export function useReplayCore({ dataset: initialDataset, initialJournalFocus = n
   const displayMarketSession = useMemo(() => (
     resolveDisplaySession(dataset, replay?.displaySession ?? "ETH") ?? marketSession
   ), [dataset, marketSession, replay?.displaySession]);
+  const barCountRthSession = useMemo(() => resolveDisplaySession(dataset, "RTH"), [dataset]);
   const appliedChartSession = chartDisplay?.displaySession ?? replay?.displaySession ?? "ETH";
   const chartMarketSession = useMemo(() => resolveDisplaySession(dataset, appliedChartSession) ?? marketSession,
     [dataset, appliedChartSession, marketSession]);
@@ -351,7 +352,7 @@ export function useReplayCore({ dataset: initialDataset, initialJournalFocus = n
     defaultFibonacciStyle, setDefaultFibonacciStyle, fibonacciTemplates, setFibonacciTemplates, displayUtcOffsetMinutes, setDisplayUtcOffsetMinutes,
     textDrawing, openTextDrawing, finishText, discardText, requestTextSettings, drawingWriteScope,
     drawingScopeGuard, drawingsLive, visibleBarCountConfig, emaWarmupCount, indicatorWarmupCount, indicatorWarmupCountRef,
-    previousIndicatorWarmupCountRef, skipNextIndicatorReloadRef, manualStepsRef, stepShortcutRef, marketSession, displayMarketSession, chartMarketSession,
+    previousIndicatorWarmupCountRef, skipNextIndicatorReloadRef, manualStepsRef, stepShortcutRef, marketSession, displayMarketSession, chartMarketSession, barCountRthSession,
     marketCache, getDisplayCache, windowCache, barsRef, warmupBarsRef, playbackDisplayRef, currentSourceBarRef,
     recoveryRequiredRef, viewChangingRef, windowRequestRef, windowAbortRef, windowPrefetchAbortRef, annotationAbortRef,
     annotationRequestRef, annotationCoverageRef, annotationTimerRef, historyAbortRef, historyLoadingRef, historyHasEarlierRef,

@@ -126,7 +126,7 @@ export function PdfExportProvider({ children }: { children: ReactNode }) {
       const { createPdfChartRenderer, waitForVisible } = await import("@/lib/paper-trading/pdf-renderer");
       await waitForVisible(signal);
       if (!containerRef.current) throw new Error(t.failed);
-      renderer = createPdfChartRenderer(containerRef.current, preferences, snapshot.dataset.priceTickSize, { ...options, session }, CURRENT_CHART_RENDERER_VERSION);
+      renderer = createPdfChartRenderer(containerRef.current, preferences, snapshot.dataset.priceTickSize, { ...options, session, rthSession: resolveDisplaySession(snapshot.dataset, "RTH") }, CURRENT_CHART_RENDERER_VERSION);
       worker = connectWorker(signal);
       const font = job.font.slice(0);
       await worker.send({ id: 0, type: "init", font, metadata: { snapshot, options, preferences, volume: job.volume + 1, volumes, totalCharts: job.pages.length, chartOffset: offset, pages } }, [font]);

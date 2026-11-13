@@ -258,6 +258,7 @@ export function HistoricalReplayClient({
     void extendHistoryWindow(range);
   }, [extendHistoryWindow]);
 
+  const barCountRthSession = useMemo(() => resolveDisplaySession(dataset, "RTH"), [dataset]);
   const barCountSession = useMemo(
     () => resolveDisplaySession(dataset, session.displaySession) ?? datasetSession(dataset),
     [dataset, session.displaySession],
@@ -580,6 +581,7 @@ export function HistoricalReplayClient({
           gridVisible={gridVisible}
           displaySession={session.displaySession}
           barCountSession={barCountSession}
+          barCountRthSession={barCountRthSession}
           barCountConfig={visibleBarCountConfig}
           paperSnapshot={null}
           tradeAnnotations={annotations}

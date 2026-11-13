@@ -79,6 +79,7 @@ export type BarCountIndicatorConfig = {
   regularColor: string;
   bar18Color: string;
   hourCloseColor: string;
+  rthBoundaryColor: string;
 };
 
 export type MarketBarData = {

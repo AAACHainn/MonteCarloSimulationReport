@@ -215,6 +215,7 @@ export type ReplayChartProps = {
   onToggleGrid?: () => void;
   displaySession: DisplaySession;
   barCountSession: TradingSessionConfig;
+  barCountRthSession?: TradingSessionConfig | null;
   barCountConfig: BarCountIndicatorConfig;
   paperSnapshot: PaperSessionSnapshot | null;
   tradeAnnotations: ReplayTradeAnnotationData[];

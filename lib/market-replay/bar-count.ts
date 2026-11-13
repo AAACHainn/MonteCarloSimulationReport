@@ -21,9 +21,10 @@ export const DEFAULT_BAR_COUNT_CONFIG: BarCountIndicatorConfig = {
   regularColor: "#64748B",
   bar18Color: "#DC2626",
   hourCloseColor: "#2563EB",
+  rthBoundaryColor: "#0D9488",
 };
 
-export type BarCountLabelKind = "REGULAR" | "BAR_18" | "HOUR_CLOSE";
+export type BarCountLabelKind = "REGULAR" | "BAR_18" | "HOUR_CLOSE" | "RTH_BOUNDARY";
 
 export type BarCountLabel = {
   index: number;
@@ -32,11 +33,16 @@ export type BarCountLabel = {
   color: string;
 };
 
-type BarCountInput = {
+export type BarCountInput = {
   bars: AggregatedMarketBarData[];
   displaySession: DisplaySession;
   displayIntervalSeconds: number;
   session: TradingSessionConfig;
+  rthSession?: TradingSessionConfig | null;
+  /** Frozen screenshot versions before ETH Bar Count support. */
+  legacy?: boolean;
+  /** Versions before 5 did not label 24/7 markets. Defaults to enabled for live charts. */
+  allowContinuous?: boolean;
   config: BarCountIndicatorConfig;
 };
 
@@ -61,10 +67,16 @@ export function barCountWindowStartIndex(
   if (!bars.length || !isValidBarCountRecentTradingDays(recentTradingDays)) return bars.length;
   let lastTradingDay: string | null = null;
   let tradingDayCount = 0;
+  let continuousCutoff: number | null = null;
   for (let index = bars.length - 1; index >= 0; index -= 1) {
     const timestamp = Date.parse(bars[index].timestamp);
     if (!Number.isFinite(timestamp)) continue;
     const tradingDay = tradingDayForTimestamp(timestamp, session);
+    if (session.mode === "TWENTY_FOUR_SEVEN") {
+      continuousCutoff ??= tradingDayBounds(tradingDay, session).start - (recentTradingDays - 1) * 24 * HOUR_MS;
+      if (timestamp < continuousCutoff) return index + 1;
+      continue;
+    }
     if (tradingDay !== lastTradingDay) {
       tradingDayCount += 1;
       if (tradingDayCount > recentTradingDays) return index + 1;
@@ -79,11 +91,17 @@ export function canDisplayBarCount({
   displayIntervalSeconds,
   session,
   config,
+  legacy = false,
+  allowContinuous = true,
 }: Omit<BarCountInput, "bars">) {
+  const supportsSession = session.mode === "TWENTY_FOUR_SEVEN"
+    ? !legacy && allowContinuous && displaySession === "ETH"
+    : session.mode === "DAILY_SESSION" || (!legacy && session.mode === "OVERNIGHT_SESSION");
   return config.enabled
-    && displaySession === "RTH"
+    && (!legacy || displaySession === "RTH")
+    && displayIntervalSeconds > 0
     && displayIntervalSeconds <= 3_600
-    && session.mode === "DAILY_SESSION"
+    && supportsSession
     && isValidBarCountInterval(config.interval)
     && isValidBarCountRecentTradingDays(config.recentTradingDays);
 }
@@ -103,6 +121,8 @@ export function parseBarCountPreferences(value: string | null): BarCountIndicato
         ? parsed.bar18Color.toUpperCase() : DEFAULT_BAR_COUNT_CONFIG.bar18Color,
       hourCloseColor: typeof parsed.hourCloseColor === "string" && HEX_COLOR.test(parsed.hourCloseColor)
         ? parsed.hourCloseColor.toUpperCase() : DEFAULT_BAR_COUNT_CONFIG.hourCloseColor,
+      rthBoundaryColor: typeof parsed.rthBoundaryColor === "string" && HEX_COLOR.test(parsed.rthBoundaryColor)
+        ? parsed.rthBoundaryColor.toUpperCase() : DEFAULT_BAR_COUNT_CONFIG.rthBoundaryColor,
     };
   } catch {
     return { ...DEFAULT_BAR_COUNT_CONFIG };
@@ -115,6 +135,9 @@ export function buildBarCountLabels(input: BarCountInput): BarCountLabel[] {
 
   const intervalMs = displayIntervalSeconds * 1_000;
   const boundsByDay = new Map<string, { start: number; end: number }>();
+  const rthBoundsByDay = new Map<string, { start: number; end: number }>();
+  const continuous = session.mode === "TWENTY_FOUR_SEVEN";
+  const rthSession = continuous ? null : input.displaySession === "RTH" ? session : input.rthSession;
   const labels: BarCountLabel[] = [];
 
   for (let index = 0; index < bars.length; index += 1) {
@@ -129,25 +152,42 @@ export function buildBarCountLabels(input: BarCountInput): BarCountLabel[] {
       bounds = tradingDayBounds(tradingDay, session);
       boundsByDay.set(tradingDay, bounds);
     }
-    const elapsed = start - bounds.start;
+    // Continuous aggregation keeps the same UTC grid across midnight. The first
+    // slot starting inside the date may therefore be later than 00:00 (e.g. 7m).
+    const firstSlotStart = continuous ? Math.ceil(bounds.start / intervalMs) * intervalMs : bounds.start;
+    const elapsed = start - firstSlotStart;
     if (elapsed < 0 || start >= bounds.end || elapsed % intervalMs !== 0) continue;
 
     const number = Math.floor(elapsed / intervalMs) + 1;
-    const isBar18 = displayIntervalSeconds === FIVE_MINUTES_SECONDS && number === 18;
+    const isBar18 = input.displaySession === "RTH" && displayIntervalSeconds === FIVE_MINUTES_SECONDS && number === 18;
+    let isRthBoundary = false;
+    if (!input.legacy && rthSession) {
+      let rthBounds = rthBoundsByDay.get(tradingDay);
+      if (!rthBounds) {
+        rthBounds = tradingDayBounds(tradingDay, rthSession);
+        rthBoundsByDay.set(tradingDay, rthBounds);
+      }
+      // Opening belongs to [start, end); closing belongs to (start, end].
+      // Missing boundary buckets never transfer their marker to a neighbour.
+      isRthBoundary = (start <= rthBounds.start && end > rthBounds.start)
+        || (start < rthBounds.end && end >= rthBounds.end);
+    }
     const isHourClose = end > bounds.start && end <= bounds.end && (end - bounds.start) % HOUR_MS === 0;
     const displayStep = config.interval + 1;
-    if (number % displayStep !== 0 && number !== 1 && !isBar18 && !isHourClose) continue;
+    if (number % displayStep !== 0 && number !== 1 && !isBar18 && !isHourClose && !isRthBoundary) continue;
 
-    const kind: BarCountLabelKind = isBar18 ? "BAR_18" : isHourClose ? "HOUR_CLOSE" : "REGULAR";
+    const kind: BarCountLabelKind = isRthBoundary ? "RTH_BOUNDARY" : isBar18 ? "BAR_18" : isHourClose ? "HOUR_CLOSE" : "REGULAR";
     labels.push({
       index,
       number,
       kind,
-      color: kind === "BAR_18"
-        ? config.bar18Color
-        : kind === "HOUR_CLOSE"
-          ? config.hourCloseColor
-          : config.regularColor,
+      color: kind === "RTH_BOUNDARY"
+        ? config.rthBoundaryColor
+        : kind === "BAR_18"
+          ? config.bar18Color
+          : kind === "HOUR_CLOSE"
+            ? config.hourCloseColor
+            : config.regularColor,
     });
   }
 
