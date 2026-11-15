@@ -13,6 +13,20 @@
 - 纠错在后台分块重建，按预览、确认流程替换当前结果。取消、失败或中断保留原状态并清理临时预览；旧页面或其他会话的写入须由会话身份、projection 与版本校验拒绝。
 - 回放推进按源 K 线序号撮合。批量保存进度、账户、订单、成交、交易周期、日志与权益采样应保持原子性；重试沿用请求编号与请求内容，响应丢失不能重复成交。绘图和显示周期变化不得改动撮合规则。
 
+## 图表样式与显示边界
+
+- 实时回放、历史只读回放和网页全屏共用“图表样式”：K 线图保留既有配色预设及主体 / 边框 / 影线设置；折线图仅选择收盘价或开盘价和线条颜色，默认收盘价、蓝色 `#2563EB`、2 px 实线，相邻已存在时间点直线连接。切换类型不自动覆盖任何自定义颜色，两种主题各沿用用户已选值。
+- 选择即时预览；确认才保存，取消、Escape 和关闭恢复面板打开前的完整配置。切换类型保留两种图形各自设置、同一图表实例、时间视口和跟随状态、绘图选择、订单草稿、订单 / 持仓线及已挂载标注和指标；依赖主价格序列的 primitive 解绑后重新挂载并恢复数据，事件订阅不能重复累加。
+- 折线点来自当前显示周期已聚合柱的 open 或 close；形成中的 close 随已揭示源行情更新。沿用原时间点、缺失柱及隐藏边界，隐藏部分只保留无价格时间占位；切换显示周期不显示跨越隐藏边界的聚合柱，不补造行情或泄露未揭示数据。
+- 类型和价格来源只影响主价格图形。EMA、ABR、Bar Count、成交量、成交标注仍使用原 OHLC / 源行情规则；撮合、进度、持仓盈亏与订单方向判断继续使用原真实价格，开盘价折线不得代替最新真实收盘价。
+- 旧浏览器默认显示 K 线图；既有 `market-replay-candlestick-style-v1` 六色及可见性偏好不迁移、不覆盖。新增版本化 `market-replay-chart-display-v1` 只保存 `chartType` 和折线 `priceSource / color`，统一页面配置在内存组合既有 K 线偏好。非法值回退 K 线 / 收盘价 / 默认蓝色；存储不可用时仍允许当前页预览与切换。本功能不新增数据库字段或交易 API。
+- PDF 与 AI 图像继续按既有独立浅色 K 线渲染。页面图表类型及折线偏好不进入导出冻结配置、图片哈希或渲染版本；相关规则仍见 [PDF 规范](replay-pdf-export.md)和 [AI 图片契约](../ai/ai-chart-images.md)。
+
+### 隔离验收入口
+
+[`/preview/chart-style`](../../app/preview/chart-style/page.tsx) 仅在 `USER_GROWTH_PREVIEW=1` 时开放，使用[真实 ReplayChart 与设置面板](../../components/market-replay/chart-style-preview.tsx)及合成已揭示行情、浏览器内存账户，不加载用户、AI 或 PDF Provider，不请求业务 API。验收应使用独立端口与输出目录，并将 DATABASE_URL 指向不存在的专用临时文件，不能使用真实账户或数据库。
+
+预览提供两主题、实时 / 历史只读、网页全屏、源柱推进、形成中价格更新、显示周期切换、手动平移和重置、绘图工具、预置绘图 / 订单 / 成交标注 / 指标；右键可建立本地订单草稿。诊断区仅在该隔离入口展示配置、真实收盘、折线点价、源序号、持仓盈亏与视口，正式页面不展示实现细节。配置刷新恢复使用实际偏好 Hook；订单 / 成交操作只改变预览内存，不模拟真实交易服务或持久化。
 ## 历史交易日志日历
 
 - 历史日志支持表格和月历，默认显示表格。月历沿用所选回放会话、自营轮次和已应用的日志筛选，首次打开定位到最新已回放月份。月份选择和前后翻页限于所选范围的首末已回放月份，超出范围的请求返回最新可用月份。
@@ -60,6 +74,7 @@
 | 创建、归档与重新开始 | [会话服务](../../lib/replay-sessions/service.ts) |
 | 会话 / 结果身份、只读和写入限制 | [会话作用域](../../lib/replay-sessions/scope.ts) |
 | 纠错请求、预览确认和取消 | [纠错服务](../../lib/replay-sessions/corrections.ts)、[分块重建](../../lib/replay-sessions/correction-runner.ts) |
+| 主价格图形与显示配置 | [主序列适配](../../lib/market-replay/price-series.ts)、[配置与点价映射](../../lib/market-replay/chart-display.ts)、[偏好 Hook](../../components/market-replay/use-replay-preferences.ts) |
 | 图表分批退出与数量模式 | [保护单规则](../../lib/paper-trading/protective-orders.ts)、[撮合](../../lib/paper-trading/engine.ts)、[图表交互](../../components/market-replay/use-protective-exit-controls.tsx) |
 | 逐源推进、事务及自营观察 | [推进服务](../../lib/market-replay/replay-sync.ts) |
 

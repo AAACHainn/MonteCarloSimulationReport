@@ -256,8 +256,11 @@ export function ReplayChart(props: ReplayChartProps) {
         busy={paperBusy} error={paperError} available={Boolean(exits.selectedOrder)}
         onSave={exits.save} onAdd={exits.add} onClose={exits.close} /> : null}
 
+      {core.chartDisplay.chartType === "line" ? <div data-chart-display-label className="pointer-events-none absolute left-3 top-3 z-20 rounded-md border bg-card/90 px-2 py-1 text-xs text-foreground shadow-sm">
+        {copy.marketReplay.lineChartLabel(copy.marketReplay.linePriceSources[core.chartDisplay.line.priceSource])}
+      </div> : null}
       {latest && (aggregatePhase(latest) === "FORMING" || aggregateHasGap(latest)) ? (
-        <div className={`pointer-events-none absolute left-3 top-3 rounded-md px-2 py-1 text-xs shadow-sm ${aggregateHasGap(latest) ? "bg-amber-100 dark:bg-warning-background text-amber-900 dark:text-warning" : "bg-blue-50 dark:bg-info-background text-blue-800 dark:text-link"}`}>
+        <div className={`pointer-events-none absolute left-3 ${core.chartDisplay.chartType === "line" ? "top-12" : "top-3"} z-20 rounded-md px-2 py-1 text-xs shadow-sm ${aggregateHasGap(latest) ? "bg-amber-100 dark:bg-warning-background text-amber-900 dark:text-warning" : "bg-blue-50 dark:bg-info-background text-blue-800 dark:text-link"}`}>
           {aggregateHasGap(latest) ? copy.marketReplay.incompleteBar(latest.sourceCount, latest.expectedCount) : copy.marketReplay.formingBar(latest.sourceCount, latest.expectedCount)}
         </div>
       ) : null}

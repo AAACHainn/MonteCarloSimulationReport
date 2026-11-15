@@ -14,6 +14,16 @@ beforeEach(() => {
 afterEach(() => vi.unstubAllGlobals());
 
 describe("PDF chart preference capture", () => {
+  it("excludes page-only line selection from PDF and AI frozen preferences", () => {
+    const before = capturePdfChartPreferences(dataset);
+    stored.set("market-replay-chart-display-v1", JSON.stringify({ chartType: "line", line: { priceSource: "open", color: "#ABCDEF" } }));
+    const after = capturePdfChartPreferences(dataset);
+    expect(after).toEqual(before);
+    expect(after).not.toHaveProperty("chartType");
+    expect(after).not.toHaveProperty("line");
+    expect(setItem).not.toHaveBeenCalled();
+  });
+
   it("captures every saved Bar Count setting without writing replay preferences", () => {
     const config = { enabled: true, interval: 2, recentTradingDays: 4, regularColor: "#123456", bar18Color: "#AB1234", hourCloseColor: "#456789", rthBoundaryColor: "#12AB34" };
     stored.set("market-replay-bar-count-settings-v1", JSON.stringify(config));

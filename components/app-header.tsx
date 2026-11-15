@@ -4,6 +4,7 @@ import Link from "next/link";
 import Image from "next/image";
 import { usePathname } from "next/navigation";
 import { UserEntry } from "@/components/user-growth/user-entry";
+import { isIsolatedPreviewPath } from "@/lib/preview-routes";
 import { copy } from "@/lib/i18n";
 
 const navItems = [
@@ -37,7 +38,7 @@ export function AppHeader() {
             </Link>
           ))}
         </nav>
-        {pathname !== "/preview/user-growth" && !/^\/market-replay\/[^/]+\/trade-history\/?$/.test(pathname) && <UserEntry />}
+        {!isIsolatedPreviewPath(pathname) && !/^\/market-replay\/[^/]+\/trade-history\/?$/.test(pathname) && <UserEntry />}
       </div>
     </header>
   );

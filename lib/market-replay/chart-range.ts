@@ -67,6 +67,8 @@ export type ReplayViewportSnapshot = {
 export type ReplayViewportApi = {
   capture: (sourceSequence: number, liveWindow: boolean) => ReplayViewportSnapshot | null;
   followLatest: () => void;
+  panByBars?: (delta: number) => void;
+  resetView?: () => void;
 };
 
 /** A filtered-session tail is live only when its owner confirms it is not a historical window. */

@@ -8,12 +8,12 @@ import { isArrowDrawing } from "@/lib/market-replay/chart-drawings";
 import { useReplayFetch, useReplaySession } from "./replay-session-context";
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { ListTree, Loader2, Palette, Settings2, Trash2, X } from "lucide-react";
+import { ListTree, Loader2, ChartCandlestick, Settings2, Trash2, X } from "lucide-react";
 import { ReplayDrawingToolbar } from "./replay-drawing-toolbar";
 import { useReplayCursorPreference } from "./use-replay-cursor-preference";
 import type { ReplayCursorMode } from "@/lib/market-replay/cursor-mode";
 import { ReplayChart, type ReplayVisibleSequenceRange } from "@/components/market-replay/replay-chart";
-import { CandlestickSettingsDialog } from "./candlestick-settings-dialog";
+import { ChartStyleSettingsDialog } from "./chart-style-settings-dialog";
 import { IndicatorSettingsDialog } from "@/components/market-replay/indicator-settings-dialog";
 import { ChartVisibilityMenu } from "@/components/market-replay/chart-visibility-menu";
 import { DisplayIntervalControls } from "@/components/market-replay/display-interval-controls";
@@ -32,7 +32,7 @@ import { TextSettingsDialog } from "./text-settings-dialog";
 import { useTextDrawingEditor } from "./use-text-drawing-editor";
 import { drawingObjectName, drawingSettingsLabel, drawingDeleteLabel } from "@/lib/market-replay/drawing-presentation";
 import { isValidBarCountInterval, isValidBarCountRecentTradingDays } from "@/lib/market-replay/bar-count";
-import type { CandlestickStyle } from "@/lib/market-replay/candlestick-style";
+import { cloneChartDisplay, type ChartDisplayConfig } from "@/lib/market-replay/chart-display";
 import type { ReplayChartVisibility } from "@/lib/market-replay/chart-visibility";
 import { resolveDisplaySession } from "@/lib/market-replay/chart-sessions";
 import {
@@ -127,7 +127,7 @@ export function HistoricalReplayClient({
   const [styleDraft, setStyleDraft] = useState<LineDrawingStyle | null>(null);
   const [selectedDrawingId, setSelectedDrawingId] = useState<string | null>(null);
   const [settingsDialog, setSettingsDialog] = useState<"candlesticks" | "indicators" | null>(null);
-  const [candlestickStyleDraft, setCandlestickStyleDraft] = useState<CandlestickStyle | null>(null);
+  const [chartStyleDraft, setChartStyleDraft] = useState<ChartDisplayConfig | null>(null);
   const [indicatorError, setIndicatorError] = useState<string | null>(null);
   const annotationAbortRef = useRef<AbortController | null>(null);
   const initialLoadCompletedRef = useRef(false);
@@ -137,8 +137,7 @@ export function HistoricalReplayClient({
   const [windowLoading, setWindowLoading] = useState(false);
   const [windowError, setWindowError] = useState<string | null>(null);
   const {
-    candlestickStyle,
-    setCandlestickStyle,
+    chartStyle, setChartStyle,
     emaEnabled,
     setEmaEnabled,
     emaIndicators,
@@ -519,8 +518,8 @@ export function HistoricalReplayClient({
           onChange={changeDisplayInterval}
         />
         <ChartVisibilityMenu value={chartVisibility} onChange={changeChartVisibility} />
-        <Button type="button" variant={settingsDialog === "candlesticks" ? "secondary" : "ghost"} size="sm" className="h-8" onClick={() => { setCandlestickStyleDraft({ ...candlestickStyle }); setSettingsDialog("candlesticks"); }}>
-          <Palette className="h-4 w-4" />{copy.marketReplay.candlestickStyle}
+        <Button type="button" variant={settingsDialog === "candlesticks" ? "secondary" : "ghost"} size="sm" className="h-8" onClick={() => { setChartStyleDraft(cloneChartDisplay(chartStyle)); setSettingsDialog("candlesticks"); }}>
+          <ChartCandlestick className="h-4 w-4" />{copy.marketReplay.chartStyle}
         </Button>
         <Button type="button" variant={settingsDialog === "indicators" ? "secondary" : "ghost"} size="sm" className="h-8" onClick={() => setSettingsDialog("indicators")}>
           <Settings2 className="h-4 w-4" />{copy.marketReplay.indicators}
@@ -546,7 +545,8 @@ export function HistoricalReplayClient({
           displayIntervalSeconds={displayIntervalSeconds}
           sourceIntervalSeconds={dataset.sourceIntervalSeconds ?? undefined}
           measurementArmed={measurementArmed}
-          candlestickStyle={candlestickStyleDraft ?? candlestickStyle}
+          candlestickStyle={(chartStyleDraft ?? chartStyle).candlestickStyle}
+          chartDisplay={chartStyleDraft ?? chartStyle}
           onMeasurementArmedChange={setMeasurementArmed}
           drawingTool={drawingsLoaded && !drawingBusy ? drawingTool : null}
           onDrawingToolChange={setDrawingTool}
@@ -683,14 +683,14 @@ export function HistoricalReplayClient({
           return true;
         }} /> : null;
     })()}
-    <CandlestickSettingsDialog
+    <ChartStyleSettingsDialog
       open={settingsDialog === "candlesticks"}
-      draft={candlestickStyleDraft}
-      onDraftChange={setCandlestickStyleDraft}
-      onClose={() => { setCandlestickStyleDraft(null); setSettingsDialog(null); }}
+      draft={chartStyleDraft}
+      onDraftChange={setChartStyleDraft}
+      onClose={() => { setChartStyleDraft(null); setSettingsDialog(null); }}
       onConfirm={style => {
-        setCandlestickStyle(style);
-        setCandlestickStyleDraft(null);
+        setChartStyle(style);
+        setChartStyleDraft(null);
         setSettingsDialog(null);
       }}
     />

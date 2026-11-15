@@ -14,7 +14,7 @@ import { type EntryCheckDraft } from "@/lib/paper-trading/entry-check-draft";
 import type { ReplayViewportApi } from "@/lib/market-replay/chart-range";
 import type { ReplayChartDisplay } from "./replay-client-shared";
 import { useCallback, useEffect, useMemo, useRef, useState, useId } from "react";
-import type { CandlestickStyle } from "@/lib/market-replay/candlestick-style";
+import type { ChartDisplayConfig } from "@/lib/market-replay/chart-display";
 import { useReplayShortcuts } from "@/components/market-replay/use-replay-shortcuts";
 import { createReplayStepShortcut, hasVisibleReplayDialog } from "@/lib/market-replay/keyboard-shortcuts";
 import { type DateTimePickerHandle } from "@/components/ui/date-time-picker";
@@ -97,7 +97,7 @@ export function useReplayCore({ dataset: initialDataset, initialJournalFocus = n
   const [saveStatus, setSaveStatus] = useState<ReplaySaveStatus>("idle");
   const [confirmAction, setConfirmAction] = useState<"reset" | "paper-clear" | null>(null);
   const [settingsDialog, setSettingsDialog] = useState<"candlesticks" | "indicators" | "paper" | null>(null);
-  const [candlestickStyleDraft, setCandlestickStyleDraft] = useState<CandlestickStyle | null>(null);
+  const [chartStyleDraft, setChartStyleDraft] = useState<ChartDisplayConfig | null>(null);
   const [emaError, setEmaError] = useState<string | null>(null);
   const [abrError, setAbrError] = useState<string | null>(null);
   const [barCountError, setBarCountError] = useState<string | null>(null);
@@ -187,6 +187,7 @@ export function useReplayCore({ dataset: initialDataset, initialJournalFocus = n
   }, [draftActive, drawingTool, measurementArmed, selectedDrawingId, webFullscreen]);
 
   const {
+    chartStyle, setChartStyle,
     candlestickStyle,
     setCandlestickStyle,
     emaEnabled,
@@ -329,8 +330,8 @@ export function useReplayCore({ dataset: initialDataset, initialJournalFocus = n
     finishPlayback, dismissAutoPause, capturePlaybackIntent, wantsPlayback, startPickerRef, startValue,
     setStartValue, startDialogOpen, setStartDialogOpen, startDialogValue, setStartDialogValue, startDialogBusy,
     setStartDialogBusy, startDialogSuspensionRef, confirmationSuspensionRef, startError, setStartError, saveStatus,
-    setSaveStatus, confirmAction, setConfirmAction, settingsDialog, setSettingsDialog, candlestickStyleDraft,
-    setCandlestickStyleDraft, emaError, setEmaError, abrError, setAbrError, barCountError,
+    setSaveStatus, confirmAction, setConfirmAction, settingsDialog, setSettingsDialog, chartStyleDraft,
+    setChartStyleDraft, emaError, setEmaError, abrError, setAbrError, barCountError,
     setBarCountError, repairInterval, setRepairInterval, paperSnapshot, paperSnapshotRef, confirmedPaperSnapshotRef,
     paperSessionLoadedRef, paperSessionLoadRef, paperMutationActiveRef, paperMutationChainRef, pendingPaperMutationsRef, commitConfirmedPaperSnapshot, growthNotice, growthNoticeKey,
     tradeAnnotations, setTradeAnnotations, tradeAnnotationsTruncated, setTradeAnnotationsTruncated, paperBusy, setPaperBusy,
@@ -343,7 +344,7 @@ export function useReplayCore({ dataset: initialDataset, initialJournalFocus = n
     drawingTool, setDrawingTool, drawings, setDrawings, clearingDrawings, setClearingDrawings,
     clearingDrawingsRef, drawingError, setDrawingError, selectedDrawingId, setSelectedDrawingId, drawingObjectsOpen,
     setDrawingObjectsOpen, rectangleStyleId, setRectangleStyleId, arrowStyleId, setArrowStyleId, arrowPreferences, setArrowPreferences, abcdPreferences, setAbcdPreferences, styleDrawingId, setStyleDrawingId, styleDraft,
-    setStyleDraft, pendingDrawingIds, setPendingDrawingIds, candlestickStyle, setCandlestickStyle, emaEnabled,
+    setStyleDraft, pendingDrawingIds, setPendingDrawingIds, chartStyle, setChartStyle, candlestickStyle, setCandlestickStyle, emaEnabled,
     setEmaEnabled, emaIndicators, setEmaIndicators, emaSettingsLoaded, abrEnabled, setAbrEnabled,
     abrLength, setAbrLength, abrSettingsLoaded, gridVisible, setGridVisible, volumeVisible,
     setVolumeVisible, candleCountdownEnabled, setCandleCountdownEnabled, barCountConfig, setBarCountConfig, chartVisibility,

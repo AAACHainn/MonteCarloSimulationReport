@@ -4,7 +4,9 @@ import { AbcdPrimitive, type AbcdPreview } from "@/lib/market-replay/abcd-primit
 import type { AbcdDraft } from "@/lib/market-replay/abcd-interaction";
 import { ArrowPrimitive, type ArrowDragPreview } from "@/lib/market-replay/arrow-primitive";
 
-import { captureReplayViewport, isReplayRangeFollowing, latestReplayLogicalIndex, type ReplayViewportMode } from "@/lib/market-replay/chart-range";
+import { chartDisplayConfig } from "@/lib/market-replay/chart-display";
+import { ReplayPriceSeries } from "@/lib/market-replay/price-series";
+import { defaultReplayLogicalRange, captureReplayViewport, isReplayRangeFollowing, latestReplayLogicalIndex, type ReplayViewportMode } from "@/lib/market-replay/chart-range";
 import { useReplaySession } from "./replay-session-context";
 import { normalizeRiskPreferences, type RiskPreferences } from "@/lib/paper-trading/risk-preferences";
 
@@ -30,7 +32,7 @@ import { replayCrosshairVisible, resolveReplayCursor, type ReplayChartCursor } f
 
 export function useReplayChartCore({
   datasetId, dataRevision = "", priceTickSize, bars, warmupBars, displayUtcOffsetMinutes, displayIntervalSeconds, measurementArmed, cursorMode = "crosshair",
-  candlestickStyle, gridVisible = true, onToggleGrid,
+  candlestickStyle, chartDisplay: requestedChartDisplay, gridVisible = true, onToggleGrid,
   onMeasurementArmedChange, drawingTool, onDrawingToolChange, trendLineDraftStyle, fibonacciDraftStyle, rectangleDraftStyle, drawings: savedDrawings, selectedDrawingId,
   drawingNudgePreviews, drawingEditingLocked = false,
   onSelectedDrawingIdChange, onCreateDrawing, onUpdateDrawing, onDeleteDrawing, onPlaceText, onPlaceArrow, onCreateAbcd, abcdDraftStyle = DEFAULT_ABCD_STYLE, drawingApiRef,
@@ -44,6 +46,7 @@ export function useReplayChartCore({
   onCancelOrder, onClosePosition, onCreatePartialExit, onPrepareProtectiveEdit, onDraftActiveChange, onDraftIdentityChange, entryCheckOpen = false, onOpenPaperAccount, onVisibleSequenceRangeChange,
   onRewindToBar, rewindRange,
 }: ReplayChartProps) {
+  const chartDisplay = useMemo(() => requestedChartDisplay ?? chartDisplayConfig(candlestickStyle), [requestedChartDisplay, candlestickStyle]);
   const replaySession = useReplaySession();
   const visibilityScope = `${datasetId}:${replaySession?.id ?? ""}:${paperSnapshot?.session.id ?? ""}:${readOnly}`;
   const [hiddenBoundary, setHiddenBoundary] = useState<{ scope: string; target: ChartHideAfter } | null>(null);
@@ -56,7 +59,7 @@ export function useReplayChartCore({
   const orderTicketRef = useRef<HTMLDivElement | null>(null);
   const orderTicketDragRef = useRef<{ pointerId: number; offsetX: number; offsetY: number } | null>(null);
   const chartRef = useRef<IChartApi | null>(null);
-  const candleRef = useRef<ISeriesApi<"Candlestick"> | null>(null);
+  const candleRef = useRef<ReplayPriceSeries | null>(null);
   const volumeRef = useRef<ISeriesApi<"Histogram"> | null>(null);
   const priceLinesRef = useRef(new Map<string, IPriceLine>());
   const lineTargetsRef = useRef(new Map<string, LineTarget>());
@@ -109,6 +112,20 @@ export function useReplayChartCore({
       viewportGestureRef.current = false;
       return snapshot;
     },
+    panByBars: (delta: number) => {
+      const chart = chartRef.current, range = chart?.timeScale().getVisibleLogicalRange();
+      if (!chart || !range || !Number.isFinite(delta)) return;
+      viewportModeRef.current = "history";
+      pendingFollowRef.current = false;
+      chart.timeScale().setVisibleLogicalRange({ from: range.from + delta, to: range.to + delta });
+    },
+    resetView: () => {
+      const chart = chartRef.current;
+      if (!chart) return;
+      viewportModeRef.current = liveWindowRef.current ? "following" : "history";
+      chart.timeScale().setVisibleLogicalRange(defaultReplayLogicalRange(chart.timeScale().width(), barsRef.current.length));
+      candleRef.current?.priceScale().applyOptions({ autoScale: true });
+    },
     followLatest: () => {
       pendingFollowRef.current = true;
       viewportModeRef.current = "following";
@@ -141,6 +158,7 @@ export function useReplayChartCore({
   tradeAnnotationsRef.current = tradeAnnotations;
   const tradeAnnotationsVisibleRef = useRef(tradeAnnotationsVisible);
   tradeAnnotationsVisibleRef.current = tradeAnnotationsVisible;
+  const chartDisplayRef = useRef(chartDisplay); chartDisplayRef.current = chartDisplay;
   const candlestickStyleRef = useRef(candlestickStyle);
   candlestickStyleRef.current = candlestickStyle;
   const priceTickSizeRef = useRef(priceTickSize);
@@ -519,6 +537,7 @@ export function useReplayChartCore({
   // and drawing preferences must update the existing instance so pointer handlers never
   // retain a removed chart or series.
   return {
+    chartDisplay, chartDisplayRef,
     viewportModeRef, viewportGestureRef, viewportUpdatingRef, pendingFollowRef, currentSourceSequenceRef, liveWindowRef, viewportSnapshot,
     replaySession, visibilityScope, setHiddenBoundary, hiddenAfter, visibleBars, visibleWarmupBars,
     containerRef, interactionRef, orderTicketRef, orderTicketDragRef, chartRef, candleRef,

@@ -19,14 +19,14 @@ import Link from "next/link";
 import { TrainingGateConfigDialog, EntryCheckDialog } from "./training-gate-dialogs";
 import { useState, type ReactNode } from "react";
 import { Breadcrumbs } from "@/components/breadcrumbs";
-import { Square, BookOpen, ListTree, Loader2, Palette, PanelRight, RotateCcw, Settings2, Trash2, TrendingUp, WalletCards, X } from "lucide-react";
+import { Square, BookOpen, ListTree, Loader2, ChartCandlestick, PanelRight, RotateCcw, Settings2, Trash2, TrendingUp, WalletCards, X } from "lucide-react";
 import { ReplayDrawingToolbar } from "./replay-drawing-toolbar";
 import { ResizableTradePanel } from "./resizable-trade-panel";
 import { useReplayCursorPreference } from "./use-replay-cursor-preference";
 import type { ReplayCursorMode } from "@/lib/market-replay/cursor-mode";
 import { ReplayChart } from "@/components/market-replay/replay-chart";
 import { ReplayAutoPauseNotice } from "@/components/market-replay/replay-auto-pause-notice";
-import { CandlestickSettingsDialog } from "./candlestick-settings-dialog";
+import { ChartStyleSettingsDialog } from "./chart-style-settings-dialog";
 import { IndicatorSettingsDialog } from "@/components/market-replay/indicator-settings-dialog";
 import { DisplayIntervalControls } from "@/components/market-replay/display-interval-controls";
 import { ReplayStartDialog } from "@/components/market-replay/replay-start-dialog";
@@ -45,6 +45,7 @@ import { DateTimePicker } from "@/components/ui/date-time-picker";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
+import { cloneChartDisplay } from "@/lib/market-replay/chart-display";
 import { copy } from "@/lib/i18n";
 import { formatMoney, formatNumber } from "@/lib/format";
 import { funds } from "@/lib/prop-practice/rules";
@@ -80,15 +81,15 @@ export function MarketReplayClient({ dataset: initialDataset, initialJournalFocu
     setLoadError, replay, autoPauseEvent, restorePlayback, dismissAutoPause, wantsPlayback,
     startPickerRef, startValue, setStartValue, startDialogOpen, startDialogValue, setStartDialogValue,
     startDialogBusy, confirmationSuspensionRef, startError, confirmAction, setConfirmAction, settingsDialog,
-    setSettingsDialog, candlestickStyleDraft, setCandlestickStyleDraft, emaError, abrError, barCountError,
+    setSettingsDialog, chartStyleDraft, setChartStyleDraft, emaError, abrError, barCountError,
     repairInterval, setRepairInterval, paperSnapshot, tradeAnnotations, tradeAnnotationsTruncated, paperBusy,
     paperError, growthNotice, growthNoticeKey, journalReview, chartFocusSequence, setChartFocusSequence, reviewReturning, draftActive,
     setDraftActive, gateDialogOpen, setGateDialogOpen, gateBusy, gateError, checkingOrder,
     entryCheckDraft, setEntryCheckDraft, measurementArmed, setMeasurementArmed,
     drawingTool, setDrawingTool, drawings, setDrawings, clearingDrawings, drawingError, setDrawingError,
     selectedDrawingId, setSelectedDrawingId, drawingObjectsOpen, setDrawingObjectsOpen, rectangleStyleId, setRectangleStyleId,
-    styleDrawingId, setStyleDrawingId, styleDraft, setStyleDraft, pendingDrawingIds, candlestickStyle,
-    setCandlestickStyle, emaEnabled, setEmaEnabled, emaIndicators, setEmaIndicators, abrEnabled,
+    styleDrawingId, setStyleDrawingId, styleDraft, setStyleDraft, pendingDrawingIds, chartStyle,
+    setChartStyle, emaEnabled, setEmaEnabled, emaIndicators, setEmaIndicators, abrEnabled,
     setAbrEnabled, abrLength, gridVisible, setGridVisible, volumeVisible, setVolumeVisible,
     candleCountdownEnabled, setCandleCountdownEnabled, barCountConfig, setBarCountConfig, chartVisibility, defaultRectangleStyle,
     setDefaultRectangleStyle, rectangleTemplates, setRectangleTemplates, arrowStyleId, setArrowStyleId, arrowPreferences, setArrowPreferences, setDefaultTextStyle, textTemplates, setTextTemplates,
@@ -263,13 +264,14 @@ export function MarketReplayClient({ dataset: initialDataset, initialJournalFocu
             variant={settingsDialog === "candlesticks" ? "secondary" : "ghost"}
             size="sm"
             className="h-8"
+            aria-label={copy.marketReplay.chartStyle}
             onClick={() => {
-              setCandlestickStyleDraft({ ...candlestickStyle });
+              setChartStyleDraft(cloneChartDisplay(chartStyle));
               setSettingsDialog("candlesticks");
             }}
           >
-            <Palette className="h-4 w-4" />
-            <span className="hidden xl:inline">{copy.marketReplay.candlestickStyle}</span>
+            <ChartCandlestick className="h-4 w-4" />
+            <span className="hidden xl:inline">{copy.marketReplay.chartStyle}</span>
           </Button>
           <Button type="button" variant="ghost" size="sm" className="h-8" onClick={() => setSettingsDialog("indicators")}><Settings2 className="h-4 w-4" />{copy.marketReplay.indicators}</Button>
           <Button type="button" variant="ghost" size="sm" className="h-8" onClick={() => setSettingsDialog("paper")}><WalletCards className="h-4 w-4" />{copy.marketReplay.accountSettings}</Button>
@@ -316,7 +318,8 @@ export function MarketReplayClient({ dataset: initialDataset, initialJournalFocu
             playbackActive={replay.status === "playing"}
             currentSourceTimestamp={currentBar?.timestamp ?? null}
             measurementArmed={measurementArmed}
-            candlestickStyle={candlestickStyleDraft ?? candlestickStyle}
+            candlestickStyle={(chartStyleDraft ?? chartStyle).candlestickStyle}
+            chartDisplay={chartStyleDraft ?? chartStyle}
             onMeasurementArmedChange={setMeasurementArmed}
             drawingTool={drawingTool}
             onDrawingToolChange={setDrawingTool}
@@ -515,14 +518,14 @@ export function MarketReplayClient({ dataset: initialDataset, initialJournalFocu
           templates={rectangleTemplates} onTemplatesChange={setRectangleTemplates} onClose={() => setRectangleStyleId(null)}
           onSave={async style => { const saved = await updateDrawing(drawing.id, { style }); if (saved) setDefaultRectangleStyle({ ...style }); return saved; }} /> : null;
       })()}
-      <CandlestickSettingsDialog
+      <ChartStyleSettingsDialog
         open={settingsDialog === "candlesticks"}
-        draft={candlestickStyleDraft}
-        onDraftChange={setCandlestickStyleDraft}
-        onClose={() => { setCandlestickStyleDraft(null); setSettingsDialog(null); }}
+        draft={chartStyleDraft}
+        onDraftChange={setChartStyleDraft}
+        onClose={() => { setChartStyleDraft(null); setSettingsDialog(null); }}
         onConfirm={style => {
-          setCandlestickStyle(style);
-          setCandlestickStyleDraft(null);
+          setChartStyle(style);
+          setChartStyleDraft(null);
           setSettingsDialog(null);
         }}
       />

@@ -186,6 +186,7 @@ export type ReplayChartProps = {
   viewportSnapshot?: ReplayViewportSnapshot | null;
   measurementArmed: boolean;
   candlestickStyle: CandlestickStyle;
+  chartDisplay?: import("@/lib/market-replay/chart-display").ChartDisplayConfig;
   onMeasurementArmedChange: (armed: boolean) => void;
   rectangleDraftStyle: RectangleStyle;
   drawingTool: DrawingTool | null;

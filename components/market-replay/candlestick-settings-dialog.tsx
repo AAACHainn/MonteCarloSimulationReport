@@ -35,26 +35,15 @@ function CandlePair({ style, className }: { style: CandlestickStyle; className: 
   );
 }
 
-type CandlestickSettingsDialogProps = {
-  open: boolean;
-  draft: CandlestickStyle | null;
-  onDraftChange: (style: CandlestickStyle) => void;
-  onClose: () => void;
-  onConfirm: (style: CandlestickStyle) => void;
-};
-
-export function CandlestickSettingsDialog({ open, draft, onDraftChange, onClose, onConfirm }: CandlestickSettingsDialogProps) {
+export function CandlestickStyleFields({ draft, onDraftChange }: {
+  draft: CandlestickStyle; onDraftChange: (style: CandlestickStyle) => void;
+}) {
   const id = useId();
   const { mode } = useAppearance();
   const presets = candlestickColorPresets(mode);
-  const matchedVersion = draft ? matchingCandlestickPresetVersion(draft) : undefined;
-  const selectedPreset = draft ? matchingCandlestickColorPreset(draft, mode) : undefined;
-  return (
-    <Dialog open={open} title={copy.marketReplay.candlestickSettings}
-      description={copy.marketReplay.candlestickSettingsDescription}
-      className="max-w-xl" contentClassName="flex flex-col p-0" onClose={onClose}>
-      {draft ? <>
-        <div className="min-h-0 flex-1 space-y-5 overflow-y-auto p-5">
+  const matchedVersion = matchingCandlestickPresetVersion(draft);
+  const selectedPreset = matchingCandlestickColorPreset(draft, mode);
+  return <div className="space-y-5">
           <section aria-labelledby={`${id}-presets`} className="space-y-3">
             <div className="flex items-center justify-between gap-3">
               <h3 id={`${id}-presets`} className="text-sm font-semibold text-slate-950 dark:text-foreground">{copy.marketReplay.candlestickPresets}</h3>
@@ -114,13 +103,22 @@ export function CandlestickSettingsDialog({ open, draft, onDraftChange, onClose,
               </div>)}
             </div>
           </section>
-        </div>
-        <div className="flex shrink-0 justify-end gap-2 border-t px-5 py-4">
-          <Button type="button" variant="outline" onClick={onClose}>{copy.marketReplay.drawingCancel}</Button>
-          <Button type="button" onClick={() => onConfirm({ ...draft })}>{copy.marketReplay.drawingConfirm}</Button>
-        </div>
-      </> : null}
-    </Dialog>
-  );
+  </div>;
 }
 
+// Retained for existing consumers; replay entry points use the unified chart-style dialog.
+export function CandlestickSettingsDialog({ open, draft, onDraftChange, onClose, onConfirm }: {
+  open: boolean; draft: CandlestickStyle | null; onDraftChange: (style: CandlestickStyle) => void;
+  onClose: () => void; onConfirm: (style: CandlestickStyle) => void;
+}) {
+  return <Dialog open={open} title={copy.marketReplay.candlestickSettings} description={copy.marketReplay.candlestickSettingsDescription}
+    className="max-w-xl" contentClassName="flex flex-col p-0" onClose={onClose}>
+    {draft ? <>
+      <div className="min-h-0 flex-1 overflow-y-auto p-5"><CandlestickStyleFields draft={draft} onDraftChange={onDraftChange} /></div>
+      <div className="flex shrink-0 justify-end gap-2 border-t px-5 py-4">
+        <Button type="button" variant="outline" onClick={onClose}>{copy.marketReplay.drawingCancel}</Button>
+        <Button type="button" onClick={() => onConfirm({ ...draft })}>{copy.marketReplay.drawingConfirm}</Button>
+      </div>
+    </> : null}
+  </Dialog>;
+}

@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import {
   DEFAULT_CANDLESTICK_STYLE,
   parseCandlestickStyle,
@@ -47,6 +47,8 @@ import {
   MAX_EMA_INDICATORS,
   type EmaIndicatorConfig,
 } from "@/lib/market-replay/types";
+
+import { CHART_DISPLAY_STORAGE_KEY, chartDisplayConfig, parseChartSelection, type ChartDisplayConfig } from "@/lib/market-replay/chart-display";
 
 const EMA_SETTINGS_STORAGE_KEY = "market-replay-ema-settings-v1";
 const ABR_SETTINGS_STORAGE_KEY = "market-replay-abr-settings-v1";
@@ -120,6 +122,23 @@ function loadAbrSettings() {
 export function useReplayPreferences(dataset: { id: string; startTime: string; timezone: string }) {
   const [candlestickStyle, setCandlestickStyle] = useState<CandlestickStyle>(DEFAULT_CANDLESTICK_STYLE);
   const [candlestickStyleLoaded, setCandlestickStyleLoaded] = useState(false);
+  const [chartSelection, setChartSelection] = useState(() => parseChartSelection(null));
+  const [chartSelectionLoaded, setChartSelectionLoaded] = useState(false);
+  const chartStyle = useMemo(() => chartDisplayConfig(candlestickStyle, chartSelection), [candlestickStyle, chartSelection]);
+  const setChartStyle = useCallback((next: ChartDisplayConfig) => {
+    setCandlestickStyle({ ...next.candlestickStyle });
+    setChartSelection({ chartType: next.chartType, line: { ...next.line } });
+  }, []);
+  useEffect(() => {
+    try { setChartSelection(parseChartSelection(window.localStorage.getItem(CHART_DISPLAY_STORAGE_KEY))); }
+    catch { setChartSelection(parseChartSelection(null)); }
+    setChartSelectionLoaded(true);
+  }, []);
+  useEffect(() => {
+    if (!chartSelectionLoaded) return;
+    try { window.localStorage.setItem(CHART_DISPLAY_STORAGE_KEY, JSON.stringify(chartSelection)); }
+    catch { /* Current-page selection remains usable without storage. */ }
+  }, [chartSelection, chartSelectionLoaded]);
   const [emaEnabled, setEmaEnabled] = useState(false);
   const [emaIndicators, setEmaIndicators] = useState<EmaIndicatorConfig[]>(DEFAULT_EMA_INDICATORS);
   const [emaSettingsLoaded, setEmaSettingsLoaded] = useState(false);
@@ -359,6 +378,7 @@ export function useReplayPreferences(dataset: { id: string; startTime: string; t
   }, [defaultTextStyle, textTemplates, defaultRectangleStyle, rectangleTemplates, defaultFibonacciStyle, defaultTrendLineStyle, drawingPreferencesLoaded, fibonacciTemplates, trendLineTemplates]);
 
   return {
+    chartStyle, setChartStyle,
     candlestickStyle,
     setCandlestickStyle,
     emaEnabled,
