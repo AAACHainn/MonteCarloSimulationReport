@@ -1,3 +1,4 @@
+import { historicalReplayEndSequence } from "@/lib/market-replay/historical-playback";
 import { ReplaySessionGate } from "@/components/market-replay/replay-session-entry-guard";
 import Link from "next/link";
 import { UserContextHeader } from "@/components/user-growth/user-context-header";
@@ -91,8 +92,11 @@ export default async function HistoricalReplayPage({
   const rawEntry = requestedEntry ?? firstEntry;
   const entry = rawEntry ? (await withReplayJournalDisplayNumbers([rawEntry], projectionId))[0] : null;
   const startSequence = bounds._min.openedSequence;
-  const endSequence = bounds._max.closedSequence;
-  if (!entry || startSequence === null || endSequence === null) notFound();
+  const projection = await prisma.replayProjection.findUniqueOrThrow({ where: { id: projectionId }, select: { currentSequence: true } });
+  const endSequence = historicalReplayEndSequence({ barCount: dataset.barCount, roundEnd: round?.endSequence ?? null,
+    projectionSequence: projection.currentSequence, progressSequence: replaySession.progress?.currentSequence ?? null,
+    activeProjection: projectionId === replaySession.activeProjectionId });
+  if (!entry || startSequence === null || endSequence < startSequence) notFound();
 
   const requestedDisplaySession = entry.displaySession === "RTH" ? "RTH" : "ETH";
   const displaySession: DisplaySession = resolveDisplaySession(dataset, requestedDisplaySession)
@@ -108,8 +112,8 @@ export default async function HistoricalReplayPage({
   const historyHref = `/market-replay/${id}/trade-history?${historyParams}`;
   const title = session.name || copy.paperTrading.historicalReplayTitle(session.replayGeneration);
 
-  return <ReplaySessionGate key={`${replaySession.id}:${projectionId}`} session={replaySession}><ReplaySessionProvider session={{ ...replaySession, activeProjectionId: projectionId, propRoundNumber: round?.number, status: "ARCHIVED" }}><div className="relative left-1/2 flex h-[calc(100dvh-4.3125rem-var(--app-notice-height,0px))] w-[calc(100vw-2rem)] max-w-none -translate-x-1/2 flex-col gap-3 overflow-hidden sm:w-[calc(100vw-3rem)]">
-    <div className="shrink-0 space-y-2">
+  return <ReplaySessionGate key={`${replaySession.id}:${projectionId}`} session={replaySession}><ReplaySessionProvider session={{ ...replaySession, activeProjectionId: projectionId, propRoundNumber: round?.number, status: "ARCHIVED" }}><div className="market-replay-page relative -my-6 left-1/2 flex h-[calc(100dvh-1rem-var(--app-notice-height,0px))] w-[calc(100vw-1rem)] max-w-none -translate-x-1/2 flex-col gap-2 overflow-hidden">
+    <div className="shrink-0 space-y-2 px-4 pt-3">
       <UserContextHeader session={replaySession}><Breadcrumbs items={[
         { label: copy.marketReplay.title, href: "/market-replay" },
         { label: dataset.name, href: `/market-replay/${id}` },
@@ -135,7 +139,7 @@ export default async function HistoricalReplayPage({
     </div>
     <div className="min-h-0 flex-1 overflow-hidden rounded-lg border bg-white dark:bg-card shadow-sm">
       <HistoricalReplayClient
-        key={`${session.id}:${replaySession.activeProjectionId}:${replaySession.status}:${entry.accountNo}`}
+        key={`${session.id}:${projectionId}:${endSequence}:${entry.accountNo}`}
         dataset={serializeMarketDataset(dataset)}
         session={{
           id: session.id,

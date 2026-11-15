@@ -44,8 +44,8 @@ export function useReplayChartSetup(core: ReturnType<typeof useReplayChartCore>)
     syncMeasurementCoordinates, syncVisibleSequenceRange, restoreCrosshair, setChartCursor, dataRevision, priceTickSize, bars,
     displayUtcOffsetMinutes, displayIntervalSeconds, gridVisible, trendLineDraftStyle, fibonacciDraftStyle,
     rectangleDraftStyle, emaEnabled, emaIndicators, volumeVisible, displaySession, barCountSession,
-    barCountRthSession, barCountConfig, paperSnapshot, tradeAnnotations, focusSequence, tradeAnnotationsVisible, candleCountdownEnabled,
-    playbackActive, currentSourceTimestamp, sourceIntervalSeconds, readOnly,
+    barCountRthSession, barCountConfig, paperSnapshot, tradeAnnotations, focusSequence, tradeAnnotationsVisible, candleCountdownEnabled, candleCountdownSeconds,
+    playbackActive, currentSourceTimestamp, sourceIntervalSeconds, readOnly, historicalPlaybackActive,
   } = core;
   const { mode } = useAppearance();
   const theme = resolveChartTheme(mode);
@@ -244,18 +244,19 @@ export function useReplayChartSetup(core: ReturnType<typeof useReplayChartCore>)
     const changed = series.setDisplay(chartDisplay);
     if (changed) {
       // Some primitives discard projected snapshots on detach; rehydrate from their original owners.
-      tradeAnnotationPrimitiveRef.current?.setData({ entries: tradeAnnotationsVisible ? tradeAnnotations : [], bars: visibleBars });
+      tradeAnnotationPrimitiveRef.current?.setData({ entries: tradeAnnotationsVisible ? tradeAnnotations : [], bars: historicalPlaybackActive ? bars : visibleBars });
       barCountPrimitiveRef.current?.setData({ bars: visibleBars, displaySession, displayIntervalSeconds, session: barCountSession, rthSession: barCountRthSession, config: barCountConfig });
       candleCountdownPrimitiveRef.current?.setData({ bars: visibleBars, currentSourceTimestamp,
-        enabled: candleCountdownEnabled && !hiddenAfter, playing: playbackActive, sourceIntervalSeconds: sourceIntervalSeconds ?? displayIntervalSeconds });
+        remainingSeconds: candleCountdownSeconds,
+        enabled: candleCountdownEnabled && (!hiddenAfter || historicalPlaybackActive), playing: playbackActive, sourceIntervalSeconds: sourceIntervalSeconds ?? displayIntervalSeconds });
       syncDrawingPrimitive();
     }
     syncLineActionCoordinates();
     syncMeasurementCoordinates();
     requestAnimationFrame(() => { viewportUpdatingRef.current = false; });
-  }, [chartDisplay, candleRef, viewportUpdatingRef, tradeAnnotationPrimitiveRef, tradeAnnotationsVisible, tradeAnnotations, visibleBars,
+  }, [chartDisplay, candleRef, viewportUpdatingRef, tradeAnnotationPrimitiveRef, tradeAnnotationsVisible, tradeAnnotations, visibleBars, bars,
     barCountPrimitiveRef, displaySession, displayIntervalSeconds, barCountSession, barCountRthSession, barCountConfig,
-    candleCountdownPrimitiveRef, currentSourceTimestamp, candleCountdownEnabled, hiddenAfter, playbackActive, sourceIntervalSeconds,
+    candleCountdownPrimitiveRef, currentSourceTimestamp, candleCountdownEnabled, candleCountdownSeconds, hiddenAfter, historicalPlaybackActive, playbackActive, sourceIntervalSeconds,
     syncDrawingPrimitive, syncLineActionCoordinates, syncMeasurementCoordinates]);
 
   useEffect(() => {
@@ -290,7 +291,7 @@ export function useReplayChartSetup(core: ReturnType<typeof useReplayChartCore>)
     const transitionViewport = timelineChanged ? viewportSnapshot ?? captureReplayViewport({
       visibleRange: previousRange, bars: previous,
       sourceSequence: currentSourceSequenceRef.current ?? previous.at(-1)?.lastSequence ?? -1,
-      liveWindow: liveWindowRef.current, mode: readOnly ? "history" : viewportModeRef.current,
+      liveWindow: liveWindowRef.current, mode: readOnly && !historicalPlaybackActive ? "history" : viewportModeRef.current,
       chartWidth: chart.timeScale().width(), barSpacing: chart.timeScale().options().barSpacing,
     }) : null;
     viewportUpdatingRef.current = true;
@@ -332,6 +333,13 @@ export function useReplayChartSetup(core: ReturnType<typeof useReplayChartCore>)
       }
       if (mappedTimelineRange) {
         chart.timeScale().setVisibleLogicalRange(mappedTimelineRange);
+      } else if (range && historicalPlaybackActive && hiddenAfter && lastHiddenAfterRef.current) {
+        const previousIndex = previous.findIndex(bar => bar.timestamp === lastHiddenAfterRef.current!.bar.timestamp);
+        const previousInNext = next.findIndex(bar => bar.timestamp === lastHiddenAfterRef.current!.bar.timestamp);
+        const nextIndex = next.findIndex(bar => bar.timestamp === visibleBars.at(-1)?.timestamp);
+        const shift = previousIndex >= 0 && previousInNext >= 0 ? previousInNext - previousIndex : 0;
+        const advanced = rangeAfterNewReplayBar(range, previousInNext, Math.max(0, nextIndex - previousInNext), following);
+        chart.timeScale().setVisibleLogicalRange({ from: advanced.from + shift, to: advanced.to + shift });
       } else if (range && previousLastInNext >= 0) {
         // A rolling server window renumbers logical indices. Preserve zoom and historical panning.
         const advanced = readOnly ? range : rangeAfterNewReplayBar(range, previousLastIndex, next.length - 1 - previousLastInNext, following && liveWindowRef.current);
@@ -375,7 +383,7 @@ export function useReplayChartSetup(core: ReturnType<typeof useReplayChartCore>)
     });
     requestAnimationFrame(syncMeasurementCoordinates);
     syncDrawingPrimitive();
-  }, [bars, dataRevision, projectionBars, visibleBars, hiddenAfter, readOnly, visibilityScope, displayIntervalSeconds, displaySession, barCountSession, sourceIntervalSeconds, syncDrawingPrimitive, syncMeasurementCoordinates, syncVisibleSequenceRange, barsRef, candleRef, chartRef, displayIntervalSecondsRef, displaySessionRef, drawingScopeRef, drawingSessionRef, lastDataIntervalRef, lastDataRef, lastDataRevisionRef, lastDataSessionRef, lastHiddenAfterRef, projectionBarsRef, requestedDisplayIntervalSecondsRef, requestedDrawingSessionRef, timelineBarsRef, volumeRef, viewportModeRef, viewportUpdatingRef, pendingFollowRef, liveWindowRef, currentSourceSequenceRef, viewportSnapshot]);
+  }, [bars, dataRevision, projectionBars, visibleBars, hiddenAfter, readOnly, historicalPlaybackActive, visibilityScope, displayIntervalSeconds, displaySession, barCountSession, sourceIntervalSeconds, syncDrawingPrimitive, syncMeasurementCoordinates, syncVisibleSequenceRange, barsRef, candleRef, chartRef, displayIntervalSecondsRef, displaySessionRef, drawingScopeRef, drawingSessionRef, lastDataIntervalRef, lastDataRef, lastDataRevisionRef, lastDataSessionRef, lastHiddenAfterRef, projectionBarsRef, requestedDisplayIntervalSecondsRef, requestedDrawingSessionRef, timelineBarsRef, volumeRef, viewportModeRef, viewportUpdatingRef, pendingFollowRef, liveWindowRef, currentSourceSequenceRef, viewportSnapshot]);
 
   useEffect(() => {
     if (focusSequence === null) return;
@@ -383,17 +391,22 @@ export function useReplayChartSetup(core: ReturnType<typeof useReplayChartCore>)
     if (!chart) return;
     const range = rangeForReplayFocus(bars, focusSequence, chart.timeScale().getVisibleLogicalRange());
     if (!range) return;
-    viewportModeRef.current = "history";
-    chart.timeScale().setVisibleLogicalRange(range);
+    viewportModeRef.current = historicalPlaybackActive ? "following" : "history";
+    if (historicalPlaybackActive) {
+      const span = range.to - range.from;
+      const index = bars.findIndex(bar => bar.lastSequence >= focusSequence);
+      const from = index - span * 0.618;
+      chart.timeScale().setVisibleLogicalRange({ from, to: from + span });
+    } else chart.timeScale().setVisibleLogicalRange(range);
     onFocusAppliedRef.current?.();
-  }, [bars, focusSequence, chartRef, onFocusAppliedRef, viewportModeRef]);
+  }, [bars, focusSequence, chartRef, onFocusAppliedRef, viewportModeRef, historicalPlaybackActive]);
 
   useEffect(() => {
     tradeAnnotationPrimitiveRef.current?.setData({
       entries: tradeAnnotationsVisible ? tradeAnnotations : [],
-      bars: visibleBars,
+      bars: historicalPlaybackActive ? bars : visibleBars,
     });
-  }, [visibleBars, tradeAnnotations, tradeAnnotationsVisible, tradeAnnotationPrimitiveRef]);
+  }, [bars, historicalPlaybackActive, visibleBars, tradeAnnotations, tradeAnnotationsVisible, tradeAnnotationPrimitiveRef]);
 
   useEffect(() => {
     barCountPrimitiveRef.current?.setData({
@@ -410,11 +423,12 @@ export function useReplayChartSetup(core: ReturnType<typeof useReplayChartCore>)
     candleCountdownPrimitiveRef.current?.setData({
       bars: visibleBars,
       currentSourceTimestamp,
-      enabled: candleCountdownEnabled && !hiddenAfter,
+      remainingSeconds: candleCountdownSeconds,
+      enabled: candleCountdownEnabled && (!hiddenAfter || historicalPlaybackActive),
       playing: playbackActive,
       sourceIntervalSeconds: sourceIntervalSeconds ?? displayIntervalSeconds,
     });
-  }, [visibleBars, hiddenAfter, candleCountdownEnabled, currentSourceTimestamp, displayIntervalSeconds, playbackActive, sourceIntervalSeconds, candleCountdownPrimitiveRef]);
+  }, [visibleBars, hiddenAfter, candleCountdownEnabled, candleCountdownSeconds, historicalPlaybackActive, currentSourceTimestamp, displayIntervalSeconds, playbackActive, sourceIntervalSeconds, candleCountdownPrimitiveRef]);
 
   useReplayChartEma({
     chartRef,

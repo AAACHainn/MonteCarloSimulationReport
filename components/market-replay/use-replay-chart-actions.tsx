@@ -23,8 +23,8 @@ export function useReplayChartActions(core: ReturnType<typeof useReplayChartCore
     contextMenu, setContextMenu, measurement, drawingDraftRef, drawingPreviewRef, draft,
     setDraft, setOrderTicketPosition, riskPreferences, setRiskPreferences, setRiskSettingsOpen,
     setDefaultSaved, setDraftError, latest, currentPrice, syncLineActionCoordinates, syncDrawingPrimitive,
-    datasetId, priceTickSize, bars, displayIntervalSeconds, displaySession, paperSnapshot,
-    readOnly, paperBusy, onSubmitOrder, entryCheckOpen, onRewindToBar, rewindRange,
+    datasetId, priceTickSize, displayIntervalSeconds, displaySession, paperSnapshot,
+    paperBusy, onSubmitOrder, entryCheckOpen, onRewindToBar, rewindRange,
   } = core;
   const {
     draftSizing,
@@ -44,7 +44,6 @@ export function useReplayChartActions(core: ReturnType<typeof useReplayChartCore
     const insidePane = chart && x >= 0 && x <= chart.timeScale().width() && y >= 0 && y <= (chart.panes()[0]?.getHeight() ?? 0);
     const logical = insidePane ? chart.timeScale().coordinateToLogical(x as never) : null;
     const hideAfter = chartHideAfterTarget(barsRef.current, logical === null ? null : Number(logical), displayIntervalSeconds, displaySession);
-    if (readOnly && !hideAfter) return;
     setContextMenu({
       x: Math.max(8, Math.min(event.clientX - root.left, root.width - 228)),
       y: Math.max(8, Math.min(event.clientY - root.top, root.height - 264)),
@@ -61,7 +60,7 @@ export function useReplayChartActions(core: ReturnType<typeof useReplayChartCore
     pendingFollowRef.current = false;
     viewportUpdatingRef.current = true;
     requestAnimationFrame(() => { viewportUpdatingRef.current = false; syncLineActionCoordinates(); });
-    chart.timeScale().setVisibleLogicalRange(defaultReplayLogicalRange(chart.timeScale().width(), bars.length));
+    chart.timeScale().setVisibleLogicalRange(defaultReplayLogicalRange(chart.timeScale().width(), barsRef.current.length));
     candleRef.current?.priceScale().applyOptions({ autoScale: true });
     volumeRef.current?.priceScale().applyOptions({ autoScale: true });
     setContextMenu(null);

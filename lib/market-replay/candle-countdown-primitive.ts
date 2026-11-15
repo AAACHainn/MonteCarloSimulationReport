@@ -15,6 +15,7 @@ const LABEL_HORIZONTAL_PADDING = 7;
 type PrimitiveSnapshot = {
   bars: AggregatedMarketBarData[];
   currentSourceTimestamp: string | null;
+  remainingSeconds?: number | null;
   enabled: boolean;
   playing: boolean;
   sourceIntervalSeconds: number;
@@ -146,7 +147,7 @@ export class CandleCountdownPrimitive implements ISeriesPrimitive<Time> {
       return;
     }
 
-    const text = formatCandleCountdown(candleCountdownRemainingSeconds(
+    const text = formatCandleCountdown(this.snapshot.remainingSeconds ?? candleCountdownRemainingSeconds(
       latest, currentSourceTimestamp, sourceIntervalSeconds,
     ));
     const labelWidth = Math.max(48, text.length * 6.7 + LABEL_HORIZONTAL_PADDING * 2);

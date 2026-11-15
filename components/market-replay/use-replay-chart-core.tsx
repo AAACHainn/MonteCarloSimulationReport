@@ -40,8 +40,8 @@ export function useReplayChartCore({
   displaySession, barCountSession, barCountRthSession, barCountConfig, paperSnapshot,
   tradeAnnotations, tradeAnnotationsTruncated, focusSequence = null, onFocusApplied,
   tradeAnnotationsVisible = true,
-  candleCountdownEnabled = false, playbackActive = false, currentSourceTimestamp = null, sourceIntervalSeconds,
-  readOnly = false,
+  candleCountdownEnabled = false, candleCountdownSeconds = null, playbackActive = false, currentSourceTimestamp = null, sourceIntervalSeconds,
+  readOnly = false, hiddenAfter: controlledHiddenAfter, onHiddenAfterChange, historicalPlaybackActive = false,
   paperBusy, paperError, onSubmitOrder, onOrderPriceChange,
   onCancelOrder, onClosePosition, onCreatePartialExit, onPrepareProtectiveEdit, onDraftActiveChange, onDraftIdentityChange, entryCheckOpen = false, onOpenPaperAccount, onVisibleSequenceRangeChange,
   onRewindToBar, rewindRange,
@@ -49,11 +49,16 @@ export function useReplayChartCore({
   const chartDisplay = useMemo(() => requestedChartDisplay ?? chartDisplayConfig(candlestickStyle), [requestedChartDisplay, candlestickStyle]);
   const replaySession = useReplaySession();
   const visibilityScope = `${datasetId}:${replaySession?.id ?? ""}:${paperSnapshot?.session.id ?? ""}:${readOnly}`;
-  const [hiddenBoundary, setHiddenBoundary] = useState<{ scope: string; target: ChartHideAfter } | null>(null);
-  const hiddenAfter = hiddenBoundary?.scope === visibilityScope ? hiddenBoundary.target : null;
+  const [hiddenBoundary, setLocalHiddenBoundary] = useState<{ scope: string; target: ChartHideAfter } | null>(null);
+  const setHiddenBoundary = useCallback((value: { scope: string; target: ChartHideAfter } | null) => {
+    if (onHiddenAfterChange) onHiddenAfterChange(value?.target ?? null);
+    else setLocalHiddenBoundary(value);
+  }, [onHiddenAfterChange]);
+  const hiddenAfter = controlledHiddenAfter !== undefined ? controlledHiddenAfter
+    : hiddenBoundary?.scope === visibilityScope ? hiddenBoundary.target : null;
   const visibleBars = useMemo(() => chartBarsBeforeHiddenBoundary(bars, hiddenAfter, displayIntervalSeconds, displaySession), [bars, hiddenAfter, displayIntervalSeconds, displaySession]);
   const visibleWarmupBars = useMemo(() => chartBarsBeforeHiddenBoundary(warmupBars, hiddenAfter, displayIntervalSeconds, displaySession), [warmupBars, hiddenAfter, displayIntervalSeconds, displaySession]);
-  useEffect(() => { setHiddenBoundary(null); }, [visibilityScope]);
+  useEffect(() => { setLocalHiddenBoundary(null); }, [visibilityScope]);
   const containerRef = useRef<HTMLDivElement | null>(null);
   const interactionRef = useRef<HTMLDivElement | null>(null);
   const orderTicketRef = useRef<HTMLDivElement | null>(null);
@@ -537,7 +542,7 @@ export function useReplayChartCore({
   // and drawing preferences must update the existing instance so pointer handlers never
   // retain a removed chart or series.
   return {
-    chartDisplay, chartDisplayRef,
+    chartDisplay, chartDisplayRef, historicalPlaybackActive,
     viewportModeRef, viewportGestureRef, viewportUpdatingRef, pendingFollowRef, currentSourceSequenceRef, liveWindowRef, viewportSnapshot,
     replaySession, visibilityScope, setHiddenBoundary, hiddenAfter, visibleBars, visibleWarmupBars,
     containerRef, interactionRef, orderTicketRef, orderTicketDragRef, chartRef, candleRef,
@@ -562,7 +567,7 @@ export function useReplayChartCore({
     measurementArmed, cursorMode, candlestickStyle, gridVisible, onToggleGrid, drawingTool, trendLineDraftStyle,
     fibonacciDraftStyle, rectangleDraftStyle, emaEnabled, emaIndicators, abrEnabled, abrLength,
     volumeVisible, displaySession, barCountSession, barCountRthSession, barCountConfig, paperSnapshot, tradeAnnotations,
-    tradeAnnotationsTruncated, focusSequence, tradeAnnotationsVisible, candleCountdownEnabled, playbackActive, currentSourceTimestamp,
+    tradeAnnotationsTruncated, focusSequence, tradeAnnotationsVisible, candleCountdownEnabled, candleCountdownSeconds, playbackActive, currentSourceTimestamp,
     setProtectiveEditing, sourceIntervalSeconds, readOnly, paperBusy, paperError, onSubmitOrder, onCancelOrder,
     onClosePosition, onCreatePartialExit, onPrepareProtectiveEdit, entryCheckOpen, onOpenPaperAccount, onRewindToBar, rewindRange,
   };

@@ -1,6 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { useReplayChartSetup } from "./use-replay-chart-setup";
 import type { AggregatedMarketBarData } from "@/lib/market-replay/types";
+import type { ChartHideAfter } from "@/lib/market-replay/chart-hide-after";
 import type { ReplayViewportSnapshot } from "@/lib/market-replay/chart-range";
 
 vi.mock("@/components/appearance-provider", () => ({ useAppearance: () => ({ mode: "light" }) }));
@@ -31,7 +32,7 @@ function setup(previous = bars(300)) {
   const core = {
     chartRef: ref({ timeScale: () => time }), candleRef: ref(line), volumeRef: ref(null),
     bars: previous, visibleBars: previous, visibleWarmupBars: [], projectionBars: previous,
-    lastDataRef: ref(previous), lastDataRevisionRef: ref(harness.revision), lastHiddenAfterRef: ref(null),
+    lastDataRef: ref(previous), lastDataRevisionRef: ref(harness.revision), lastHiddenAfterRef: ref<ChartHideAfter | null>(null),
     lastDataIntervalRef: ref(60), lastDataSessionRef: ref("ETH"), displaySessionRef: ref("ETH"),
     barsRef: ref(previous), timelineBarsRef: ref(previous), projectionBarsRef: ref(previous),
     drawingScopeRef: ref("scope"), displayIntervalSecondsRef: ref(60), requestedDisplayIntervalSecondsRef: ref(60),
@@ -39,7 +40,7 @@ function setup(previous = bars(300)) {
     viewportModeRef: ref<"following" | "history">("following"), viewportGestureRef: ref(false),
     viewportUpdatingRef: ref(false), currentSourceSequenceRef: ref(299), pendingFollowRef: ref(false), liveWindowRef: ref(true),
     dataRevision: harness.revision, displayIntervalSeconds: 60, displaySession: "ETH", visibilityScope: "scope",
-    hiddenAfter: null, readOnly: false, emaIndicators: [], priceTickSize: 1, viewportSnapshot: null as ReplayViewportSnapshot | null,
+    hiddenAfter: null as ChartHideAfter | null, historicalPlaybackActive: false, readOnly: false, emaIndicators: [], priceTickSize: 1, viewportSnapshot: null as ReplayViewportSnapshot | null,
     syncVisibleSequenceRange: vi.fn(), syncMeasurementCoordinates: vi.fn(), syncDrawingPrimitive: vi.fn(),
   };
   const render = () => RenderHook(core as unknown as Parameters<typeof useReplayChartSetup>[0]);
@@ -111,4 +112,26 @@ describe("applying chart viewport transitions", () => {
     expect(s.scale.options().autoScale).toBe(false);
     expect(s.scale.applyOptions).not.toHaveBeenCalled();
   });
+  it("follows the newly revealed boundary even when the historical timeline already contains future slots", () => {
+    const s = setup();
+    s.core.readOnly = true; s.core.historicalPlaybackActive = true;
+    s.core.lastHiddenAfterRef.current = { bar: s.core.bars[199], displayIntervalSeconds: 60, displaySession: "ETH" };
+    s.core.hiddenAfter = { bar: s.core.bars[200], displayIntervalSeconds: 60, displaySession: "ETH" };
+    s.core.visibleBars = s.core.bars.slice(0, 201);
+    const before = s.time.getVisibleLogicalRange();
+    s.render();
+    expect(s.time.getVisibleLogicalRange()).toEqual({ from: before.from + 1, to: before.to + 1 });
+    expect(s.line.setData.mock.calls[0][0][201]).not.toHaveProperty("close");
+  });
+  it("does not jump back after a manual pan during historical playback", () => {
+    const s = setup();
+    s.core.readOnly = true; s.core.historicalPlaybackActive = true; s.core.viewportModeRef.current = "history";
+    s.core.lastHiddenAfterRef.current = { bar: s.core.bars[199], displayIntervalSeconds: 60, displaySession: "ETH" };
+    s.core.hiddenAfter = { bar: s.core.bars[200], displayIntervalSeconds: 60, displaySession: "ETH" };
+    s.core.visibleBars = s.core.bars.slice(0, 201);
+    const before = s.time.getVisibleLogicalRange();
+    s.render();
+    expect(s.time.getVisibleLogicalRange()).toEqual(before);
+  });
+
 });

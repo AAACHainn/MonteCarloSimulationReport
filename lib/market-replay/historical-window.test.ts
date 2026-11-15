@@ -1,5 +1,8 @@
 import { describe, expect, it, vi } from "vitest";
-import { historicalWindowFocusSequence, mergeHistoricalBars, readLaterHistoryWindow } from "./historical-window";
+import { historicalWindowFocusSequence, mergeHistoricalBars, readLaterHistoryWindow, boundedHistoricalPlaybackWindow } from "./historical-window";
+import { isHistoricalPlaybackBarReady } from "./historical-playback";
+import { calculateEmaSeries } from "./ema";
+import { REPLAY_HISTORY_BAR_LIMIT } from "./types";
 import type { AggregatedMarketBarData } from "./types";
 
 function bar(sequence: number, count = 5): AggregatedMarketBarData {
@@ -90,5 +93,52 @@ describe("historical period changes", () => {
   it("clamps blank chart margins to the historical session boundaries", () => {
     expect(historicalWindowFocusSequence({ fromSequence: 0, toSequence: 10 }, 100, 100, 2000)).toBe(100);
     expect(historicalWindowFocusSequence({ fromSequence: 2500, toSequence: 3000 }, 100, 100, 2000)).toBe(2000);
+  });
+});
+
+
+describe("bounded historical playback memory", () => {
+  it("retains a capped overlapping tail and the actual preceding indicator warmup", () => {
+    const current = Array.from({ length: REPLAY_HISTORY_BAR_LIMIT }, (_, index) => bar(index * 5));
+    const incoming = [bar((REPLAY_HISTORY_BAR_LIMIT - 1) * 5), bar(REPLAY_HISTORY_BAR_LIMIT * 5)];
+    const result = boundedHistoricalPlaybackWindow(current, incoming, 10);
+    expect(result.visibleBars).toHaveLength(REPLAY_HISTORY_BAR_LIMIT);
+    expect(result.visibleBars[0]).toEqual(bar(5));
+    expect(result.visibleBars.at(-1)).toEqual(incoming[1]);
+    expect(result.warmupBars).toEqual([bar(0)]);
+    expect(boundedHistoricalPlaybackWindow([bar(0)], [bar(5)], 10).warmupBars).toBeNull();
+  });
+});
+
+describe("preserving indicator context across repeated window compaction", () => {
+  it("combines existing warmup with each removed prefix, keeping a full 1000-bar context", () => {
+    const previous = Array.from({ length: 1000 }, (_, index) => bar(index * 5));
+    const current = Array.from({ length: REPLAY_HISTORY_BAR_LIMIT }, (_, index) => bar((index + 1000) * 5));
+    const incoming = [bar((REPLAY_HISTORY_BAR_LIMIT + 1000) * 5)];
+    const first = boundedHistoricalPlaybackWindow(current, incoming, 1000, previous);
+    expect(first.warmupBars).toHaveLength(1000);
+    expect(first.warmupBars).toEqual([...previous.slice(1), current[0]]);
+    expect(first.visibleBars).toHaveLength(REPLAY_HISTORY_BAR_LIMIT);
+    const ema = calculateEmaSeries([...first.warmupBars!, first.visibleBars[0]], 1000, 1000, 1000);
+    expect(ema.points).toEqual([{ sequence: 1000, value: 11 }]);
+    const second = boundedHistoricalPlaybackWindow(first.visibleBars, [bar((REPLAY_HISTORY_BAR_LIMIT + 1001) * 5)], 1000, first.warmupBars!);
+    expect(second.warmupBars).toEqual([...previous.slice(2), ...current.slice(0, 2)]);
+    expect(second.visibleBars[0]).toEqual(current[2]);
+    expect(previous).toHaveLength(1000);
+  });
+});
+
+describe("reading through artificial forming page tails", () => {
+  it("continues probing when the only later candle is still cut off by a page boundary", async () => {
+    const partial = { ...bar(10, 1), phase: "FORMING" as const, status: "INCOMPLETE" as const, quality: "GAP" as const };
+    const readWindow = vi.fn(async (focus: number) => ({ visibleBars: [bar(5), focus < 14 ? partial : bar(10)] }));
+    const page = await readLaterHistoryWindow({ afterSequence: 9, endSequence: 19, sourceSeconds: 60,
+      displaySeconds: 300, visibleCount: 1, readWindow,
+      acceptBar: bar => isHistoricalPlaybackBarReady(bar, 19) });
+    expect(readWindow.mock.calls.map(([focus]) => focus)).toEqual([10, 14]);
+    expect(page!.visibleBars.at(-1)!.lastSequence).toBe(14);
+  });
+  it("accepts a closed gap candle without requiring fabricated missing source bars", () => {
+    expect(isHistoricalPlaybackBarReady({ ...bar(10, 2), phase: "CLOSED", status: "INCOMPLETE", quality: "GAP" }, 19)).toBe(true);
   });
 });

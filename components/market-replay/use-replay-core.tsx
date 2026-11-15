@@ -1,4 +1,5 @@
 "use client";
+import { useWebFullscreen } from "./use-web-fullscreen";
 import { useArrowPreferences } from "./use-arrow-preferences";
 import { useAbcdPreferences } from "./use-abcd-preferences";
 
@@ -16,7 +17,7 @@ import type { ReplayChartDisplay } from "./replay-client-shared";
 import { useCallback, useEffect, useMemo, useRef, useState, useId } from "react";
 import type { ChartDisplayConfig } from "@/lib/market-replay/chart-display";
 import { useReplayShortcuts } from "@/components/market-replay/use-replay-shortcuts";
-import { createReplayStepShortcut, hasVisibleReplayDialog } from "@/lib/market-replay/keyboard-shortcuts";
+import { createReplayStepShortcut } from "@/lib/market-replay/keyboard-shortcuts";
 import { type DateTimePickerHandle } from "@/components/ui/date-time-picker";
 import { useTextDrawingEditor } from "./use-text-drawing-editor";
 import { useDrawingScopeGuard } from "./use-drawing-scope-guard";
@@ -161,30 +162,7 @@ export function useReplayCore({ dataset: initialDataset, initialJournalFocus = n
   const [styleDrawingId, setStyleDrawingId] = useState<string | null>(null);
   const [styleDraft, setStyleDraft] = useState<TrendLineStyle | FibonacciRetracementStyle | null>(null);
   const [pendingDrawingIds, setPendingDrawingIds] = useState<Set<string>>(() => new Set());
-  useEffect(() => {
-    if (!webFullscreen) return;
-    // Lock the root independently of dialogs, which lock body scrolling.
-    const previousOverflow = document.documentElement.style.overflow;
-    document.documentElement.style.overflow = "hidden";
-    return () => { document.documentElement.style.overflow = previousOverflow; };
-  }, [webFullscreen]);
-
-  useEffect(() => {
-    if (!webFullscreen) return;
-    const onKeyDown = (event: KeyboardEvent) => {
-      if (
-        event.key !== "Escape" || event.defaultPrevented || event.isComposing
-        || drawingTool || selectedDrawingId || measurementArmed || draftActive
-        || hasVisibleReplayDialog()
-        || document.querySelector("[role='menu'], [role='listbox'], [data-context-menu], [data-radix-popper-content-wrapper]")
-      ) return;
-      event.preventDefault();
-      setWebFullscreen(false);
-    };
-    // Check overlays before their Escape handlers remove them from the DOM.
-    window.addEventListener("keydown", onKeyDown, true);
-    return () => window.removeEventListener("keydown", onKeyDown, true);
-  }, [draftActive, drawingTool, measurementArmed, selectedDrawingId, webFullscreen]);
+  useWebFullscreen(webFullscreen, () => setWebFullscreen(false), Boolean(draftActive || drawingTool || measurementArmed || selectedDrawingId));
 
   const {
     chartStyle, setChartStyle,

@@ -32,6 +32,7 @@ type IndicatorSettingsDialogProps = {
   onClose: () => void;
   candleCountdown?: {
     enabled: boolean;
+    description?: string;
     onChange: (enabled: boolean) => void;
   };
   volumeVisible: boolean;
@@ -114,7 +115,7 @@ export function IndicatorSettingsDialog({
     ...(candleCountdown ? [{
       id: "countdown" as const,
       title: copy.marketReplay.candleCountdownTitle,
-      description: copy.marketReplay.candleCountdownDescription,
+      description: candleCountdown.description ?? copy.marketReplay.candleCountdownDescription,
       enabled: candleCountdown.enabled,
       icon: Clock3,
     }] : []),

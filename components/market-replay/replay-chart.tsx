@@ -4,7 +4,7 @@
 import { aggregateHasGap, aggregatePhase } from "@/lib/market-replay/bar-quality";
 import { formatInteger, formatNumber } from "@/lib/format";
 import { type PointerEvent as ReactPointerEvent } from "react";
-import { EyeOff, Grid2X2, GripHorizontal, Link2, Loader2, LogOut, RotateCcw, Settings, ShieldAlert, Undo2, X } from "lucide-react";
+import { EyeOff, Grid2X2, GripHorizontal, Link2, Loader2, LogOut, Play, RotateCcw, Settings, ShieldAlert, Undo2, X } from "lucide-react";
 import { RiskDefaultsDialog } from "./risk-defaults-dialog";
 import { Button } from "@/components/ui/button";
 import { Dialog } from "@/components/ui/dialog";
@@ -59,6 +59,7 @@ export function ReplayChart(props: ReplayChartProps) {
     submitDraft, contextEntryOrderTypes, measurementColor, measurementGeometry, measurementDuration, measurementLabelLeft,
     measurementLabelTop,
   } = actions;
+  const statusBar = hiddenAfter ? visibleBars.at(-1) : latest;
   const positionPnl = paperSnapshot ? Number(paperSnapshot.stats.unrealizedPnl.toFixed(2)) || 0 : null;
   const paneHeight = core.chartRef.current?.panes()[0]?.getHeight() ?? 0;
   const lineLabelY = layoutPriceLineLabels(lineActions.map(action => action.y), paneHeight);
@@ -84,7 +85,7 @@ export function ReplayChart(props: ReplayChartProps) {
         <div className="flex justify-end"><Button onClick={() => setTradeBlockReason(null)}>{copy.common.confirm}</Button></div>
       </Dialog>
 
-      {hiddenAfter ? <Alert data-hidden-bars-notice role="status" aria-live="polite"
+      {hiddenAfter && !props.historicalPlaybackActive ? <Alert data-hidden-bars-notice role="status" aria-live="polite"
         className="absolute bottom-3 left-3 z-30 flex w-auto max-w-[calc(100%-1.5rem)] flex-wrap items-center gap-2 bg-white/95 dark:bg-card/95 px-3 py-2 shadow-lg backdrop-blur">
         <span className="flex items-center gap-2 font-medium text-slate-700 dark:text-secondary-text"><EyeOff className="h-4 w-4 shrink-0" aria-hidden="true" />{copy.marketReplay.subsequentBarsHidden}</span>
         <Button type="button" variant="outline" size="sm" className="min-h-10 sm:min-h-8" data-testid="restore-subsequent-bars" aria-label={copy.marketReplay.restoreSubsequentBars}
@@ -259,9 +260,9 @@ export function ReplayChart(props: ReplayChartProps) {
       {core.chartDisplay.chartType === "line" ? <div data-chart-display-label className="pointer-events-none absolute left-3 top-3 z-20 rounded-md border bg-card/90 px-2 py-1 text-xs text-foreground shadow-sm">
         {copy.marketReplay.lineChartLabel(copy.marketReplay.linePriceSources[core.chartDisplay.line.priceSource])}
       </div> : null}
-      {latest && (aggregatePhase(latest) === "FORMING" || aggregateHasGap(latest)) ? (
-        <div className={`pointer-events-none absolute left-3 ${core.chartDisplay.chartType === "line" ? "top-12" : "top-3"} z-20 rounded-md px-2 py-1 text-xs shadow-sm ${aggregateHasGap(latest) ? "bg-amber-100 dark:bg-warning-background text-amber-900 dark:text-warning" : "bg-blue-50 dark:bg-info-background text-blue-800 dark:text-link"}`}>
-          {aggregateHasGap(latest) ? copy.marketReplay.incompleteBar(latest.sourceCount, latest.expectedCount) : copy.marketReplay.formingBar(latest.sourceCount, latest.expectedCount)}
+      {statusBar && (aggregatePhase(statusBar) === "FORMING" || aggregateHasGap(statusBar)) ? (
+        <div className={`pointer-events-none absolute left-3 ${core.chartDisplay.chartType === "line" ? "top-12" : "top-3"} z-20 rounded-md px-2 py-1 text-xs shadow-sm ${aggregateHasGap(statusBar) ? "bg-amber-100 dark:bg-warning-background text-amber-900 dark:text-warning" : "bg-blue-50 dark:bg-info-background text-blue-800 dark:text-link"}`}>
+          {aggregateHasGap(statusBar) ? copy.marketReplay.incompleteBar(statusBar.sourceCount, statusBar.expectedCount) : copy.marketReplay.formingBar(statusBar.sourceCount, statusBar.expectedCount)}
         </div>
       ) : null}
 
@@ -269,12 +270,15 @@ export function ReplayChart(props: ReplayChartProps) {
 
       {contextMenu ? (
         <div ref={contextMenuRef} data-context-menu role="menu" className="absolute z-40 max-h-[calc(100%-1rem)] w-[220px] max-w-[calc(100%-1rem)] overflow-y-auto rounded-lg border border-slate-200 dark:border-border bg-white dark:bg-card p-1.5 shadow-xl" style={{ left: contextMenu.x, top: contextMenu.y }}>
-          {!readOnly ? (
-            <button type="button" role="menuitem" data-testid="context-reset-chart-view" className="flex w-full items-center gap-2 rounded-md px-2 py-2 text-left text-sm font-medium text-slate-700 dark:text-secondary-text hover:bg-slate-100 dark:hover:bg-hover focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-600" onClick={resetChartView}>
-              <RotateCcw className="h-4 w-4" />
-              {copy.marketReplay.resetChartView}
-            </button>
-          ) : null}
+          <Button type="button" role="menuitem" variant="ghost" data-testid="context-reset-chart-view"
+            className="w-full justify-start px-2 text-left font-medium text-slate-700 dark:text-secondary-text" onClick={resetChartView}>
+            <RotateCcw className="h-4 w-4" aria-hidden="true" />{copy.marketReplay.resetChartView}
+          </Button>
+          {readOnly && props.onStartHistoricalPlayback && contextMenu.hideAfter ? <Button type="button" role="menuitem" variant="ghost"
+            data-testid="context-start-historical-playback" className="w-full justify-start px-2 text-left font-medium text-slate-700 dark:text-secondary-text"
+            onClick={() => { const target = contextMenu.hideAfter; setContextMenu(null); setAbrTooltip(null); if (target) props.onStartHistoricalPlayback?.(target); }}>
+            <Play className="h-4 w-4" aria-hidden="true" />{copy.marketReplay.startHistoricalPlayback}
+          </Button> : null}
           {contextMenu.hideAfter ? <Button type="button" role="menuitem" variant="ghost" data-testid="context-hide-subsequent-bars"
             className="w-full justify-start px-2 text-left font-medium text-slate-700 dark:text-secondary-text"
             onClick={() => { const target = contextMenu.hideAfter; if (target) setHiddenBoundary({ scope: visibilityScope, target }); setContextMenu(null); setAbrTooltip(null); }}>

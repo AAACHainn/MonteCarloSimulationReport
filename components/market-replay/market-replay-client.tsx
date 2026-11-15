@@ -28,6 +28,7 @@ import { ReplayChart } from "@/components/market-replay/replay-chart";
 import { ReplayAutoPauseNotice } from "@/components/market-replay/replay-auto-pause-notice";
 import { ChartStyleSettingsDialog } from "./chart-style-settings-dialog";
 import { IndicatorSettingsDialog } from "@/components/market-replay/indicator-settings-dialog";
+import { DisplaySessionControls } from "./display-session-controls";
 import { DisplayIntervalControls } from "@/components/market-replay/display-interval-controls";
 import { ReplayStartDialog } from "@/components/market-replay/replay-start-dialog";
 import { ChartVisibilityMenu } from "@/components/market-replay/chart-visibility-menu";
@@ -55,7 +56,7 @@ import { runDrawingWrite } from "@/lib/market-replay/drawing-write-queue";
 import { deleteTextDrawing, persistTextDrawing } from "@/lib/market-replay/text-persistence";
 import { drawingObjectName, drawingObjectColor, drawingSettingsLabel, drawingDeleteLabel } from "@/lib/market-replay/drawing-presentation";
 import { UTC_OFFSET_OPTIONS, formatUtcOffset } from "@/lib/market-replay/display-timezone";
-import { formatInterval, type DisplaySession } from "@/lib/market-replay/types";
+import { formatInterval } from "@/lib/market-replay/types";
 import { DRAWING_TYPE_FIB_RETRACEMENT, DRAWING_TYPE_TREND_LINE, DRAWING_TYPE_RECTANGLE, DRAWING_TYPE_TEXT, type FibonacciRetracementStyle, type TrendLineStyle } from "@/lib/market-replay/chart-drawings";
 import { cloneFibonacciStyle, formatDatasetTime } from "./replay-client-shared";
 import type { JournalFocus } from "./replay-client-shared";
@@ -232,18 +233,8 @@ export function MarketReplayClient({ dataset: initialDataset, initialJournalFocu
             disabled={Boolean(journalReview) || correctionPending}
             onChange={changeDisplayInterval}
           />
-          {dataset.availableDisplaySessions.length > 1 ? (
-            <>
-              <Label htmlFor="display-session" className="whitespace-nowrap text-xs text-slate-500 dark:text-muted-foreground">{copy.marketReplay.displaySession}</Label>
-              <Select disabled={Boolean(journalReview) || correctionPending} value={replay.displaySession} onValueChange={(value) => void changeChartSession(value as DisplaySession)}>
-                <SelectTrigger id="display-session" className="h-8 w-20" title={copy.marketReplay.displaySessionHint}><SelectValue /></SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="ETH">{copy.marketReplay.displaySessionEth}</SelectItem>
-                  <SelectItem value="RTH">{copy.marketReplay.displaySessionRth}</SelectItem>
-                </SelectContent>
-              </Select>
-            </>
-          ) : null}
+          <DisplaySessionControls value={replay.displaySession} available={dataset.availableDisplaySessions}
+            disabled={Boolean(journalReview) || correctionPending} onChange={changeChartSession} />
           <Label htmlFor="display-timezone" className="whitespace-nowrap text-xs text-slate-500 dark:text-muted-foreground">{copy.marketReplay.displayTimezone}</Label>
           <Select value={String(displayUtcOffsetMinutes)} onValueChange={(value) => setDisplayUtcOffsetMinutes(Number(value))}>
             <SelectTrigger id="display-timezone" className="h-8 w-28" title={copy.marketReplay.displayTimezoneHint}><SelectValue /></SelectTrigger>

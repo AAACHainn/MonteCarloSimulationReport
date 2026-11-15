@@ -1,15 +1,13 @@
 "use client";
 
 import * as Popover from "@radix-ui/react-popover";
-import { CalendarDays, ChevronRight, Pause, Play } from "lucide-react";
+import { CalendarDays } from "lucide-react";
 import { PaperTradingDetails } from "./paper-trading-panel";
-import { useReplayShortcuts } from "./use-replay-shortcuts";
+import { ReplayTransportButtons, ReplaySpeedControls } from "./replay-transport-controls";
 import { Button } from "@/components/ui/button";
-import { Input } from "@/components/ui/input";
-import { Label } from "@/components/ui/label";
 import { copy } from "@/lib/i18n";
 import { formatUtcDateTime } from "@/lib/market-replay/display-timezone";
-import { MAX_PLAYBACK_RATE, MIN_PLAYBACK_RATE, type MarketBarData, type ReplayState } from "@/lib/market-replay/types";
+import { type MarketBarData, type ReplayState } from "@/lib/market-replay/types";
 import type { PaperSessionSnapshot, ReplayJournalEntryData } from "@/lib/paper-trading/types";
 
 type Props = {
@@ -40,7 +38,6 @@ export function ReplayPlaybackBar({
   onToggle, onNext, onSpeedChange, onFocusJournalEntry, correctionPending = false, retrying = false, playbackRequested = replay.status === "playing",
   onLocateDate, dateForwarding = false, dateForwardStatus, onStopDateForward,
 }: Props) {
-  const shortcuts = useReplayShortcuts();
   const stateLabel = replay.status === "finished" ? copy.marketReplay.finished
     : playbackRequested ? copy.marketReplay.play : copy.marketReplay.pause;
   const statusLabel = stateLabel + (statusText ? ` · ${statusText}` : "");
@@ -56,28 +53,15 @@ export function ReplayPlaybackBar({
   return (
     <div aria-busy={retrying} className="flex h-14 shrink-0 items-center gap-2 border-t bg-slate-50/80 dark:bg-muted/80 px-3 pr-20">
       <div className="flex min-w-0 flex-1 items-center gap-2 overflow-x-auto [&>*]:shrink-0">
-        <Button
-          type="button"
-          size="sm"
-          className="h-9"
-          title={`${copy.marketReplay.playbackTiming(sourceIntervalSeconds / replay.playbackRate)}\n${copy.marketReplay.playbackShortcutHint(shortcuts.playback)}`}
-          aria-keyshortcuts={shortcuts.playbackAria}
-          onClick={onToggle}
-          disabled={replay.status === "finished" || correctionPending}
-        >
-          {playbackRequested ? <Pause className="h-4 w-4" /> : <Play className="h-4 w-4" />}{playbackRequested ? copy.marketReplay.pause : copy.marketReplay.play}
-        </Button>
-        <Button type="button" size="sm" variant="outline" className="h-9" title={copy.marketReplay.playbackShortcutHint(shortcuts.nextBar)} aria-keyshortcuts={shortcuts.nextBarAria} onClick={onNext} disabled={retrying || replay.status === "finished" || replay.status === "playing" || correctionPending}>
-          <ChevronRight className="h-4 w-4" />{copy.marketReplay.nextBar}
-        </Button>
+        <ReplayTransportButtons playing={playbackRequested} secondsPerBar={sourceIntervalSeconds} rate={replay.playbackRate}
+          playDisabled={replay.status === "finished" || correctionPending}
+          stepDisabled={retrying || replay.status === "finished" || replay.status === "playing" || correctionPending}
+          onToggle={onToggle} onNext={onNext} />
         {onLocateDate ? <Button type="button" variant="outline" size="sm" className="h-9" disabled={correctionPending || dateForwarding} onClick={onLocateDate}><CalendarDays className="h-4 w-4" aria-hidden="true" />{copy.replaySessions.locateDate}</Button> : null}
         {dateForwarding ? <><span role="status" className="max-w-64 truncate text-xs tabular-nums text-slate-600 dark:text-secondary-text" title={dateForwardStatus}>{dateForwardStatus}</span><Button type="button" size="sm" variant="outline" className="h-9" onClick={onStopDateForward}>{copy.replaySessions.forwardCancel}</Button></> : null}
         <PaperTradingDetails snapshot={paperSnapshot} onFocusJournalEntry={onFocusJournalEntry} />
         <div className="mx-1 h-6 w-px bg-slate-200 dark:bg-hover" />
-        <Label htmlFor="replay-speed" className="whitespace-nowrap text-xs text-slate-500 dark:text-muted-foreground">{copy.marketReplay.speed}</Label>
-        <Input id="replay-speed" type="range" min={MIN_PLAYBACK_RATE} max={MAX_PLAYBACK_RATE} value={replay.playbackRate} onChange={(event) => onSpeedChange(Number(event.target.value))} className="h-8 w-24 border-0 bg-transparent px-0 lg:w-32" />
-        <Input aria-label={copy.marketReplay.speed} type="number" min={MIN_PLAYBACK_RATE} max={MAX_PLAYBACK_RATE} value={replay.playbackRate} onChange={(event) => onSpeedChange(Math.max(MIN_PLAYBACK_RATE, Math.min(MAX_PLAYBACK_RATE, Number(event.target.value))))} className="h-8 w-20" />
-        <span className="text-xs font-medium text-slate-700 dark:text-secondary-text">{copy.marketReplay.playbackRate(replay.playbackRate)}</span>
+        <ReplaySpeedControls rate={replay.playbackRate} onChange={onSpeedChange} />
         <div className="ml-auto hidden items-center gap-4 text-xs xl:flex">
           <span className="text-slate-500 dark:text-muted-foreground">{copy.marketReplay.progress(revealedCount, replayCount)}</span>
           <span className="font-medium text-slate-800 dark:text-foreground">{currentBar ? formatUtcDateTime(currentBar.timestamp, displayUtcOffsetMinutes) : copy.marketReplay.waiting}</span>

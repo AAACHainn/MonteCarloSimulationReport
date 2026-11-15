@@ -1,6 +1,9 @@
 "use client";
 
 import { useCallback, useMemo, useRef, useState } from "react";
+import { useHistoricalPlayback } from "./use-historical-playback";
+import { HistoricalPlaybackBar } from "./historical-playback-bar";
+import { useWebFullscreen } from "./use-web-fullscreen";
 import { ChartCandlestick } from "lucide-react";
 import { useAppearance } from "@/components/appearance-provider";
 import { Button } from "@/components/ui/button";
@@ -42,9 +45,13 @@ export function ChartStylePreview() {
   const viewport = useRef<ReplayViewportApi | null>(null);
   const [view, setView] = useState<ReplayViewportSnapshot | null>(null);
   const [visibleRange, setVisibleRange] = useState<ReplayVisibleSequenceRange | null>(null);
-  const source = useMemo(() => previewSourceBars(sequence, pulse), [sequence, pulse]);
+  const source = useMemo(() => previewSourceBars(readOnly ? 399 : sequence, readOnly ? 0 : pulse), [readOnly, sequence, pulse]);
   const bars = useMemo(() => aggregateMarketBars({ bars: source, sourceSeconds: 60, displaySeconds: interval,
-    session: PREVIEW_SESSION, currentSequence: sequence, finalSequence: 399, emissionMode: "DENSE" }), [source, sequence, interval]);
+    session: PREVIEW_SESSION, currentSequence: readOnly ? 399 : sequence, finalSequence: 399, emissionMode: "DENSE" }), [source, sequence, interval, readOnly]);
+  const [focus, setFocus] = useState<number | null>(null);
+  const playback = useHistoricalPlayback({ endSequence: 399, seconds: interval, disabled: false,
+    getTimeline: () => ({ bars, seconds: interval, session: "ETH" }), readLater: async () => [] });
+  useWebFullscreen(fullscreen, () => setFullscreen(false), Boolean(tool || measure || selected));
   const lastClose = source.at(-1)!.close;
   const account = useMemo(() => {
     const snapshot = previewAccount(sequence, lastClose, orders);
@@ -66,7 +73,7 @@ export function ChartStylePreview() {
         <h1 className="mr-auto text-xl font-semibold text-foreground">{t.title}</h1>
         <Button variant="outline" aria-pressed={mode === "light"} onClick={() => setMode("light")}>{copy.appearance.light}</Button>
         <Button variant="outline" aria-pressed={mode === "dark"} onClick={() => setMode("dark")}>{copy.appearance.dark}</Button>
-        <Button variant="outline" aria-pressed={!readOnly} onClick={() => setReadOnly(false)}>{t.live}</Button>
+        <Button variant="outline" aria-pressed={!readOnly} onClick={() => { playback.engine.exit(); setReadOnly(false); }}>{t.live}</Button>
         <Button variant="outline" aria-pressed={readOnly} onClick={() => setReadOnly(true)}>{t.history}</Button>
         <Button variant="outline" onClick={() => setFullscreen(value => !value)}>{fullscreen ? copy.marketReplay.exitWebFullscreen : copy.marketReplay.enterWebFullscreen}</Button>
       </div>
@@ -76,7 +83,7 @@ export function ChartStylePreview() {
         <Button variant="outline" disabled={readOnly || sequence >= 399} onClick={() => { setSequence(value => value + 1); setPulse(0); }}>{t.advance}</Button>
         <Button variant="outline" disabled={readOnly} onClick={() => setPulse(value => value + 1)}>{t.forming}</Button>
         <Label htmlFor="preview-interval">{t.interval}</Label>
-        <Select value={String(interval)} onValueChange={value => setInterval(Number(value))}>
+        <Select value={String(interval)} onValueChange={value => { playback.engine.pause(); setInterval(Number(value)); }}>
           <SelectTrigger id="preview-interval" className="w-24"><SelectValue /></SelectTrigger>
           <SelectContent>{[60, 300, 900].map(seconds => <SelectItem key={seconds} value={String(seconds)}>{seconds / 60}m</SelectItem>)}</SelectContent>
         </Select>
@@ -85,15 +92,21 @@ export function ChartStylePreview() {
         <Button variant="outline" onClick={() => setView(viewport.current?.capture(sequence, !readOnly) ?? null)}>{t.inspect}</Button>
       </div>
     </div>
-    <div className="flex min-h-0 flex-1 overflow-hidden rounded-lg border bg-card">
+    <div className="flex min-h-0 flex-1 flex-col overflow-hidden rounded-lg border bg-card">
+    <div className="flex min-h-0 flex-1">
       <ReplayDrawingToolbar cursorMode="crosshair" onCursorChange={() => {}} drawingTool={tool}
         onArmDrawing={next => setTool(current => current === next ? null : next)}
         measurementArmed={measure} onToggleMeasurement={() => setMeasure(value => !value)}
-        drawingObjectsOpen={objects} onToggleDrawingObjects={() => setObjects(value => !value)} />
+        drawingObjectsOpen={objects} onToggleDrawingObjects={() => setObjects(value => !value)}
+        webFullscreen={fullscreen} onToggleWebFullscreen={() => setFullscreen(value => !value)} />
       <div className="min-w-0 flex-1">
         <ReplayChart datasetId={PREVIEW_DATASET.id} dataRevision="synthetic-source" priceTickSize={0.25}
           bars={bars} warmupBars={[]} displayUtcOffsetMinutes={0} displayIntervalSeconds={interval} sourceIntervalSeconds={60}
-          currentSourceSequence={sequence} currentSourceTimestamp={source.at(-1)!.timestamp} liveWindow={!readOnly}
+          hiddenAfter={readOnly ? playback.boundary : undefined} onHiddenAfterChange={readOnly ? playback.engine.hide : undefined}
+          historicalPlaybackActive={readOnly && playback.active}
+          onStartHistoricalPlayback={readOnly ? target => { playback.engine.start(target); setFocus(target.bar.lastSequence); } : undefined}
+          focusSequence={focus} onFocusApplied={() => setFocus(null)}
+          currentSourceSequence={playback.active ? playback.boundary?.bar.lastSequence : sequence} currentSourceTimestamp={source.at(-1)!.timestamp} liveWindow={!readOnly}
           candlestickStyle={config.candlestickStyle} chartDisplay={config}
           viewportApiRef={viewport} measurementArmed={measure} onMeasurementArmedChange={setMeasure}
           rectangleDraftStyle={DEFAULT_RECTANGLE_STYLE} trendLineDraftStyle={DEFAULT_TREND_LINE_STYLE}
@@ -118,7 +131,7 @@ export function ChartStylePreview() {
           }}
           emaEnabled emaIndicators={[{ id: "preview-ema", length: 5, color: "#F59E0B", lineWidth: 1, lineStyle: "SOLID", visible: true }]}
           abrEnabled abrLength={8} volumeVisible gridVisible displaySession="ETH" barCountSession={PREVIEW_SESSION} barCountConfig={prefs.barCountConfig}
-          paperSnapshot={account} tradeAnnotations={PREVIEW_TRADES} tradeAnnotationsTruncated={false} readOnly={readOnly}
+          paperSnapshot={readOnly ? null : account} tradeAnnotations={PREVIEW_TRADES} tradeAnnotationsTruncated={false} readOnly={readOnly}
           paperBusy={false} paperError={null}
           onSubmitOrder={async order => {
             setOrders(current => [...current, { ...previewAccount(0, 100).activeOrders[0], ...order, id: createUuid() }]); return true;
@@ -132,6 +145,9 @@ export function ChartStylePreview() {
       {objects ? <div className="w-48 space-y-2 overflow-y-auto border-l p-2">
         {drawings.map(drawing => <Button key={drawing.id} variant={selected === drawing.id ? "secondary" : "outline"} className="w-full" onClick={() => setSelected(drawing.id)}>{drawing.id}</Button>)}
       </div> : null}
+    </div>
+      <HistoricalPlaybackBar playback={playback} seconds={interval} onToggle={playback.engine.toggle}
+        onNext={() => void playback.engine.step()} onRate={playback.engine.setRate} onExit={playback.engine.exit} />
     </div>
     <details className="shrink-0 rounded-md border bg-card p-2 text-xs" open>
       <summary>{t.diagnostics}</summary>

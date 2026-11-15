@@ -1,5 +1,6 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import {
+  CandleCountdownPrimitive,
   candleCountdownRemainingSeconds,
   formatCandleCountdown,
 } from "./candle-countdown-primitive";
@@ -47,5 +48,28 @@ describe("candle countdown", () => {
     expect(formatCandleCountdown(59)).toBe("00:59");
     expect(formatCandleCountdown(300)).toBe("05:00");
     expect(formatCandleCountdown(3_661)).toBe("01:01:01");
+  });
+});
+
+
+describe("historical countdown rendering", () => {
+  it("renders the next-reveal countdown beside a complete candle and hides it on pause", () => {
+    const primitive = new CandleCountdownPrimitive();
+    primitive.attached({ chart: { timeScale: () => ({ width: () => 800, logicalToCoordinate: () => 400 }),
+      panes: () => [{ getHeight: () => 500 }] }, series: { priceToCoordinate: () => 250 }, requestUpdate: vi.fn() } as unknown as Parameters<CandleCountdownPrimitive["attached"]>[0]);
+    const context = { save: vi.fn(), restore: vi.fn(), fillText: vi.fn() };
+    const target = { useMediaCoordinateSpace: (draw: (scope: { context: typeof context }) => void) => draw({ context }) };
+    const render = () => {
+      primitive.updateAllViews();
+      const renderer = primitive.paneViews()[0].renderer();
+      renderer.draw(target as unknown as Parameters<typeof renderer.draw>[0]);
+    };
+    primitive.setData({ bars: [bar({ status: "COMPLETE" })], currentSourceTimestamp: null,
+      enabled: true, playing: true, sourceIntervalSeconds: 60, remainingSeconds: 37 });
+    render(); expect(context.fillText).toHaveBeenLastCalledWith("00:37", expect.any(Number), expect.any(Number));
+    context.fillText.mockClear();
+    primitive.setData({ bars: [bar()], currentSourceTimestamp: null, enabled: true, playing: false,
+      sourceIntervalSeconds: 60, remainingSeconds: 36 });
+    render(); expect(context.fillText).not.toHaveBeenCalled();
   });
 });

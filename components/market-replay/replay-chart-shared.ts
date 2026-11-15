@@ -178,6 +178,7 @@ export type ReplayChartProps = {
   displayIntervalSeconds: number;
   sourceIntervalSeconds?: number;
   candleCountdownEnabled?: boolean;
+  candleCountdownSeconds?: number | null;
   playbackActive?: boolean;
   currentSourceTimestamp?: string | null;
   currentSourceSequence?: number;
@@ -225,6 +226,10 @@ export type ReplayChartProps = {
   focusSequence?: number | null;
   onFocusApplied?: () => void;
   readOnly?: boolean;
+  hiddenAfter?: ChartHideAfter | null;
+  onHiddenAfterChange?: (target: ChartHideAfter | null) => void;
+  historicalPlaybackActive?: boolean;
+  onStartHistoricalPlayback?: (target: ChartHideAfter) => void;
   paperBusy: boolean;
   paperError: string | null;
   onSubmitOrder: (order: { side: PaperSide; type: "LIMIT" | "STOP"; quantity: number; riskAmount: number; price: number; stopLoss: number; takeProfit: number }, draftId?: string) => Promise<boolean | OrderSubmitResult>;
