@@ -242,7 +242,6 @@ export const zhMarketReplay = {
       chartTypes: { candlestick: "K 线图", line: "折线图" },
       linePriceSource: "价格来源",
       linePriceSources: { close: "收盘价", open: "开盘价" },
-      lineColor: "线条颜色",
       lineChartLabel: (source: string) => `折线图 · ${source}`,
       candlestickStyle: "K 线样式",
       candlestickSettings: "K 线样式设置",
