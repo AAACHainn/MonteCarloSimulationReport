@@ -17,7 +17,7 @@ export function useReplayChartDrawingPointer(core: ReturnType<typeof useReplayCh
     rectanglePrimitiveRef, trendLinePrimitiveRef, fibonacciPrimitiveRef, textPrimitiveRef, textEditRef, textClicks,
     textDragRef, onPlaceTextRef, arrowPrimitiveRef, arrowDragRef, onPlaceArrowRef,
     abcdPrimitiveRef, abcdDraftRef, abcdPreviewRef, onCreateAbcdRef, barsRef, drawingTimelineRef, drawingSessionRef, measurementArmedRef,
-    drawingToolRef, drawingsRef, drawingGroupsRef, selectedDrawingIdRef, onDrawingToolChangeRef, onSelectedDrawingIdChangeRef, drawingEditingLockedRef,
+    shortcutsActiveRef, drawingToolRef, drawingsRef, drawingGroupsRef, selectedDrawingIdRef, onDrawingToolChangeRef, onSelectedDrawingIdChangeRef, drawingEditingLockedRef,
     onCreateDrawingRef, onUpdateDrawingRef, onDeleteDrawingRef, onOpenDrawingStyleRef, displayIntervalSecondsRef, sourceIntervalSecondsRef,
     setContextMenu, drawingDraftRef, drawingDraftCoordinateRef, drawingPreviewRef, syncDrawingPrimitive,
     setChartCursor, priceTickSize,
@@ -94,7 +94,9 @@ export function useReplayChartDrawingPointer(core: ReturnType<typeof useReplayCh
     };
     const stopEvent = (event: Event) => {
       event.preventDefault();
-      event.stopImmediatePropagation();
+      // Shortcut listeners on window must also see the release after a drawing click or drag.
+      if (event.type === "pointerup") event.stopPropagation();
+      else event.stopImmediatePropagation();
       setContextMenu(null);
     };
     const selectDrawing = (id: string) => {
@@ -385,9 +387,14 @@ export function useReplayChartDrawingPointer(core: ReturnType<typeof useReplayCh
       pendingPointer = null;
     };
     const move = (event: PointerEvent) => {
-      const active = dragging || textDragging || arrowDragging || abcdDragging || drawingToolRef.current && (drawingDraftRef.current || abcdDraftRef.current);
+      const draggingObject = dragging || textDragging || arrowDragging || abcdDragging;
+      if (!draggingObject && !interaction.contains(event.target as Node)) {
+        if (drawingGroupsRef.current.text.length) hoverText(null);
+        return;
+      }
+      const active = draggingObject || drawingToolRef.current && (drawingDraftRef.current || abcdDraftRef.current);
       if (!active && !drawingGroupsRef.current.text.length) return;
-      if (!active && (textEditRef.current?.inline || !interaction.contains(event.target as Node))) { hoverText(null); return; }
+      if (!active && textEditRef.current?.inline) { hoverText(null); return; }
       if (active) stopEvent(event);
       pendingPointer = event;
       if (pointerFrame !== null) return;
@@ -479,7 +486,7 @@ export function useReplayChartDrawingPointer(core: ReturnType<typeof useReplayCh
       onOpenDrawingStyleRef.current(id);
     };
     const key = (event: KeyboardEvent) => {
-      if (event.defaultPrevented || event.isComposing || hasVisibleReplayDialog() || isReplayShortcutInputTarget(event.target)) return;
+      if (shortcutsActiveRef?.current === false || event.defaultPrevented || event.isComposing || hasVisibleReplayDialog() || isReplayShortcutInputTarget(event.target)) return;
       if (event.key === "Escape" && (dragging || textDragging || arrowDragging || abcdDragging)) {
         stopEvent(event);
         cancelDrag();
@@ -534,6 +541,6 @@ export function useReplayChartDrawingPointer(core: ReturnType<typeof useReplayCh
       interaction.removeEventListener("dblclick", doubleClick, true);
       window.removeEventListener("keydown", key, true);
     };
-  }, [abcdPrimitiveRef, abcdDraftRef, abcdPreviewRef, onCreateAbcdRef, arrowPrimitiveRef, arrowDragRef, onPlaceArrowRef, priceTickSize, setChartCursor, syncDrawingPrimitive, visibilityScope, barsRef, candleRef, chartRef, containerRef, displayIntervalSecondsRef, drawingDraftCoordinateRef, drawingDraftRef, drawingEditingLockedRef, drawingGroupsRef, drawingPreviewRef, drawingSessionRef, drawingTimelineRef, drawingToolRef, drawingsRef, fibonacciPrimitiveRef, interactionRef, lineTargetsRef, measurementArmedRef, onCreateDrawingRef, onDeleteDrawingRef, onDrawingToolChangeRef, onOpenDrawingStyleRef, onPlaceTextRef, onSelectedDrawingIdChangeRef, onUpdateDrawingRef, rectanglePrimitiveRef, selectedDrawingIdRef, setContextMenu, sourceIntervalSecondsRef, textClicks, textDragRef, textEditRef, textPrimitiveRef, trendLinePrimitiveRef]);
+  }, [abcdPrimitiveRef, abcdDraftRef, abcdPreviewRef, onCreateAbcdRef, arrowPrimitiveRef, arrowDragRef, onPlaceArrowRef, priceTickSize, setChartCursor, syncDrawingPrimitive, visibilityScope, barsRef, candleRef, chartRef, containerRef, displayIntervalSecondsRef, drawingDraftCoordinateRef, drawingDraftRef, drawingEditingLockedRef, shortcutsActiveRef, drawingGroupsRef, drawingPreviewRef, drawingSessionRef, drawingTimelineRef, drawingToolRef, drawingsRef, fibonacciPrimitiveRef, interactionRef, lineTargetsRef, measurementArmedRef, onCreateDrawingRef, onDeleteDrawingRef, onDrawingToolChangeRef, onOpenDrawingStyleRef, onPlaceTextRef, onSelectedDrawingIdChangeRef, onUpdateDrawingRef, rectanglePrimitiveRef, selectedDrawingIdRef, setContextMenu, sourceIntervalSecondsRef, textClicks, textDragRef, textEditRef, textPrimitiveRef, trendLinePrimitiveRef]);
 
 }

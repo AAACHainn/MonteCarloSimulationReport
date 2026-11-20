@@ -2,6 +2,7 @@ import { sqliteWriteTransaction } from "@/lib/sqlite-write";
 import { withReplaySessionRoute, drawingScopeWhere, assertReplayDrawingWritable } from '@/lib/replay-sessions/scope';
 import { NextResponse } from "next/server";
 import { prisma } from "@/lib/db";
+import { readDrawingPane } from "@/lib/market-replay/drawing-pane";
 import { copy } from "@/lib/i18n";
 import {
   drawingStyleMatchesType,
@@ -16,13 +17,15 @@ type RouteContext = { params: Promise<{ id: string; drawingId: string }> };
 
 async function handlePATCH(request: Request, context: RouteContext) {
   const { id, drawingId } = await context.params;
+  const pane = readDrawingPane(request);
+  if (pane === null) return NextResponse.json({ error: copy.marketReplay.invalidDrawing }, { status: 400 });
   const parsed = updateMarketDrawingSchema.safeParse(await request.json());
   if (!parsed.success) {
     return NextResponse.json({ error: copy.marketReplay.invalidDrawing }, { status: 400 });
   }
   return sqliteWriteTransaction(prisma, async tx => {
     await assertReplayDrawingWritable(tx);
-    const existing = await tx.marketDrawing.findFirst({ where: { id: drawingId, datasetId: id, ...drawingScopeWhere() } });
+    const existing = await tx.marketDrawing.findFirst({ where: { id: drawingId, datasetId: id, ...drawingScopeWhere(), pane } });
     if (!existing) return NextResponse.json({ error: copy.marketReplay.drawingNotFound }, { status: 404 });
     if (parsed.data.style && (
       !DRAWING_TYPES.includes(existing.type as DrawingType)
@@ -44,12 +47,14 @@ async function handlePATCH(request: Request, context: RouteContext) {
   });
 }
 
-async function handleDELETE(_request: Request, context: RouteContext) {
+async function handleDELETE(request: Request, context: RouteContext) {
   const { id, drawingId } = await context.params;
+  const pane = readDrawingPane(request);
+  if (pane === null) return NextResponse.json({ error: copy.marketReplay.invalidDrawing }, { status: 400 });
   return sqliteWriteTransaction(prisma, async tx => {
     await assertReplayDrawingWritable(tx);
     const existing = await tx.marketDrawing.findFirst({
-      where: { id: drawingId, datasetId: id, ...drawingScopeWhere() },
+      where: { id: drawingId, datasetId: id, ...drawingScopeWhere(), pane },
     });
     if (!existing) return NextResponse.json({ error: copy.marketReplay.drawingNotFound }, { status: 404 });
     await tx.marketDrawing.delete({ where: { id: drawingId } });

@@ -16,6 +16,7 @@ function canonical(value: unknown): unknown {
 export function sameDrawingSnapshot(a: MarketDrawing | null, b: MarketDrawing | null) {
   if (!a || !b) return a === b;
   return a.id === b.id && a.datasetId === b.datasetId && a.type === b.type && a.createdAt === b.createdAt
+    && (a.pane ?? 1) === (b.pane ?? 1)
     && JSON.stringify(canonical(a.geometry)) === JSON.stringify(canonical(b.geometry))
     && JSON.stringify(canonical(a.style)) === JSON.stringify(canonical(b.style));
 }

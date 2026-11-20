@@ -7,7 +7,7 @@ import { createUuid } from "@/lib/uuid";
 import { selectedTimeToTimestamp } from "@/lib/market-replay/start-time";
 import { useCallback, useEffect } from "react";
 import { DEFAULT_REPLAY_MAX_VISIBLE_BARS } from "@/lib/market-replay/chart-range";
-import { isReplayPlaybackShortcut, hasVisibleReplayDialog, isReplayShortcutInputTarget, replayDrawingShortcutKey } from "@/lib/market-replay/keyboard-shortcuts";
+import { isReplayPlaybackShortcut, isReplayShortcutInputTarget } from "@/lib/market-replay/keyboard-shortcuts";
 import { copy } from "@/lib/i18n";
 import { createReplayState, calculatePlaybackAdvance } from "@/lib/market-replay/engine";
 import { getAggregationBucket, mergeSourceBarInto } from "@/lib/market-replay/aggregation";
@@ -40,15 +40,15 @@ export function useReplayEngine(core: ReturnType<typeof useReplayCore>, drawingW
     settingsDialog, paperSnapshot, confirmedPaperSnapshotRef, paperSessionLoadedRef, paperSessionLoadRef, paperMutationActiveRef,
     paperMutationChainRef, commitConfirmedPaperSnapshot, setPaperError, journalReview, setJournalReview, setChartFocusSequence,
     chartWindowDetachedRef, chartViewportRef, setReviewReturning, setRecoveryNotice, gateDialogOpen, setGateNotice, checkingOrder,
-    preparingEntryCheckRef, gateSeenRef, rectangleStyleId, styleDrawingId, abrLength, displayUtcOffsetMinutes,
-    textDrawing, indicatorWarmupCountRef, manualStepsRef, stepShortcutRef, marketSession, displayMarketSession,
+    preparingEntryCheckRef, gateSeenRef, abrLength, displayUtcOffsetMinutes,
+    indicatorWarmupCountRef, manualStepsRef, stepShortcutRef, marketSession, displayMarketSession,
     marketCache, getDisplayCache, barsRef, warmupBarsRef, playbackDisplayRef, currentSourceBarRef, recoveryRequiredRef,
     viewChangingRef, windowRequestRef, windowAbortRef, historyAbortRef, historyEpochRef, saveTimerRef,
     advancingRef, advanceCompletionRef, playbackAccumulatorRef,
     playbackClockRef, playbackEpochRef, initialJournalFocusAppliedRef, beginBuffering, endBuffering, initialJournalFocus,
   } = core;
   const {
-    armDrawing, loadTradeAnnotations, loadWindow,
+    loadTradeAnnotations, loadWindow,
   } = drawingWindow;
   const reloadPaper = useCallback(async () => {
     const response = await fetch(`/api/market-datasets/${dataset.id}/paper-session`);
@@ -786,22 +786,6 @@ export function useReplayEngine(core: ReturnType<typeof useReplayCore>, drawingW
     window.addEventListener("keydown", onKeyDown);
     return () => window.removeEventListener("keydown", onKeyDown);
   }, [confirmAction, gateDialogOpen, checkingOrder, settingsDialog, shortcuts.platform, startDialogOpen, togglePlayback]);
-
-  useEffect(() => {
-    const onKeyDown = (event: KeyboardEvent) => {
-      const key = replayDrawingShortcutKey(event);
-      if (!key || hasVisibleReplayDialog()) return;
-      if (
-        settingsDialog || gateDialogOpen || checkingOrder || startDialogOpen || confirmAction || styleDrawingId
-        || isReplayShortcutInputTarget(event.target)
-      ) return;
-      event.preventDefault();
-      if (event.repeat || rectangleStyleId || textDrawing.editor) return;
-      armDrawing(key);
-    };
-    window.addEventListener("keydown", onKeyDown);
-    return () => window.removeEventListener("keydown", onKeyDown);
-  }, [armDrawing, rectangleStyleId, textDrawing.editor, confirmAction, gateDialogOpen, checkingOrder, settingsDialog, startDialogOpen, styleDrawingId]);
 
   return {
     reloadPaper, queueSave, flushPreferences, flushVisible, processServerBars, replayStatus, startReplayAt,

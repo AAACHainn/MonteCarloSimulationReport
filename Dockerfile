@@ -23,4 +23,4 @@ RUN mkdir -p /app/.next-dev
 
 EXPOSE 3000
 
-CMD ["sh", "-c", "corepack pnpm install --frozen-lockfile && corepack pnpm prisma generate && corepack pnpm prisma migrate deploy && exec corepack pnpm dev --hostname 0.0.0.0"]
+CMD ["sh", "-c", "corepack pnpm install --frozen-lockfile && corepack pnpm prisma generate && node scripts/database/init-sqlite.mjs && exec corepack pnpm dev --hostname 0.0.0.0"]

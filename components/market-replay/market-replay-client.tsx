@@ -17,7 +17,16 @@ import { ReplayCorrectionProvider } from "./replay-correction-context";
 import { ReplayCorrectionDialog } from "./replay-correction-dialog";
 import Link from "next/link";
 import { TrainingGateConfigDialog, EntryCheckDialog } from "./training-gate-dialogs";
-import { useState, type ReactNode } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
+import { ReplayLayoutMenu, ReplayPaneDivider, ReplayPaneFrame, useReplayPaneLayout } from "./replay-pane-layout";
+import { ReplaySecondaryPane, type PaneControl } from "./replay-secondary-pane";
+import { ReplayDrawingPaneProvider } from "./replay-session-context";
+import { createPaneReader } from "./use-replay-pane-bars";
+import { paneIds, secondaryIntervals, type LayoutId, type PaneId } from "@/lib/market-replay/multi-pane-layout";
+import { displayIntervalOptions } from "@/lib/market-replay/display-interval";
+import { isValidDisplayInterval } from "@/lib/market-replay/types";
+import { rangeForReplayViewport, type ReplayViewportSnapshot } from "@/lib/market-replay/chart-range";
+import { hasVisibleReplayDialog, isReplayShortcutInputTarget, replayDrawingShortcutKey } from "@/lib/market-replay/keyboard-shortcuts";
 import { Breadcrumbs } from "@/components/breadcrumbs";
 import { Square, BookOpen, ListTree, Loader2, ChartCandlestick, PanelRight, RotateCcw, Settings2, Trash2, TrendingUp, WalletCards, X } from "lucide-react";
 import { ReplayDrawingToolbar } from "./replay-drawing-toolbar";
@@ -100,17 +109,92 @@ export function MarketReplayClient({ dataset: initialDataset, initialJournalFocu
   } = core;
   const {
     armDrawing, changeChartVisibility, createDrawing, updateDrawing,
-    deleteDrawing, clearDrawings, openDrawingStyle, visibleDrawings, handleVisibleSequenceRange,
+    deleteDrawing, clearDrawings, openDrawingStyle, visibleDrawings, handleVisibleSequenceRange, publishAiChartWindow,
   } = drawingWindow;
   const {
     beginReplay, returnToLiveWindow, togglePlayback, revealNextBar, enterJournalReview,
   } = engine;
+  const layout = useReplayPaneLayout(Boolean(journalReview));
+  const { activePane } = layout;
+  const [chartControls, setChartControls] = useState<HTMLDivElement | null>(null);
+  const [secondaryToolbar, setSecondaryToolbar] = useState<HTMLDivElement | null>(null);
+  const [visitedPanes, setVisitedPanes] = useState<PaneId[]>([]);
+  const paneControllers = useRef(new Map<PaneId, PaneControl>());
+  const registerPane = useCallback((pane: PaneId, control: PaneControl | null) => {
+    if (control) paneControllers.current.set(pane, control);
+    else paneControllers.current.delete(pane);
+  }, []);
+  const paneReader = useMemo(createPaneReader, []);
+  const secondaryPeriodKey = "market-replay-pane-periods-v1:" + dataset.id;
+  const [periodState, setPeriodState] = useState<{ key: string; values: (number | null)[] } | null>(null);
+  useEffect(() => {
+    let values: (number | null)[] = [];
+    try {
+      const stored: unknown = JSON.parse(localStorage.getItem(secondaryPeriodKey) ?? "null");
+      if (Array.isArray(stored)) values = stored.slice(0, 4).map(value => typeof value === "number" ? value : null);
+    } catch { /* Use the default periods. */ }
+    setPeriodState({ key: secondaryPeriodKey, values });
+  }, [secondaryPeriodKey]);
+  const primaryPeriod = replay?.displayIntervalSeconds ?? dataset.sourceIntervalSeconds ?? 60;
+  const periods = useMemo(() => [primaryPeriod, ...secondaryIntervals(dataset.sourceIntervalSeconds, primaryPeriod,
+    displayIntervalOptions(dataset.sourceIntervalSeconds, primaryPeriod),
+    periodState?.key === secondaryPeriodKey ? periodState.values : [])],
+  [dataset.sourceIntervalSeconds, periodState, primaryPeriod, secondaryPeriodKey]);
+  const visiblePaneKey = [...layout.panes.keys()].join(",");
+  useEffect(() => {
+    const visible = paneIds.slice(1).filter(pane => visiblePaneKey.split(",").includes(String(pane)));
+    if (!visible.length) return;
+    setVisitedPanes(current => visible.every(pane => current.includes(pane)) ? current : [...new Set([...current, ...visible])]);
+  }, [visiblePaneKey]);
+  useEffect(() => {
+    if (periodState?.key !== secondaryPeriodKey || !replay || !visiblePaneKey.includes(",")) return;
+    const saved = periods.slice(1).map((value, i) => visiblePaneKey.split(",").includes(String(i + 2))
+      ? value : periodState.values[i] ?? null);
+    if (saved.every((value, i) => value === (periodState.values[i] ?? null))) return;
+    setPeriodState({ key: secondaryPeriodKey, values: saved });
+    try { localStorage.setItem(secondaryPeriodKey, JSON.stringify(saved)); } catch { /* Keep the in-memory periods. */ }
+  }, [periods, periodState, replay, secondaryPeriodKey, visiblePaneKey]);
+
+  const mainViewport = useRef<ReplayViewportSnapshot | null>(null);
+  const primaryVisible = layout.measured && layout.panes.has(1);
+  useEffect(() => {
+    const last = bars.at(-1);
+    if (primaryVisible || !last) return;
+    const snapshot = mainViewport.current;
+    const viewport = snapshot && rangeForReplayViewport(snapshot.mode === "following"
+      ? { ...snapshot, anchor: { timestamp: last.timestamp, sourceSequence: last.lastSequence } } : snapshot, bars, primaryPeriod);
+    const from = viewport ? Math.max(0, Math.floor(viewport.from)) : Math.max(0, bars.length - 200);
+    const to = viewport ? Math.min(bars.length - 1, Math.max(from, Math.ceil(viewport.to))) : bars.length - 1;
+    if (bars[from] && bars[to]) publishAiChartWindow(bars[from].firstSequence, bars[to].lastSequence);
+  }, [bars, primaryPeriod, primaryVisible, publishAiChartWindow]);
+  const beforeMaximize = useRef<ReplayViewportSnapshot | null>(null);
+  const [mainChartRevision, setMainChartRevision] = useState(0);
+  const layoutTransition = useRef(false);
+  const [layoutBusy, setLayoutBusy] = useState(false);
+  const drawingToolShortcutBlocked = Boolean(settingsDialog || gateDialogOpen || checkingOrder || startDialogOpen || confirmAction || layoutBusy);
+  const mainDrawingToolShortcutBlocked = Boolean(styleDrawingId || rectangleStyleId || textDrawing.editor);
+  useEffect(() => {
+    const onKeyDown = (event: KeyboardEvent) => {
+      const tool = replayDrawingShortcutKey(event);
+      if (!tool || drawingToolShortcutBlocked || isReplayShortcutInputTarget(event.target) || hasVisibleReplayDialog()) return;
+      event.preventDefault();
+      if (event.repeat) return;
+      if (activePane === 1) {
+        if (!mainDrawingToolShortcutBlocked) void armDrawing(tool);
+      } else {
+        void paneControllers.current.get(activePane)?.armDrawing(tool);
+      }
+    };
+    window.addEventListener("keydown", onKeyDown);
+    return () => window.removeEventListener("keydown", onKeyDown);
+  }, [activePane, armDrawing, drawingToolShortcutBlocked, mainDrawingToolShortcutBlocked]);
   const drawingCommandsDisabled = !chartVisibility.drawings || clearingDrawings || pendingDrawingIds.size > 0 || isLoading || correctionPending
       || measurementArmed || draftActive || Boolean(textDrawing.editor) || Boolean(settingsDialog) || Boolean(checkingOrder)
       || gateDialogOpen || startDialogOpen || Boolean(confirmAction) || Boolean(drawingTool) || Boolean(rectangleStyleId) || Boolean(styleDrawingId) || Boolean(arrowStyleId);
   const drawingCommands = useDrawingCommands({ datasetId: dataset.id, scope: drawingWriteScope, fetch, drawings, selectedDrawingId,
     setDrawings: next => { const resolved = typeof next === "function" ? next(drawingsLive.current) : next; drawingsLive.current = resolved; setDrawings(resolved); },
     select: setSelectedDrawingId, disabled: drawingCommandsDisabled, editor: textDrawing.editor, chartApi: textDrawing.apiRef,
+    active: activePane === 1,
     displayKey: `${chartDisplay?.displayIntervalSeconds ?? replay?.displayIntervalSeconds}:${chartDisplay?.displaySession ?? replay?.displaySession}`,
     onNudgeError: setDrawingError });
   const {
@@ -120,13 +204,67 @@ export function MarketReplayClient({ dataset: initialDataset, initialJournalFocu
     onChartDraftChange, submitPaperOrder, cancelEntryCheck, confirmEntryCheck, saveGateConfig, currentGate,
     gateButton, gateNoticeBlock, updatePaperOrder, cancelPaperOrder, cancelPaperScope, closePaperPosition, createPartialExit, prepareProtectiveEdit,
     currentBar, revealedCount, replayCount, statusText,
-  } = useReplayActions(core, drawingWindow, engine, drawingCommands.flushNudges);
-  useDrawingStyleShortcuts({ drawings: visibleDrawings, selectedDrawingId, drawingTool, scope: drawingWriteScope,
+  } = useReplayActions(core, drawingWindow, engine, flushPaneEdits);
+  useDrawingStyleShortcuts({ drawings: visibleDrawings, selectedDrawingId, drawingTool, scope: drawingWriteScope, active: activePane === 1,
     disabled: drawingCommandsDisabled || drawingCommands.pasteUnconfirmed || drawingCommands.pending,
     templates: { TREND_LINE: trendLineTemplates, FIB_RETRACEMENT: fibonacciTemplates, RECTANGLE: rectangleTemplates,
       TEXT: textTemplates, AB_CD: abcdPreferences.templates, ARROW_UP: arrowPreferences.ARROW_UP.templates, ARROW_DOWN: arrowPreferences.ARROW_DOWN.templates },
     apply: (id, style, action) => updateDrawing(id, { style }, action),
   });
+  async function flushPaneEdits() {
+    if (!await drawingCommands.flushNudges()) return false;
+    for (const pane of paneControllers.current.values()) if (!await pane.prepare()) return false;
+    return true;
+  }
+
+  async function changeWorkspace(action: () => void | Promise<void>, allowJournalReview = false) {
+    if (layoutTransition.current || draftActive || correctionPending || checkingOrder || (journalReview && !allowJournalReview)
+      || pendingDrawingIds.size || clearingDrawings || drawingCommands.pasteUnconfirmed
+      || drawingCommands.pending && !drawingCommands.nudging) return;
+    layoutTransition.current = true;
+    setLayoutBusy(true);
+    try {
+      if (!await core.finishText() || !await flushPaneEdits()) return;
+      const viewport = chartViewportRef.current?.capture(core.latestReplayRef.current?.currentSequence ?? 0, !chartWindowDetachedRef.current);
+      if (viewport) mainViewport.current = viewport;
+      setDrawingTool(null);
+      setMeasurementArmed(false);
+      await action();
+    } finally {
+      layoutTransition.current = false;
+      setLayoutBusy(false);
+    }
+  }
+
+  function selectLayout(template: LayoutId) {
+    return changeWorkspace(() => layout.select(template));
+  }
+
+  function togglePane(pane: PaneId) {
+    void changeWorkspace(() => {
+      if (layout.maximized === pane) {
+        mainViewport.current = beforeMaximize.current;
+        setMainChartRevision(value => value + 1);
+        for (const controller of paneControllers.current.values()) controller.restore();
+      } else {
+        beforeMaximize.current = mainViewport.current;
+        for (const controller of paneControllers.current.values()) controller.capture();
+      }
+      layout.toggleMaximize(pane);
+    });
+  }
+
+  async function changeActivePeriod(seconds: number) {
+    if (activePane === 1) return changeDisplayInterval(seconds);
+    if (!dataset.sourceIntervalSeconds || !isValidDisplayInterval(dataset.sourceIntervalSeconds, seconds)) return false;
+    if (!await paneControllers.current.get(activePane)?.prepare()) return false;
+    const values = Array.from({ length: 4 }, (_, i) => periodState?.values[i] ?? null);
+    values[activePane - 2] = seconds;
+    setPeriodState({ key: secondaryPeriodKey, values });
+    try { localStorage.setItem(secondaryPeriodKey, JSON.stringify(values)); } catch { /* Keep the in-memory periods. */ }
+    return true;
+  }
+
   async function selectCursor(mode: ReplayCursorMode) {
     if (!await textDrawing.beforeExit()) return;
     setDrawingTool(null);
@@ -228,10 +366,10 @@ export function MarketReplayClient({ dataset: initialDataset, initialJournalFocu
         <div className="flex h-12 shrink-0 items-center gap-2 border-b px-3">
           <div className="flex min-w-0 flex-1 items-center gap-2 overflow-x-auto [&>*]:shrink-0">
           <DisplayIntervalControls
-            value={replay.displayIntervalSeconds}
+            value={periods[activePane - 1]}
             sourceIntervalSeconds={dataset.sourceIntervalSeconds}
             disabled={Boolean(journalReview) || correctionPending}
-            onChange={changeDisplayInterval}
+            onChange={changeActivePeriod}
           />
           <DisplaySessionControls value={replay.displaySession} available={dataset.availableDisplaySessions}
             disabled={Boolean(journalReview) || correctionPending} onChange={changeChartSession} />
@@ -249,7 +387,9 @@ export function MarketReplayClient({ dataset: initialDataset, initialJournalFocu
             </SelectContent>
           </Select>
           <div className="mx-1 h-5 w-px bg-slate-200 dark:bg-hover" />
-          <ChartVisibilityMenu value={chartVisibility} onChange={changeChartVisibility} />
+          <div className="contents" ref={setChartControls} />
+          {activePane === 1 ? <>
+          <ChartVisibilityMenu value={chartVisibility} onChange={changeChartVisibility} includeOrderLines />
           <Button
             type="button"
             variant={settingsDialog === "candlesticks" ? "secondary" : "ghost"}
@@ -265,13 +405,17 @@ export function MarketReplayClient({ dataset: initialDataset, initialJournalFocu
             <span className="hidden xl:inline">{copy.marketReplay.chartStyle}</span>
           </Button>
           <Button type="button" variant="ghost" size="sm" className="h-8" onClick={() => setSettingsDialog("indicators")}><Settings2 className="h-4 w-4" />{copy.marketReplay.indicators}</Button>
+          </> : null}
           <Button type="button" variant="ghost" size="sm" className="h-8" onClick={() => setSettingsDialog("paper")}><WalletCards className="h-4 w-4" />{copy.marketReplay.accountSettings}</Button>
           <Button asChild type="button" variant="ghost" size="sm" className="h-8"><Link href={`/market-replay/${dataset.id}/trade-history?sessionId=${encodeURIComponent(replaySession?.id ?? "")}`}><BookOpen className="h-4 w-4" />{copy.paperTrading.openJournalHistory}</Link></Button>
           {paperSnapshot ? <div className="flex shrink-0 items-center gap-2 whitespace-nowrap px-2"><span className="text-xs tabular-nums text-slate-500 dark:text-muted-foreground">{copy.propPractice.balance} <strong className="font-medium text-slate-800 dark:text-foreground">{formatMoney(paperSnapshot.propAccount ? funds(paperSnapshot.propAccount.state).balance : paperSnapshot.stats.balance, paperSnapshot.session.currency)}</strong></span>{paperSnapshot.propAccount ? <PropAccountStatusBadge runtime={paperSnapshot.propAccount} /> : null}</div> : null}
-          <div className="ml-auto flex items-center gap-1">
-            <Button type="button" variant="ghost" size="sm" className="h-8" disabled={draftActive} title={draftActive ? copy.paperTrading.draftLockedReplay : undefined} onClick={() => requestConfirmation("reset")}><RotateCcw className="h-4 w-4" /><span className="hidden xl:inline">{copy.marketReplay.reset}</span></Button>
-            <Button type="button" variant="ghost" size="sm" className="h-8" disabled={draftActive} title={draftActive ? copy.paperTrading.draftLockedReplay : undefined} onClick={openStartDialog}><span className="hidden xl:inline">{copy.marketReplay.chooseNewStart}</span><span className="xl:hidden">{copy.marketReplay.startAt}</span></Button>
           </div>
+          <ReplayLayoutMenu template={layout.template} disabled={Boolean(journalReview) || layoutBusy || draftActive || correctionPending}
+            onSelect={selectLayout} onReset={layout.resetRatios} />
+          <div className="mx-1 h-5 w-px shrink-0 bg-border" aria-hidden="true" />
+          <div className="flex shrink-0 items-center gap-1">
+            <Button type="button" variant="ghost" size="sm" className="h-8" aria-label={copy.marketReplay.reset} disabled={draftActive} title={draftActive ? copy.paperTrading.draftLockedReplay : undefined} onClick={() => requestConfirmation("reset")}><RotateCcw className="h-4 w-4" aria-hidden="true" /><span className="hidden xl:inline">{copy.marketReplay.reset}</span></Button>
+            <Button type="button" variant="ghost" size="sm" className="h-8" disabled={draftActive} title={draftActive ? copy.paperTrading.draftLockedReplay : undefined} onClick={openStartDialog}><span className="hidden xl:inline">{copy.marketReplay.chooseNewStart}</span><span className="xl:hidden">{copy.marketReplay.startAt}</span></Button>
           </div>
           <div className="mx-1 h-5 w-px shrink-0 bg-slate-200 dark:bg-hover" aria-hidden="true" />
           {webFullscreen && <UserEntry compact session={replaySession ?? undefined} />}
@@ -281,17 +425,24 @@ export function MarketReplayClient({ dataset: initialDataset, initialJournalFocu
           </Button>
         </div>
         <div className="flex min-h-0 flex-1">
-          <ReplayDrawingToolbar cursorMode={cursorMode} onCursorChange={mode => { if (!drawingCommands.pending && !drawingCommands.pasteUnconfirmed) void selectCursor(mode); }} drawingTool={drawingTool} onArmDrawing={tool => void armDrawing(tool)}
+          <div className="contents" ref={setSecondaryToolbar} />
+          {activePane === 1 ? <ReplayDrawingToolbar cursorMode={cursorMode} onCursorChange={mode => { if (!drawingCommands.pending && !drawingCommands.pasteUnconfirmed) void selectCursor(mode); }} drawingTool={drawingTool} onArmDrawing={tool => void armDrawing(tool)}
             drawingDisabled={drawingCommands.pending || drawingCommands.pasteUnconfirmed} history={drawingCommands} measurementArmed={measurementArmed} onToggleMeasurement={() => { if (!drawingCommands.pending && !drawingCommands.pasteUnconfirmed) setMeasurementArmed(current => !current); }}
             drawingObjectsOpen={drawingObjectsOpen} onToggleDrawingObjects={() => setDrawingObjectsOpen(current => !current)}
-            webFullscreen={webFullscreen} onToggleWebFullscreen={() => setWebFullscreen(current => !current)} />
-        <div className="relative min-h-0 min-w-0 flex-1">
+            webFullscreen={webFullscreen} onToggleWebFullscreen={() => setWebFullscreen(current => !current)} /> : null}
+        <div ref={layout.setHost} className="relative min-h-0 min-w-0 flex-1" data-replay-pane-workspace>
           {autoPauseEvent ? (
             <div className="pointer-events-none absolute inset-x-3 top-3 z-[60]">
               <ReplayAutoPauseNotice event={autoPauseEvent} onDismiss={dismissAutoPause} />
             </div>
           ) : null}
-          <ReplayChart
+          {primaryVisible ? <ReplayPaneFrame pane={1} rect={layout.panes.get(1)!} active={activePane === 1}
+            title={dataset.symbol + " · " + formatInterval(primaryPeriod)} showHeader={layout.panes.size > 1 || layout.maximized === 1}
+            maximized={layout.maximized === 1} canMaximize={!layoutBusy && !journalReview && (layout.panes.size > 1 || layout.maximized === 1)}
+            onActivate={() => layout.setActive(1)} onMaximize={() => togglePane(1)}>
+          <ReplayChart key={mainChartRevision}
+            onAltMaximize={!layoutBusy && !journalReview && (layout.panes.size > 1 || layout.maximized === 1) ? () => togglePane(1) : undefined}
+            shortcutsActive={activePane === 1} compact={layout.panes.size > 1 || Boolean(layout.maximized)}
             cursorMode={cursorMode}
             datasetId={dataset.id}
             dataRevision={chartDataRevision}
@@ -302,6 +453,7 @@ export function MarketReplayClient({ dataset: initialDataset, initialJournalFocu
             displayIntervalSeconds={chartDisplay?.displayIntervalSeconds ?? replay.displayIntervalSeconds}
             viewportApiRef={chartViewportRef}
             viewportSnapshot={chartDisplay?.viewport}
+            initialViewportSnapshot={mainViewport.current}
             currentSourceSequence={replay.currentSequence}
             liveWindow={!chartWindowDetachedRef.current}
             sourceIntervalSeconds={dataset.sourceIntervalSeconds}
@@ -342,6 +494,7 @@ export function MarketReplayClient({ dataset: initialDataset, initialJournalFocu
             barCountRthSession={barCountRthSession}
             barCountConfig={visibleBarCountConfig}
             paperSnapshot={journalReview ? null : paperSnapshot}
+            orderLinesVisible={chartVisibility.orderLines}
             tradeAnnotations={tradeAnnotations}
             tradeAnnotationsTruncated={tradeAnnotationsTruncated}
             tradeAnnotationsVisible={chartVisibility.tradeAnnotations}
@@ -359,7 +512,10 @@ export function MarketReplayClient({ dataset: initialDataset, initialJournalFocu
             onDraftIdentityChange={onChartDraftChange}
             entryCheckOpen={Boolean(checkingOrder)}
             onOpenPaperAccount={() => setSettingsDialog("paper")}
-            onVisibleSequenceRangeChange={handleVisibleSequenceRange}
+            onVisibleSequenceRangeChange={range => {
+              mainViewport.current = chartViewportRef.current?.capture(replay.currentSequence, !chartWindowDetachedRef.current) ?? mainViewport.current;
+              handleVisibleSequenceRange(range);
+            }}
             rewindRange={{ minSequence: replay.startSequence - 1, maxSequence: replay.currentSequence }}
             onRewindToBar={replaySession?.mode === "LIVE_REPLAY" && !replaySession.legacy && !journalReview
               ? (target) => openCorrectionTarget({ type: "REWIND", sequence: target.sequence, chartTimestamp: target.timestamp }) : undefined}
@@ -370,7 +526,7 @@ export function MarketReplayClient({ dataset: initialDataset, initialJournalFocu
               {drawingError}
             </div>
           ) : null}
-          {drawingObjectsOpen ? (
+          {activePane === 1 && drawingObjectsOpen ? (
             <aside className="absolute right-3 top-3 z-50 flex max-h-[calc(100%-1.5rem)] w-72 flex-col overflow-hidden rounded-lg border border-slate-200 dark:border-border bg-white/95 dark:bg-card/95 shadow-xl backdrop-blur">
               <header className="flex items-center gap-2 border-b px-3 py-2.5">
                 <ListTree className="h-4 w-4 text-slate-500 dark:text-muted-foreground" />
@@ -439,6 +595,18 @@ export function MarketReplayClient({ dataset: initialDataset, initialJournalFocu
               </div>
             </aside>
           ) : null}
+          </ReplayPaneFrame> : null}
+          {layout.dividers.map(divider => <ReplayPaneDivider key={divider.key} divider={divider} onRatio={ratio => layout.changeRatio(divider.key, ratio)} />)}
+          {periodState?.key === secondaryPeriodKey ? paneIds.slice(1).filter(pane => layout.panes.has(pane) || visitedPanes.includes(pane)).map(pane =>
+            <ReplayDrawingPaneProvider key={pane} pane={pane}>
+              <ReplaySecondaryPane pane={pane} core={core} rect={layout.panes.get(pane)} active={activePane === pane}
+                period={periods[pane - 1]} sequence={replay.confirmedSequence} session={chartDisplay?.displaySession ?? replay.displaySession}
+                cursorMode={cursorMode} onCursorChange={setCursorMode} controls={chartControls} toolbar={secondaryToolbar}
+                register={registerPane} maximized={layout.maximized === pane} canMaximize={!layoutBusy && !draftActive}
+                onActivate={() => layout.setActive(pane)} onMaximize={() => togglePane(pane)} reader={paneReader}
+                blocked={Boolean(journalReview || correctionPending || checkingOrder || settingsDialog || confirmAction || layoutBusy)}
+                webFullscreen={webFullscreen} toggleWebFullscreen={() => setWebFullscreen(current => !current)} />
+            </ReplayDrawingPaneProvider>) : null}
         </div>
         {tradePanelOpen ? <ResizableTradePanel checking={Boolean(checkingOrder)} onClose={() => setTradePanelOpen(false)}>
           {paperSnapshot ? journalReview ? null : <PaperTradingPanel embedded priceTickSize={dataset.priceTickSize} snapshot={paperSnapshot} currentBar={currentBar} busy={paperBusy || correctionPending || dateForwarding} error={paperError} onSubmit={submitPaperOrder} onCancel={cancelPaperOrder} onUpdate={updatePaperOrder} onCancelScope={cancelPaperScope} /> : <div className="space-y-4">
@@ -466,7 +634,9 @@ export function MarketReplayClient({ dataset: initialDataset, initialJournalFocu
           onToggle={togglePlayback}
           onNext={() => void revealNextBar()}
           onSpeedChange={changeSpeed}
-          onFocusJournalEntry={(entry) => void enterJournalReview({ sequence: entry.openedSequence, no: entry.no, globalNo: entry.globalNo })}
+          onFocusJournalEntry={entry => {
+            void changeWorkspace(() => enterJournalReview({ sequence: entry.openedSequence, no: entry.no, globalNo: entry.globalNo }), true);
+          }}
         />
       </div>
 

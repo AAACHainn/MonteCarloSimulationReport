@@ -45,7 +45,7 @@
 | AI 机器人 | [使用、配置与统计口径](ai/ai-assistant.md)；[取图、展示及截图契约](ai/ai-chart-images.md) | [工具注册](../lib/ai/tools.ts)、[上限](../lib/ai/limits.ts)、[图片契约](../lib/ai/chart-images-contract.ts) |
 | 图表绘图 | [Bar Count](charting/bar-count.md)、[矩形](charting/rectangle-drawing.md)、[文字用法与数据](charting/text-drawing.md)、[文字保存状态机](charting/text-autosave-design.md)、[AB=CD](charting/abcd-drawing.md)、[箭头](charting/arrow-drawing.md)、[绘图快捷键](charting/drawing-template-shortcuts.md)、[绘图编辑与撤销重做](charting/drawing-editing.md)；跨工具保存规则见[会话绘图持久化](charting/archived-drawings.md) | [类型、样式与校验](../lib/market-replay/chart-drawings.ts)、[快捷键](../lib/market-replay/keyboard-shortcuts.ts)、[文字自动保存](../lib/market-replay/text-autosave.ts) |
 | 行情数据 | [增量同步与预算](market-data/market-data-sync.md)；[时间聚合、质量与查询](market-data/time-aggregation.md) | [同步引擎](../lib/market-sync/engine.ts)、[调度](../lib/market-sync/runtime.ts)、[聚合任务](../lib/market-replay/aggregation-jobs.ts) |
-| 回放与交易 | [会话与纠错](replay/replay-sessions-implementation.md)；[自营账户](replay/prop-practice-account-design.md)；[交易关卡](replay/training-gate.md)；[空仓推进](replay/flat-replay-advance.md) | [会话服务](../lib/replay-sessions/service.ts)、[自营规则](../lib/prop-practice/rules.ts)、[关卡状态](../lib/paper-trading/training-gate.ts)、[空仓推进](../lib/market-replay/flat-advance.ts) |
+| 回放与交易 | [会话与纠错](replay/replay-sessions-implementation.md)；[多窗口回放](replay/replay-sessions-implementation.md#多窗口回放)；[自营账户](replay/prop-practice-account-design.md)；[交易关卡](replay/training-gate.md)；[空仓推进](replay/flat-replay-advance.md) | [会话服务](../lib/replay-sessions/service.ts)、[自营规则](../lib/prop-practice/rules.ts)、[关卡状态](../lib/paper-trading/training-gate.ts)、[空仓推进](../lib/market-replay/flat-advance.ts) |
 | PDF 导出 | [筛选、截图、分卷及任务生命周期](replay/replay-pdf-export.md) | [共享上限](../lib/paper-trading/pdf-types.ts)、[规划](../lib/paper-trading/pdf-planner.ts)、[任务管理](../components/market-replay/pdf-export-provider.tsx) |
 | 蒙特卡洛 | [使用与计算口径](../README.md#蒙特卡洛风险分析) | [参数与计算量限制](../lib/validations.ts)、[模拟算法](../lib/monte-carlo/simulate.ts) |
 | 安装与运维 | [升级、备份与部署](operations/upgrade.md)；数据库操作只从此入口选择路径 | [命令定义](../package.json)、[结构](../prisma/schema.prisma)、[迁移目录](../prisma/migrations/) |
@@ -63,7 +63,7 @@
 
 | 类别 | 文档与当前入口 |
 | --- | --- |
-| K 线多窗口回放（待开发） | [首版设计与验收](replay/multi-pane-replay-design.md)。当前规范见[回放会话与纠错](replay/replay-sessions-implementation.md) |
+| K 线多窗口回放 | [首版设计与验收](replay/multi-pane-replay-design.md)。当前规范见[回放会话与纠错](replay/replay-sessions-implementation.md) |
 | 用户成长分阶段方案 | [五阶段实施顺序与交付摘要](account/user-growth-implementation-plan.md)；当前规范见[用户档案与成长](account/user-growth-design.md) |
 | 聚合排队与写入冲突方案 | [聚合排队方案](operations/aggregation-lock-repair-plan.md)；当前规范见[时间聚合与查询](market-data/time-aggregation.md) |
 | 旧升级入口交互方案 | [升级进度方案](operations/db-upgrade-progress-plan.md)；当前操作及版本边界见[升级指南](operations/upgrade.md) |

@@ -63,6 +63,7 @@ export type ReplayViewportSnapshot = {
   position: number;
   logicalSpan: number;
   barSpacing: number;
+  priceRange?: { from: number; to: number };
 };
 export type ReplayViewportApi = {
   capture: (sourceSequence: number, liveWindow: boolean) => ReplayViewportSnapshot | null;

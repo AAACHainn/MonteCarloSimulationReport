@@ -375,6 +375,7 @@ model MarketDrawing {
   dataset   MarketDataset @relation(fields: [datasetId], references: [id], onDelete: Cascade)
   replaySessionId String?
   replaySession ReplaySession? @relation(fields: [replaySessionId], references: [id], onDelete: Cascade)
+  pane      Int           @default(1)
   type      String
   geometry  String
   style     String
@@ -383,6 +384,7 @@ model MarketDrawing {
 
   @@index([datasetId, createdAt])
   @@index([replaySessionId, createdAt])
+  @@index([datasetId, replaySessionId, pane, createdAt])
 }
 
 model MarketAggregationGeneration {

@@ -14,13 +14,16 @@ import {
 export function ChartVisibilityMenu({
   value,
   onChange,
+  includeOrderLines = false,
 }: {
   value: ReplayChartVisibility;
   onChange: (value: ReplayChartVisibility) => void;
+  includeOrderLines?: boolean;
 }) {
   const [open, setOpen] = useState(false);
-  const anyHidden = !value.drawings || !value.indicators || !value.tradeAnnotations;
-  const allHidden = !value.drawings && !value.indicators && !value.tradeAnnotations;
+  const orderLines = value.orderLines ?? true;
+  const anyHidden = !value.drawings || !value.indicators || !value.tradeAnnotations || includeOrderLines && !orderLines;
+  const allHidden = !value.drawings && !value.indicators && !value.tradeAnnotations && (!includeOrderLines || !orderLines);
 
   const items: Array<{
     target: Exclude<ReplayChartVisibilityTarget, "all">;
@@ -32,9 +35,15 @@ export function ChartVisibilityMenu({
     { target: "indicators", visible: value.indicators, hideLabel: copy.marketReplay.hideIndicators, showLabel: copy.marketReplay.showIndicators },
     { target: "tradeAnnotations", visible: value.tradeAnnotations, hideLabel: copy.marketReplay.hideTradeAnnotations, showLabel: copy.marketReplay.showTradeAnnotations },
   ];
+  if (includeOrderLines) items.push({ target: "orderLines", visible: orderLines,
+    hideLabel: copy.marketReplay.multiPane.hideOrderLines, showLabel: copy.marketReplay.multiPane.showOrderLines });
 
   function toggle(target: ReplayChartVisibilityTarget) {
-    onChange(toggleReplayChartVisibility(value, target));
+    if (target === "all") onChange({
+      ...value, drawings: allHidden, indicators: allHidden, tradeAnnotations: allHidden,
+      ...(includeOrderLines ? { orderLines: allHidden } : {}),
+    });
+    else onChange(toggleReplayChartVisibility({ ...value, ...(includeOrderLines ? { orderLines } : {}) }, target));
     setOpen(false);
   }
 

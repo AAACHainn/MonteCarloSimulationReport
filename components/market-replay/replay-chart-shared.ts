@@ -185,6 +185,7 @@ export type ReplayChartProps = {
   liveWindow?: boolean;
   viewportApiRef?: Ref<ReplayViewportApi>;
   viewportSnapshot?: ReplayViewportSnapshot | null;
+  initialViewportSnapshot?: ReplayViewportSnapshot | null;
   measurementArmed: boolean;
   candlestickStyle: CandlestickStyle;
   chartDisplay?: import("@/lib/market-replay/chart-display").ChartDisplayConfig;
@@ -226,6 +227,11 @@ export type ReplayChartProps = {
   focusSequence?: number | null;
   onFocusApplied?: () => void;
   readOnly?: boolean;
+  observeTrades?: boolean;
+  orderLinesVisible?: boolean;
+  shortcutsActive?: boolean;
+  compact?: boolean;
+  onAltMaximize?: () => void;
   hiddenAfter?: ChartHideAfter | null;
   onHiddenAfterChange?: (target: ChartHideAfter | null) => void;
   historicalPlaybackActive?: boolean;
@@ -243,6 +249,7 @@ export type ReplayChartProps = {
   entryCheckOpen?: boolean;
   onOpenPaperAccount: () => void;
   onVisibleSequenceRangeChange?: (range: ReplayVisibleSequenceRange) => void;
+  onResetChartView?: () => void;
   onRewindToBar?: (target: ChartRewindTarget) => void;
   rewindRange?: ChartRewindRange;
 };

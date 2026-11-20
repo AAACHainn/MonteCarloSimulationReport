@@ -36,7 +36,36 @@ beforeAll(async () => {
   await prisma.marketBar.createMany({ data: Array.from({ length: 4 }, (_, sequence) => ({ datasetId: "history-data", sequence, timestamp: new Date(+base + sequence * 60_000), open: 100, high: 110, low: 90, close: 102 })) });
 }, 30_000);
 afterAll(async () => { await prisma.$disconnect(); });
-describe("transactional drawing undo/redo without schema changes", () => {
+describe("transactional drawing undo/redo", () => {
+  it("isolates window lists, writes, clears, retries and restoration", async () => {
+    const scope = await session();
+    const primary = await add(scope);
+    const inPane = (method: string, body?: unknown, pane = "2") => {
+      const scoped = request(scope, method, body);
+      scoped.headers.set("X-Replay-Drawing-Pane", pane);
+      return scoped;
+    };
+    const payload = { type: "TREND_LINE", clientId: randomUUID(), geometry, style: DEFAULT_TREND_LINE_STYLE };
+    const created = await createDrawing(inPane("POST", payload), context);
+    expect(created.status).toBe(201);
+    const secondary = (await created.json()).drawing as MarketDrawing;
+    expect(secondary.pane).toBe(2);
+    expect((await (await createDrawing(inPane("POST", payload), context)).json()).drawing).toEqual(secondary);
+    expect((await createDrawing(request(scope, "POST", payload), context)).status).toBe(409);
+    expect(await read(scope)).toEqual([primary]);
+    expect((await (await readDrawings(inPane("GET"), context)).json()).drawings).toEqual([secondary]);
+    expect((await readDrawings(inPane("GET", undefined, "6"), context)).status).toBe(400);
+    expect((await updateDrawing(inPane("PATCH", { geometry }), itemContext(primary.id))).status).toBe(404);
+    expect((await deleteDrawing(inPane("DELETE"), itemContext(primary.id))).status).toBe(404);
+    expect((await clearDrawings(inPane("DELETE", { ids: [primary.id, secondary.id] }), context)).status).toBe(409);
+    expect((await clearDrawings(inPane("DELETE", { ids: [secondary.id] }), context)).status).toBe(200);
+    const changes = [{ id: secondary.id, before: null, after: secondary }];
+    expect((await applyChanges(request(scope, "POST", { changes }), context)).status).toBe(409);
+    expect((await applyChanges(inPane("POST", { changes }), context)).status).toBe(200);
+    expect((await applyChanges(inPane("POST", { changes }), context)).status).toBe(200);
+    expect(await read(scope)).toEqual([primary]);
+    expect((await (await readDrawings(inPane("GET"), context)).json()).drawings).toMatchObject([{ id: secondary.id, pane: 2 }]);
+  });
   it("creates retry-safe copies for non-text types and rejects ID reuse across sessions", async () => {
     const scope = await session(), id = randomUUID(); const first = await add(scope, id), second = await add(scope, id);
     expect(second).toEqual(first); expect(await read(scope)).toHaveLength(1);

@@ -130,5 +130,6 @@ export function useHistoricalDrawings({ datasetId, fetch, writeScope }: {
       publish(current.current.filter(item => item.id !== id)); setError(null);
     } finally { if (generation === readGeneration.current) { locked.current = false; setBusy(false); } }
   });
-  return { drawings, setDrawings: publish, loaded, busy, error, setError, refresh, create, update, remove, clear, saveText, removeText };
+  const findDrawing = (id: string) => current.current.find(item => item.id === id);
+  return { drawings, findDrawing, setDrawings: publish, loaded, busy, error, setError, refresh, create, update, remove, clear, saveText, removeText };
 }

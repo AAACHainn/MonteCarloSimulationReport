@@ -62,6 +62,7 @@ export function ReplayChart(props: ReplayChartProps) {
   const statusBar = hiddenAfter ? visibleBars.at(-1) : latest;
   const positionPnl = paperSnapshot ? Number(paperSnapshot.stats.unrealizedPnl.toFixed(2)) || 0 : null;
   const paneHeight = core.chartRef.current?.panes()[0]?.getHeight() ?? 0;
+  const tradingAllowed = !readOnly && !props.observeTrades;
   const lineLabelY = layoutPriceLineLabels(lineActions.map(action => action.y), paneHeight);
   return (
     <div
@@ -70,13 +71,25 @@ export function ReplayChart(props: ReplayChartProps) {
       data-drawing-nudge-chart
       className="relative h-full min-h-0 select-none focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring"
       onContextMenu={openContextMenu}
+      onPointerDownCapture={event => {
+        if (!props.onAltMaximize || !event.altKey || event.button !== 0 || event.pointerType !== "mouse"
+          || !containerRef.current?.contains(event.target as Node)) return;
+        const chart = core.chartRef.current;
+        const bounds = containerRef.current.getBoundingClientRect();
+        const x = event.clientX - bounds.left, y = event.clientY - bounds.top;
+        if (!chart || x < 0 || y < 0 || x >= chart.timeScale().width() || y >= (chart.panes()[0]?.getHeight() ?? 0)) return;
+        event.preventDefault();
+        event.stopPropagation();
+        props.onAltMaximize();
+      }}
       onPointerDown={(event: ReactPointerEvent<HTMLDivElement>) => {
         if (!(event.target as HTMLElement).closest("[data-context-menu]")) setContextMenu(null);
       }}
     >
       <div
         ref={containerRef}
-        className="h-full min-h-[240px] w-full overflow-hidden bg-white dark:bg-card"
+        className={`h-full w-full overflow-hidden bg-white dark:bg-card ${props.compact ? "min-h-0" : "min-h-[240px]"}`}
+        data-replay-price-chart
         aria-label={copy.marketReplay.chartAriaLabel}
         data-bar-count={bars.length}
         data-visible-bar-count={visibleBars.length}
@@ -198,7 +211,7 @@ export function ReplayChart(props: ReplayChartProps) {
           style={{ top: lineLabelY[index], borderColor: `${action.color}66`, color: action.color }}
           onContextMenu={(event) => event.preventDefault()}
         >
-          {protective && !readOnly && core.onCreatePartialExit ? <Button type="button" variant="ghost" size="sm"
+          {protective && tradingAllowed && core.onCreatePartialExit ? <Button type="button" variant="ghost" size="sm"
             className="h-8 shrink-0 cursor-ns-resize touch-none rounded-none border-r px-2"
             disabled={paperBusy || entryCheckOpen || Boolean(draft)}
             aria-label={copy.paperTrading.exitDragHint(protectiveOrderLabel(protective))}
@@ -210,10 +223,10 @@ export function ReplayChart(props: ReplayChartProps) {
             {protectiveOrderLabel(protective)}
           </Button> : null}
           <span
-            onDoubleClick={protective && !readOnly ? () => void exits.openSettings(protective.id) : undefined}
-            data-line-drag-key={action.kind === "cancel" ? action.key : undefined}
-            className={action.kind === "cancel" ? "cursor-ns-resize touch-none truncate px-2 py-1 font-medium" : "truncate px-2 py-1 font-medium"}
-            title={action.kind === "cancel" ? copy.paperTrading.dragHint : undefined}
+            onDoubleClick={protective && tradingAllowed ? () => void exits.openSettings(protective.id) : undefined}
+            data-line-drag-key={tradingAllowed && action.kind === "cancel" ? action.key : undefined}
+            className={tradingAllowed && action.kind === "cancel" ? "cursor-ns-resize touch-none truncate px-2 py-1 font-medium" : "truncate px-2 py-1 font-medium"}
+            title={tradingAllowed && action.kind === "cancel" ? copy.paperTrading.dragHint : undefined}
           >
             {action.label}
           </span>
@@ -226,13 +239,13 @@ export function ReplayChart(props: ReplayChartProps) {
               {positionPnl > 0 ? "+" : ""}{formatNumber(positionPnl)}
             </span>
           </span> : null}
-          {protective && !readOnly ? <Button type="button" variant="ghost" size="sm" className="h-8 w-8 shrink-0 rounded-none border-l px-1"
+          {protective && tradingAllowed ? <Button type="button" variant="ghost" size="sm" className="h-8 w-8 shrink-0 rounded-none border-l px-1"
             aria-label={copy.paperTrading.exitSettings(protectiveOrderLabel(protective))}
             title={copy.paperTrading.exitSettings(protectiveOrderLabel(protective))} disabled={paperBusy || entryCheckOpen || Boolean(draft)}
             onClick={() => void exits.openSettings(protective.id)}>
             <Settings className="h-4 w-4" aria-hidden="true" />
           </Button> : null}
-          <button
+          {tradingAllowed ? <button
             type="button"
             className="flex shrink-0 items-center gap-1 border-l px-2 py-1 font-semibold hover:bg-slate-50 dark:hover:bg-hover disabled:cursor-not-allowed disabled:opacity-50"
             style={{ borderColor: `${action.color}44` }}
@@ -242,7 +255,7 @@ export function ReplayChart(props: ReplayChartProps) {
           >
             {action.kind === "cancel" ? <X className="h-3 w-3" /> : <LogOut className="h-3 w-3" />}
             {action.kind === "cancel" ? copy.paperTrading.cancelFromLine : hasPendingClose ? copy.paperTrading.closePending : copy.paperTrading.oneClickClose}
-          </button>
+          </button> : null}
         </div>
       ); })}
 
@@ -266,12 +279,15 @@ export function ReplayChart(props: ReplayChartProps) {
         </div>
       ) : null}
 
-      {!draft && paperSnapshot && latest ? <div className="pointer-events-none absolute bottom-3 left-3 rounded-md border border-slate-200 dark:border-border bg-white/90 dark:bg-card/90 px-2 py-1 text-[11px] text-slate-500 dark:text-muted-foreground shadow-sm backdrop-blur">{copy.paperTrading.rightClickHint}</div> : null}
+      {tradingAllowed && !draft && paperSnapshot && latest ? <div className="pointer-events-none absolute bottom-3 left-3 rounded-md border border-slate-200 dark:border-border bg-white/90 dark:bg-card/90 px-2 py-1 text-[11px] text-slate-500 dark:text-muted-foreground shadow-sm backdrop-blur">{copy.paperTrading.rightClickHint}</div> : null}
 
       {contextMenu ? (
         <div ref={contextMenuRef} data-context-menu role="menu" className="absolute z-40 max-h-[calc(100%-1rem)] w-[220px] max-w-[calc(100%-1rem)] overflow-y-auto rounded-lg border border-slate-200 dark:border-border bg-white dark:bg-card p-1.5 shadow-xl" style={{ left: contextMenu.x, top: contextMenu.y }}>
           <Button type="button" role="menuitem" variant="ghost" data-testid="context-reset-chart-view"
-            className="w-full justify-start px-2 text-left font-medium text-slate-700 dark:text-secondary-text" onClick={resetChartView}>
+            className="w-full justify-start px-2 text-left font-medium text-slate-700 dark:text-secondary-text" onClick={() => {
+              resetChartView();
+              props.onResetChartView?.();
+            }}>
             <RotateCcw className="h-4 w-4" aria-hidden="true" />{copy.marketReplay.resetChartView}
           </Button>
           {readOnly && props.onStartHistoricalPlayback && contextMenu.hideAfter ? <Button type="button" role="menuitem" variant="ghost"
@@ -284,7 +300,7 @@ export function ReplayChart(props: ReplayChartProps) {
             onClick={() => { const target = contextMenu.hideAfter; if (target) setHiddenBoundary({ scope: visibilityScope, target }); setContextMenu(null); setAbrTooltip(null); }}>
             <EyeOff className="h-4 w-4" aria-hidden="true" />{copy.marketReplay.hideSubsequentBars}
           </Button> : null}
-          {!readOnly ? <>
+          {tradingAllowed ? <>
           <div className="mb-1 border-b pb-1">
             {onToggleGrid ? (
               <Button

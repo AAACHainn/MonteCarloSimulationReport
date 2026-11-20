@@ -326,7 +326,7 @@ export function useReplayCore({ dataset: initialDataset, initialJournalFocus = n
     setEmaEnabled, emaIndicators, setEmaIndicators, emaSettingsLoaded, abrEnabled, setAbrEnabled,
     abrLength, setAbrLength, abrSettingsLoaded, gridVisible, setGridVisible, volumeVisible,
     setVolumeVisible, candleCountdownEnabled, setCandleCountdownEnabled, barCountConfig, setBarCountConfig, chartVisibility,
-    setChartVisibility, defaultRectangleStyle, setDefaultRectangleStyle, rectangleTemplates, setRectangleTemplates, setDefaultTextStyle,
+    setChartVisibility, defaultRectangleStyle, setDefaultRectangleStyle, rectangleTemplates, setRectangleTemplates, defaultTextStyle, setDefaultTextStyle,
     textTemplates, setTextTemplates, defaultTrendLineStyle, setDefaultTrendLineStyle, trendLineTemplates, setTrendLineTemplates,
     defaultFibonacciStyle, setDefaultFibonacciStyle, fibonacciTemplates, setFibonacciTemplates, displayUtcOffsetMinutes, setDisplayUtcOffsetMinutes,
     textDrawing, openTextDrawing, finishText, discardText, requestTextSettings, drawingWriteScope,

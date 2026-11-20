@@ -29,6 +29,7 @@ export function useDrawingCommands(options: {
   editor: { key: string; id: string | null; inline?: boolean } | null;
   chartApi: RefObject<TextDrawingApi | null>;
   displayKey?: string;
+  active?: boolean;
   onNudgeError?: (error: string | null) => void;
 }) {
   const provided = useDrawingHistory();
@@ -48,7 +49,7 @@ export function useDrawingCommands(options: {
     lifetime.current++; history.reset(); clipboard.current = null; frozenPaste.current = null; setPending(false);
     return () => { lifetime.current++; history.reset(); };
   }, [options.scope, history]);
-  useLayoutEffect(() => { finishNudge(); }, [options.displayKey, options.selectedDrawingId, options.disabled, options.editor, finishNudge]);
+  useLayoutEffect(() => { finishNudge(); }, [options.active, options.displayKey, options.selectedDrawingId, options.disabled, options.editor, finishNudge]);
   const textGroup = useCallback((key: string | null, id: string | null = null) => history.setTextGroup(key, id), [history]);
   useEffect(() => {
     if (!pending && !nudging && !frozenPaste.current) return;
@@ -126,6 +127,7 @@ export function useDrawingCommands(options: {
     finally { submitting.current = false; if (generation === epoch.current) setPending(false); }
   }, [merge, history, isNudging]);
   useLayoutEffect(() => {
+    if (options.active === false) return;
     let pointerHeld = false;
     const down = () => { pointerHeld = true; finishNudge(); };
     const up = () => { pointerHeld = false; };
@@ -178,7 +180,7 @@ export function useDrawingCommands(options: {
       window.removeEventListener("focusout", focusOut, true);
       document.removeEventListener("visibilitychange", visibility);
     };
-  }, [finishNudge, history, isNudging, nudge, placePaste, travel]);
+  }, [finishNudge, history, isNudging, nudge, options.active, placePaste, travel]);
   return { pasteUnconfirmed: Boolean(frozenPaste.current), pending: pending || nudging, textGroup, nudging, nudgePreviews, flushNudges,
     undo: () => void travel("undo"), redo: () => void travel("redo"), undoLabel: entryLabel(view.undo), redoLabel: entryLabel(view.redo),
     historyDisabled: options.disabled || Boolean(options.editor) || Boolean(frozenPaste.current) || pending || nudging || view.busy,

@@ -36,7 +36,7 @@ function TextToggle({ label, checked, onChange, children }: { label: string; che
     {checked ? children : null}
   </div>;
 }
-export function TextSettingsDialog({ editor, apiRef, templates, onTemplatesChange, onPreview, onSave, onRemove, onClose, onAdopt, register, isCurrent, onHistoryGroup }: {
+export function TextSettingsDialog({ editor, apiRef, templates, onTemplatesChange, onPreview, onSave, onRemove, onClose, onAdopt, register, isCurrent, onHistoryGroup, inlineAvailable = true }: {
   editor: TextEditor; templates: TextTemplate[]; onTemplatesChange: (templates: TextTemplate[]) => void;
   apiRef: RefObject<TextDrawingApi | null>;
   onPreview: (preview: TextEditPreview | null, owner: string) => void;
@@ -45,6 +45,7 @@ export function TextSettingsDialog({ editor, apiRef, templates, onTemplatesChang
   onAdopt: (id: string, owner: string) => void; register: (control: TextEditorControl | null, owner: string) => void;
   isCurrent: () => boolean;
   onHistoryGroup?: (key: string | null, id?: string | null) => void;
+  inlineAvailable?: boolean;
 }) {
   const prefix = useId();
   const [text, setText] = useState(editor.geometry.text);
@@ -146,7 +147,7 @@ export function TextSettingsDialog({ editor, apiRef, templates, onTemplatesChang
     setTemplateId(template.id); setNaming(false); setName(""); setTemplateError(null);
   };
   return <>
-    {inline ? <TextInlineEditor apiRef={apiRef} anchor={editor.geometry.anchor} text={text} style={style}
+    {inline && inlineAvailable ? <TextInlineEditor apiRef={apiRef} anchor={editor.geometry.anchor} text={text} style={style}
       onChange={updateInline} valid={contentValid && styleValid} saving={saveState.saving} disabled={saveState.removing}
       error={saveState.removing ? null : error || (saveState.error ? copy.marketReplay.textAutosaveError : null)}
       onFinish={finish} onSettings={openSettings} onRetry={async () => { setError(null); if (!controller.current.geometry.text.trim()) await finish(); else await controller.flush(); }}

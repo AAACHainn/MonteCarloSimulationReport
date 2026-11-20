@@ -649,15 +649,19 @@ export function useReplayDrawingWindow(core: ReturnType<typeof useReplayCore>) {
     }
   }, [beginBuffering, dataset.id, dataset.sourceIntervalSeconds, endBuffering, getDisplayCache, latestReplayRef, fetch, barsRef, chartWindowDetachedRef, historyAbortRef, historyEpochRef, historyLaterExhaustedThroughRef, historyLoadingRef, indicatorWarmupCountRef, setBars, setChartFocusSequence, setPaperError, setWarmupBars, viewChangingRef, warmupBarsRef]);
 
+  const publishAiChartWindow = useCallback((fromSequence: number, toSequence: number) => {
+    const live = latestReplayRef.current;
+    if (replaySession && live && fromSequence <= live.currentSequence) registerAiScope?.("chart", aiChartOwner, {
+      replaySessionId: replaySession.id, projectionId: replaySession.activeProjectionId, sessionName: replaySession.name, includeCurrentChart: true,
+      chartWindow: { fromSequence, toSequence: Math.min(toSequence, live.currentSequence), displayIntervalSeconds: live.displayIntervalSeconds, displaySession: live.displaySession },
+    });
+  }, [aiChartOwner, latestReplayRef, registerAiScope, replaySession]);
+
   const handleVisibleSequenceRange = useCallback((range: ReplayVisibleSequenceRange) => {
     if (viewChangingRef.current) return;
     if (annotationTimerRef.current) clearTimeout(annotationTimerRef.current);
     annotationTimerRef.current = setTimeout(() => {
-      const live = latestReplayRef.current;
-      if (replaySession && live && range.fromSequence <= live.currentSequence) registerAiScope?.("chart", aiChartOwner, {
-        replaySessionId: replaySession.id, projectionId: replaySession.activeProjectionId, sessionName: replaySession.name, includeCurrentChart: true,
-        chartWindow: { fromSequence: range.fromSequence, toSequence: Math.min(range.toSequence, live.currentSequence), displayIntervalSeconds: live.displayIntervalSeconds, displaySession: live.displaySession },
-      });
+      publishAiChartWindow(range.fromSequence, range.toSequence);
       const visible = barsRef.current.filter((bar) => (
         bar.lastSequence >= range.fromSequence && bar.firstSequence <= range.toSequence
       ));
@@ -675,7 +679,7 @@ export function useReplayDrawingWindow(core: ReturnType<typeof useReplayCore>) {
     if (movedLeft && range.barsBefore <= REPLAY_HISTORY_PREFETCH_THRESHOLD) {
       void loadEarlierHistory();
     }
-  }, [latestReplayRef, loadEarlierHistory, loadLaterHistory, loadTradeAnnotations, registerAiScope, aiChartOwner, replaySession, annotationTimerRef, barsRef, historyLastBarsBeforeRef, historyLaterExhaustedThroughRef, viewChangingRef]);
+  }, [latestReplayRef, loadEarlierHistory, loadLaterHistory, loadTradeAnnotations, publishAiChartWindow, annotationTimerRef, barsRef, historyLastBarsBeforeRef, historyLaterExhaustedThroughRef, viewChangingRef]);
 
   useEffect(() => {
     if (!emaSettingsLoaded || !abrSettingsLoaded || initializedDatasetRef.current === dataset.id) return;
@@ -730,6 +734,6 @@ export function useReplayDrawingWindow(core: ReturnType<typeof useReplayCore>) {
   return {
     armDrawing, changeChartVisibility, armTrendLine, armFibonacciRetracement, createDrawing, updateDrawing,
     deleteDrawing, clearDrawings, openDrawingStyle, visibleDrawings, loadTradeAnnotations, loadWindow,
-    loadEarlierHistory, handleVisibleSequenceRange,
+    loadEarlierHistory, handleVisibleSequenceRange, publishAiChartWindow,
   };
 }

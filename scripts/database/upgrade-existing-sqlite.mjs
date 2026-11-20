@@ -2,13 +2,14 @@ import Database from "better-sqlite3";
 import { Prisma } from "@prisma/client";
 import { createHash, randomUUID } from "node:crypto";
 import { spawn } from "node:child_process";
-import { closeSync, constants, copyFileSync, cpSync, existsSync, lstatSync, mkdirSync, openSync, readFileSync, readdirSync, realpathSync, statSync, unlinkSync, writeFileSync } from "node:fs";
+import { closeSync, constants, copyFileSync, cpSync, existsSync, lstatSync, mkdirSync, openSync, readFileSync, realpathSync, statSync, unlinkSync, writeFileSync } from "node:fs";
 import { basename, dirname, isAbsolute, join, relative, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { createInterface } from "node:readline/promises";
 import { isMainThread } from "node:worker_threads";
 import { createRequire } from "node:module";
 import { resolveSqlitePath, SQLITE_DRIVER_VERSION } from "../../lib/sqlite-client.mjs";
+import { identifyMigration, localMigrations as identifyLocalMigrations } from "./sqlite-upgrade-plan.mjs";
 import { createProgress, monitorUpgrade, printUpgradeStatus, readUpgradeStatus } from "./upgrade-sqlite-progress.mjs";
 
 const projectRoot = resolve(dirname(fileURLToPath(import.meta.url)), "../..");
@@ -31,7 +32,7 @@ export function checkIntegrity(db) {
 
 // Stream every value; no sampling, ORM result limits or floating-point conversion of Int64.
 export function fingerprint(db, selection, progress = () => {}, reference = []) {
-  const tables = selection ?? db.prepare("SELECT name FROM sqlite_master WHERE type='table' AND name NOT LIKE 'sqlite_%' AND name != '_prisma_migrations' ORDER BY name").all().map(({ name }) => ({ name }));
+  const tables = selection ?? db.prepare("SELECT name FROM sqlite_master WHERE type='table' AND name NOT LIKE 'sqlite_%' AND name NOT IN ('_prisma_migrations', '_replay_schema_migrations') ORDER BY name").all().map(({ name }) => ({ name }));
   const result = [];
   for (const [index, table] of tables.entries()) {
     progress({ tableName: table.name, tableIndex: index + 1, tableTotal: tables.length, completedRows: 0, referenceRows: table.count ?? reference.find(item => item.name === table.name)?.count ?? null });
@@ -58,29 +59,6 @@ function assertSame(actual, expected, label) {
   if (json(actual) !== json(expected)) throw new Error(`${label}不一致，停止升级；请查看报告并保留现场`);
 }
 
-export function identifyMigration(db, root = projectRoot) {
-  const migrations = identifyLocalMigrations(root);
-  const tables = db.prepare("SELECT name FROM sqlite_master WHERE type='table'").all().map(row => row.name);
-  if (!tables.includes("_prisma_migrations")) {
-    if (!tables.includes("MarketDataset") && !tables.includes("TradeDataset")) throw new Error("不是可识别的现有业务库；新安装请使用原初始化流程");
-    return { method: "init", pending: null, migrations };
-  }
-  const rows = db.prepare('SELECT * FROM "_prisma_migrations" ORDER BY migration_name').all();
-  if (!rows.length) throw new Error("迁移历史表为空，无法安全识别原安装方式；不自动转用初始化脚本");
-  const applied = [];
-  for (const row of rows) {
-    if (row.rolled_back_at) continue;
-    if (!row.finished_at) throw new Error(`存在未完成/失败迁移：${row.migration_name}`);
-    const local = migrations.find(item => item.name === row.migration_name);
-    const sql = local ? readFileSync(join(root, "prisma/migrations", local.name, "migration.sql"), "utf8") : "";
-    const lineEndings = [hash(sql), hash(sql.replaceAll("\r\n", "\n")), hash(sql.replaceAll("\r\n", "\n").replaceAll("\n", "\r\n"))];
-    if (!local || !lineEndings.includes(row.checksum) || applied.includes(row.migration_name)) throw new Error(`迁移历史分叉、重复或校验和不符：${row.migration_name}`);
-    applied.push(row.migration_name);
-  }
-  if (!applied.length || applied.some((name, index) => migrations[index]?.name !== name)) throw new Error("迁移历史不是本仓库的完整前缀；需人工核查，不自动修复基线");
-  return { method: "prisma", pending: migrations.slice(applied.length).map(item => item.name), migrations };
-}
-
 function checkTarget(db) {
   const models = Prisma.dmmf.datamodel.models;
   const relations = new Set();
@@ -103,8 +81,8 @@ function checkTarget(db) {
 }
 
 function executionManifest(root, method) {
-  const files = ["scripts/database/upgrade-sqlite.mjs", "lib/sqlite-client.mjs", "package.json", "pnpm-lock.yaml",
-    method === "init" ? "scripts/database/init-sqlite.mjs" : "node_modules/prisma/build/index.js"];
+  const files = ["scripts/database/upgrade-existing-sqlite.mjs", "lib/sqlite-client.mjs", "package.json", "pnpm-lock.yaml",
+    method === "baseline" ? "scripts/database/apply-baseline-migrations.mjs" : "node_modules/prisma/build/index.js"];
   return files.map(name => ({ name, sha256: hash(readFileSync(join(root, name))) }));
 }
 
@@ -154,7 +132,7 @@ export function runCommand(args, env, logFile, root) {
 function implementationFingerprint(root) {
   // Include the orchestrator, its worker/display boundary, init entry and its local
   // driver dependency, as well as dependency resolution metadata and generated DMMF.
-  const names = ["scripts/database/upgrade-sqlite.mjs", "scripts/database/upgrade-sqlite-worker.mjs", "scripts/database/upgrade-sqlite-progress.mjs", "scripts/database/init-sqlite.mjs", "lib/sqlite-client.mjs", "package.json", "pnpm-lock.yaml", "pnpm-workspace.yaml"];
+  const names = ["scripts/database/upgrade-existing-sqlite.mjs", "scripts/database/upgrade-sqlite-worker.mjs", "scripts/database/upgrade-sqlite-progress.mjs", "scripts/database/apply-baseline-migrations.mjs", "scripts/database/sqlite-upgrade-plan.mjs", "lib/sqlite-client.mjs", "package.json", "pnpm-lock.yaml", "pnpm-workspace.yaml"];
   const require = createRequire(join(root, "package.json"));
   const generated = dirname(require.resolve(".prisma/client/index", { paths: [dirname(require.resolve("@prisma/client"))] }));
   return names.map(name => ({ name, checksum: hash(readFileSync(join(root, name))) }))
@@ -256,7 +234,7 @@ export async function upgradeDatabase(options, execute = runCommand) {
       if (name === ".env") writeFileSync(join(directory, "environment.backup"), readFileSync(source), { mode: 0o600, flag: "wx" });
       else cpSync(source, join(directory, name), { recursive: true, errorOnExist: true, force: false });
     }
-    // init uses the current validated driver. Prisma CLI has its own engine and
+    // The baseline worker uses the current validated driver. Prisma CLI has its own engine and
     // does not inherit this adapter; both paths run offline in the original mode.
     const childEnv = { ...env, DATABASE_URL: "", SQLITE_DRIVER: "better-sqlite3", SQLITE_JOURNAL_MODE: mode, SQLITE_SYNCHRONOUS: "FULL", MARKET_DATA_SYNC_ENABLED: "0" };
     report.migrationJournalMode = mode;
@@ -264,7 +242,7 @@ export async function upgradeDatabase(options, execute = runCommand) {
       step(phaseIndex, stage + "-execute", target === file ? "source" : "rehearsal");
       checkExecution();
       prepareJournal(target, mode, target !== file);
-      const args = plan.method === "init" ? [join(root, "scripts/database/init-sqlite.mjs")] : [join(root, "node_modules/prisma/build/index.js"), "migrate", "deploy", "--schema", join(root, "prisma/schema.prisma")];
+      const args = plan.method === "baseline" ? [join(root, "scripts/database/apply-baseline-migrations.mjs")] : [join(root, "node_modules/prisma/build/index.js"), "migrate", "deploy", "--schema", join(root, "prisma/schema.prisma")];
       checkExecution();
       await execute(args, { ...childEnv, DATABASE_URL: "file:" + target.replaceAll("\\", "/") }, join(directory, stage + ".log"), root);
       checkExecution();
@@ -272,6 +250,7 @@ export async function upgradeDatabase(options, execute = runCommand) {
       const db = open(target);
       try {
         checkTarget(db);
+        if (plan.pending.includes("20261120120000_market_drawing_pane") && db.prepare('SELECT 1 FROM "MarketDrawing" WHERE pane <> 1 LIMIT 1').get()) throw new Error("旧绘图未归入窗口 1");
         assertSame(db.pragma("journal_mode", { simple: true }), mode, "升级过程日志模式");
         const afterPlan = identifyMigration(db, root);
         if (afterPlan.method !== plan.method || (afterPlan.pending?.length ?? 0)) throw new Error("迁移路径发生变化或仍有待应用项");
@@ -340,10 +319,6 @@ export async function upgradeDatabase(options, execute = runCommand) {
     progress.finish(report?.status ?? "FAILED", { formalWriteStarted: report?.formalWriteStarted ?? false, error: error.message, report: directory ? join(directory, "report.json") : null });
     throw error;
   }
-}
-
-function identifyLocalMigrations(root) {
-  return readdirSync(join(root, "prisma/migrations")).filter(name => existsSync(join(root, "prisma/migrations", name, "migration.sql"))).sort().map(name => ({ name, checksum: hash(readFileSync(join(root, "prisma/migrations", name, "migration.sql"))) }));
 }
 
 async function main() {

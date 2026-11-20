@@ -36,18 +36,20 @@ export function useReplayChartCore({
   onMeasurementArmedChange, drawingTool, onDrawingToolChange, trendLineDraftStyle, fibonacciDraftStyle, rectangleDraftStyle, drawings: savedDrawings, selectedDrawingId,
   drawingNudgePreviews, drawingEditingLocked = false,
   onSelectedDrawingIdChange, onCreateDrawing, onUpdateDrawing, onDeleteDrawing, onPlaceText, onPlaceArrow, onCreateAbcd, abcdDraftStyle = DEFAULT_ABCD_STYLE, drawingApiRef,
-  onOpenDrawingStyle, viewportApiRef, viewportSnapshot = null, currentSourceSequence, liveWindow = true, emaEnabled, emaIndicators, abrEnabled, abrLength, volumeVisible,
+  onOpenDrawingStyle, viewportApiRef, viewportSnapshot = null, initialViewportSnapshot = null, currentSourceSequence, liveWindow = true, emaEnabled, emaIndicators, abrEnabled, abrLength, volumeVisible,
   displaySession, barCountSession, barCountRthSession, barCountConfig, paperSnapshot,
   tradeAnnotations, tradeAnnotationsTruncated, focusSequence = null, onFocusApplied,
   tradeAnnotationsVisible = true,
   candleCountdownEnabled = false, candleCountdownSeconds = null, playbackActive = false, currentSourceTimestamp = null, sourceIntervalSeconds,
-  readOnly = false, hiddenAfter: controlledHiddenAfter, onHiddenAfterChange, historicalPlaybackActive = false,
+  readOnly = false, observeTrades = false, orderLinesVisible = true, shortcutsActive = true, hiddenAfter: controlledHiddenAfter, onHiddenAfterChange, historicalPlaybackActive = false,
   paperBusy, paperError, onSubmitOrder, onOrderPriceChange,
   onCancelOrder, onClosePosition, onCreatePartialExit, onPrepareProtectiveEdit, onDraftActiveChange, onDraftIdentityChange, entryCheckOpen = false, onOpenPaperAccount, onVisibleSequenceRangeChange,
   onRewindToBar, rewindRange,
 }: ReplayChartProps) {
   const chartDisplay = useMemo(() => requestedChartDisplay ?? chartDisplayConfig(candlestickStyle), [requestedChartDisplay, candlestickStyle]);
   const replaySession = useReplaySession();
+  const shortcutsActiveRef = useRef(shortcutsActive);
+  shortcutsActiveRef.current = shortcutsActive;
   const visibilityScope = `${datasetId}:${replaySession?.id ?? ""}:${paperSnapshot?.session.id ?? ""}:${readOnly}`;
   const [hiddenBoundary, setLocalHiddenBoundary] = useState<{ scope: string; target: ChartHideAfter } | null>(null);
   const setHiddenBoundary = useCallback((value: { scope: string; target: ChartHideAfter } | null) => {
@@ -100,6 +102,7 @@ export function useReplayChartCore({
   const requestedBarsRef = useRef(visibleBars); requestedBarsRef.current = visibleBars;
   const timelineBarsRef = useRef(bars);
   const viewportModeRef = useRef<ReplayViewportMode | null>(null);
+  const initialViewportRef = useRef(initialViewportSnapshot);
   const viewportGestureRef = useRef(false);
   const viewportUpdatingRef = useRef(false);
   const pendingFollowRef = useRef(false);
@@ -113,7 +116,12 @@ export function useReplayChartCore({
       const snapshot = chart ? captureReplayViewport({ visibleRange: chart.timeScale().getVisibleLogicalRange(),
         bars: barsRef.current, sourceSequence: sequence, liveWindow: isLive && liveWindowRef.current,
         mode: viewportGestureRef.current ? null : viewportModeRef.current, chartWidth: chart.timeScale().width(), barSpacing: chart.timeScale().options().barSpacing }) : null;
-      if (snapshot) viewportModeRef.current = snapshot.mode;
+      if (snapshot) {
+        viewportModeRef.current = snapshot.mode;
+        const scale = candleRef.current?.priceScale();
+        const priceRange = scale && !scale.options().autoScale ? scale.getVisibleRange() : null;
+        if (priceRange) snapshot.priceRange = priceRange;
+      }
       viewportGestureRef.current = false;
       return snapshot;
     },
@@ -543,7 +551,7 @@ export function useReplayChartCore({
   // retain a removed chart or series.
   return {
     chartDisplay, chartDisplayRef, historicalPlaybackActive,
-    viewportModeRef, viewportGestureRef, viewportUpdatingRef, pendingFollowRef, currentSourceSequenceRef, liveWindowRef, viewportSnapshot,
+    viewportModeRef, viewportGestureRef, viewportUpdatingRef, pendingFollowRef, currentSourceSequenceRef, liveWindowRef, viewportSnapshot, initialViewportRef,
     replaySession, visibilityScope, setHiddenBoundary, hiddenAfter, visibleBars, visibleWarmupBars,
     containerRef, interactionRef, orderTicketRef, orderTicketDragRef, chartRef, candleRef,
     volumeRef, priceLinesRef, lineTargetsRef, tradeAnnotationPrimitiveRef, barCountPrimitiveRef, candleCountdownPrimitiveRef,
@@ -554,7 +562,7 @@ export function useReplayChartCore({
     projectionBarsRef, drawingTimelineRef, drawingScopeRef, drawingFrameRef, drawingSessionRef, requestedDrawingSessionRef,
     onFocusAppliedRef, tradeAnnotationsRef, tradeAnnotationsVisibleRef, candlestickStyleRef, measurementArmedRef, onMeasurementArmedChangeRef,
     drawingToolRef, drawingsRef, drawingGroupsRef, positionCopyRef, selectedDrawingIdRef, onDrawingToolChangeRef, onSelectedDrawingIdChangeRef,
-    drawingEditingLockedRef, getDrawingTimeline, drawingAnchorAt,
+    drawingEditingLockedRef, shortcutsActiveRef, observeTrades, orderLinesVisible, getDrawingTimeline, drawingAnchorAt,
     onCreateDrawingRef, onUpdateDrawingRef, onDeleteDrawingRef, onOpenDrawingStyleRef, displayIntervalSecondsRef, requestedDisplayIntervalSecondsRef,
     sourceIntervalSecondsRef, gridVisibleRef, contextMenu, setContextMenu, contextMenuRef, abrTooltip,
     setAbrTooltip, measurement, setMeasurement, measurementRef, drawingDraftRef, drawingDraftCoordinateRef,

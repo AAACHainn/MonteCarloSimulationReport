@@ -70,6 +70,7 @@ export type TrendLineStyle = {
 export type TrendLineDrawing = {
   id: string;
   datasetId: string;
+  pane?: number;
   type: typeof DRAWING_TYPE_TREND_LINE;
   geometry: TrendLineGeometry;
   style: TrendLineStyle;
@@ -95,6 +96,7 @@ export type FibonacciRetracementStyle = {
 export type FibonacciRetracementDrawing = {
   id: string;
   datasetId: string;
+  pane?: number;
   type: typeof DRAWING_TYPE_FIB_RETRACEMENT;
   geometry: TrendLineGeometry;
   style: FibonacciRetracementStyle;
@@ -375,6 +377,7 @@ export const updateMarketDrawingSchema = z.object({
 type StoredDrawing = {
   id: string;
   datasetId: string;
+  pane?: number;
   type: string;
   geometry: string;
   style: string;
@@ -386,6 +389,7 @@ export function serializeMarketDrawing(record: StoredDrawing): MarketDrawing {
   const base = {
     id: record.id,
     datasetId: record.datasetId,
+    ...(record.pane && record.pane !== 1 ? { pane: record.pane } : {}),
     createdAt: record.createdAt.toISOString(),
     updatedAt: record.updatedAt.toISOString(),
   };

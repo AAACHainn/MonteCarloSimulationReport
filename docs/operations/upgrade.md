@@ -32,31 +32,17 @@
 4. 切换 package 命令、安装脚本、Docker 启动流程、测试及 README 等所有调用方后，从主线移除已无引用的旧入口与专用实现；历史实现由 `v1.0` tag 保存，无需长期改名保留。仍被新安装或其他功能依赖的初始化脚本、公共模块须先替换或拆分，不能一并删去。任何文件移除须逐个明确路径，禁止批量删除。
 5. 已发布的 Prisma 迁移 SQL 和校验和继续保留。移除旧升级编排不等于删除历史迁移；迁移历史压缩或重新基线化须另有经过验证的接续方案。
 
-**实施状态（2026-10-30 核对）：尚未实现或切换新入口，也未移除旧脚本。** 当前 schema 与迁移集合相对 v1.0 tag 尚无变更；现有 `db:upgrade` 仍指向 `scripts/database/upgrade-sqlite.mjs`。已达 v1.0 且仅更新当前代码时无需重复执行旧兼容迁移；低于 v1.0 的库须使用该 tag 的完整代码和文档升级至基线。不得把此规则当作新入口已经可用或数据库已经验收的证明。新入口实施后须同步更新本状态、具体命令和验证记录。
+### 当前入口
 
-当前工作树的维护脚本集中在 `scripts/database/`，后台业务任务在 `scripts/workers/`；本次仅调整位置与调用引用，版本支持边界不变。`v1.0` tag 内的脚本仍保持该 tag 原目录，旧安装须使用 tag 的完整代码及同版本指南，不能将当前分类后的路径直接套用到历史版本。
+在停写的目标环境使用 `corepack pnpm run db:upgrade`。当前入口核验实际完整结构和迁移记录。Prisma 管理的库须至少具有 v1.0 的完整迁移前缀，并与从已发布 SQL 重建的结构一致，再由 Prisma CLI 应用剩余迁移。旧初始化路径的库须匹配已核验的完整结构指纹，从 v1.0 后的首条增量开始按顺序执行，使用独立的 `_replay_schema_migrations` 记录真实完成项及校验和。旧初始化实现由 v1.0 tag 保留。
+
+首条增量 `20261120120000_market_drawing_pane` 将既有绘图归入窗口 1，保留对象 ID、样式、内容、会话、时间和原有顺序。升级流程核对窗口默认值及所有原字段，拒绝未知结构、低版本、异常历史或演练差异。正式升级前须在目标站点副本演练。
+
+新安装与 Docker 启动通过 `db:init-sqlite` 创建新库或核验已有库已达到目标版本。已有库发现待应用迁移时，先退出并走离线升级。
 
 ### 历史迁移测试
 
-升级到 v1.0 的旧兼容测试集中放在 [tests/legacy-migrations-v1/](../../tests/legacy-migrations-v1/)，从默认 `corepack pnpm test` 中排除；当前功能、SQLite 运行时、升级进度与新库复盘长度限制等测试继续执行。此分组仅调整测试收集范围，不移除旧升级实现，不修改数据库、初始化入口或已发布的迁移 SQL。
-
-按需运行历史测试：
-
-```powershell
-corepack pnpm test:legacy-migrations
-```
-
-| 目录内文件 | 覆盖范围 | 用例数 |
-| --- | --- | --- |
-| `upgrade-sqlite.test.mjs` | 旧升级编排、Prisma / 初始化兼容路径及数据保护 | 31 |
-| `init-sqlite.test.ts` | 旧 `ReplayProgress.intervalMs` 字段兼容 | 1 |
-| `user-profiles-migration.test.mjs` | 旧库补用户字段、历史用户迁移 SQL | 2 |
-| `user-wallet-migration.test.mjs` | 历史钱包初始化及 `cashAdjustment` 迁移 | 2 |
-| `review-limit-migration.integration.test.ts` | 旧复盘长度约束的迁移及初始化兼容 | 2 |
-
-共 38 项，使用隔离临时数据库；目录内 `vitest.config.ts` 为独立收集入口。原混合测试文件中的用户及成长数据重复初始化保护、新库 2000 字复盘限制仍在默认测试范围内。测试迁出不代表原断言已经失效，也不代表新升级入口已完成验证。
-
-目录集中便于后续退役；届时同时移除 `test:legacy-migrations` 命令、默认配置中的目录排除项及对应文档引用。旧生产入口仍按上节生命周期单独处理；新入口就绪前保留现有脚本。
+复核升级到 v1.0 的兼容流程时，使用 `v1.0` 标签的完整代码和对应测试，并使用隔离测试库。主线的 `corepack pnpm test` 继续覆盖当前初始化、升级进度、SQLite 运行时和复盘长度限制。
 
 下文保留旧升级流程供 v1.0 阶段查阅：第 0、3、4 节的旧兼容路径、时间聚合及其他转换说明，以及文末转交指令，适用于升级到 v1.0，不是后续版本继续维护旧兼容的要求。备份、停写、配置、验收及回退的数据保护原则继续适用；后续版本以本节及届时发布的新入口说明为准。
 
@@ -111,7 +97,7 @@ corepack pnpm test:legacy-migrations
 
 ## 3. 获取代码并选择迁移路径
 
-> 本节的旧数据库迁移命令仅用于升级到 v1.0，须在 v1.0 tag 的完整代码与依赖环境中执行。以下原初始化 / Prisma 双路径不是 v1.0 之后的新升级入口；后续数据库变更须按顶部基线规则提供并验证新入口。
+> 本节的旧数据库迁移命令仅用于升级到 v1.0，须在 v1.0 tag 的完整代码与依赖环境中执行。本节的离线编排适用于当前版本；末尾路径 A / B 仅用于 v1.0。
 
 拉取已确认的目标分支或提交；使用快进更新，遇到本地改动或分叉先保留并处理。记录最终提交；有多个后续提交时无需按功能逐次启动应用，但必须执行目标代码全部尚未应用的数据库迁移。
 
@@ -133,11 +119,9 @@ corepack pnpm prisma generate
 <a id="推荐入口可重复执行的离线升级编排"></a>
 <a id="legacy-v1-upgrade"></a>
 
-### 旧升级入口（仅用于升级到 v1.0）：离线升级编排
+### 离线升级编排
 
-> v1.0 tag 内的旧入口为 `scripts/upgrade-sqlite.mjs`；当前工作树中保留的实现移至 `scripts/database/upgrade-sqlite.mjs`。仅用于目标为 v1.0 的旧库升级，不代表后续升级入口已经实现。
-
-在 v1.0 tag 环境安装依赖并生成相应 Prisma Client 后，可以使用该版本的编排入口；它复用原迁移 SQL 或 `init-sqlite.mjs`，不另建迁移实现，也不自动构建或启动服务：
+当前入口用于已达到 v1.0 的库，包含备份、演练和写入核对。旧版编排命令见 v1.0 tag 同版本文档。
 
 ```powershell
 corepack pnpm run db:upgrade
@@ -155,7 +139,7 @@ corepack pnpm run db:upgrade --expect-database "D:/实际部署目录/prisma/dev
 
 1. 独占创建 `<数据库路径>.upgrade.lock`，防止升级命令相互并发。它不是应用维护锁，不能代替实际停止服务和 worker。
 2. 核对完整性与外键，通过 SQLite backup API 创建包含已提交 WAL 页的一致性 `before.db`；保存逐表全量 SHA-256、行数和原字段基线，不采样。同步复制存在的 `.env`、`storage/`、`.market-imports/`，不改原环境或密钥。服务环境及 Docker 卷挂载不在这些路径内的文件仍须按第 2 节另备份。
-3. 识别原安装方式：没有迁移历史表的可识别业务库走原初始化脚本；有完整、校验和匹配的迁移前缀走 `prisma migrate deploy`。空历史、未完成/失败记录、分叉或校验和不符均停止，不自动换路径、重置或标记迁移完成。允许 LF/CRLF 换行差异，不允许 SQL 内容变化。
+3. 确认原安装方式、完整结构和迁移历史，按顶部规则接续已核验的 v1.0 基线或后续版本。
 4. 在独立 `rehearsal.db` 上执行原升级入口，关闭行情同步；再执行一次验证幂等性。检查目标模型表/字段，以及 Prisma 未列为独立模型的隐式多对多关联表和 A/B 字段（包括 `_TradeToTradeTag`、`_ReplayJournalTradeReasons`）；检查完整性、外键、原字段全量数据及重复执行结果。迁移历史完整不能代替实际结构校验；缺表时 Prisma 路径停止，不自动改用初始化脚本。
 5. 复核正式库自备份后未变化、数据库文件未被替换、迁移文件及 schema 未变化。演练前记录升级入口、Worker、进度显示入口、初始化脚本及所选 CLI 入口、本地 SQLite 连接工厂、生成的 Prisma Client、package.json 和锁文件的 SHA-256；每次子进程执行前后以及正式升级前复核，缺失或变化时停止后续阶段，不等到正式数据被修改后才判断结果。执行期间不得并行拉取代码、安装依赖或修改脚本。通过后对正式库执行同一路径。正式结果的表结构与全量数据须与演练一致，原字段数据还需与备份一致。
 6. 两条路径都保持源库原先的 WAL/DELETE 模式，不强制 checkpoint 或临时转 DELETE。演练副本在必要时设为源库模式，正式库模式若被外部改变则拒绝升级。初始化子进程使用 better-sqlite3；CLI 仍使用其自身引擎，不能视为继承了新适配器。写锁冲突直接停止，不删除 WAL/SHM。子进程维护连接临时使用 FULL，不改原 FULL/NORMAL 配置，应用重启后仍按原配置连接。
@@ -382,7 +366,7 @@ corepack pnpm start
 
 - `compose.yaml` 挂载源码并启动 `dev`，不是生产 start 部署。
 - `compose.prod.yaml` 当前引用 `sudongpojiaozi/monte-carlo-simulation-report:v0.1`，没有 `build` 配置；仅拉取仓库代码或执行 Compose 的 `up --build` 不会从最新源码生成该生产镜像。应构建并发布/指定包含目标提交的镜像，记录摘要，保留原数据卷。
-- `Dockerfile.prod` 默认启动命令每次都会先执行 `prisma migrate deploy`。创建新容器前必须完成备份和迁移路径检查；迁移保持原模式并单独离线完成后，WAL 服务仍须覆盖启动命令为仅启动 Next，避免普通重启未经备份和演练就执行迁移。旧初始化方式的库也不能未经迁移基线处理就使用默认启动命令。
+- `Dockerfile.prod` 启动先运行 `db:init-sqlite` 的等效命令。升级已有卷须在停写、备份及演练后通过离线入口执行，再启动应用。最终镜像保留升级指纹所需的 `package.json`、`pnpm-lock.yaml` 和 `pnpm-workspace.yaml`。可在目标镜像的一次性维护进程中直接调用 `node scripts/database/upgrade-existing-sqlite.mjs`，使用上文同样的参数。
 - AI 版本的生产 runner 已补充 `scripts/`、`lib/`、`tsconfig.json`，供回退与 AI 分析 worker 运行。仍需发布包含当前代码的镜像，并实测子进程、环境变量与持久化；仅首页 healthcheck 成功不能证明 worker 可用，本次未发布或实机验证 Docker 镜像。
 - 当前生产 Compose 没有映射 `SQLITE_DRIVER` / `SQLITE_JOURNAL_MODE`；仅在宿主机 `.env` 添加这两项不会自动传进容器，须显式增加容器环境变量。
 - 镜像从目标提交的干净检出或只含受版本管理文件的构建目录生成。`.gitignore` 不控制 Docker 构建上下文；当前 `.dockerignore` 已排除 `tmp/`、`.market-imports/`、`storage/`、`.env*` 及常见数据库文件，额外命名或位置的备份仍须核对实际排除规则，避免业务数据进入镜像。
@@ -443,7 +427,7 @@ services:
 
 先阅读 AGENTS.md 和 docs/operations/upgrade.md，并按其引用阅读行情同步、多会话及交易关卡说明。检查当前提交、本地改动、运行方式、真实 DATABASE_URL、数据库迁移历史和环境变量，确认目标提交已包含这些文档。
 
-停止本项目写入并建立一致性数据库/文件/环境备份，在数据库副本上演练，识别 Prisma migrate deploy 与旧 db:init-sqlite 路径后再升级正式库；不要重置数据库、覆盖为开发库或将未执行迁移直接标记完成。保留原 MARKET_DATA_ENCRYPTION_KEY，副本及首次验收关闭行情同步，不触发付费下载。
+停止本项目写入并建立一致性数据库/文件/环境备份，在数据库副本上演练，使用当前 db:upgrade 核验安装来源与迁移状态后再升级正式库；不要重置数据库、覆盖为开发库或将未执行迁移直接标记完成。保留原 MARKET_DATA_ENCRYPTION_KEY，副本及首次验收关闭行情同步，不触发付费下载。
 
 本次时间聚合重构有新增结构迁移，完成备份副本验证后按原安装路径升级；不转换旧块、不自动回填，在面板构建已有数据集聚合。普通推进、浏览器和特殊等待优化需重新构建、重启并刷新页面；WAL 提交优化需额外在目标环境验证锁定驱动并显式配置。已有 WAL 库的初始化和 Prisma CLI 迁移均保持 WAL，在完全停写的离线阶段执行；db:runtime 会应用配置的日志模式，正式库运行前先备份并确认配置。
 

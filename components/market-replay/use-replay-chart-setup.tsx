@@ -31,7 +31,7 @@ import type { useReplayChartCore } from "./use-replay-chart-core";
 
 export function useReplayChartSetup(core: ReturnType<typeof useReplayChartCore>) {
   const {
-    viewportModeRef, viewportGestureRef, viewportUpdatingRef, pendingFollowRef, liveWindowRef, currentSourceSequenceRef, viewportSnapshot,
+    viewportModeRef, viewportGestureRef, viewportUpdatingRef, pendingFollowRef, liveWindowRef, currentSourceSequenceRef, viewportSnapshot, initialViewportRef,
     chartDisplay, chartDisplayRef,
     visibilityScope, hiddenAfter, visibleBars, visibleWarmupBars, containerRef, chartRef,
     candleRef, volumeRef, priceLinesRef, lineTargetsRef, tradeAnnotationPrimitiveRef, barCountPrimitiveRef,
@@ -288,12 +288,17 @@ export function useReplayChartSetup(core: ReturnType<typeof useReplayChartCore>)
     const next = bars;
     const timelineChanged = lastDataIntervalRef.current !== nextDisplayIntervalSeconds
       || lastDataSessionRef.current !== nextDisplaySession;
-    const transitionViewport = timelineChanged ? viewportSnapshot ?? captureReplayViewport({
+    const lastBar = next.at(-1);
+    const savedViewport = lastBar ? initialViewportRef.current : null;
+    const initialViewport = savedViewport?.mode === "following" && lastBar && liveWindowRef.current
+      ? { ...savedViewport, anchor: { sourceSequence: lastBar.lastSequence, timestamp: lastBar.timestamp } } : savedViewport;
+    if (initialViewport) initialViewportRef.current = null;
+    const transitionViewport = initialViewport ?? (timelineChanged ? viewportSnapshot ?? captureReplayViewport({
       visibleRange: previousRange, bars: previous,
       sourceSequence: currentSourceSequenceRef.current ?? previous.at(-1)?.lastSequence ?? -1,
       liveWindow: liveWindowRef.current, mode: readOnly && !historicalPlaybackActive ? "history" : viewportModeRef.current,
       chartWidth: chart.timeScale().width(), barSpacing: chart.timeScale().options().barSpacing,
-    }) : null;
+    }) : null);
     viewportUpdatingRef.current = true;
     const following = viewportModeRef.current === "following" || (viewportModeRef.current === null
       && isReplayRangeFollowing(previousRange ?? { from: 0, to: 0 }, previous.length - 1));
@@ -360,7 +365,7 @@ export function useReplayChartSetup(core: ReturnType<typeof useReplayChartCore>)
       chart.timeScale().setVisibleLogicalRange({ from, to: from + span });
       pendingFollowRef.current = false;
       viewportModeRef.current = "following";
-    } else if (!previous.length && next.length) viewportModeRef.current = "following";
+    } else if (!previous.length && next.length) viewportModeRef.current = initialViewport?.mode ?? "following";
     else if (timelineChanged) viewportModeRef.current = transitionViewport?.mode ?? (following ? "following" : "history");
     // A new display period gets a fresh vertical fit; ordinary updates keep manual scaling.
     if (timelineChanged) {
@@ -369,6 +374,7 @@ export function useReplayChartSetup(core: ReturnType<typeof useReplayChartCore>)
     } else if (!candleWasAutoScaled && series.priceScale().options().autoScale) {
       series.priceScale().applyOptions({ autoScale: false });
     }
+    if (initialViewport?.priceRange) series.priceScale().setVisibleRange(initialViewport.priceRange);
     if (!timelineChanged && volumeSeries && !volumeWasAutoScaled && volumeSeries.priceScale().options().autoScale) {
       volumeSeries.priceScale().applyOptions({ autoScale: false });
     }
@@ -383,7 +389,7 @@ export function useReplayChartSetup(core: ReturnType<typeof useReplayChartCore>)
     });
     requestAnimationFrame(syncMeasurementCoordinates);
     syncDrawingPrimitive();
-  }, [bars, dataRevision, projectionBars, visibleBars, hiddenAfter, readOnly, historicalPlaybackActive, visibilityScope, displayIntervalSeconds, displaySession, barCountSession, sourceIntervalSeconds, syncDrawingPrimitive, syncMeasurementCoordinates, syncVisibleSequenceRange, barsRef, candleRef, chartRef, displayIntervalSecondsRef, displaySessionRef, drawingScopeRef, drawingSessionRef, lastDataIntervalRef, lastDataRef, lastDataRevisionRef, lastDataSessionRef, lastHiddenAfterRef, projectionBarsRef, requestedDisplayIntervalSecondsRef, requestedDrawingSessionRef, timelineBarsRef, volumeRef, viewportModeRef, viewportUpdatingRef, pendingFollowRef, liveWindowRef, currentSourceSequenceRef, viewportSnapshot]);
+  }, [bars, dataRevision, projectionBars, visibleBars, hiddenAfter, readOnly, historicalPlaybackActive, visibilityScope, displayIntervalSeconds, displaySession, barCountSession, sourceIntervalSeconds, syncDrawingPrimitive, syncMeasurementCoordinates, syncVisibleSequenceRange, barsRef, candleRef, chartRef, displayIntervalSecondsRef, displaySessionRef, drawingScopeRef, drawingSessionRef, lastDataIntervalRef, lastDataRef, lastDataRevisionRef, lastDataSessionRef, lastHiddenAfterRef, projectionBarsRef, requestedDisplayIntervalSecondsRef, requestedDrawingSessionRef, timelineBarsRef, volumeRef, viewportModeRef, viewportUpdatingRef, pendingFollowRef, liveWindowRef, currentSourceSequenceRef, viewportSnapshot, initialViewportRef]);
 
   useEffect(() => {
     if (focusSequence === null) return;
@@ -454,6 +460,7 @@ export function useReplayChartSetup(core: ReturnType<typeof useReplayChartCore>)
   useEffect(() => {
     const series = candleRef.current;
     if (!series) return;
+    const displayedAccount = core.orderLinesVisible ? paperSnapshot : null;
     const nextKeys = new Set<string>();
     lineTargetsRef.current.clear();
     const nextLineActions: LineAction[] = [];
@@ -463,17 +470,17 @@ export function useReplayChartSetup(core: ReturnType<typeof useReplayChartCore>)
       nextKeys.add(key);
       syncPriceLine(priceLinesRef.current, key, { price, color, lineWidth: 1, lineStyle: solid ? 0 : 2, axisLabelVisible: true, title },
         options => series.createPriceLine(options));
-      if (target) lineTargetsRef.current.set(key, target);
+      if (target && !core.observeTrades) lineTargetsRef.current.set(key, target);
     };
     const addAction = (action: Omit<LineAction, "y">) => {
       const coordinate = series.priceToCoordinate(action.price);
       if (coordinate !== null) nextLineActions.push({ ...action, y: Number(coordinate) });
     };
-    if (paperSnapshot?.session.averageEntryPrice !== null && paperSnapshot?.session.averageEntryPrice !== undefined && paperSnapshot.session.netQuantity !== 0) {
-      addLine(null, paperSnapshot.session.averageEntryPrice, theme.text, copy.paperTrading.positionValue(formatNumber(paperSnapshot.session.netQuantity), paperSnapshot.session.averageEntryPrice));
-      addAction({ key: "position", price: paperSnapshot.session.averageEntryPrice, color: theme.text, label: copy.paperTrading.positionValue(formatNumber(paperSnapshot.session.netQuantity), paperSnapshot.session.averageEntryPrice), kind: "close" });
+    if (displayedAccount?.session.averageEntryPrice !== null && displayedAccount?.session.averageEntryPrice !== undefined && displayedAccount.session.netQuantity !== 0) {
+      addLine(null, displayedAccount.session.averageEntryPrice, theme.text, copy.paperTrading.positionValue(formatNumber(displayedAccount.session.netQuantity), displayedAccount.session.averageEntryPrice));
+      addAction({ key: "position", price: displayedAccount.session.averageEntryPrice, color: theme.text, label: copy.paperTrading.positionValue(formatNumber(displayedAccount.session.netQuantity), displayedAccount.session.averageEntryPrice), kind: "close" });
     }
-    for (const order of paperSnapshot?.activeOrders ?? []) {
+    for (const order of displayedAccount?.activeOrders ?? []) {
       if (order.price !== null) {
         const isStop = order.isProtective && order.type === "STOP";
         const color = isStop ? theme.negative : order.isProtective ? theme.positive : order.side === "BUY" ? theme.buy : theme.sell;
@@ -507,7 +514,7 @@ export function useReplayChartSetup(core: ReturnType<typeof useReplayChartCore>)
       priceLinesRef.current.delete(key);
     }
     setLineActions((current) => sameLineActions(current, nextLineActions) ? current : nextLineActions);
-  }, [theme, draft, paperSnapshot, priceTickSize, candleRef, lineTargetsRef, priceLinesRef, setLineActions]);
+  }, [theme, draft, paperSnapshot, core.observeTrades, core.orderLinesVisible, priceTickSize, candleRef, lineTargetsRef, priceLinesRef, setLineActions]);
 
   const moveDraftLine = useCallback((current: DraftOrder, field: LineTarget["field"], price: number): DraftOrder => {
     price = snapPriceToTick(price, priceTickSize);

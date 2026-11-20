@@ -2,11 +2,21 @@
 
 import { createContext, useCallback, useContext, useEffect, useId, useMemo, type ReactNode } from "react";
 import { DrawingHistory } from "@/lib/market-replay/drawing-history";
+import { drawingPaneHeader } from "@/lib/market-replay/drawing-pane";
 import type { ReplaySessionSummary } from "@/lib/replay-sessions/types";
 import { useAiPageScope } from "@/components/ai/page-context";
 
 const Context = createContext<ReplaySessionSummary | null>(null);
 const DrawingHistoryContext = createContext<DrawingHistory | null>(null);
+const DrawingPaneContext = createContext(1);
+export function ReplayDrawingPaneProvider({ pane, children }: { pane: number; children: ReactNode }) {
+  const session = useReplaySession();
+  const history = useMemo(() => new DrawingHistory(`${session?.id}:${session?.activeProjectionId}:${pane}`),
+    [session?.id, session?.activeProjectionId, pane]);
+  return <DrawingPaneContext.Provider value={pane}><DrawingHistoryContext.Provider value={history}>
+    {children}
+  </DrawingHistoryContext.Provider></DrawingPaneContext.Provider>;
+}
 export const useDrawingHistory = () => useContext(DrawingHistoryContext);
 export function ReplaySessionProvider({ session, children, includeCurrentChart = false }: { session: ReplaySessionSummary; children: ReactNode; includeCurrentChart?: boolean }) {
   const drawingHistory = useMemo(() => new DrawingHistory(`${session.id}:${session.activeProjectionId}`), [session.id, session.activeProjectionId]);
@@ -33,12 +43,16 @@ export function useReplaySessionUrl() {
 export function useReplayFetch(): typeof fetch {
   const session = useReplaySession();
   const drawingHistory = useDrawingHistory();
+  const pane = useContext(DrawingPaneContext);
   return useCallback((input: RequestInfo | URL, init?: RequestInit) => {
     const url = typeof input === "string" ? replaySessionUrl(input, session?.id, session?.propRoundNumber) : input;
     const headers = new Headers(init?.headers);
+    if (pane !== 1 && typeof url === "string" && /^\/api\/market-datasets\/[^/]+\/drawings(?:[/?]|$)/.test(url)) {
+      headers.set(drawingPaneHeader, String(pane));
+    }
     if (session && typeof url === "string" && url.includes("replaySessionId=")) {
       headers.set("X-Replay-Projection", session.activeProjectionId);
     }
     return drawingHistory ? drawingHistory.observe(globalThis.fetch, url, { ...init, headers }) : globalThis.fetch(url, { ...init, headers });
-  }, [session, drawingHistory]);
+  }, [session, drawingHistory, pane]);
 }

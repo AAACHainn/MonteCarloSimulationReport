@@ -97,7 +97,7 @@ corepack pnpm start
    ```bash
    corepack pnpm install --frozen-lockfile
    corepack pnpm prisma generate
-   corepack pnpm prisma migrate deploy
+   corepack pnpm db:init-sqlite
    ```
 
 3. 启动开发服务（默认使用 Turbopack，开发产物写入 `.next-dev/`）：
@@ -116,7 +116,7 @@ corepack pnpm start
 docker compose up --build -d
 ```
 
-打开 [http://localhost:3001](http://localhost:3001)。当前开发镜像每次启动都会安装依赖、生成 Prisma Client、执行 `prisma migrate deploy` 并启动开发服务；仅在新安装或已完成离线升级核验的数据库上使用。进度可通过日志查看：
+打开 [http://localhost:3001](http://localhost:3001)。当前开发镜像每次启动都会安装依赖、生成 Prisma Client、执行 `db:init-sqlite` 并启动开发服务。新库直接建到当前版本，已有库须先完成离线升级。进度可通过日志查看：
 
 ```bash
 docker compose logs -f app
@@ -167,7 +167,7 @@ corepack pnpm start
 
 当前 Next.js 15.5 的 Turbopack 生产构建仍处于 beta；遇到兼容问题可使用上述回退命令。目录隔离只隔离构建产物，两个模式默认仍使用同一数据库和端口；切换前停止当前服务，生产模式须先重新构建。配置与验收注意事项见[本地 Node 运行说明](docs/operations/upgrade.md#本地-node-的-start-模式)。
 
-仓库还提供 `Dockerfile.prod` 与 `compose.prod.yaml`。生产 Compose 当前固定引用 `v0.1` 镜像，不能代表当前源码；部署时须构建或指定目标版本镜像。生产 Dockerfile 默认启动时也会执行迁移，已有库应将迁移改为离线执行；启用 WAL 时还需显式传入 SQLite 配置。详情见 [Docker 部署检查](docs/operations/upgrade.md#docker-部署的额外检查)。
+仓库还提供 `Dockerfile.prod` 与 `compose.prod.yaml`。生产 Compose 当前固定引用 `v0.1` 镜像，部署时须构建或指定目标版本镜像。生产容器启动时创建新库或核验已有库版本。已有库的待应用迁移通过目标镜像离线执行；启用 WAL 时还需显式传入 SQLite 配置。详情见 [Docker 部署检查](docs/operations/upgrade.md#docker-部署的额外检查)。
 
 已有数据库的迁移、SQLite 驱动或 WAL 配置变更，请按[升级指南](docs/operations/upgrade.md)核对目标环境、备份并执行相应步骤。
 
@@ -175,7 +175,7 @@ corepack pnpm start
 
 **数据库最低兼容基线为 `v1.0` tag。** `v0.2 → v1.0` 使用该 tag 中的旧升级脚本及同版本文档；v1.0 之前的数据库须先升级并验收到 v1.0，不能直接交给后续版本升级。
 
-当前代码的 Prisma schema 和迁移集合仍与 v1.0 相同，`db:upgrade` 仍指向旧的 `scripts/database/upgrade-sqlite.mjs`；新的后续升级入口尚未实现。v1.0 之后首次发生数据库变更时，须提供新的统一入口，仅接受已核验的 v1.0 及后续数据库。旧入口在新入口验证并完成调用方切换后移除，历史实现由 v1.0 tag 保留。基线与脚本状态见[升级指南](docs/operations/upgrade.md)。
+已有库使用 `db:upgrade` 离线核验、备份和演练。入口接续已核验的两种 v1.0 基线，应用窗口归属增量迁移，旧绘图归入主窗。v1.0 以前仍按对应历史版本升级。基线与运行说明见[升级指南](docs/operations/upgrade.md)。
 
 本地 Node 安装按以下顺序操作，每条命令成功后再继续：
 
@@ -238,6 +238,7 @@ Docker 部署须使用目标镜像及实际数据卷、环境配置执行离线�
 - **图表分批退出**：从持仓 TP / SL 手柄拖出分批止盈或止损线，默认固定当前余仓的一半；齿轮可编辑价格与数量、精确新增分批。原主线默认管理全部余仓，分批成交后继续保护余仓，并按剩余持仓比例缩减对侧分批数量；手动减仓同时缩减两侧。成交及日志保持分批独立记录。数量联动与边界见[回放会话规则](docs/replay/replay-sessions-implementation.md#图表分批止盈止损)。
 - **风险定额下单**：通过入场、止损和目标价计算数量、预计盈亏与净盈亏比；图表展示委托线、持仓和成交位置。
 - **独立会话**：同一行情可建立多个会话，切换时分别保存账户与进度；会话可重命名、归档和删除。
+- **多窗口回放**：可交易页的「布局」支持 1～5 窗。共用进度和账户，按主窗周期手动推进，只在主窗进行图上交易。各窗独立保存绘图与显示偏好。详见[多窗口回放](docs/replay/replay-sessions-implementation.md#多窗口回放)。
 - **绘图编辑**：支持当前页面内的单对象复制粘贴、方向键微调，以及 100 步撤销/重做。Ctrl+C 复制，鼠标在图表价格窗格内时 Ctrl+V 立即粘贴。选中对象后，左右各移动一根显示 K 线，上下各移动一档报价，长按持续移动。历史仅存内存，普通回放与历史回放独立。详见[绘图编辑与撤销重做](docs/charting/drawing-editing.md)。
 
 两种会话用途分别为：
@@ -378,7 +379,7 @@ install.bat             Windows 全新安装、环境配置与生产启动
 docs/                   按主题分类的文档与目录索引
 ```
 
-脚本用途与调用维护说明见[脚本目录](scripts/README.md)。数据库升级入口仅调整了文件位置，版本边界仍以[升级指南](docs/operations/upgrade.md)为准。
+脚本用途与调用维护说明见[脚本目录](scripts/README.md)。数据库升级按[升级指南](docs/operations/upgrade.md)选择与版本匹配的入口。
 
 代码改动按影响范围运行相关测试及必要检查，提交前完成适用的验证：
 
@@ -388,7 +389,7 @@ corepack pnpm test
 corepack pnpm run build
 ```
 
-默认 `corepack pnpm test` 运行当前功能测试，排除集中在 `tests/legacy-migrations-v1/` 的历史迁移用例。需要核验升级到 v1.0 的旧兼容流程时，单独执行 `corepack pnpm test:legacy-migrations`；分组范围见[历史迁移测试](docs/operations/upgrade.md#历史迁移测试)。
+默认 `corepack pnpm test` 运行当前功能测试。需要复核升级到 v1.0 的旧兼容流程时，使用该标签的完整代码和测试。详见[历史迁移测试](docs/operations/upgrade.md#历史迁移测试)。
 
 纯文档修改执行 `corepack pnpm docs:check` 和 `git diff --check`，无需运行应用测试或构建。`lint` 自动先执行同一文档检查；检查范围与功能变更的同步维护要求见[持续维护说明](docs/README.md#持续维护)。
 

@@ -2,6 +2,7 @@ export type ReplayChartVisibility = {
   drawings: boolean;
   indicators: boolean;
   tradeAnnotations: boolean;
+  orderLines?: boolean;
 };
 
 export type ReplayChartVisibilityTarget = keyof ReplayChartVisibility | "all";
@@ -21,6 +22,7 @@ export function parseReplayChartVisibility(value: string | null): ReplayChartVis
       drawings: typeof parsed.drawings === "boolean" ? parsed.drawings : true,
       indicators: typeof parsed.indicators === "boolean" ? parsed.indicators : true,
       tradeAnnotations: typeof parsed.tradeAnnotations === "boolean" ? parsed.tradeAnnotations : true,
+      ...(typeof parsed.orderLines === "boolean" ? { orderLines: parsed.orderLines } : {}),
     };
   } catch {
     return { ...DEFAULT_REPLAY_CHART_VISIBILITY };

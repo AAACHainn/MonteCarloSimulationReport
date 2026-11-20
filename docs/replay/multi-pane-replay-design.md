@@ -1,6 +1,6 @@
 # K 线多窗口回放首版设计
 
-> 文档状态：设计与计划。适用范围：可交易回放页面的多周期工作区。待开发。
+> 文档状态：设计与计划。适用范围：可交易回放页面的多周期工作区。实现后的使用规则见当前规范。
 > 当前规范：[回放会话与纠错](replay-sessions-implementation.md)、[会话绘图持久化](../charting/archived-drawings.md)、[桌面 UI 规范](../ui/ui-guidelines.md)。
 
 ## 范围

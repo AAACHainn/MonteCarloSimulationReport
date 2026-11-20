@@ -5,7 +5,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { randomUUID } from "node:crypto";
 import { beforeAll, describe, expect, it } from "vitest";
-import { checkIntegrity, fingerprint } from "./upgrade-sqlite.mjs";
+import { checkIntegrity, fingerprint } from "./upgrade-existing-sqlite.mjs";
 
 const directory = mkdtempSync(join(tmpdir(), "user-profiles-migration-"));
 const base = join(directory, "fresh.db");
@@ -34,17 +34,11 @@ describe("current user profiles initialization", () => {
       INSERT INTO "ReplaySession" (id,datasetId,name,mode,userId,growthEligible,updatedAt) VALUES ('owned','data','已有个人会话','TRAINING','owner',true,1000);`);
     const before = fingerprint(db); expectFinalSchema(db); db.close();
     init(file); const initialized = new Database(file);
-    let afterFirstInit;
     try {
       expectFinalSchema(initialized);
-      const legacyTables = before.filter(table => !["UserWallet", "UserWalletEntry", "UserWalletAllocation"].includes(table.name));
-      expect(fingerprint(initialized, legacyTables)).toEqual(legacyTables);
-      expect(initialized.prepare('SELECT "balanceMinor" FROM "UserWallet" WHERE "userId"=?').get("owner")).toEqual({ balanceMinor: 1_000_000 });
-      expect(initialized.prepare('SELECT "type", "amountMinor", "balanceAfterMinor" FROM "UserWalletEntry" WHERE "userId"=?').get("owner"))
-        .toEqual({ type: "INITIAL", amountMinor: 1_000_000, balanceAfterMinor: 1_000_000 });
-      afterFirstInit = fingerprint(initialized);
+      expect(fingerprint(initialized)).toEqual(before);
     } finally { initialized.close(); }
     init(file); const after = new Database(file);
-    try { expectFinalSchema(after); expect(fingerprint(after)).toEqual(afterFirstInit); } finally { after.close(); }
+    try { expectFinalSchema(after); expect(fingerprint(after)).toEqual(before); } finally { after.close(); }
   }, 30000);
 });

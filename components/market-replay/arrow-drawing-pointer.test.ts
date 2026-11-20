@@ -54,8 +54,9 @@ function setup(tool: DrawingTool | null = null) {
   // eslint-disable-next-line react-hooks/rules-of-hooks
   useReplayChartDrawingPointer({ ...core, drawingEditingLockedRef: { current: false } } as unknown as ReturnType<typeof useReplayChartCore>);
   const event = (x = 120, y = 100) => ({ clientX: x, clientY: y, pointerType: "mouse", button: 0, pointerId: 1,
-    shiftKey: false, timeStamp: 100, target: { closest: () => null }, preventDefault: vi.fn(), stopImmediatePropagation: vi.fn() });
-  const emit = (type: string, value: object) => { const fn = listeners.get(type) ?? windowListeners.get(type); if (!fn) throw new Error(`Missing listener ${type}`); fn(value as never); };
+    shiftKey: false, timeStamp: 100, target: { closest: () => null }, preventDefault: vi.fn(),
+    stopPropagation: vi.fn(), stopImmediatePropagation: vi.fn() });
+  const emit = (type: string, value: object) => { const fn = listeners.get(type) ?? windowListeners.get(type); if (!fn) throw new Error(`Missing listener ${type}`); fn({ ...value, type } as never); };
   return { core, chart, arrow, abcd, event, emit, flush, frames };
 }
 
@@ -82,7 +83,11 @@ describe("arrow pointer interactions", () => {
     expect(s.frames.size).toBe(1); expect(s.core.onUpdateDrawingRef.current).not.toHaveBeenCalled();
     s.flush();
     expect(s.core.arrowDragRef.current).toEqual({ id: "arrow", geometry: { anchor: { ...anchor, price: 200 } } });
-    s.emit("pointerup", s.event(120, 205));
+    const release = s.event(120, 205);
+    s.emit("pointerup", release);
+    expect(release.preventDefault).toHaveBeenCalled();
+    expect(release.stopPropagation).toHaveBeenCalled();
+    expect(release.stopImmediatePropagation).not.toHaveBeenCalled();
     expect(s.core.onUpdateDrawingRef.current).toHaveBeenCalledTimes(1);
     expect(s.core.onUpdateDrawingRef.current).toHaveBeenCalledWith("arrow", { anchor: { ...anchor, price: 205 } });
     s.flush(); expect(s.core.arrowDragRef.current).toBeNull();

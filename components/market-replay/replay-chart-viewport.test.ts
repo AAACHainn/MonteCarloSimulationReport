@@ -24,7 +24,8 @@ const bars = (count: number, minutes = 1) => Array.from({ length: count }, (_, i
 }) as AggregatedMarketBarData);
 function setup(previous = bars(300)) {
   let range = { from: 176, to: 375 }, autoScale = false;
-  const scale = { options: () => ({ autoScale }), applyOptions: vi.fn((options: { autoScale: boolean }) => { autoScale = options.autoScale; }) };
+  const scale = { options: () => ({ autoScale }), applyOptions: vi.fn((options: { autoScale: boolean }) => { autoScale = options.autoScale; }),
+    setVisibleRange: vi.fn() };
   const line = { update: vi.fn(), setData: vi.fn(), priceScale: () => scale };
   const time = { width: () => 1000, options: () => ({ barSpacing: 5 }), getVisibleLogicalRange: () => range,
     setVisibleLogicalRange: vi.fn((next: { from: number; to: number }) => { range = next; }) };
@@ -41,6 +42,7 @@ function setup(previous = bars(300)) {
     viewportUpdatingRef: ref(false), currentSourceSequenceRef: ref(299), pendingFollowRef: ref(false), liveWindowRef: ref(true),
     dataRevision: harness.revision, displayIntervalSeconds: 60, displaySession: "ETH", visibilityScope: "scope",
     hiddenAfter: null as ChartHideAfter | null, historicalPlaybackActive: false, readOnly: false, emaIndicators: [], priceTickSize: 1, viewportSnapshot: null as ReplayViewportSnapshot | null,
+    initialViewportRef: ref<ReplayViewportSnapshot | null>(null),
     syncVisibleSequenceRange: vi.fn(), syncMeasurementCoordinates: vi.fn(), syncDrawingPrimitive: vi.fn(),
   };
   const render = () => RenderHook(core as unknown as Parameters<typeof useReplayChartSetup>[0]);
@@ -58,6 +60,18 @@ beforeEach(() => {
 afterEach(() => vi.unstubAllGlobals());
 
 describe("applying chart viewport transitions", () => {
+  it("restores the saved time and price viewport after a pane remounts", () => {
+    const s = setup([]);
+    s.core.bars = bars(300); s.core.visibleBars = s.core.bars; s.core.projectionBars = s.core.bars;
+    s.core.initialViewportRef.current = { mode: "history", anchor: { sourceSequence: 120, timestamp: s.core.bars[120].timestamp },
+      position: 0.5, logicalSpan: 199, barSpacing: 5, priceRange: { from: 90, to: 110 } };
+    s.render();
+    expect(s.core.viewportModeRef.current).toBe("history");
+    expect(s.core.initialViewportRef.current).toBeNull();
+    expect(s.scale.setVisibleRange).toHaveBeenCalledWith({ from: 90, to: 110 });
+    const visible = s.time.getVisibleLogicalRange();
+    expect((visible.from + visible.to) / 2).toBeCloseTo(120);
+  });
   it("does not consume the requested period until that period's data is actually applied", () => {
     const s = setup(); s.render();
     expect(s.core.lastDataIntervalRef.current).toBe(60);

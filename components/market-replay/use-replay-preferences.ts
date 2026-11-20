@@ -79,9 +79,9 @@ function isValidEmaLength(value: unknown): value is number {
   return Number.isInteger(value) && Number(value) >= EMA_LENGTH_MIN && Number(value) <= EMA_LENGTH_MAX;
 }
 
-function loadEmaSettings() {
+function loadEmaSettings(key = EMA_SETTINGS_STORAGE_KEY) {
   try {
-    const parsed = JSON.parse(window.localStorage.getItem(EMA_SETTINGS_STORAGE_KEY) ?? "null") as {
+    const parsed = JSON.parse(window.localStorage.getItem(key) ?? "null") as {
       enabled?: unknown;
       indicators?: unknown;
     } | null;
@@ -105,9 +105,9 @@ function loadEmaSettings() {
   }
 }
 
-function loadAbrSettings() {
+function loadAbrSettings(key = ABR_SETTINGS_STORAGE_KEY) {
   try {
-    const parsed = JSON.parse(window.localStorage.getItem(ABR_SETTINGS_STORAGE_KEY) ?? "null") as {
+    const parsed = JSON.parse(window.localStorage.getItem(key) ?? "null") as {
       enabled?: unknown;
       length?: unknown;
     } | null;
@@ -119,7 +119,8 @@ function loadAbrSettings() {
   }
 }
 
-export function useReplayPreferences(dataset: { id: string; startTime: string; timezone: string }) {
+export function useReplayPreferences(dataset: { id: string; startTime: string; timezone: string }, pane = 1) {
+  const paneKey = useCallback((key: string) => pane === 1 ? key : key + ':pane:' + pane, [pane]);
   const [candlestickStyle, setCandlestickStyle] = useState<CandlestickStyle>(DEFAULT_CANDLESTICK_STYLE);
   const [candlestickStyleLoaded, setCandlestickStyleLoaded] = useState(false);
   const [chartSelection, setChartSelection] = useState(() => parseChartSelection(null));
@@ -130,15 +131,15 @@ export function useReplayPreferences(dataset: { id: string; startTime: string; t
     setChartSelection({ chartType: next.chartType, line: { ...next.line } });
   }, []);
   useEffect(() => {
-    try { setChartSelection(parseChartSelection(window.localStorage.getItem(CHART_DISPLAY_STORAGE_KEY))); }
+    try { setChartSelection(parseChartSelection(window.localStorage.getItem(paneKey(CHART_DISPLAY_STORAGE_KEY)))); }
     catch { setChartSelection(parseChartSelection(null)); }
     setChartSelectionLoaded(true);
-  }, []);
+  }, [paneKey]);
   useEffect(() => {
     if (!chartSelectionLoaded) return;
-    try { window.localStorage.setItem(CHART_DISPLAY_STORAGE_KEY, JSON.stringify(chartSelection)); }
+    try { window.localStorage.setItem(paneKey(CHART_DISPLAY_STORAGE_KEY), JSON.stringify(chartSelection)); }
     catch { /* Current-page selection remains usable without storage. */ }
-  }, [chartSelection, chartSelectionLoaded]);
+  }, [chartSelection, chartSelectionLoaded, paneKey]);
   const [emaEnabled, setEmaEnabled] = useState(false);
   const [emaIndicators, setEmaIndicators] = useState<EmaIndicatorConfig[]>(DEFAULT_EMA_INDICATORS);
   const [emaSettingsLoaded, setEmaSettingsLoaded] = useState(false);
@@ -170,86 +171,86 @@ export function useReplayPreferences(dataset: { id: string; startTime: string; t
   const [displayTimezoneLoaded, setDisplayTimezoneLoaded] = useState(false);
 
   useEffect(() => {
-    const stored = loadEmaSettings();
+    const stored = loadEmaSettings(paneKey(EMA_SETTINGS_STORAGE_KEY));
     if (stored) {
       setEmaEnabled(stored.enabled);
       setEmaIndicators(stored.indicators);
     }
     setEmaSettingsLoaded(true);
-  }, []);
+  }, [paneKey]);
 
   useEffect(() => {
-    const stored = loadAbrSettings();
+    const stored = loadAbrSettings(paneKey(ABR_SETTINGS_STORAGE_KEY));
     if (stored) {
       setAbrEnabled(stored.enabled);
       setAbrLength(stored.length);
     }
     setAbrSettingsLoaded(true);
-  }, []);
+  }, [paneKey]);
 
   useEffect(() => {
     try {
-      setGridVisible(window.localStorage.getItem(GRID_VISIBILITY_STORAGE_KEY) !== "false");
+      setGridVisible(window.localStorage.getItem(paneKey(GRID_VISIBILITY_STORAGE_KEY)) !== "false");
     } catch {
       setGridVisible(true);
     }
     setGridVisibilityLoaded(true);
-  }, []);
+  }, [paneKey]);
 
   useEffect(() => {
     try {
-      const stored = window.localStorage.getItem(VOLUME_VISIBILITY_STORAGE_KEY);
+      const stored = window.localStorage.getItem(paneKey(VOLUME_VISIBILITY_STORAGE_KEY));
       setVolumeVisible(stored === null ? true : stored === "true");
     } catch {
       setVolumeVisible(true);
     }
     setVolumeVisibilityLoaded(true);
-  }, []);
+  }, [paneKey]);
 
   useEffect(() => {
     try {
-      setCandleCountdownEnabled(window.localStorage.getItem(CANDLE_COUNTDOWN_VISIBILITY_STORAGE_KEY) === "true");
+      setCandleCountdownEnabled(window.localStorage.getItem(paneKey(CANDLE_COUNTDOWN_VISIBILITY_STORAGE_KEY)) === "true");
     } catch {
       setCandleCountdownEnabled(false);
     }
     setCandleCountdownSettingsLoaded(true);
-  }, []);
+  }, [paneKey]);
 
   useEffect(() => {
     try {
-      setBarCountConfig(parseBarCountPreferences(window.localStorage.getItem(BAR_COUNT_SETTINGS_STORAGE_KEY)));
+      setBarCountConfig(parseBarCountPreferences(window.localStorage.getItem(paneKey(BAR_COUNT_SETTINGS_STORAGE_KEY))));
     } catch {
       setBarCountConfig({ ...DEFAULT_BAR_COUNT_CONFIG });
     }
     setBarCountSettingsLoaded(true);
-  }, []);
+  }, [paneKey]);
 
   useEffect(() => {
     try {
-      setChartVisibility(parseReplayChartVisibility(window.localStorage.getItem(CHART_VISIBILITY_STORAGE_KEY)));
+      setChartVisibility(parseReplayChartVisibility(window.localStorage.getItem(paneKey(CHART_VISIBILITY_STORAGE_KEY))));
     } catch {
       setChartVisibility({ ...DEFAULT_REPLAY_CHART_VISIBILITY });
     }
     setChartVisibilityLoaded(true);
-  }, []);
+  }, [paneKey]);
 
   useEffect(() => {
     try {
-      setCandlestickStyle(parseCandlestickStyle(window.localStorage.getItem(CANDLESTICK_STYLE_STORAGE_KEY)));
+      setCandlestickStyle(parseCandlestickStyle(window.localStorage.getItem(paneKey(CANDLESTICK_STYLE_STORAGE_KEY))));
     } catch {
       setCandlestickStyle(DEFAULT_CANDLESTICK_STYLE);
     }
     setCandlestickStyleLoaded(true);
-  }, []);
+  }, [paneKey]);
 
   useEffect(() => {
     if (!candlestickStyleLoaded) return;
     try {
-      window.localStorage.setItem(CANDLESTICK_STYLE_STORAGE_KEY, JSON.stringify(candlestickStyle));
+      window.localStorage.setItem(paneKey(CANDLESTICK_STYLE_STORAGE_KEY), JSON.stringify(candlestickStyle));
     } catch {
       // Browser storage can be unavailable; the style still applies to this page session.
     }
-  }, [candlestickStyle, candlestickStyleLoaded]);
+  }, [candlestickStyle, candlestickStyleLoaded, paneKey]);
 
   useEffect(() => {
     const fallback = utcOffsetMinutesForTimezone(dataset.startTime, dataset.timezone);
@@ -264,78 +265,79 @@ export function useReplayPreferences(dataset: { id: string; startTime: string; t
   }, [dataset.id, dataset.startTime, dataset.timezone]);
 
   useEffect(() => {
-    if (!displayTimezoneLoaded) return;
+    if (pane !== 1 || !displayTimezoneLoaded) return;
     try {
       window.localStorage.setItem(`${DISPLAY_TIMEZONE_STORAGE_KEY}:${dataset.id}`, String(displayUtcOffsetMinutes));
     } catch {
       // Browser storage can be unavailable; the selected timezone still applies to this page session.
     }
-  }, [dataset.id, displayTimezoneLoaded, displayUtcOffsetMinutes]);
+  }, [dataset.id, displayTimezoneLoaded, displayUtcOffsetMinutes, pane]);
 
   useEffect(() => {
     if (!emaSettingsLoaded) return;
     try {
-      window.localStorage.setItem(EMA_SETTINGS_STORAGE_KEY, JSON.stringify({ enabled: emaEnabled, indicators: emaIndicators }));
+      window.localStorage.setItem(paneKey(EMA_SETTINGS_STORAGE_KEY), JSON.stringify({ enabled: emaEnabled, indicators: emaIndicators }));
     } catch {
       // Browser storage can be unavailable; EMA controls still work for the current page session.
     }
-  }, [emaEnabled, emaIndicators, emaSettingsLoaded]);
+  }, [emaEnabled, emaIndicators, emaSettingsLoaded, paneKey]);
 
   useEffect(() => {
     if (!abrSettingsLoaded) return;
     try {
-      window.localStorage.setItem(ABR_SETTINGS_STORAGE_KEY, JSON.stringify({ enabled: abrEnabled, length: abrLength }));
+      window.localStorage.setItem(paneKey(ABR_SETTINGS_STORAGE_KEY), JSON.stringify({ enabled: abrEnabled, length: abrLength }));
     } catch {
       // Browser storage can be unavailable; ABR settings still apply to this page session.
     }
-  }, [abrEnabled, abrLength, abrSettingsLoaded]);
+  }, [abrEnabled, abrLength, abrSettingsLoaded, paneKey]);
 
   useEffect(() => {
     if (!gridVisibilityLoaded) return;
     try {
-      window.localStorage.setItem(GRID_VISIBILITY_STORAGE_KEY, String(gridVisible));
+      window.localStorage.setItem(paneKey(GRID_VISIBILITY_STORAGE_KEY), String(gridVisible));
     } catch {
       // Browser storage can be unavailable; the grid setting still applies to this page session.
     }
-  }, [gridVisibilityLoaded, gridVisible]);
+  }, [gridVisibilityLoaded, gridVisible, paneKey]);
 
   useEffect(() => {
     if (!volumeVisibilityLoaded) return;
     try {
-      window.localStorage.setItem(VOLUME_VISIBILITY_STORAGE_KEY, String(volumeVisible));
+      window.localStorage.setItem(paneKey(VOLUME_VISIBILITY_STORAGE_KEY), String(volumeVisible));
     } catch {
       // Browser storage can be unavailable; the visibility still applies to this page session.
     }
-  }, [volumeVisibilityLoaded, volumeVisible]);
+  }, [volumeVisibilityLoaded, volumeVisible, paneKey]);
 
   useEffect(() => {
     if (!candleCountdownSettingsLoaded) return;
     try {
-      window.localStorage.setItem(CANDLE_COUNTDOWN_VISIBILITY_STORAGE_KEY, String(candleCountdownEnabled));
+      window.localStorage.setItem(paneKey(CANDLE_COUNTDOWN_VISIBILITY_STORAGE_KEY), String(candleCountdownEnabled));
     } catch {
       // Browser storage can be unavailable; the countdown setting still applies to this page session.
     }
-  }, [candleCountdownEnabled, candleCountdownSettingsLoaded]);
+  }, [candleCountdownEnabled, candleCountdownSettingsLoaded, paneKey]);
 
   useEffect(() => {
     if (!barCountSettingsLoaded) return;
     try {
-      window.localStorage.setItem(BAR_COUNT_SETTINGS_STORAGE_KEY, JSON.stringify(barCountConfig));
+      window.localStorage.setItem(paneKey(BAR_COUNT_SETTINGS_STORAGE_KEY), JSON.stringify(barCountConfig));
     } catch {
       // Browser storage can be unavailable; Bar Count settings still apply to this page session.
     }
-  }, [barCountConfig, barCountSettingsLoaded]);
+  }, [barCountConfig, barCountSettingsLoaded, paneKey]);
 
   useEffect(() => {
     if (!chartVisibilityLoaded) return;
     try {
-      window.localStorage.setItem(CHART_VISIBILITY_STORAGE_KEY, JSON.stringify(chartVisibility));
+      window.localStorage.setItem(paneKey(CHART_VISIBILITY_STORAGE_KEY), JSON.stringify(chartVisibility));
     } catch {
       // Browser storage can be unavailable; visibility still applies to this page session.
     }
-  }, [chartVisibility, chartVisibilityLoaded]);
+  }, [chartVisibility, chartVisibilityLoaded, paneKey]);
 
   useEffect(() => {
+    if (pane !== 1) return;
     let preferences = parseTrendLinePreferences(null);
     let fibonacciPreferences = parseFibonacciRetracementPreferences(null);
     let rectanglePreferences = parseRectanglePreferences(null);
@@ -357,10 +359,10 @@ export function useReplayPreferences(dataset: { id: string; startTime: string; t
     setDefaultTextStyle(textPreferences.defaultStyle);
     setTextTemplates(textPreferences.templates);
     setDrawingPreferencesLoaded(true);
-  }, []);
+  }, [pane]);
 
   useEffect(() => {
-    if (!drawingPreferencesLoaded) return;
+    if (pane !== 1 || !drawingPreferencesLoaded) return;
     try {
       window.localStorage.setItem(RECTANGLE_PREFERENCES_STORAGE_KEY, JSON.stringify({ defaultStyle: defaultRectangleStyle, templates: rectangleTemplates }));
       window.localStorage.setItem(TEXT_PREFERENCES_STORAGE_KEY, JSON.stringify({ defaultStyle: defaultTextStyle, templates: textTemplates }));
@@ -375,7 +377,7 @@ export function useReplayPreferences(dataset: { id: string; startTime: string; t
     } catch {
       // Drawing preferences still apply until this page closes.
     }
-  }, [defaultTextStyle, textTemplates, defaultRectangleStyle, rectangleTemplates, defaultFibonacciStyle, defaultTrendLineStyle, drawingPreferencesLoaded, fibonacciTemplates, trendLineTemplates]);
+  }, [defaultTextStyle, textTemplates, defaultRectangleStyle, rectangleTemplates, defaultFibonacciStyle, defaultTrendLineStyle, drawingPreferencesLoaded, fibonacciTemplates, trendLineTemplates, pane]);
 
   return {
     chartStyle, setChartStyle,

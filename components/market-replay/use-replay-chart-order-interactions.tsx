@@ -12,7 +12,7 @@ export function useReplayChartOrderInteractions(core: ReturnType<typeof useRepla
     barsRef, measurementArmedRef, drawingToolRef, setContextMenu, setAbrTooltip, measurementRef,
     drawingDraftRef, drawingPreviewRef, setDraft, setLineActions, warmupBarsRef, abrLengthRef,
     onOrderPriceChangeRef, syncLineActionCoordinates, setChartCursor, priceTickSize, abrEnabled, paperBusy,
-    entryCheckOpen, readOnly, lineActionsRef,
+    entryCheckOpen, readOnly, observeTrades, lineActionsRef,
   } = core;
   const {
     moveDraftLine,
@@ -147,7 +147,7 @@ export function useReplayChartOrderInteractions(core: ReturnType<typeof useRepla
       .filter((item) => item.coordinate !== null)
       .sort((a, b) => Math.abs(Number(a.coordinate) - y) - Math.abs(Number(b.coordinate) - y))[0];
     const down = (event: PointerEvent) => {
-      if (readOnly || paperBusy || event.button !== 0 || event.shiftKey || measurementArmedRef.current || drawingToolRef.current || drawingDraftRef.current || drawingPreviewRef.current) return;
+      if (readOnly || observeTrades || paperBusy || event.button !== 0 || event.shiftKey || measurementArmedRef.current || drawingToolRef.current || drawingDraftRef.current || drawingPreviewRef.current) return;
       if ((event.target as HTMLElement | null)?.closest("button,input,textarea,[data-text-editor],[data-context-menu]")) return;
       const y = event.clientY - container.getBoundingClientRect().top;
       const dragKey = (event.target as HTMLElement | null)?.closest<HTMLElement>("[data-line-drag-key]")?.dataset.lineDragKey;
@@ -226,6 +226,6 @@ export function useReplayChartOrderInteractions(core: ReturnType<typeof useRepla
       interaction.removeEventListener("pointerleave", leave); window.removeEventListener("keydown", key);
       setChartCursor("");
     };
-  }, [lineActionsRef, readOnly, entryCheckOpen, paperBusy, moveDraftLine, priceTickSize, setChartCursor, syncLineActionCoordinates, candleRef, containerRef, drawingDraftRef, drawingPreviewRef, drawingToolRef, interactionRef, lineTargetsRef, measurementArmedRef, onOrderPriceChangeRef, priceLinesRef, setContextMenu, setDraft, setLineActions]);
+  }, [lineActionsRef, readOnly, observeTrades, entryCheckOpen, paperBusy, moveDraftLine, priceTickSize, setChartCursor, syncLineActionCoordinates, candleRef, containerRef, drawingDraftRef, drawingPreviewRef, drawingToolRef, interactionRef, lineTargetsRef, measurementArmedRef, onOrderPriceChangeRef, priceLinesRef, setContextMenu, setDraft, setLineActions]);
 
 }

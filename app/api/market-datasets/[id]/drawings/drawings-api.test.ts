@@ -78,6 +78,7 @@ describe("market drawing API", () => {
     expect(mocks.drawingCreate).toHaveBeenCalledWith({
       data: {
         datasetId: "dataset-1",
+        pane: 1,
         type: "TREND_LINE",
         geometry: JSON.stringify(geometry),
         style: JSON.stringify(DEFAULT_TREND_LINE_STYLE),
@@ -100,6 +101,7 @@ describe("market drawing API", () => {
     expect(mocks.drawingCreate).toHaveBeenCalledWith({
       data: {
         datasetId: "dataset-1",
+        pane: 1,
         type: "FIB_RETRACEMENT",
         geometry: JSON.stringify(geometry),
         style: expect.any(String),
@@ -167,7 +169,7 @@ describe("market drawing API", () => {
     }), itemContext);
     expect(response.status).toBe(200);
     expect(mocks.drawingFindFirst).toHaveBeenCalledWith({
-      where: { id: "drawing-1", datasetId: "dataset-1" },
+      where: { id: "drawing-1", datasetId: "dataset-1", pane: 1 },
     });
 
     mocks.drawingFindFirst.mockResolvedValueOnce(null);

@@ -11,6 +11,7 @@ import { useReplayShortcuts } from "./use-replay-shortcuts";
 
 export function useDrawingStyleShortcuts(options: {
   drawings: readonly MarketDrawing[]; selectedDrawingId: string | null; templates: DrawingTemplateCatalog;
+  active?: boolean;
   disabled: boolean; drawingTool: DrawingTool | null; scope: string;
   apply: (id: string, style: MarketDrawingStyle, action?: DrawingAction) => Promise<boolean>;
 }) {
@@ -18,9 +19,8 @@ export function useDrawingStyleShortcuts(options: {
   const { platform } = useReplayShortcuts();
   const latest = useRef({ ...options, bindings, platform });
   latest.current = { ...options, bindings, platform };
-  // Register before chart pointer effects, whose pointerup handler may stop
-  // immediate propagation after ending a drawing drag.
   useLayoutEffect(() => {
+    if (options.active === false) return;
     let pointerHeld = false;
     let saving = false;
     const down = () => { pointerHeld = true; };
@@ -64,5 +64,5 @@ export function useDrawingStyleShortcuts(options: {
       window.removeEventListener("pointerdown", down, true); window.removeEventListener("pointerup", up, true);
       window.removeEventListener("pointercancel", up, true); window.removeEventListener("blur", up);
     };
-  }, [options.scope]);
+  }, [options.active, options.scope]);
 }
