@@ -2,13 +2,11 @@ import Database from "better-sqlite3";
 import { createHash } from "node:crypto";
 import { existsSync, readFileSync, readdirSync } from "node:fs";
 import { join } from "node:path";
+import { checkBaselineStructure } from "./sqlite-baseline-structure.mjs";
 
 const baseline = "20261026170000_user_wallet_transfers";
 const paneMigration = "20261120120000_market_drawing_pane";
-const legacyVersions = {
-  [baseline]: "d40c80124cb4e199d8dbb68ede5a5fbf7b2b5042baf8b8a9ea3ea67bbfe122f2",
-  [paneMigration]: "2481d0024af0f038fb4bb01ad3190a9b2b9b7ecb5d921890f2814802a71bcaf0",
-};
+const legacyVersions = new Set([baseline, paneMigration]);
 const legacyHistory = "_replay_schema_migrations";
 const hash = input => createHash("sha256").update(input).digest("hex");
 const sqlFor = (root, name) => readFileSync(join(root, "prisma/migrations", name, "migration.sql"), "utf8");
@@ -29,6 +27,20 @@ function checksumMatches(root, name, checksum) {
   return [hash(lf), hash(lf.replaceAll("\n", "\r\n"))].includes(checksum);
 }
 
+function compareWithMigrations(root, migrations, compare) {
+  const reference = new Database(":memory:");
+  try {
+    for (const { name } of migrations) reference.exec(sqlFor(root, name));
+    compare(reference);
+  } finally { reference.close(); }
+}
+
+function checkLegacyVersion(db, root, migrations, version) {
+  if (!legacyVersions.has(version)) throw new Error(`初始化路径缺少目标版本核验规则：${version}`);
+  const versionIndex = migrations.findIndex(item => item.name === version);
+  compareWithMigrations(root, migrations.slice(0, versionIndex + 1), reference => checkBaselineStructure(db, reference));
+}
+
 export function identifyMigration(db, root) {
   const migrations = localMigrations(root);
   const baselineIndex = migrations.findIndex(item => item.name === baseline);
@@ -46,31 +58,30 @@ export function identifyMigration(db, root) {
     || rows.some((row, i) => row.name !== candidates[i]?.name || (prisma && !row.finished_at) || !checksumMatches(root, row.name, row.checksum))) {
     throw new Error("迁移历史不完整、低于 v1.0 或校验和不符");
   }
-  const actual = hash(JSON.stringify(schemaObjects(db)));
   const version = rows.at(-1)?.name ?? baseline;
+  const pending = candidates.slice(rows.length).map(item => item.name);
   if (prisma) {
-    const reference = new Database(":memory:");
-    try {
-      for (const row of rows) reference.exec(sqlFor(root, row.name));
+    const actual = hash(JSON.stringify(schemaObjects(db)));
+    compareWithMigrations(root, rows, reference => {
       if (actual !== hash(JSON.stringify(schemaObjects(reference)))) throw new Error("数据库结构与迁移历史不符");
-    } finally { reference.close(); }
-  } else if (actual !== legacyVersions[version]) {
-    throw new Error("初始化路径的数据库结构与已核验的 v1.0 基线及后续版本不符");
+    });
+  } else {
+    checkLegacyVersion(db, root, migrations, version);
+    const unsupported = pending.find(name => !legacyVersions.has(name));
+    if (unsupported) throw new Error(`初始化路径缺少目标版本核验规则：${unsupported}`);
   }
-  return { method, pending: candidates.slice(rows.length).map(item => item.name), migrations };
+  return { method, pending, migrations };
 }
 
 export function applyBaselineMigrations(db, root) {
   const plan = identifyMigration(db, root);
   if (plan.method !== "baseline") throw new Error("该数据库应使用 Prisma 迁移");
   for (const name of plan.pending) {
-    if (!legacyVersions[name]) throw new Error(`初始化路径缺少目标版本核验规则：${name}`);
     const sql = sqlFor(root, name);
     db.transaction(() => {
       db.exec(sql);
-      if (db.pragma("foreign_key_check").length || hash(JSON.stringify(schemaObjects(db))) !== legacyVersions[name]) {
-        throw new Error(`迁移后的结构或外键异常：${name}`);
-      }
+      checkLegacyVersion(db, root, plan.migrations, name);
+      if (db.pragma("foreign_key_check").length) throw new Error(`迁移后外键异常：${name}`);
       db.exec('CREATE TABLE IF NOT EXISTS "_replay_schema_migrations" (name TEXT PRIMARY KEY NOT NULL, checksum TEXT NOT NULL)');
       db.prepare('INSERT INTO "_replay_schema_migrations" VALUES (?, ?)').run(name, hash(sql));
     }).immediate();

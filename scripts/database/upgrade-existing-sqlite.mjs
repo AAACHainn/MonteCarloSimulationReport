@@ -32,7 +32,7 @@ export function checkIntegrity(db) {
 
 // Stream every value; no sampling, ORM result limits or floating-point conversion of Int64.
 export function fingerprint(db, selection, progress = () => {}, reference = []) {
-  const tables = selection ?? db.prepare("SELECT name FROM sqlite_master WHERE type='table' AND name NOT LIKE 'sqlite_%' AND name NOT IN ('_prisma_migrations', '_replay_schema_migrations') ORDER BY name").all().map(({ name }) => ({ name }));
+  const tables = selection ?? db.prepare("SELECT name FROM sqlite_master WHERE type='table' AND name NOT GLOB 'sqlite_*' AND name NOT IN ('_prisma_migrations', '_replay_schema_migrations') ORDER BY name").all().map(({ name }) => ({ name }));
   const result = [];
   for (const [index, table] of tables.entries()) {
     progress({ tableName: table.name, tableIndex: index + 1, tableTotal: tables.length, completedRows: 0, referenceRows: table.count ?? reference.find(item => item.name === table.name)?.count ?? null });
@@ -94,7 +94,7 @@ function assertExecutionUnchanged(root, manifest) {
 }
 
 function schemaFingerprint(db) {
-  return hash(json(db.prepare("SELECT type,name,tbl_name,sql FROM sqlite_master WHERE name NOT LIKE 'sqlite_%' AND tbl_name != '_prisma_migrations' ORDER BY type,name").all()));
+  return hash(json(db.prepare("SELECT type,name,tbl_name,sql FROM sqlite_master WHERE name NOT GLOB 'sqlite_*' AND tbl_name != '_prisma_migrations' ORDER BY type,name").all()));
 }
 
 function prepareJournal(file, mode, isolatedCopy) {
@@ -132,7 +132,7 @@ export function runCommand(args, env, logFile, root) {
 function implementationFingerprint(root) {
   // Include the orchestrator, its worker/display boundary, init entry and its local
   // driver dependency, as well as dependency resolution metadata and generated DMMF.
-  const names = ["scripts/database/upgrade-existing-sqlite.mjs", "scripts/database/upgrade-sqlite-worker.mjs", "scripts/database/upgrade-sqlite-progress.mjs", "scripts/database/apply-baseline-migrations.mjs", "scripts/database/sqlite-upgrade-plan.mjs", "lib/sqlite-client.mjs", "package.json", "pnpm-lock.yaml", "pnpm-workspace.yaml"];
+  const names = ["scripts/database/upgrade-existing-sqlite.mjs", "scripts/database/upgrade-sqlite-worker.mjs", "scripts/database/upgrade-sqlite-progress.mjs", "scripts/database/apply-baseline-migrations.mjs", "scripts/database/sqlite-upgrade-plan.mjs", "scripts/database/sqlite-baseline-structure.mjs", "lib/sqlite-client.mjs", "package.json", "pnpm-lock.yaml", "pnpm-workspace.yaml"];
   const require = createRequire(join(root, "package.json"));
   const generated = dirname(require.resolve(".prisma/client/index", { paths: [dirname(require.resolve("@prisma/client"))] }));
   return names.map(name => ({ name, checksum: hash(readFileSync(join(root, name))) }))
