@@ -3,7 +3,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { copy } from "@/lib/i18n";
 import { isHistoricalPlaybackBarReady } from "@/lib/market-replay/historical-playback";
-import { boundedHistoricalPlaybackWindow, mergeHistoricalBars, readLaterHistoryWindow } from "@/lib/market-replay/historical-window";
+import { boundedHistoricalPlaybackWindow, mergeHistoricalBars, readHistoricalResetWindow, readLaterHistoryWindow } from "@/lib/market-replay/historical-window";
 import { REPLAY_HISTORY_BAR_LIMIT, type DisplaySession, type MarketDatasetSummary } from "@/lib/market-replay/types";
 import { replayWindowRequest, type WindowPayload } from "./replay-client-shared";
 import type { ReplayVisibleSequenceRange } from "./replay-chart-shared";
@@ -20,7 +20,7 @@ type HistoricalPaneRead = {
 };
 
 async function readPanePage({ dataset, period, session, warmup, reader, end }: HistoricalPaneRead,
-  cutoff: number, focus: number | null, signal: AbortSignal): Promise<HistoricalPaneWindow> {
+  cutoff: number, focus: number | null, signal: AbortSignal, includeForming = false): Promise<HistoricalPaneWindow> {
   signal.throwIfAborted();
   const { cacheKey: key, params } = replayWindowRequest(dataset, cutoff, period, session, warmup, focus, pageSize);
   const pending = reader("/api/market-datasets/" + dataset.id + "/bars/window?" + params, key);
@@ -29,7 +29,7 @@ async function readPanePage({ dataset, period, session, warmup, reader, end }: H
     const { visibleBars, warmupBars } = await pending.result;
     signal.throwIfAborted();
     // Only the history endpoint may retain a candle that was truncated by the window cutoff.
-    return { key, warmupBars, visibleBars: visibleBars.filter(bar => isHistoricalPlaybackBarReady(bar, end)) };
+    return { key, warmupBars, visibleBars: includeForming ? visibleBars : visibleBars.filter(bar => isHistoricalPlaybackBarReady(bar, end)) };
   } finally {
     signal.removeEventListener("abort", pending.release);
   }
@@ -51,9 +51,21 @@ export async function readInitialHistoricalPaneWindow(config: HistoricalPaneRead
   return { ...available, key: focused.key };
 }
 
-export async function prepareHistoricalPaneWindow(config: HistoricalPaneRead, focus: number, formingCursor: number | null, signal: AbortSignal):
+export async function prepareHistoricalPaneWindow(config: HistoricalPaneRead, focus: number, formingCursor: number | null, signal: AbortSignal, resetView = false):
   Promise<HistoricalPanePreparation> {
-  const window = await readInitialHistoricalPaneWindow(config, focus, signal);
+  let window: HistoricalPaneWindow | undefined;
+  if (resetView) {
+    const page = await readHistoricalResetWindow(focus, config.end, pageSize, signal,
+      (cutoff, target) => readPanePage(config, cutoff, target, signal, true));
+    const { dataset, end, period, session, warmup } = config;
+    const visibleBars = page.visibleBars.filter(bar => isHistoricalPlaybackBarReady(bar, end));
+    if (visibleBars.length) {
+      const { cacheKey } = replayWindowRequest(dataset, end, period, session, warmup, focus, pageSize);
+      window = { ...page, key: cacheKey, visibleBars };
+    }
+  }
+  // An empty early RTH window still needs the first later page so the pane can follow.
+  window ??= await readInitialHistoricalPaneWindow(config, focus, signal);
   const forming = await prepareHistoricalFormingBar(config, window.visibleBars, formingCursor, signal);
   return { window, forming };
 }

@@ -3,7 +3,7 @@
 
 import { aggregateHasGap, aggregatePhase } from "@/lib/market-replay/bar-quality";
 import { formatInteger, formatNumber } from "@/lib/format";
-import { type PointerEvent as ReactPointerEvent } from "react";
+import { useEffect, useId, useRef, type PointerEvent as ReactPointerEvent } from "react";
 import { EyeOff, Grid2X2, GripHorizontal, Link2, Loader2, LogOut, Play, RotateCcw, Settings, ShieldAlert, Undo2, X } from "lucide-react";
 import { RiskDefaultsDialog } from "./risk-defaults-dialog";
 import { Button } from "@/components/ui/button";
@@ -59,6 +59,14 @@ export function ReplayChart(props: ReplayChartProps) {
     submitDraft, contextEntryOrderTypes, measurementColor, measurementGeometry, measurementDuration, measurementLabelLeft,
     measurementLabelTop,
   } = actions;
+  const appliedResetRevision = useRef(props.viewportResetRevision);
+  const resetDisabledReasonId = useId();
+  // Data and focus effects run before applying a reset for a replacement window.
+  useEffect(() => {
+    if (props.viewportResetRevision === undefined || props.viewportResetRevision === appliedResetRevision.current) return;
+    appliedResetRevision.current = props.viewportResetRevision;
+    resetChartView();
+  }, [props.viewportResetRevision, resetChartView]);
   const statusBar = hiddenAfter ? visibleBars.at(-1) : latest;
   const positionPnl = paperSnapshot ? Number(paperSnapshot.stats.unrealizedPnl.toFixed(2)) || 0 : null;
   const paneHeight = core.chartRef.current?.panes()[0]?.getHeight() ?? 0;
@@ -284,12 +292,20 @@ export function ReplayChart(props: ReplayChartProps) {
       {contextMenu ? (
         <div ref={contextMenuRef} data-context-menu role="menu" className="absolute z-40 max-h-[calc(100%-1rem)] w-[220px] max-w-[calc(100%-1rem)] overflow-y-auto rounded-lg border border-slate-200 dark:border-border bg-white dark:bg-card p-1.5 shadow-xl" style={{ left: contextMenu.x, top: contextMenu.y }}>
           <Button type="button" role="menuitem" variant="ghost" data-testid="context-reset-chart-view"
+            disabled={Boolean(props.resetChartViewDisabledReason)}
+            aria-describedby={props.resetChartViewDisabledReason ? resetDisabledReasonId : undefined}
             className="w-full justify-start px-2 text-left font-medium text-slate-700 dark:text-secondary-text" onClick={() => {
-              resetChartView();
-              props.onResetChartView?.();
+              setContextMenu(null);
+              const chart = core.chartRef.current;
+              const revision = core.viewportInteractionRevisionRef.current;
+              const isCurrent = () => chart === core.chartRef.current && revision === core.viewportInteractionRevisionRef.current;
+              if (!props.onResetChartView?.(isCurrent)) resetChartView();
             }}>
             <RotateCcw className="h-4 w-4" aria-hidden="true" />{copy.marketReplay.resetChartView}
           </Button>
+          {props.resetChartViewDisabledReason ? <p id={resetDisabledReasonId} className="px-2 pb-1 text-xs text-muted-foreground">
+            {props.resetChartViewDisabledReason}
+          </p> : null}
           {readOnly && props.onStartHistoricalPlayback && contextMenu.hideAfter ? <Button type="button" role="menuitem" variant="ghost"
             data-testid="context-start-historical-playback" className="w-full justify-start px-2 text-left font-medium text-slate-700 dark:text-secondary-text"
             onClick={() => { const target = contextMenu.hideAfter; setContextMenu(null); setAbrTooltip(null); if (target) props.onStartHistoricalPlayback?.(target); }}>

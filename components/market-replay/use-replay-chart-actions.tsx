@@ -4,7 +4,7 @@ import { createUuid } from "@/lib/uuid";
 import { defaultRiskAmount, type RiskPreferences } from "@/lib/paper-trading/risk-preferences";
 import { funds, propTradingBlockReason } from "@/lib/prop-practice/rules";
 
-import { useState, type MouseEvent as ReactMouseEvent } from "react";
+import { useCallback, useState, type MouseEvent as ReactMouseEvent } from "react";
 import { copy } from "@/lib/i18n";
 import { defaultReplayLogicalRange } from "@/lib/market-replay/chart-range";
 import { calculateChartMeasurementGeometry, measurementDurationParts } from "@/lib/market-replay/chart-measurement";
@@ -19,10 +19,10 @@ import type { useReplayChartSetup } from "./use-replay-chart-setup";
 export function useReplayChartActions(core: ReturnType<typeof useReplayChartCore>, setup: ReturnType<typeof useReplayChartSetup>) {
   const [tradeBlockReason, setTradeBlockReason] = useState<string | null>(null);
   const {
-    replaySession, viewportModeRef, viewportUpdatingRef, pendingFollowRef, chartRef, candleRef, volumeRef, barsRef, drawingToolRef,
+    replaySession, viewportModeRef, viewportUpdatingRef, viewportGestureRef, pendingFollowRef, chartRef, candleRef, volumeRef, barsRef, drawingToolRef,
     contextMenu, setContextMenu, measurement, drawingDraftRef, drawingPreviewRef, draft,
     setDraft, setOrderTicketPosition, riskPreferences, setRiskPreferences, setRiskSettingsOpen,
-    setDefaultSaved, setDraftError, latest, currentPrice, syncLineActionCoordinates, syncDrawingPrimitive,
+    setDefaultSaved, setDraftError, latest, currentPrice, syncLineActionCoordinates, syncDrawingPrimitive, syncVisibleSequenceRange,
     datasetId, priceTickSize, displayIntervalSeconds, displaySession, paperSnapshot,
     paperBusy, onSubmitOrder, entryCheckOpen, onRewindToBar, rewindRange,
   } = core;
@@ -53,20 +53,24 @@ export function useReplayChartActions(core: ReturnType<typeof useReplayChartCore
     });
   }
 
-  function resetChartView() {
+  const resetChartView = useCallback(() => {
     const chart = chartRef.current;
     if (!chart) return;
     viewportModeRef.current = "following";
+    viewportGestureRef.current = false;
     pendingFollowRef.current = false;
     viewportUpdatingRef.current = true;
-    requestAnimationFrame(() => { viewportUpdatingRef.current = false; syncLineActionCoordinates(); });
     chart.timeScale().setVisibleLogicalRange(defaultReplayLogicalRange(chart.timeScale().width(), barsRef.current.length));
     candleRef.current?.priceScale().applyOptions({ autoScale: true });
     volumeRef.current?.priceScale().applyOptions({ autoScale: true });
-    setContextMenu(null);
-    requestAnimationFrame(syncLineActionCoordinates);
+    requestAnimationFrame(() => {
+      viewportUpdatingRef.current = false;
+      syncLineActionCoordinates();
+      syncVisibleSequenceRange();
+    });
     syncDrawingPrimitive();
-  }
+  }, [barsRef, candleRef, chartRef, pendingFollowRef, syncDrawingPrimitive, syncLineActionCoordinates,
+    syncVisibleSequenceRange, viewportGestureRef, viewportModeRef, viewportUpdatingRef, volumeRef]);
 
   function createDraft(side: PaperSide, type: "LIMIT" | "STOP") {
     if (entryCheckOpen || paperBusy || !paperSnapshot || !latest || !contextMenu || contextMenu.price <= 0) return;

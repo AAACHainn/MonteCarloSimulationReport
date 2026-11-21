@@ -64,7 +64,7 @@ import {
   type DrawingTool,
   type TrendLineGeometry,
 } from "@/lib/market-replay/chart-drawings";
-import { historicalWindowFocusSequence, mergeHistoricalBars, readLaterHistoryWindow, boundedHistoricalPlaybackWindow, commitHistoricalWindowChange } from "@/lib/market-replay/historical-window";
+import { historicalWindowFocusSequence, mergeHistoricalBars, readHistoricalResetWindow, readLaterHistoryWindow, boundedHistoricalPlaybackWindow, commitHistoricalWindowChange } from "@/lib/market-replay/historical-window";
 import { datasetSession } from "@/lib/market-replay/dataset";
 import type {
   AggregatedMarketBarData,
@@ -99,7 +99,7 @@ type WindowPayload = {
   warmupBars: AggregatedMarketBarData[];
 };
 
-type HistoricalPaneFocus = { sequence: number; revision: number; prepared?: HistoricalPanePreparation };
+type HistoricalPaneFocus = { sequence: number; revision: number; prepared?: HistoricalPanePreparation; resetView?: boolean };
 type WindowChange = (signal: AbortSignal) => Promise<() => void>;
 
 type AnnotationPayload = {
@@ -141,6 +141,7 @@ export function HistoricalReplayClient({
   const primaryViewport = useRef<ReplayViewportSnapshot | null>(null);
   const beforeMaximize = useRef<ReplayViewportSnapshot | null>(null);
   const [primaryRevision, setPrimaryRevision] = useState(0);
+  const [viewportResetRevision, setViewportResetRevision] = useState(0);
   const [displaySession, setDisplaySession] = useState(session.displaySession);
   const displayedSessionRef = useRef(session.displaySession);
   const [displayIntervalSeconds, setDisplayIntervalSeconds] = useState(session.displayIntervalSeconds);
@@ -268,6 +269,8 @@ export function HistoricalReplayClient({
     },
   });
   const playbackEngine = playback.engine;
+  const resetChartViewDisabledReason = windowLoading || playback.busy ? copy.marketReplay.loading
+    : layoutBusy ? copy.marketReplay.quickIntervalApplying : undefined;
   useWebFullscreen(webFullscreen, () => setWebFullscreen(false), () => activePane === 1
     ? Boolean(drawingTool || selectedDrawingId || measurementArmed) : Boolean(paneControllers.current.get(activePane)?.hasInteraction()));
   function startHistoricalPlayback(target: ChartHideAfter) {
@@ -470,7 +473,7 @@ export function HistoricalReplayClient({
     }
   }, [dataset.id, session.id, fetch]);
 
-  const runWindowChange = useCallback(async (prepare: WindowChange) => {
+  const runWindowChange = useCallback(async (prepare: WindowChange, isCurrent?: () => boolean) => {
     mainWindowAbortRef.current?.abort();
     windowAbortRef.current?.abort();
     windowBusyRef.current = true;
@@ -481,9 +484,9 @@ export function HistoricalReplayClient({
     else setWindowLoading(true);
     setWindowError(null);
     try {
-      return await commitHistoricalWindowChange(controller.signal, prepare);
+      return await commitHistoricalWindowChange(controller.signal, prepare, isCurrent);
     } catch (cause) {
-      if (!controller.signal.aborted) {
+      if (!controller.signal.aborted && isCurrent?.() !== false) {
         const message = cause instanceof Error && cause.message ? cause.message : copy.paperTrading.historicalReplayLoadFailed;
         if (initial) setError(message);
         else setWindowError(message);
@@ -502,24 +505,26 @@ export function HistoricalReplayClient({
   }, []);
 
   const loadHistoryWindow = useCallback((seconds: number, targetSequence: number, options?: {
-    session?: DisplaySession; preparePanes?: WindowChange; onApply?: () => void;
+    session?: DisplaySession; preparePanes?: WindowChange; onApply?: () => void; resetView?: () => boolean;
   }) => runWindowChange(async signal => {
     const nextSession = options?.session ?? displayedSessionRef.current;
-    const params = new URLSearchParams({
-      displayIntervalSeconds: String(seconds),
-      displaySession: nextSession,
-      endSequence: String(session.endSequence),
-      focusSequence: String(targetSequence),
-      visibleCount: String(VISIBLE_BAR_COUNT),
-      warmupCount: String(Math.min(EMA_LENGTH_MAX, indicatorWarmupCount)),
-    });
-    const readPrimary = async () => {
+    const readPrimary = async (cutoff: number, focus: number | null) => {
+      const params = new URLSearchParams({
+        displayIntervalSeconds: String(seconds), displaySession: nextSession,
+        endSequence: String(cutoff), visibleCount: String(VISIBLE_BAR_COUNT),
+        warmupCount: String(Math.min(EMA_LENGTH_MAX, indicatorWarmupCount)),
+      });
+      if (focus !== null) params.set("focusSequence", String(focus));
       const response = await fetch("/api/market-datasets/" + dataset.id + "/bars/window?" + params, { signal });
       const data = await response.json() as WindowPayload & { error?: string };
       if (!response.ok) throw new Error(data.error);
       return data;
     };
-    const [data, applyPanes] = await Promise.all([readPrimary(), options?.preparePanes?.(signal)]);
+    const [data, applyPanes] = await Promise.all([
+      options?.resetView ? readHistoricalResetWindow(targetSequence, session.endSequence, VISIBLE_BAR_COUNT, signal, readPrimary)
+        : readPrimary(session.endSequence, targetSequence),
+      options?.preparePanes?.(signal),
+    ]);
     return () => {
       exhaustedEdgesRef.current = { left: false, right: false };
       setChartFocusSequence(initialLoadCompletedRef.current ? null : targetSequence);
@@ -529,11 +534,23 @@ export function HistoricalReplayClient({
       setDisplayIntervalSeconds(seconds);
       setBars(data.visibleBars);
       setWarmupBars(data.warmupBars);
-      playbackEngine.timelineChanged();
+      if (options?.resetView) setViewportResetRevision(revision => revision + 1);
+      else playbackEngine.timelineChanged();
       applyPanes?.();
       options?.onApply?.();
     };
-  }), [dataset.id, indicatorWarmupCount, session.endSequence, fetch, playbackEngine, runWindowChange]);
+  }, options?.resetView), [dataset.id, indicatorWarmupCount, session.endSequence, fetch, playbackEngine, runWindowChange]);
+
+  function resetPrimaryChartView(isCurrent: () => boolean) {
+    if (mainWindowAbortRef.current || layoutTransition.current) return true;
+    const boundary = playbackEngine.getSnapshot().boundary?.bar.lastSequence;
+    const target = boundary ?? session.endSequence;
+    if ((bars[0]?.lastSequence ?? Infinity) <= target && (bars.at(-1)?.lastSequence ?? -1) >= target) return false;
+    if (playbackEngine.getSnapshot().busy) return false;
+    void loadHistoryWindow(displayIntervalSeconds, target, { resetView: () => isCurrent()
+      && target === (playbackEngine.getSnapshot().boundary?.bar.lastSequence ?? session.endSequence) });
+    return true;
+  }
 
   useEffect(() => {
     playbackEngine.pause();
@@ -634,9 +651,23 @@ export function HistoricalReplayClient({
     });
   }
 
-  function focusPane(pane: PaneId, sequence: number, prepared?: HistoricalPanePreparation) {
-    const next = { sequence: Math.min(session.endSequence, sequence), revision: ++focusRevision.current, prepared };
+  function focusPane(pane: PaneId, sequence: number, prepared: HistoricalPanePreparation, resetView = false) {
+    const next = { sequence: Math.min(session.endSequence, sequence), revision: ++focusRevision.current, prepared, resetView };
     setPaneFocus(current => ({ ...current, [pane]: next }));
+  }
+
+  function resetSecondaryChartView(pane: PaneId, isCurrent: () => boolean) {
+    const { active, boundary, busy } = playbackEngine.getSnapshot();
+    if (mainWindowAbortRef.current || layoutTransition.current || busy) return;
+    const loadHistory = paneControllers.current.get(pane)?.loadHistory;
+    if (!loadHistory) return;
+    const period = periods[pane - 1];
+    const target = boundary?.bar.lastSequence ?? session.endSequence;
+    void runWindowChange(async signal => {
+      const prepared = await loadHistory({ period, session: displaySession, focus: target, resetView: true,
+        formingCursor: active && period > displayIntervalSeconds ? target : null }, signal);
+      return () => focusPane(pane, target, prepared, true);
+    }, () => isCurrent() && target === (playbackEngine.getSnapshot().boundary?.bar.lastSequence ?? session.endSequence));
   }
 
   function prepareVisiblePaneSettings(nextPeriods: number[], nextSession: DisplaySession, cursor: number | null, formingCursor: number | null): WindowChange {
@@ -856,6 +887,9 @@ export function HistoricalReplayClient({
           historicalPlaybackActive={playback.active}
           onStartHistoricalPlayback={windowLoading ? undefined : startHistoricalPlayback}
           currentSourceSequence={playback.boundary?.bar.lastSequence}
+          viewportResetRevision={viewportResetRevision}
+          resetChartViewDisabledReason={resetChartViewDisabledReason}
+          onResetChartView={resetPrimaryChartView}
           focusSequence={chartFocusSequence}
           onFocusApplied={() => setChartFocusSequence(null)}
           onVisibleSequenceRangeChange={range => {
@@ -911,10 +945,11 @@ export function HistoricalReplayClient({
               blocked={layoutBusy || Boolean(settingsDialog || rectangleStyleId || arrowStyleId || styleDrawingId)}
               webFullscreen={webFullscreen} toggleWebFullscreen={() => setWebFullscreen(current => !current)}
               historical={{ start: session.startSequence, end: session.endSequence, primaryPeriod: displayIntervalSeconds,
-                focus: focus.sequence, focusRevision: focus.revision, prepared: focus.prepared,
+                focus: focus.sequence, focusRevision: focus.revision, prepared: focus.prepared, resetView: focus.resetView,
                 annotations, boundary: playback.boundary, playbackActive: playback.active, playing: playback.playing && !playback.busy && !windowLoading,
                 countdownSeconds: playback.countdownSeconds, onStart: windowLoading ? undefined : startHistoricalPlayback,
-                onHide: playbackEngine.hide, onFocus: sequence => focusPane(pane, sequence) }} />
+                onHide: playbackEngine.hide, resetViewDisabledReason: resetChartViewDisabledReason,
+                onResetView: isCurrent => resetSecondaryChartView(pane, isCurrent) }} />
           </ReplayDrawingPaneProvider>;
         })}
       </div>

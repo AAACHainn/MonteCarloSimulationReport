@@ -249,7 +249,9 @@ export type ReplayChartProps = {
   entryCheckOpen?: boolean;
   onOpenPaperAccount: () => void;
   onVisibleSequenceRangeChange?: (range: ReplayVisibleSequenceRange) => void;
-  onResetChartView?: () => void;
+  onResetChartView?: (isCurrent: () => boolean) => boolean;
+  resetChartViewDisabledReason?: string;
+  viewportResetRevision?: number;
   onRewindToBar?: (target: ChartRewindTarget) => void;
   rewindRange?: ChartRewindRange;
 };

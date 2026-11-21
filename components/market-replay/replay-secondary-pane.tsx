@@ -48,7 +48,7 @@ export type PaneControl = {
   armDrawing: (tool: DrawingTool) => Promise<void>;
   inspect: () => number | null;
   hasInteraction: () => boolean;
-  loadHistory?: (settings: { period: number; session: DisplaySession; focus: number; formingCursor: number | null },
+  loadHistory?: (settings: { period: number; session: DisplaySession; focus: number; formingCursor: number | null; resetView?: boolean },
     signal: AbortSignal) => Promise<HistoricalPanePreparation>;
 };
 type Core = ReturnType<typeof useReplayCore>;
@@ -65,6 +65,7 @@ type HistoricalSource = {
   focus: number;
   focusRevision: number;
   prepared?: HistoricalPanePreparation;
+  resetView?: boolean;
   annotations: ReplayTradeAnnotationData[];
   boundary: ChartHideAfter | null;
   playbackActive: boolean;
@@ -72,7 +73,8 @@ type HistoricalSource = {
   countdownSeconds: number | null;
   onStart?: (target: ChartHideAfter) => void;
   onHide: (target: ChartHideAfter | null) => void;
-  onFocus: (sequence: number) => void;
+  resetViewDisabledReason?: string;
+  onResetView: (isCurrent: () => boolean) => void;
 };
 const t = copy.marketReplay;
 const emptyBars: NonNullable<ReturnType<typeof useReplayPaneBars>["data"]>["visibleBars"] = [];
@@ -135,14 +137,15 @@ export function ReplaySecondaryPane({ pane, core, rect, active, period, sequence
   const desiredViewport = useRef<ReplayViewportSnapshot | null>(null);
   const center = useRef<number | null>(null);
   const [appliedFocus, setAppliedFocus] = useState<number | null>(null);
+  const [liveResetRevision, setLiveResetRevision] = useState(0);
   const warmup = Math.max(prefs.abrLength, 0, ...prefs.emaIndicators.filter(indicator => prefs.emaEnabled && indicator.visible).map(indicator => indicator.length));
   const api = useRef<PaneControl>(null);
   api.current = {
     armDrawing,
     inspect: () => center.current,
     hasInteraction: () => Boolean(tool || selected || measuring),
-    loadHistory: historical ? ({ period, session, focus, formingCursor }, signal) => prepareHistoricalPaneWindow(
-      { dataset: core.dataset, period, session, warmup, reader, end: historical.end }, focus, formingCursor, signal) : undefined,
+    loadHistory: historical ? ({ period, session, focus, formingCursor, resetView }, signal) => prepareHistoricalPaneWindow(
+      { dataset: core.dataset, period, session, warmup, reader, end: historical.end }, focus, formingCursor, signal, resetView) : undefined,
     async prepare() {
       if (commands.pasteUnconfirmed || styleId || chartDraft || showIndicators) return false;
       if (!await text.beforeExit() || !await commands.flushNudges() || state.loaded && state.busy || commands.pending && !commands.nudging) return false;
@@ -280,15 +283,24 @@ export function ReplaySecondaryPane({ pane, core, rect, active, period, sequence
         playbackActive={historical ? historical.playing : live?.replay?.status === "playing"} displaySession={session}
         readOnly={Boolean(historical)} hiddenAfter={hiddenAfter} historicalPlaybackActive={historical?.playbackActive}
         onHiddenAfterChange={historical?.onHide} onStartHistoricalPlayback={historical?.onStart}
-        focusSequence={historical && appliedFocus !== historical.focusRevision ? historical.focus : null}
+        focusSequence={historical && !historical.resetView && appliedFocus !== historical.focusRevision ? historical.focus : null}
         onFocusApplied={historical ? () => setAppliedFocus(historical.focusRevision) : undefined}
         barCountSession={core.chartMarketSession} barCountRthSession={core.barCountRthSession}
         barCountConfig={prefs.chartVisibility.indicators ? prefs.barCountConfig : { ...prefs.barCountConfig, enabled: false }}
         viewportApiRef={viewport} initialViewportSnapshot={desiredViewport.current ?? savedViewport.current}
-        onResetChartView={historical ? () => {
-          const boundary = historical.boundary?.bar.lastSequence;
-          if (boundary !== undefined && boundary > (bars.at(-1)?.lastSequence ?? -1)) historical.onFocus(boundary);
-        } : liveWindow.resumeFollowing}
+        viewportResetRevision={historical ? historical.resetView ? historical.focusRevision : undefined : liveResetRevision}
+        resetChartViewDisabledReason={historical?.resetViewDisabledReason}
+        onResetChartView={isCurrent => {
+          if (historical) {
+            const target = historical.boundary?.bar.lastSequence ?? historical.end;
+            if ((bars[0]?.lastSequence ?? Infinity) <= target && (bars.at(-1)?.lastSequence ?? -1) >= target) return false;
+            historical.onResetView(isCurrent);
+          } else {
+            liveWindow.resumeFollowing();
+            setLiveResetRevision(revision => revision + 1);
+          }
+          return true;
+        }}
         onVisibleSequenceRangeChange={range => {
           center.current = Math.floor((range.fromSequence + range.toSequence) / 2);
           if (data) savedViewport.current = viewport.current?.capture(sequence, !historical || historical.playbackActive) ?? savedViewport.current;

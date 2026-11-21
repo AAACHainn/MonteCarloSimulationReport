@@ -17,7 +17,7 @@ function windowWith(visibleBars: AggregatedMarketBarData[]): WindowPayload {
 }
 
 describe("loading the initial historical pane window", () => {
-  it("finds the first RTH bar beyond an empty ETH-centered page without reading past the session endpoint", async () => {
+  it.each([false, true])("finds the first later RTH page when the focused page is empty (reset: %s)", async (resetView) => {
     const seen: number[] = [];
     const firstRth = 1_000;
     const end = 1_250;
@@ -32,7 +32,10 @@ describe("loading the initial historical pane window", () => {
       const visibleBars = Array.from({ length: Math.max(0, Math.min(pageEnd - firstRth + 1, 120)) }, (_, i) => bar(firstRth + i));
       return { result: Promise.resolve(windowWith(visibleBars)), release: vi.fn() };
     });
-    const loaded = await readInitialHistoricalPaneWindow({ dataset, period: 60, session: "RTH", warmup: 20, reader, end }, 100, new AbortController().signal);
+    const config = { dataset, period: 60, session: "RTH" as const, warmup: 20, reader, end };
+    const signal = new AbortController().signal;
+    const loaded = resetView ? (await prepareHistoricalPaneWindow(config, 100, null, signal, true)).window
+      : await readInitialHistoricalPaneWindow(config, 100, signal);
     expect(loaded.visibleBars[0].firstSequence).toBe(firstRth);
     expect(loaded.visibleBars).toHaveLength(120);
     expect(loaded.key.endsWith(":100")).toBe(true);
@@ -56,6 +59,25 @@ describe("loading the initial historical pane window", () => {
 });
 
 describe("preparing a historical pane timeline change", () => {
+  it("uses the recovered reset page as the prepared pane and restores its safe forming snapshot", async () => {
+    const target = 900;
+    const previous = bar(target - 1);
+    const crossing = { ...bar(target), lastSequence: target + 1, sourceCount: 2 };
+    const forming = { ...bar(target, "FORMING") };
+    const reader = vi.fn((url: string) => {
+      const query = new URL(url, "http://localhost").searchParams;
+      const bars = query.get("visibleCount") === "1" ? [forming]
+        : query.has("focusSequence") ? [bar(1_200)] : [previous, crossing];
+      return { result: Promise.resolve(windowWith(bars)), release: vi.fn() };
+    });
+    const prepared = await prepareHistoricalPaneWindow({ dataset, period: 300, session: "RTH", warmup: 20, end: 2_000, reader },
+      target, target, new AbortController().signal, true);
+    expect(prepared.window.key.endsWith(":900")).toBe(true);
+    expect(prepared.window.visibleBars).toEqual([previous, crossing]);
+    expect(prepared.forming).toMatchObject({ through: target, bar: forming });
+    expect(reader).toHaveBeenCalledTimes(3);
+  });
+
   it("keeps the old timeline if the new window succeeds but its forming bar fails", async () => {
     const bucket = { ...bar(100), lastSequence: 104, sourceCount: 5, expectedCount: 5 };
     const failure = new Error("forming snapshot failed");

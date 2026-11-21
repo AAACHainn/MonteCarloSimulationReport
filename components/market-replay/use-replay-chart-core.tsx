@@ -104,6 +104,7 @@ export function useReplayChartCore({
   const viewportModeRef = useRef<ReplayViewportMode | null>(null);
   const initialViewportRef = useRef(initialViewportSnapshot);
   const viewportGestureRef = useRef(false);
+  const viewportInteractionRevisionRef = useRef(0);
   const viewportUpdatingRef = useRef(false);
   const pendingFollowRef = useRef(false);
   const currentSourceSequenceRef = useRef(currentSourceSequence);
@@ -131,6 +132,7 @@ export function useReplayChartCore({
     panByBars: (delta: number) => {
       const chart = chartRef.current, range = chart?.timeScale().getVisibleLogicalRange();
       if (!chart || !range || !Number.isFinite(delta)) return;
+      viewportInteractionRevisionRef.current += 1;
       viewportModeRef.current = "history";
       pendingFollowRef.current = false;
       chart.timeScale().setVisibleLogicalRange({ from: range.from + delta, to: range.to + delta });
@@ -555,7 +557,7 @@ export function useReplayChartCore({
   // retain a removed chart or series.
   return {
     chartDisplay, chartDisplayRef, historicalPlaybackActive,
-    viewportModeRef, viewportGestureRef, viewportUpdatingRef, pendingFollowRef, currentSourceSequenceRef, liveWindowRef, viewportSnapshot, initialViewportRef,
+    viewportModeRef, viewportGestureRef, viewportInteractionRevisionRef, viewportUpdatingRef, pendingFollowRef, currentSourceSequenceRef, liveWindowRef, viewportSnapshot, initialViewportRef,
     replaySession, visibilityScope, setHiddenBoundary, hiddenAfter, visibleBars, visibleWarmupBars,
     containerRef, interactionRef, orderTicketRef, orderTicketDragRef, chartRef, candleRef,
     volumeRef, priceLinesRef, lineTargetsRef, tradeAnnotationPrimitiveRef, barCountPrimitiveRef, candleCountdownPrimitiveRef,

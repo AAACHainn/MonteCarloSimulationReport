@@ -1,12 +1,49 @@
 import { REPLAY_HISTORY_BAR_LIMIT } from "./types";
 import type { AggregatedMarketBarData } from "./types";
+import { isHistoricalPlaybackBarReady } from "./historical-playback";
 
 /** Apply a timeline change only after all of its windows are available. */
-export async function commitHistoricalWindowChange(signal: AbortSignal, prepare: (signal: AbortSignal) => Promise<() => void>) {
+export async function commitHistoricalWindowChange(signal: AbortSignal, prepare: (signal: AbortSignal) => Promise<() => void>, isCurrent?: () => boolean) {
   const apply = await prepare(signal);
-  if (signal.aborted) return false;
+  if (signal.aborted || isCurrent?.() === false) return false;
   apply();
   return true;
+}
+
+export async function readHistoricalResetWindow<T extends { visibleBars: AggregatedMarketBarData[] }>(
+  target: number, end: number, visibleCount: number, signal: AbortSignal,
+  readWindow: (cutoff: number, focus: number | null) => Promise<T>,
+): Promise<T> {
+  const focused = await readWindow(end, target);
+  signal.throwIfAborted();
+  const first = focused.visibleBars[0];
+  if (!first || first.lastSequence <= target) return focused;
+
+  // The focused read estimates lookahead from the display/source ratio. On sparse data
+  // it can fill the whole page with later candles. Back off to a page around the cursor.
+  let lower = target;
+  let upper = first.firstSequence > target ? first.firstSequence : Math.min(end, first.lastSequence + 1);
+  let cutoff = Math.min(upper, target + Math.floor(visibleCount / 2));
+  let anchored: T | undefined;
+  let crossing: T | undefined;
+  while (lower <= upper) {
+    const page = await readWindow(cutoff, null);
+    signal.throwIfAborted();
+    const head = page.visibleBars[0];
+    const tail = page.visibleBars.at(-1);
+    if (head && head.lastSequence > target) {
+      if (head.firstSequence <= target && isHistoricalPlaybackBarReady(head, end)) crossing = page;
+      upper = cutoff - 1;
+    } else {
+      if (head && isHistoricalPlaybackBarReady(head, end)) anchored = page;
+      // A later slot or a completed crossing bucket proves the cursor's candle was
+      // not clipped by this request. Retain adjacent data for the next playback step.
+      if (tail && (tail.firstSequence > target || tail.lastSequence > target && isHistoricalPlaybackBarReady(tail, end))) return page;
+      lower = cutoff + 1;
+    }
+    cutoff = lower + Math.floor((upper - lower) / 2);
+  }
+  return anchored ?? crossing ?? focused;
 }
 
 /** Find the next displayed page across filtered sessions without skipping an intervening page. */

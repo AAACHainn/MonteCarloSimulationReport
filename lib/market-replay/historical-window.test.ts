@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from "vitest";
-import { historicalWindowFocusSequence, mergeHistoricalBars, readLaterHistoryWindow, boundedHistoricalPlaybackWindow, commitHistoricalWindowChange } from "./historical-window";
+import { historicalWindowFocusSequence, mergeHistoricalBars, readHistoricalResetWindow, readLaterHistoryWindow, boundedHistoricalPlaybackWindow, commitHistoricalWindowChange } from "./historical-window";
 import { createHistoricalPlayback, isHistoricalPlaybackBarReady } from "./historical-playback";
 import { calculateEmaSeries } from "./ema";
 import { REPLAY_HISTORY_BAR_LIMIT } from "./types";
@@ -97,6 +97,19 @@ describe("historical period changes", () => {
 });
 
 describe("committing an asynchronous historical window change", () => {
+  it("discards a completed reset after another viewport interaction", async () => {
+    let interactionRevision = 4;
+    const resetRevision = interactionRevision;
+    let finish: (apply: () => void) => void = () => {};
+    const apply = vi.fn();
+    const reset = commitHistoricalWindowChange(new AbortController().signal,
+      () => new Promise(resolve => { finish = resolve; }), () => interactionRevision === resetRevision);
+    interactionRevision += 1;
+    finish(apply);
+    await expect(reset).resolves.toBe(false);
+    expect(apply).not.toHaveBeenCalled();
+  });
+
   it("keeps all settings and windows when one pane fails while switching session", async () => {
     const controller = new AbortController();
     const apply = vi.fn();
@@ -124,6 +137,37 @@ describe("committing an asynchronous historical window change", () => {
     finish(() => playback.start(target));
     await expect(seek).resolves.toBe(false);
     expect(playback.getSnapshot()).toMatchObject({ active: false, boundary: null });
+  });
+});
+
+describe("loading the latest revealed candles for a chart reset", () => {
+  it("recovers the cursor and the adjacent candles when sparse data fills a focused page with future candles", async () => {
+    const target = 600;
+    const end = 2_000;
+    const count = 300;
+    const sparse = Array.from({ length: end + 1 }, (_, index) => ({ ...bar(index, 1), phase: "CLOSED" as const }));
+    const readWindow = vi.fn(async (endSequence: number, focus: number | null) => {
+      const cutoff = focus === null ? endSequence : Math.min(endSequence, focus + Math.ceil(count / 2) * 5);
+      return { visibleBars: sparse.slice(0, cutoff + 1).slice(-count) };
+    });
+    const page = await readHistoricalResetWindow(target, end, count, new AbortController().signal, readWindow);
+    expect(readWindow.mock.calls).toEqual([[end, target], [750, null]]);
+    expect(page.visibleBars.filter(item => item.lastSequence <= target).at(-1)).toEqual(sparse[target]);
+    expect(page.visibleBars.find(item => item.firstSequence > target)).toEqual(sparse[target + 1]);
+  });
+
+  it("retains a full crossing bucket and its preceding revealed candle", async () => {
+    const preceding = { ...bar(900), phase: "CLOSED" as const };
+    const crossing = { ...bar(905, 501), expectedCount: 900, phase: "CLOSED" as const };
+    const readWindow = vi.fn(async (cutoff: number, focus: number | null) => {
+      if (focus !== null) return { visibleBars: [crossing, bar(1_406)] };
+      const tail = cutoff >= crossing.lastSequence ? crossing
+        : { ...crossing, lastSequence: cutoff, phase: "FORMING" as const };
+      return { visibleBars: [preceding, tail] };
+    });
+    const page = await readHistoricalResetWindow(1_000, 2_000, 300, new AbortController().signal, readWindow);
+    expect(page.visibleBars).toEqual([preceding, crossing]);
+    expect(readWindow.mock.calls.length).toBeLessThan(12);
   });
 });
 

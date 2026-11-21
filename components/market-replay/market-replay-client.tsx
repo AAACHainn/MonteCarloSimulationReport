@@ -80,6 +80,7 @@ import { useDrawingCommands } from "./use-drawing-commands";
 export function MarketReplayClient({ dataset: initialDataset, initialJournalFocus = null }: { dataset: MarketDatasetSummary; initialJournalFocus?: JournalFocus | null }) {
   const [cursorMode, setCursorMode] = useReplayCursorPreference();
   const [tradePanelOpen, setTradePanelOpen] = useState(false);
+  const [viewportResetRevision, setViewportResetRevision] = useState(0);
   const core = useReplayCore({ dataset: initialDataset, initialJournalFocus });
   const drawingWindow = useReplayDrawingWindow(core);
   const engine = useReplayEngine(core, drawingWindow);
@@ -426,6 +427,14 @@ export function MarketReplayClient({ dataset: initialDataset, initialJournalFocu
             initialViewportSnapshot={mainViewport.current}
             currentSourceSequence={replay.currentSequence}
             liveWindow={!chartWindowDetachedRef.current}
+            viewportResetRevision={viewportResetRevision}
+            onResetChartView={() => {
+              if (!chartWindowDetachedRef.current && !journalReview) return false;
+              void returnToLiveWindow().then(applied => {
+                if (applied) setViewportResetRevision(revision => revision + 1);
+              });
+              return true;
+            }}
             sourceIntervalSeconds={dataset.sourceIntervalSeconds}
             candleCountdownEnabled={chartVisibility.indicators && candleCountdownEnabled}
             playbackActive={replay.status === "playing"}

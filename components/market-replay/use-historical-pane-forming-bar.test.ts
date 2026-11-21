@@ -36,7 +36,7 @@ vi.mock("react", () => ({
 const dataset = { id: "history", sourceIntervalSeconds: 60, dataVersion: 1,
   symbol: "ES", timezone: "America/Chicago", tradingWeekdays: [1, 2, 3, 4, 5] } as MarketDatasetSummary;
 const period = 300;
-const session = "RTH";
+const session = "RTH" as const;
 
 function bar(first: number, last: number, high: number, volume: number): AggregatedMarketBarData {
   return { timestamp: new Date(first * 60_000).toISOString(), bucketEnd: new Date((first + 5) * 60_000).toISOString(),
