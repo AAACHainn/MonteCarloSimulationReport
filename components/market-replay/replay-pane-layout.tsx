@@ -7,11 +7,10 @@ import { Button } from "@/components/ui/button";
 import { copy } from "@/lib/i18n";
 import { layouts, paneIds, paneLayout, type LayoutId, type LayoutRatios, type PaneId, type PaneRect } from "@/lib/market-replay/multi-pane-layout";
 
-const key = "market-replay-pane-layout-v1";
 type Preference = { template: LayoutId; ratios: LayoutRatios };
 const defaultPreference: Preference = { template: "single", ratios: {} };
 
-export function useReplayPaneLayout(temporarySingle: boolean) {
+export function useReplayPaneLayout(temporarySingle: boolean, key = "market-replay-pane-layout-v1") {
   const [saved, setSaved] = useState(defaultPreference);
   const [loaded, setLoaded] = useState(false);
   const [size, setSize] = useState({ width: 0, height: 0 });
@@ -26,11 +25,11 @@ export function useReplayPaneLayout(temporarySingle: boolean) {
       }
     } catch { /* Current-page settings are still available. */ }
     setLoaded(true);
-  }, []);
+  }, [key]);
   useEffect(() => {
     if (!loaded) return;
     try { localStorage.setItem(key, JSON.stringify(saved)); } catch { /* Storage may be unavailable. */ }
-  }, [loaded, saved]);
+  }, [key, loaded, saved]);
   useEffect(() => {
     if (!host) return;
     const measure = () => setSize({ width: host.clientWidth, height: host.clientHeight });

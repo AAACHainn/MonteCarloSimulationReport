@@ -79,6 +79,10 @@ export function latestReplayLogicalIndex(bars: AggregatedMarketBarData[], source
   return liveWindow && bars.length > 0 && sourceSequence >= bars.at(-1)!.lastSequence ? bars.length - 1 : -1;
 }
 
+export function replayViewportSourceSequence(bars: AggregatedMarketBarData[], sourceSequence: number, historicalPlayback: boolean) {
+  return historicalPlayback ? bars.at(-1)?.lastSequence ?? sourceSequence : sourceSequence;
+}
+
 export function captureReplayViewport({ visibleRange, bars, sourceSequence, liveWindow, mode = null, chartWidth = 0, barSpacing = 0 }: {
   visibleRange: ReplayLogicalRange | null; bars: AggregatedMarketBarData[];
   sourceSequence: number; liveWindow: boolean; mode?: ReplayViewportMode | null;

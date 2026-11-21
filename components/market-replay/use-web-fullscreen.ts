@@ -3,7 +3,7 @@
 import { useEffect } from "react";
 import { hasVisibleReplayDialog } from "@/lib/market-replay/keyboard-shortcuts";
 
-export function useWebFullscreen(active: boolean, exit: () => void, blocked: boolean) {
+export function useWebFullscreen(active: boolean, exit: () => void, blocked: boolean | (() => boolean)) {
   useEffect(() => {
     if (!active) return;
     const previousOverflow = document.documentElement.style.overflow;
@@ -13,7 +13,8 @@ export function useWebFullscreen(active: boolean, exit: () => void, blocked: boo
   useEffect(() => {
     if (!active) return;
     const onKeyDown = (event: KeyboardEvent) => {
-      if (event.key !== "Escape" || event.defaultPrevented || event.isComposing || blocked || hasVisibleReplayDialog()
+      if (event.key !== "Escape" || event.defaultPrevented || event.isComposing
+        || (typeof blocked === "function" ? blocked() : blocked) || hasVisibleReplayDialog()
         || document.querySelector("[role='menu'], [role='listbox'], [data-context-menu], [data-radix-popper-content-wrapper]")) return;
       event.preventDefault();
       exit();

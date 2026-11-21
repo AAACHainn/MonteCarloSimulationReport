@@ -131,6 +131,7 @@ describe("applying chart viewport transitions", () => {
     s.core.readOnly = true; s.core.historicalPlaybackActive = true;
     s.core.lastHiddenAfterRef.current = { bar: s.core.bars[199], displayIntervalSeconds: 60, displaySession: "ETH" };
     s.core.hiddenAfter = { bar: s.core.bars[200], displayIntervalSeconds: 60, displaySession: "ETH" };
+    s.core.barsRef.current = s.core.bars.slice(0, 200);
     s.core.visibleBars = s.core.bars.slice(0, 201);
     const before = s.time.getVisibleLogicalRange();
     s.render();
@@ -142,10 +143,30 @@ describe("applying chart viewport transitions", () => {
     s.core.readOnly = true; s.core.historicalPlaybackActive = true; s.core.viewportModeRef.current = "history";
     s.core.lastHiddenAfterRef.current = { bar: s.core.bars[199], displayIntervalSeconds: 60, displaySession: "ETH" };
     s.core.hiddenAfter = { bar: s.core.bars[200], displayIntervalSeconds: 60, displaySession: "ETH" };
+    s.core.barsRef.current = s.core.bars.slice(0, 200);
     s.core.visibleBars = s.core.bars.slice(0, 201);
     const before = s.time.getVisibleLogicalRange();
     s.render();
     expect(s.time.getVisibleLogicalRange()).toEqual(before);
+  });
+
+  it("follows only the slower pane's newly revealed bars even when the shared cursor has a different timestamp", () => {
+    const s = setup(bars(300, 5));
+    const steps = bars(1500);
+    Object.assign(s.core, { displayIntervalSeconds: 300, readOnly: true, historicalPlaybackActive: true });
+    s.core.lastDataIntervalRef.current = 300;
+    s.core.requestedDisplayIntervalSecondsRef.current = 300;
+    s.core.barsRef.current = s.core.bars.slice(0, 200);
+    s.core.lastHiddenAfterRef.current = { bar: steps[1001], displayIntervalSeconds: 60, displaySession: "ETH" };
+    s.core.hiddenAfter = { bar: steps[1002], displayIntervalSeconds: 60, displaySession: "ETH" };
+    s.core.visibleBars = s.core.bars.slice(0, 200);
+    const before = s.time.getVisibleLogicalRange();
+    s.render();
+    expect(s.time.getVisibleLogicalRange()).toEqual(before);
+    s.core.hiddenAfter = { bar: steps[1004], displayIntervalSeconds: 60, displaySession: "ETH" };
+    s.core.visibleBars = s.core.bars.slice(0, 201);
+    s.render();
+    expect(s.time.getVisibleLogicalRange()).toEqual({ from: before.from + 1, to: before.to + 1 });
   });
 
 });

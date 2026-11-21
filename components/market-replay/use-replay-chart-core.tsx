@@ -6,7 +6,7 @@ import { ArrowPrimitive, type ArrowDragPreview } from "@/lib/market-replay/arrow
 
 import { chartDisplayConfig } from "@/lib/market-replay/chart-display";
 import { ReplayPriceSeries } from "@/lib/market-replay/price-series";
-import { defaultReplayLogicalRange, captureReplayViewport, isReplayRangeFollowing, latestReplayLogicalIndex, type ReplayViewportMode } from "@/lib/market-replay/chart-range";
+import { defaultReplayLogicalRange, captureReplayViewport, isReplayRangeFollowing, latestReplayLogicalIndex, replayViewportSourceSequence, type ReplayViewportMode } from "@/lib/market-replay/chart-range";
 import { useReplaySession } from "./replay-session-context";
 import { normalizeRiskPreferences, type RiskPreferences } from "@/lib/paper-trading/risk-preferences";
 
@@ -108,13 +108,16 @@ export function useReplayChartCore({
   const pendingFollowRef = useRef(false);
   const currentSourceSequenceRef = useRef(currentSourceSequence);
   currentSourceSequenceRef.current = currentSourceSequence;
+  const historicalPlaybackActiveRef = useRef(historicalPlaybackActive);
+  historicalPlaybackActiveRef.current = historicalPlaybackActive;
   const liveWindowRef = useRef(liveWindow && !hiddenAfter);
   liveWindowRef.current = liveWindow && !hiddenAfter;
   useImperativeHandle(viewportApiRef, () => ({
     capture: (sequence: number, isLive: boolean) => {
       const chart = chartRef.current;
       const snapshot = chart ? captureReplayViewport({ visibleRange: chart.timeScale().getVisibleLogicalRange(),
-        bars: barsRef.current, sourceSequence: sequence, liveWindow: isLive && liveWindowRef.current,
+        bars: barsRef.current, sourceSequence: replayViewportSourceSequence(barsRef.current, sequence, historicalPlaybackActiveRef.current),
+        liveWindow: isLive && liveWindowRef.current,
         mode: viewportGestureRef.current ? null : viewportModeRef.current, chartWidth: chart.timeScale().width(), barSpacing: chart.timeScale().options().barSpacing }) : null;
       if (snapshot) {
         viewportModeRef.current = snapshot.mode;
@@ -460,7 +463,8 @@ export function useReplayChartCore({
     if (!range || !currentBars.length || viewportUpdatingRef.current) return;
     if (viewportGestureRef.current) {
       const sequence = currentSourceSequenceRef.current ?? currentBars.at(-1)!.lastSequence;
-      const index = latestReplayLogicalIndex(barsRef.current, sequence, liveWindowRef.current);
+      const revealedSequence = replayViewportSourceSequence(barsRef.current, sequence, historicalPlaybackActiveRef.current);
+      const index = latestReplayLogicalIndex(barsRef.current, revealedSequence, liveWindowRef.current);
       viewportModeRef.current = isReplayRangeFollowing(range, index) ? "following" : "history";
     }
     const fromIndex = Math.max(0, Math.min(currentBars.length - 1, Math.floor(range.from)));

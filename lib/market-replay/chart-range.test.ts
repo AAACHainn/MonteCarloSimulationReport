@@ -6,6 +6,7 @@ import {
   rangeAfterTimelineChange,
   rangeAfterWindowReplacement,
   rangeForReplayFocus,
+  replayViewportSourceSequence,
 } from "./chart-range";
 import type { AggregatedMarketBarData } from "./types";
 
@@ -62,6 +63,20 @@ describe("rangeAfterNewReplayBar", () => {
 
   it("does not jump to realtime when the latest bar is outside the historical viewport", () => {
     expect(rangeAfterNewReplayBar({ from: 20, to: 80 }, 120)).toEqual({ from: 20, to: 80 });
+  });
+});
+
+describe("following a historical pane at a mixed-period boundary", () => {
+  it("uses the last revealed candle while the next slower candle is still hidden", () => {
+    const bars = aggregatedBars(60, 5, 5);
+    const visibleRange = { from: 20, to: 64 };
+    const sharedSequence = 302;
+    const sourceSequence = replayViewportSourceSequence(bars, sharedSequence, true);
+    expect(sourceSequence).toBe(299);
+    expect(captureReplayViewport({ bars, visibleRange, sourceSequence, liveWindow: false, mode: "following" }))
+      .toMatchObject({ mode: "following", anchor: { sourceSequence: 299 } });
+    expect(captureReplayViewport({ bars, visibleRange, sourceSequence, liveWindow: false, mode: "history" })?.mode).toBe("history");
+    expect(replayViewportSourceSequence(bars, sharedSequence, false)).toBe(sharedSequence);
   });
 });
 

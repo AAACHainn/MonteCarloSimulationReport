@@ -8,13 +8,15 @@ import { Button } from "@/components/ui/button";
 import { copy } from "@/lib/i18n";
 import { createUuid } from "@/lib/uuid";
 import { cloneChartDisplay, type ChartDisplayConfig } from "@/lib/market-replay/chart-display";
+import type { ChartHideAfter } from "@/lib/market-replay/chart-hide-after";
 import type { ReplayViewportApi, ReplayViewportSnapshot } from "@/lib/market-replay/chart-range";
 import { drawingStyleMatchesType, isArrowDrawing, type DrawingGeometry, type DrawingTool, type MarketDrawing, type MarketDrawingStyle } from "@/lib/market-replay/chart-drawings";
 import { drawingDeleteLabel, drawingObjectName, drawingSettingsLabel } from "@/lib/market-replay/drawing-presentation";
 import { isValidBarCountInterval, isValidBarCountRecentTradingDays } from "@/lib/market-replay/bar-count";
 import { DEFAULT_EMA_LINE_STYLE, DEFAULT_EMA_LINE_WIDTH } from "@/lib/market-replay/ema-style";
 import type { ReplayCursorMode } from "@/lib/market-replay/cursor-mode";
-import { ABR_LENGTH_MAX, ABR_LENGTH_MIN, MAX_EMA_INDICATORS, formatInterval, type DisplaySession } from "@/lib/market-replay/types";
+import { ABR_LENGTH_MAX, ABR_LENGTH_MIN, MAX_EMA_INDICATORS, formatInterval, type DisplaySession, type MarketBarData } from "@/lib/market-replay/types";
+import type { ReplayTradeAnnotationData } from "@/lib/paper-trading/types";
 import type { PaneId, PaneRect } from "@/lib/market-replay/multi-pane-layout";
 import { AbcdSettingsDialog } from "./abcd-settings-dialog";
 import { ArrowSettingsDialog } from "./arrow-controls";
@@ -32,6 +34,7 @@ import { TextSettingsDialog } from "./text-settings-dialog";
 import { useDrawingCommands } from "./use-drawing-commands";
 import { useDrawingStyleShortcuts } from "./use-drawing-style-shortcuts";
 import { useHistoricalDrawings } from "./use-historical-drawings";
+import { readInitialHistoricalPaneWindow, useHistoricalPaneWindow, type HistoricalPaneWindow } from "./use-historical-pane-window";
 import { EMA_COLORS, useReplayPreferences } from "./use-replay-preferences";
 import type { useReplayCore } from "./use-replay-core";
 import { useReplayPaneBars, type createPaneReader } from "./use-replay-pane-bars";
@@ -42,22 +45,47 @@ export type PaneControl = {
   capture: () => void;
   restore: () => void;
   armDrawing: (tool: DrawingTool) => Promise<void>;
+  inspect: () => number | null;
+  hasInteraction: () => boolean;
+  loadHistory?: (period: number, session: DisplaySession, focus: number, signal: AbortSignal) => Promise<HistoricalPaneWindow>;
 };
 type Core = ReturnType<typeof useReplayCore>;
+type ChartContext = Pick<Core, "dataset" | "drawingWriteScope" | "drawingScopeGuard" | "defaultTextStyle" | "textTemplates" | "setTextTemplates" | "setDefaultTextStyle"
+  | "defaultTrendLineStyle" | "trendLineTemplates" | "setTrendLineTemplates" | "setDefaultTrendLineStyle"
+  | "defaultFibonacciStyle" | "fibonacciTemplates" | "setFibonacciTemplates" | "setDefaultFibonacciStyle"
+  | "defaultRectangleStyle" | "rectangleTemplates" | "setRectangleTemplates" | "setDefaultRectangleStyle"
+  | "abcdPreferences" | "setAbcdPreferences" | "arrowPreferences" | "setArrowPreferences" | "displayUtcOffsetMinutes" | "chartMarketSession" | "barCountRthSession">;
+type LiveSource = Pick<Core, "currentSourceBar" | "replay" | "marketCache" | "paperSnapshot">;
+type HistoricalSource = {
+  start: number;
+  end: number;
+  focus: number;
+  focusRevision: number;
+  prepared?: HistoricalPaneWindow;
+  annotations: ReplayTradeAnnotationData[];
+  boundary: ChartHideAfter | null;
+  playbackActive: boolean;
+  playing: boolean;
+  countdownSeconds: number | null;
+  onStart?: (target: ChartHideAfter) => void;
+  onHide: (target: ChartHideAfter | null) => void;
+  onFocus: (sequence: number) => void;
+};
 const t = copy.marketReplay;
 const emptyBars: NonNullable<ReturnType<typeof useReplayPaneBars>["data"]>["visibleBars"] = [];
 const emptyDrawings: MarketDrawing[] = [];
 const noAction = () => {};
 const rejectTrade = async () => false;
+const noSourceBars: MarketBarData[] = [];
 
 export function ReplaySecondaryPane({ pane, core, rect, active, period, sequence, session, cursorMode, onCursorChange,
-  controls, toolbar, register, maximized, canMaximize, onActivate, onMaximize, reader, blocked, webFullscreen, toggleWebFullscreen }: {
-  pane: PaneId; core: Core; rect?: PaneRect; active: boolean; period: number; sequence: number; session: DisplaySession;
+  controls, toolbar, register, maximized, canMaximize, onActivate, onMaximize, reader, blocked, webFullscreen, toggleWebFullscreen, live, historical }: {
+  pane: PaneId; core: ChartContext; rect?: PaneRect; active: boolean; period: number; sequence: number; session: DisplaySession;
   cursorMode: ReplayCursorMode; onCursorChange: (mode: ReplayCursorMode) => void; controls: HTMLDivElement | null;
   toolbar: HTMLDivElement | null; register: (pane: PaneId, control: PaneControl | null) => void;
   maximized: boolean; canMaximize: boolean; onActivate: () => void; onMaximize: () => void;
   reader: ReturnType<typeof createPaneReader>; blocked: boolean; webFullscreen: boolean; toggleWebFullscreen: () => void;
-}) {
+} & ({ live: LiveSource; historical?: never } | { historical: HistoricalSource; live?: never })) {
   const scope = core.drawingWriteScope + ":" + pane;
   const fetch = useReplayFetch();
   const prefs = useReplayPreferences(core.dataset, pane);
@@ -102,16 +130,23 @@ export function ReplaySecondaryPane({ pane, core, rect, active, period, sequence
   const beforeMaximize = useRef<ReplayViewportSnapshot | null>(null);
   const [restoreRevision, setRestoreRevision] = useState(0);
   const desiredViewport = useRef<ReplayViewportSnapshot | null>(null);
+  const center = useRef<number | null>(null);
+  const [appliedFocus, setAppliedFocus] = useState<number | null>(null);
+  const warmup = Math.max(prefs.abrLength, 0, ...prefs.emaIndicators.filter(indicator => prefs.emaEnabled && indicator.visible).map(indicator => indicator.length));
   const api = useRef<PaneControl>(null);
   api.current = {
     armDrawing,
+    inspect: () => center.current,
+    hasInteraction: () => Boolean(tool || selected || measuring),
+    loadHistory: historical ? (period, session, focus, signal) => readInitialHistoricalPaneWindow(
+      { dataset: core.dataset, period, session, warmup, reader, end: historical.end }, focus, signal) : undefined,
     async prepare() {
       if (commands.pasteUnconfirmed || styleId || chartDraft || showIndicators) return false;
       if (!await text.beforeExit() || !await commands.flushNudges() || state.loaded && state.busy || commands.pending && !commands.nudging) return false;
       arm(null); measure(false);
       return true;
     },
-    capture() { beforeMaximize.current = viewport.current?.capture(sequence, true) ?? savedViewport.current; },
+    capture() { beforeMaximize.current = viewport.current?.capture(sequence, !historical || historical.playbackActive) ?? savedViewport.current; },
     restore() {
       desiredViewport.current = beforeMaximize.current;
       savedViewport.current = beforeMaximize.current;
@@ -121,25 +156,32 @@ export function ReplaySecondaryPane({ pane, core, rect, active, period, sequence
   useLayoutEffect(() => {
     register(pane, {
       prepare: () => api.current!.prepare(), capture: () => api.current!.capture(), restore: () => api.current!.restore(),
-      armDrawing: tool => api.current!.armDrawing(tool),
+      armDrawing: tool => api.current!.armDrawing(tool), inspect: () => api.current!.inspect(),
+      hasInteraction: () => api.current!.hasInteraction(),
+      loadHistory: api.current?.loadHistory ? (...args) => api.current!.loadHistory!(...args) : undefined,
     });
     return () => register(pane, null);
   }, [pane, register]);
 
-  const warmup = Math.max(prefs.abrLength, 0, ...prefs.emaIndicators.filter(indicator => prefs.emaEnabled && indicator.visible).map(indicator => indicator.length));
-  const marketCache = core.marketCache;
-  const readSource = useCallback((after: number, count: number) => marketCache.readMemoryBarsAfter(after, count), [marketCache]);
-  const { data, error, retry, updateViewport, resumeFollowing } = useReplayPaneBars({ visible, dataset: core.dataset, sequence, period, session,
-    calendar: core.chartMarketSession, warmup, scope: scope + ":" + core.replay?.generation, reader, readSource });
+  const marketCache = live?.marketCache;
+  const readSource = useCallback((after: number, count: number) => marketCache?.readMemoryBarsAfter(after, count) ?? noSourceBars, [marketCache]);
+  const liveWindow = useReplayPaneBars({ visible: visible && Boolean(live), dataset: core.dataset, sequence, period, session,
+    calendar: core.chartMarketSession, warmup, scope: scope + ":" + live?.replay?.generation, reader, readSource });
+  const following = useCallback(() => savedViewport.current?.mode !== "history", []);
+  const historicalWindow = useHistoricalPaneWindow({ visible: visible && Boolean(historical), dataset: core.dataset, period, session, warmup, reader,
+    start: historical?.start ?? 0, end: historical?.end ?? 0, focus: historical?.focus ?? 0,
+    revision: historical?.focusRevision ?? 0, prepared: historical?.prepared,
+    cursor: historical?.playbackActive ? historical.boundary?.bar.lastSequence ?? null : null, following });
+  const { data, error, retry } = historical ? historicalWindow : liveWindow;
   const bars = data?.visibleBars ?? emptyBars;
   const firstSequence = bars[0]?.firstSequence;
   const fromSequence = firstSequence === undefined ? undefined : Math.floor(firstSequence / 300) * 300;
   const endRef = useRef(sequence);
   endRef.current = sequence;
-  const fill = core.paperSnapshot?.recentFills[0]?.id;
-  const annotationKey = [scope, fromSequence, fill, core.paperSnapshot?.stats.journalEntryCount, core.replay?.generation].join(":");
+  const fill = live?.paperSnapshot?.recentFills[0]?.id;
+  const annotationKey = [scope, fromSequence, fill, live?.paperSnapshot?.stats.journalEntryCount, live?.replay?.generation].join(":");
   const [annotations, setAnnotations] = useState<(TradeAnnotationsPayload & { key: string; through: number }) | null>(null);
-  const showTrades = Boolean(rect && prefs.chartVisibility.tradeAnnotations && core.paperSnapshot);
+  const showTrades = Boolean(rect && prefs.chartVisibility.tradeAnnotations && live?.paperSnapshot);
   useEffect(() => {
     if (!showTrades || fromSequence === undefined) return;
     const abort = new AbortController();
@@ -196,7 +238,7 @@ export function ReplaySecondaryPane({ pane, core, rect, active, period, sequence
   }
   return <>
     {active && controls && createPortal(<>
-      <ChartVisibilityMenu value={prefs.chartVisibility} includeOrderLines onChange={async value => {
+      <ChartVisibilityMenu value={prefs.chartVisibility} includeOrderLines={Boolean(live)} onChange={async value => {
         if (!await text.beforeExit() || !await commands.flushNudges()) return;
         prefs.setChartVisibility(value);
         if (!value.drawings) { arm(null); select(null); setShowObjects(false); }
@@ -219,18 +261,28 @@ export function ReplaySecondaryPane({ pane, core, rect, active, period, sequence
       active={active} showHeader canMaximize={canMaximize} maximized={maximized} onActivate={onActivate} onMaximize={onMaximize}>
       <ReplayChart key={restoreRevision} compact observeTrades shortcutsActive={active} cursorMode={cursorMode}
         onAltMaximize={canMaximize ? onMaximize : undefined}
-        datasetId={core.dataset.id} dataRevision={scope + ":" + core.replay?.generation}
+        datasetId={core.dataset.id} dataRevision={scope + ":" + live?.replay?.generation}
         bars={bars} warmupBars={data?.warmupBars ?? emptyBars} priceTickSize={core.dataset.priceTickSize}
         displayIntervalSeconds={period} displayUtcOffsetMinutes={core.displayUtcOffsetMinutes} sourceIntervalSeconds={core.dataset.sourceIntervalSeconds ?? undefined}
-        currentSourceSequence={data?.sequence} currentSourceTimestamp={core.currentSourceBar?.timestamp}
-        playbackActive={core.replay?.status === "playing"} displaySession={session}
+        currentSourceSequence={historical ? historical.boundary?.bar.lastSequence : liveWindow.data?.sequence}
+        currentSourceTimestamp={live?.currentSourceBar?.timestamp}
+        playbackActive={historical ? historical.playing : live?.replay?.status === "playing"} displaySession={session}
+        readOnly={Boolean(historical)} hiddenAfter={historical?.boundary} historicalPlaybackActive={historical?.playbackActive}
+        onHiddenAfterChange={historical?.onHide} onStartHistoricalPlayback={historical?.onStart}
+        focusSequence={historical && appliedFocus !== historical.focusRevision ? historical.focus : null}
+        onFocusApplied={historical ? () => setAppliedFocus(historical.focusRevision) : undefined}
         barCountSession={core.chartMarketSession} barCountRthSession={core.barCountRthSession}
         barCountConfig={prefs.chartVisibility.indicators ? prefs.barCountConfig : { ...prefs.barCountConfig, enabled: false }}
         viewportApiRef={viewport} initialViewportSnapshot={desiredViewport.current ?? savedViewport.current}
-        onResetChartView={resumeFollowing}
+        onResetChartView={historical ? () => {
+          const boundary = historical.boundary?.bar.lastSequence;
+          if (boundary !== undefined && boundary > (bars.at(-1)?.lastSequence ?? -1)) historical.onFocus(boundary);
+        } : liveWindow.resumeFollowing}
         onVisibleSequenceRangeChange={range => {
-          if (data) savedViewport.current = viewport.current?.capture(data.sequence, true) ?? savedViewport.current;
-          updateViewport(savedViewport.current?.mode === "history", range.barsBefore);
+          center.current = Math.floor((range.fromSequence + range.toSequence) / 2);
+          if (data) savedViewport.current = viewport.current?.capture(sequence, !historical || historical.playbackActive) ?? savedViewport.current;
+          if (historical) historicalWindow.updateViewport(range);
+          else liveWindow.updateViewport(savedViewport.current?.mode === "history", range.barsBefore);
           desiredViewport.current = null;
         }}
         drawingApiRef={text.apiRef} drawings={visibleDrawings} drawingTool={tool} onDrawingToolChange={arm} selectedDrawingId={selected}
@@ -246,9 +298,11 @@ export function ReplaySecondaryPane({ pane, core, rect, active, period, sequence
         gridVisible={prefs.gridVisible} onToggleGrid={() => prefs.setGridVisible(current => !current)}
         emaEnabled={prefs.chartVisibility.indicators && prefs.emaEnabled} emaIndicators={prefs.emaIndicators}
         abrEnabled={prefs.chartVisibility.indicators && prefs.abrEnabled} abrLength={prefs.abrLength}
-        volumeVisible={prefs.chartVisibility.indicators && prefs.volumeVisible} candleCountdownEnabled={prefs.chartVisibility.indicators && prefs.candleCountdownEnabled}
-        paperSnapshot={core.paperSnapshot} orderLinesVisible={prefs.chartVisibility.orderLines} paperBusy={false} paperError={null}
-        tradeAnnotations={annotations?.key === annotationKey && annotations.through <= sequence ? annotations.items : []}
+        volumeVisible={prefs.chartVisibility.indicators && prefs.volumeVisible}
+        candleCountdownEnabled={prefs.chartVisibility.indicators && prefs.candleCountdownEnabled && (!historical || historical.countdownSeconds !== null)}
+        candleCountdownSeconds={historical?.countdownSeconds}
+        paperSnapshot={live?.paperSnapshot ?? null} orderLinesVisible={prefs.chartVisibility.orderLines} paperBusy={false} paperError={null}
+        tradeAnnotations={historical?.annotations ?? (annotations?.key === annotationKey && annotations.through <= sequence ? annotations.items : [])}
         tradeAnnotationsTruncated={annotations?.key === annotationKey && annotations.truncated}
         tradeAnnotationsVisible={prefs.chartVisibility.tradeAnnotations}
         onCancelOrder={rejectTrade} onClosePosition={rejectTrade} onSubmitOrder={rejectTrade} onOrderPriceChange={rejectTrade}

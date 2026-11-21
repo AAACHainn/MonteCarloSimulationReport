@@ -22,8 +22,8 @@ import { ReplayLayoutMenu, ReplayPaneDivider, ReplayPaneFrame, useReplayPaneLayo
 import { ReplaySecondaryPane, type PaneControl } from "./replay-secondary-pane";
 import { ReplayDrawingPaneProvider } from "./replay-session-context";
 import { createPaneReader } from "./use-replay-pane-bars";
-import { paneIds, secondaryIntervals, type LayoutId, type PaneId } from "@/lib/market-replay/multi-pane-layout";
-import { displayIntervalOptions } from "@/lib/market-replay/display-interval";
+import { type LayoutId, type PaneId } from "@/lib/market-replay/multi-pane-layout";
+import { useReplayPanePeriods } from "./use-replay-pane-periods";
 import { isValidDisplayInterval } from "@/lib/market-replay/types";
 import { rangeForReplayViewport, type ReplayViewportSnapshot } from "@/lib/market-replay/chart-range";
 import { hasVisibleReplayDialog, isReplayShortcutInputTarget, replayDrawingShortcutKey } from "@/lib/market-replay/keyboard-shortcuts";
@@ -118,42 +118,15 @@ export function MarketReplayClient({ dataset: initialDataset, initialJournalFocu
   const { activePane } = layout;
   const [chartControls, setChartControls] = useState<HTMLDivElement | null>(null);
   const [secondaryToolbar, setSecondaryToolbar] = useState<HTMLDivElement | null>(null);
-  const [visitedPanes, setVisitedPanes] = useState<PaneId[]>([]);
   const paneControllers = useRef(new Map<PaneId, PaneControl>());
   const registerPane = useCallback((pane: PaneId, control: PaneControl | null) => {
     if (control) paneControllers.current.set(pane, control);
     else paneControllers.current.delete(pane);
   }, []);
   const paneReader = useMemo(createPaneReader, []);
-  const secondaryPeriodKey = "market-replay-pane-periods-v1:" + dataset.id;
-  const [periodState, setPeriodState] = useState<{ key: string; values: (number | null)[] } | null>(null);
-  useEffect(() => {
-    let values: (number | null)[] = [];
-    try {
-      const stored: unknown = JSON.parse(localStorage.getItem(secondaryPeriodKey) ?? "null");
-      if (Array.isArray(stored)) values = stored.slice(0, 4).map(value => typeof value === "number" ? value : null);
-    } catch { /* Use the default periods. */ }
-    setPeriodState({ key: secondaryPeriodKey, values });
-  }, [secondaryPeriodKey]);
   const primaryPeriod = replay?.displayIntervalSeconds ?? dataset.sourceIntervalSeconds ?? 60;
-  const periods = useMemo(() => [primaryPeriod, ...secondaryIntervals(dataset.sourceIntervalSeconds, primaryPeriod,
-    displayIntervalOptions(dataset.sourceIntervalSeconds, primaryPeriod),
-    periodState?.key === secondaryPeriodKey ? periodState.values : [])],
-  [dataset.sourceIntervalSeconds, periodState, primaryPeriod, secondaryPeriodKey]);
-  const visiblePaneKey = [...layout.panes.keys()].join(",");
-  useEffect(() => {
-    const visible = paneIds.slice(1).filter(pane => visiblePaneKey.split(",").includes(String(pane)));
-    if (!visible.length) return;
-    setVisitedPanes(current => visible.every(pane => current.includes(pane)) ? current : [...new Set([...current, ...visible])]);
-  }, [visiblePaneKey]);
-  useEffect(() => {
-    if (periodState?.key !== secondaryPeriodKey || !replay || !visiblePaneKey.includes(",")) return;
-    const saved = periods.slice(1).map((value, i) => visiblePaneKey.split(",").includes(String(i + 2))
-      ? value : periodState.values[i] ?? null);
-    if (saved.every((value, i) => value === (periodState.values[i] ?? null))) return;
-    setPeriodState({ key: secondaryPeriodKey, values: saved });
-    try { localStorage.setItem(secondaryPeriodKey, JSON.stringify(saved)); } catch { /* Keep the in-memory periods. */ }
-  }, [periods, periodState, replay, secondaryPeriodKey, visiblePaneKey]);
+  const { periods, setPeriod, mounted } = useReplayPanePeriods("market-replay-pane-periods-v1:" + dataset.id,
+    dataset.sourceIntervalSeconds, primaryPeriod, layout.panes, Boolean(replay));
 
   const mainViewport = useRef<ReplayViewportSnapshot | null>(null);
   const primaryVisible = layout.measured && layout.panes.has(1);
@@ -258,10 +231,7 @@ export function MarketReplayClient({ dataset: initialDataset, initialJournalFocu
     if (activePane === 1) return changeDisplayInterval(seconds);
     if (!dataset.sourceIntervalSeconds || !isValidDisplayInterval(dataset.sourceIntervalSeconds, seconds)) return false;
     if (!await paneControllers.current.get(activePane)?.prepare()) return false;
-    const values = Array.from({ length: 4 }, (_, i) => periodState?.values[i] ?? null);
-    values[activePane - 2] = seconds;
-    setPeriodState({ key: secondaryPeriodKey, values });
-    try { localStorage.setItem(secondaryPeriodKey, JSON.stringify(values)); } catch { /* Keep the in-memory periods. */ }
+    setPeriod(activePane, seconds);
     return true;
   }
 
@@ -597,16 +567,16 @@ export function MarketReplayClient({ dataset: initialDataset, initialJournalFocu
           ) : null}
           </ReplayPaneFrame> : null}
           {layout.dividers.map(divider => <ReplayPaneDivider key={divider.key} divider={divider} onRatio={ratio => layout.changeRatio(divider.key, ratio)} />)}
-          {periodState?.key === secondaryPeriodKey ? paneIds.slice(1).filter(pane => layout.panes.has(pane) || visitedPanes.includes(pane)).map(pane =>
+          {mounted.map(pane =>
             <ReplayDrawingPaneProvider key={pane} pane={pane}>
-              <ReplaySecondaryPane pane={pane} core={core} rect={layout.panes.get(pane)} active={activePane === pane}
+              <ReplaySecondaryPane pane={pane} core={core} live={core} rect={layout.panes.get(pane)} active={activePane === pane}
                 period={periods[pane - 1]} sequence={replay.confirmedSequence} session={chartDisplay?.displaySession ?? replay.displaySession}
                 cursorMode={cursorMode} onCursorChange={setCursorMode} controls={chartControls} toolbar={secondaryToolbar}
                 register={registerPane} maximized={layout.maximized === pane} canMaximize={!layoutBusy && !draftActive}
                 onActivate={() => layout.setActive(pane)} onMaximize={() => togglePane(pane)} reader={paneReader}
                 blocked={Boolean(journalReview || correctionPending || checkingOrder || settingsDialog || confirmAction || layoutBusy)}
                 webFullscreen={webFullscreen} toggleWebFullscreen={() => setWebFullscreen(current => !current)} />
-            </ReplayDrawingPaneProvider>) : null}
+            </ReplayDrawingPaneProvider>)}
         </div>
         {tradePanelOpen ? <ResizableTradePanel checking={Boolean(checkingOrder)} onClose={() => setTradePanelOpen(false)}>
           {paperSnapshot ? journalReview ? null : <PaperTradingPanel embedded priceTickSize={dataset.priceTickSize} snapshot={paperSnapshot} currentBar={currentBar} busy={paperBusy || correctionPending || dateForwarding} error={paperError} onSubmit={submitPaperOrder} onCancel={cancelPaperOrder} onUpdate={updatePaperOrder} onCancelScope={cancelPaperScope} /> : <div className="space-y-4">

@@ -1,6 +1,14 @@
 import { REPLAY_HISTORY_BAR_LIMIT } from "./types";
 import type { AggregatedMarketBarData } from "./types";
 
+/** Apply a timeline change only after all of its windows are available. */
+export async function commitHistoricalWindowChange(signal: AbortSignal, prepare: (signal: AbortSignal) => Promise<() => void>) {
+  const apply = await prepare(signal);
+  if (signal.aborted) return false;
+  apply();
+  return true;
+}
+
 /** Find the next displayed page across filtered sessions without skipping an intervening page. */
 export async function readLaterHistoryWindow<T extends { visibleBars: AggregatedMarketBarData[] }>({
   afterSequence, endSequence, sourceSeconds, displaySeconds, visibleCount, readWindow,

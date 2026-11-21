@@ -13,7 +13,15 @@ import { ArrowSettingsDialog } from "./arrow-controls";
 import { useArrowPreferences } from "./use-arrow-preferences";
 import { useAbcdPreferences } from "./use-abcd-preferences";
 import { isArrowDrawing } from "@/lib/market-replay/chart-drawings";
-import { useReplayFetch, useReplaySession } from "./replay-session-context";
+import { ReplayDrawingPaneProvider, useReplayFetch, useReplaySession } from "./replay-session-context";
+import { ReplayLayoutMenu, ReplayPaneDivider, ReplayPaneFrame, useReplayPaneLayout } from "./replay-pane-layout";
+import { ReplaySecondaryPane, type PaneControl } from "./replay-secondary-pane";
+import { useReplayPanePeriods } from "./use-replay-pane-periods";
+import { createPaneReader } from "./use-replay-pane-bars";
+import type { HistoricalPaneWindow } from "./use-historical-pane-window";
+import { useDrawingScopeGuard } from "./use-drawing-scope-guard";
+import type { ReplayViewportApi, ReplayViewportSnapshot } from "@/lib/market-replay/chart-range";
+import type { LayoutId, PaneId } from "@/lib/market-replay/multi-pane-layout";
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { ListTree, Loader2, ChartCandlestick, Settings2, Trash2, X } from "lucide-react";
@@ -56,7 +64,7 @@ import {
   type DrawingTool,
   type TrendLineGeometry,
 } from "@/lib/market-replay/chart-drawings";
-import { historicalWindowFocusSequence, mergeHistoricalBars, readLaterHistoryWindow, boundedHistoricalPlaybackWindow } from "@/lib/market-replay/historical-window";
+import { historicalWindowFocusSequence, mergeHistoricalBars, readLaterHistoryWindow, boundedHistoricalPlaybackWindow, commitHistoricalWindowChange } from "@/lib/market-replay/historical-window";
 import { datasetSession } from "@/lib/market-replay/dataset";
 import type {
   AggregatedMarketBarData,
@@ -73,6 +81,7 @@ import {
   EMA_LENGTH_MAX,
   EMA_LENGTH_MIN,
   MAX_EMA_INDICATORS,
+  formatInterval,
   isValidDisplayInterval,
 } from "@/lib/market-replay/types";
 import type { ReplayTradeAnnotationData } from "@/lib/paper-trading/types";
@@ -89,6 +98,9 @@ type WindowPayload = {
   visibleBars: AggregatedMarketBarData[];
   warmupBars: AggregatedMarketBarData[];
 };
+
+type HistoricalPaneFocus = { sequence: number; revision: number; prepared?: HistoricalPaneWindow };
+type WindowChange = (signal: AbortSignal) => Promise<() => void>;
 
 type AnnotationPayload = {
   items: ReplayTradeAnnotationData[];
@@ -113,11 +125,28 @@ export function HistoricalReplayClient({
   const [cursorMode, setCursorMode] = useReplayCursorPreference();
   const fetch = useReplayFetch();
   const replaySession = useReplaySession();
+  const layout = useReplayPaneLayout(false, "historical-replay-pane-layout-v1");
+  const { activePane } = layout;
+  const [paneToolbar, setPaneToolbar] = useState<HTMLDivElement | null>(null);
+  const [paneControls, setPaneControls] = useState<HTMLDivElement | null>(null);
+  const paneControllers = useRef(new Map<PaneId, PaneControl>());
+  const registerPane = useCallback((pane: PaneId, control: PaneControl | null) => {
+    if (control) paneControllers.current.set(pane, control);
+    else paneControllers.current.delete(pane);
+  }, []);
+  const paneReader = useMemo(createPaneReader, []);
+  const [layoutBusy, setLayoutBusy] = useState(false);
+  const layoutTransition = useRef(false);
+  const primaryViewportApi = useRef<ReplayViewportApi | null>(null);
+  const primaryViewport = useRef<ReplayViewportSnapshot | null>(null);
+  const beforeMaximize = useRef<ReplayViewportSnapshot | null>(null);
+  const [primaryRevision, setPrimaryRevision] = useState(0);
   const [displaySession, setDisplaySession] = useState(session.displaySession);
-  const requestedSessionRef = useRef(session.displaySession);
   const displayedSessionRef = useRef(session.displaySession);
   const [displayIntervalSeconds, setDisplayIntervalSeconds] = useState(session.displayIntervalSeconds);
-  const requestedIntervalRef = useRef(session.displayIntervalSeconds);
+  const [secondaryFocus, setSecondaryFocus] = useState<HistoricalPaneFocus>({ sequence: focusSequence, revision: 0 });
+  const [paneFocus, setPaneFocus] = useState<Partial<Record<PaneId, HistoricalPaneFocus>>>({});
+  const focusRevision = useRef(0);
   const displayedIntervalRef = useRef(session.displayIntervalSeconds);
   const mainWindowAbortRef = useRef<AbortController | null>(null);
   const visibleRangeRef = useRef<ReplayVisibleSequenceRange | null>(null);
@@ -126,12 +155,15 @@ export function HistoricalReplayClient({
   const [warmupBars, setWarmupBars] = useState<AggregatedMarketBarData[]>([]);
   const [annotations, setAnnotations] = useState<ReplayTradeAnnotationData[]>([]);
   const [loading, setLoading] = useState(true);
+  const { periods, setPeriod, mounted } = useReplayPanePeriods("historical-replay-pane-periods-v1:" + dataset.id,
+    dataset.sourceIntervalSeconds, displayIntervalSeconds, layout.panes, !loading);
   const [error, setError] = useState<string | null>(null);
   const [measurementArmed, setMeasurementArmed] = useState(false);
   const [drawingTool, setDrawingTool] = useState<DrawingTool | null>(null);
   const [drawingObjectsOpen, setDrawingObjectsOpen] = useState(false);
-  const drawingState = useHistoricalDrawings({ datasetId: dataset.id, fetch,
-    writeScope: dataset.id + ":" + replaySession?.id + ":" + replaySession?.activeProjectionId });
+  const drawingWriteScope = dataset.id + ":" + replaySession?.id + ":" + replaySession?.activeProjectionId;
+  const drawingScopeGuard = useDrawingScopeGuard(drawingWriteScope);
+  const drawingState = useHistoricalDrawings({ datasetId: dataset.id, fetch, writeScope: drawingWriteScope });
   const { drawings, loaded: drawingsLoaded, busy: drawingBusy, error: drawingError } = drawingState;
   const [rectangleStyleId, setRectangleStyleId] = useState<string | null>(null);
   const [arrowStyleId, setArrowStyleId] = useState<string | null>(null);
@@ -177,17 +209,15 @@ export function HistoricalReplayClient({
     displayUtcOffsetMinutes,
   } = useReplayPreferences(dataset);
   const textDrawing = useTextDrawingEditor(
-    dataset.id + ":" + replaySession?.id + ":" + replaySession?.activeProjectionId,
-    chartVisibility.drawings, drawings, defaultTextStyle);
+    drawingWriteScope, chartVisibility.drawings, drawings, defaultTextStyle);
   const { open: openTextDrawing } = textDrawing;
   const { beforeExit: finishText, discard: discardText, requestSettings: requestTextSettings } = textDrawing;
   const drawingCommandsDisabled = !chartVisibility.drawings || !drawingsLoaded || drawingBusy || measurementArmed || Boolean(textDrawing.editor)
     || Boolean(settingsDialog) || Boolean(drawingTool) || Boolean(rectangleStyleId) || Boolean(styleDrawingId) || Boolean(arrowStyleId);
-  const drawingCommands = useDrawingCommands({ datasetId: dataset.id, scope: dataset.id + ":" + replaySession?.id + ":" + replaySession?.activeProjectionId,
+  const drawingCommands = useDrawingCommands({ datasetId: dataset.id, scope: drawingWriteScope, active: activePane === 1,
     fetch, drawings, selectedDrawingId, setDrawings: drawingState.setDrawings, select: setSelectedDrawingId, disabled: drawingCommandsDisabled, editor: textDrawing.editor, chartApi: textDrawing.apiRef,
     displayKey: `${displayIntervalSeconds}:${displaySession}`, onNudgeError: drawingState.setError });
-  useDrawingStyleShortcuts({ drawings, selectedDrawingId, drawingTool,
-    scope: dataset.id + ":" + replaySession?.id + ":" + replaySession?.activeProjectionId,
+  useDrawingStyleShortcuts({ drawings, selectedDrawingId, drawingTool, active: activePane === 1, scope: drawingWriteScope,
     disabled: drawingCommandsDisabled || drawingCommands.pasteUnconfirmed || drawingCommands.pending,
     templates: { TREND_LINE: trendLineTemplates, FIB_RETRACEMENT: fibonacciTemplates, RECTANGLE: rectangleTemplates,
       TEXT: textTemplates, AB_CD: abcdPreferences.templates, ARROW_UP: arrowPreferences.ARROW_UP.templates, ARROW_DOWN: arrowPreferences.ARROW_DOWN.templates },
@@ -238,15 +268,37 @@ export function HistoricalReplayClient({
     },
   });
   const playbackEngine = playback.engine;
-  useWebFullscreen(webFullscreen, () => setWebFullscreen(false), Boolean(drawingTool || selectedDrawingId || measurementArmed));
-  const startHistoricalPlayback = (target: ChartHideAfter) => {
+  useWebFullscreen(webFullscreen, () => setWebFullscreen(false), () => activePane === 1
+    ? Boolean(drawingTool || selectedDrawingId || measurementArmed) : Boolean(paneControllers.current.get(activePane)?.hasInteraction()));
+  function startHistoricalPlayback(target: ChartHideAfter) {
+    if (windowBusyRef.current || layoutTransition.current) return;
+    playbackEngine.pause();
+    const sequence = target.bar.lastSequence;
+    const startPlayback = () => {
+      setChartFocusSequence(sequence);
+      setSecondaryFocus({ sequence, revision: ++focusRevision.current });
+      setPaneFocus({});
+      playbackEngine.start(target);
+    };
+    // A secondary pane can start playback outside the primary pane's loaded page.
+    if (!bars.length || sequence < bars[0].firstSequence || sequence > bars.at(-1)!.lastSequence) {
+      void loadHistoryWindow(displayIntervalSeconds, sequence, { onApply: startPlayback });
+    } else {
+      setWindowError(null);
+      startPlayback();
+    }
+  }
+
+  function exitHistoricalPlayback() {
+    mainWindowAbortRef.current?.abort();
+    mainWindowAbortRef.current = null;
     windowAbortRef.current?.abort();
     windowBusyRef.current = false;
     setWindowLoading(false);
     setWindowError(null);
-    setChartFocusSequence(target.bar.lastSequence);
-    playbackEngine.start(target);
-  };
+    setChartFocusSequence(null);
+    playbackEngine.exit();
+  }
   useEffect(() => {
     if (!playback.active) return;
     const onKeyDown = (event: KeyboardEvent) => {
@@ -326,6 +378,14 @@ export function HistoricalReplayClient({
     () => resolveDisplaySession(dataset, displaySession) ?? datasetSession(dataset),
     [dataset, displaySession],
   );
+  const paneChart = {
+    dataset, drawingWriteScope, drawingScopeGuard, displayUtcOffsetMinutes, chartMarketSession: barCountSession, barCountRthSession,
+    defaultTextStyle, setDefaultTextStyle, textTemplates, setTextTemplates,
+    defaultTrendLineStyle, setDefaultTrendLineStyle, trendLineTemplates, setTrendLineTemplates,
+    defaultFibonacciStyle, setDefaultFibonacciStyle, fibonacciTemplates, setFibonacciTemplates,
+    defaultRectangleStyle, setDefaultRectangleStyle, rectangleTemplates, setRectangleTemplates,
+    abcdPreferences, setAbcdPreferences, arrowPreferences, setArrowPreferences,
+  };
 
   const armDrawing = useCallback(async (tool: DrawingTool) => {
     if (!await finishText()) return;
@@ -410,7 +470,7 @@ export function HistoricalReplayClient({
     }
   }, [dataset.id, session.id, fetch]);
 
-  const loadHistoryWindow = useCallback(async (seconds: number, targetSequence: number, nextSession: DisplaySession = requestedSessionRef.current) => {
+  const runWindowChange = useCallback(async (prepare: WindowChange) => {
     mainWindowAbortRef.current?.abort();
     windowAbortRef.current?.abort();
     windowBusyRef.current = true;
@@ -420,41 +480,17 @@ export function HistoricalReplayClient({
     if (initial) setLoading(true);
     else setWindowLoading(true);
     setWindowError(null);
-    const params = new URLSearchParams({
-      displayIntervalSeconds: String(seconds),
-      displaySession: nextSession,
-      endSequence: String(session.endSequence),
-      focusSequence: String(targetSequence),
-      visibleCount: String(VISIBLE_BAR_COUNT),
-      warmupCount: String(Math.min(EMA_LENGTH_MAX, indicatorWarmupCount)),
-    });
     try {
-      const response = await fetch(`/api/market-datasets/${dataset.id}/bars/window?${params}`, { signal: controller.signal });
-      const data = await response.json() as WindowPayload & { error?: string };
-      if (!response.ok) throw new Error(data.error);
-      if (controller.signal.aborted) return false;
-      // Commit the new period and its bars together; old requests must never mix timelines.
-      exhaustedEdgesRef.current = { left: false, right: false };
-      setChartFocusSequence(initial ? targetSequence : null);
-      displayedIntervalRef.current = seconds;
-      displayedSessionRef.current = nextSession;
-      requestedSessionRef.current = nextSession;
-      setDisplaySession(nextSession);
-      playbackEngine.timelineChanged();
-      setDisplayIntervalSeconds(seconds);
-      setBars(data.visibleBars);
-      setWarmupBars(data.warmupBars);
-      return true;
+      return await commitHistoricalWindowChange(controller.signal, prepare);
     } catch (cause) {
       if (!controller.signal.aborted) {
         const message = cause instanceof Error && cause.message ? cause.message : copy.paperTrading.historicalReplayLoadFailed;
         if (initial) setError(message);
         else setWindowError(message);
-        requestedIntervalRef.current = displayedIntervalRef.current;
-        requestedSessionRef.current = displayedSessionRef.current;
       }
       return false;
     } finally {
+      controller.abort();
       if (mainWindowAbortRef.current === controller) {
         mainWindowAbortRef.current = null;
         windowBusyRef.current = false;
@@ -463,39 +499,47 @@ export function HistoricalReplayClient({
         setWindowLoading(false);
       }
     }
-  }, [dataset.id, indicatorWarmupCount, session.endSequence, fetch, playbackEngine]);
+  }, []);
 
-  const changeDisplayInterval = useCallback(async (seconds: number) => {
-    playbackEngine.pause();
-    if (!dataset.sourceIntervalSeconds || !isValidDisplayInterval(dataset.sourceIntervalSeconds, seconds)) {
-      setWindowError(copy.marketReplay.invalidDisplayInterval);
-      return false;
-    }
-    if (seconds === displayIntervalSeconds && mainWindowAbortRef.current === null) return true;
-    requestedIntervalRef.current = seconds;
-    const target = playbackEngine.getSnapshot().boundary?.bar.lastSequence
-      ?? historicalWindowFocusSequence(visibleRangeRef.current, focusSequence, session.startSequence, session.endSequence);
-    return loadHistoryWindow(seconds, target);
-  }, [dataset.sourceIntervalSeconds, displayIntervalSeconds, focusSequence, loadHistoryWindow, session.endSequence, session.startSequence, playbackEngine]);
-
-  const changeDisplaySession = useCallback(async (next: DisplaySession) => {
-    playbackEngine.pause();
-    if (!dataset.availableDisplaySessions.includes(next) || !resolveDisplaySession(dataset, next)) {
-      setWindowError(copy.marketReplay.unsupportedDisplaySession);
-      return false;
-    }
-    if (next === displaySession && mainWindowAbortRef.current === null) return true;
-    requestedSessionRef.current = next;
-    const target = playbackEngine.getSnapshot().boundary?.bar.lastSequence
-      ?? historicalWindowFocusSequence(visibleRangeRef.current, focusSequence, session.startSequence, session.endSequence);
-    return loadHistoryWindow(requestedIntervalRef.current, target, next);
-  }, [dataset, displaySession, focusSequence, loadHistoryWindow, playbackEngine, session.startSequence, session.endSequence]);
+  const loadHistoryWindow = useCallback((seconds: number, targetSequence: number, options?: {
+    session?: DisplaySession; preparePanes?: WindowChange; onApply?: () => void;
+  }) => runWindowChange(async signal => {
+    const nextSession = options?.session ?? displayedSessionRef.current;
+    const params = new URLSearchParams({
+      displayIntervalSeconds: String(seconds),
+      displaySession: nextSession,
+      endSequence: String(session.endSequence),
+      focusSequence: String(targetSequence),
+      visibleCount: String(VISIBLE_BAR_COUNT),
+      warmupCount: String(Math.min(EMA_LENGTH_MAX, indicatorWarmupCount)),
+    });
+    const readPrimary = async () => {
+      const response = await fetch("/api/market-datasets/" + dataset.id + "/bars/window?" + params, { signal });
+      const data = await response.json() as WindowPayload & { error?: string };
+      if (!response.ok) throw new Error(data.error);
+      return data;
+    };
+    const [data, applyPanes] = await Promise.all([readPrimary(), options?.preparePanes?.(signal)]);
+    return () => {
+      exhaustedEdgesRef.current = { left: false, right: false };
+      setChartFocusSequence(initialLoadCompletedRef.current ? null : targetSequence);
+      displayedIntervalRef.current = seconds;
+      displayedSessionRef.current = nextSession;
+      setDisplaySession(nextSession);
+      setDisplayIntervalSeconds(seconds);
+      setBars(data.visibleBars);
+      setWarmupBars(data.warmupBars);
+      playbackEngine.timelineChanged();
+      applyPanes?.();
+      options?.onApply?.();
+    };
+  }), [dataset.id, indicatorWarmupCount, session.endSequence, fetch, playbackEngine, runWindowChange]);
 
   useEffect(() => {
     playbackEngine.pause();
     const target = playbackEngine.getSnapshot().boundary?.bar.lastSequence
       ?? historicalWindowFocusSequence(visibleRangeRef.current, focusSequence, session.startSequence, session.endSequence);
-    void loadHistoryWindow(requestedIntervalRef.current, target);
+    void loadHistoryWindow(displayedIntervalRef.current, target);
     return () => mainWindowAbortRef.current?.abort();
   }, [focusSequence, loadHistoryWindow, session.endSequence, session.startSequence, playbackEngine]);
 
@@ -512,13 +556,110 @@ export function HistoricalReplayClient({
   useEffect(() => {
     const onKeyDown = (event: KeyboardEvent) => {
       const key = replayDrawingShortcutKey(event);
-      if (!key || hasVisibleReplayDialog() || event.repeat || settingsDialog || rectangleStyleId || styleDrawingId || textDrawing.editor || drawingBusy || !drawingsLoaded || isReplayShortcutInputTarget(event.target)) return;
+      if (!key || hasVisibleReplayDialog() || event.repeat || layoutBusy || settingsDialog || rectangleStyleId || styleDrawingId || textDrawing.editor || isReplayShortcutInputTarget(event.target)) return;
+      if (activePane === 1 && (drawingBusy || !drawingsLoaded)) return;
       event.preventDefault();
-      armDrawing(key);
+      if (activePane === 1) void armDrawing(key);
+      else void paneControllers.current.get(activePane)?.armDrawing(key);
     };
     window.addEventListener("keydown", onKeyDown);
     return () => window.removeEventListener("keydown", onKeyDown);
-  }, [armDrawing, settingsDialog, rectangleStyleId, styleDrawingId, textDrawing.editor, drawingBusy, drawingsLoaded]);
+  }, [activePane, armDrawing, layoutBusy, settingsDialog, rectangleStyleId, styleDrawingId, textDrawing.editor, drawingBusy, drawingsLoaded]);
+
+  async function changeWorkspace(action: () => boolean | void | Promise<boolean | void>) {
+    if (windowBusyRef.current || layoutTransition.current || drawingCommands.pasteUnconfirmed || drawingCommands.pending && !drawingCommands.nudging
+      || settingsDialog || rectangleStyleId || arrowStyleId || styleDrawingId) return false;
+    layoutTransition.current = true;
+    setLayoutBusy(true);
+    try {
+      if (!await finishText() || !await drawingCommands.flushNudges() || drawingBusy && !textDrawing.editor) return false;
+      for (const controller of paneControllers.current.values()) if (!await controller.prepare()) return false;
+      const sequence = playback.boundary?.bar.lastSequence ?? bars.at(-1)?.lastSequence ?? focusSequence;
+      primaryViewport.current = primaryViewportApi.current?.capture(sequence, playback.active) ?? primaryViewport.current;
+      setDrawingTool(null);
+      setMeasurementArmed(false);
+      return (await action()) !== false;
+    } finally {
+      layoutTransition.current = false;
+      setLayoutBusy(false);
+    }
+  }
+
+  async function selectLayout(template: LayoutId) {
+    await changeWorkspace(() => layout.select(template));
+  }
+
+  function togglePane(pane: PaneId) {
+    void changeWorkspace(() => {
+      if (layout.maximized === pane) {
+        primaryViewport.current = beforeMaximize.current;
+        setPrimaryRevision(current => current + 1);
+        for (const controller of paneControllers.current.values()) controller.restore();
+      } else {
+        beforeMaximize.current = primaryViewport.current;
+        for (const controller of paneControllers.current.values()) controller.capture();
+      }
+      layout.toggleMaximize(pane);
+    });
+  }
+
+  function changeActivePeriod(seconds: number) {
+    return changeWorkspace(() => {
+      if (!dataset.sourceIntervalSeconds || !isValidDisplayInterval(dataset.sourceIntervalSeconds, seconds)) {
+        setWindowError(copy.marketReplay.invalidDisplayInterval);
+        return false;
+      }
+      if (periods[activePane - 1] === seconds) return true;
+      playbackEngine.pause();
+      const cursor = playbackEngine.getSnapshot().boundary?.bar.lastSequence;
+      if (activePane === 1) {
+        const target = cursor ?? historicalWindowFocusSequence(visibleRangeRef.current, focusSequence, session.startSequence, session.endSequence);
+        return loadHistoryWindow(seconds, target);
+      }
+      const controller = paneControllers.current.get(activePane);
+      if (!controller?.loadHistory) return false;
+      const loadHistory = controller.loadHistory;
+      const focus = paneFocus[activePane] ?? secondaryFocus;
+      const target = Math.min(session.endSequence, cursor ?? controller.inspect() ?? focus.sequence);
+      return runWindowChange(async signal => {
+        const prepared = await loadHistory(seconds, displaySession, target, signal);
+        return () => {
+          focusPane(activePane, target, prepared);
+          setPeriod(activePane, seconds);
+        };
+      });
+    });
+  }
+
+  function focusPane(pane: PaneId, sequence: number, prepared?: HistoricalPaneWindow) {
+    const next = { sequence: Math.min(session.endSequence, sequence), revision: ++focusRevision.current, prepared };
+    setPaneFocus(current => ({ ...current, [pane]: next }));
+  }
+
+  function changeActiveSession(next: DisplaySession) {
+    return changeWorkspace(() => {
+      if (next === displaySession) return true;
+      if (!dataset.availableDisplaySessions.includes(next) || !resolveDisplaySession(dataset, next)) {
+        setWindowError(copy.marketReplay.unsupportedDisplaySession);
+        return false;
+      }
+      playbackEngine.pause();
+      const cursor = playbackEngine.getSnapshot().boundary?.bar.lastSequence;
+      const target = cursor ?? historicalWindowFocusSequence(visibleRangeRef.current, focusSequence, session.startSequence, session.endSequence);
+      const visiblePanes = [...paneControllers.current].filter(([pane]) => layout.panes.has(pane));
+      return loadHistoryWindow(displayIntervalSeconds, target, { session: next, preparePanes: async signal => {
+        const nextFocus: Partial<Record<PaneId, HistoricalPaneFocus>> = {};
+        await Promise.all(visiblePanes.map(async ([pane, controller]) => {
+          if (!controller.loadHistory) return;
+          const focus = paneFocus[pane] ?? secondaryFocus;
+          const sequence = Math.min(session.endSequence, cursor ?? controller.inspect() ?? focus.sequence);
+          const prepared = await controller.loadHistory(periods[pane - 1], next, sequence, signal);
+          nextFocus[pane] = { sequence, revision: ++focusRevision.current, prepared };
+        }));
+        return () => setPaneFocus(current => ({ ...current, ...nextFocus }));
+      } });
+    });
+  }
 
   function updateAbrLength(value: number) {
     if (!Number.isInteger(value) || value < ABR_LENGTH_MIN || value > ABR_LENGTH_MAX) {
@@ -601,13 +742,14 @@ export function HistoricalReplayClient({
       <div className="flex h-12 shrink-0 items-center gap-2 overflow-x-auto border-b px-3 [&>*]:shrink-0">
         {webFullscreen ? <span className="max-w-48 truncate text-xs font-medium" title={dataset.name}>{dataset.symbol} · {copy.paperTrading.historicalReplayReadOnly}</span> : null}
         <DisplayIntervalControls
-          value={displayIntervalSeconds}
+          value={periods[activePane - 1]}
           sourceIntervalSeconds={dataset.sourceIntervalSeconds}
-          disabled={windowLoading}
-          onChange={changeDisplayInterval}
+          disabled={windowLoading || layoutBusy}
+          onChange={changeActivePeriod}
         />
         <DisplaySessionControls value={displaySession} available={dataset.availableDisplaySessions}
-          disabled={windowLoading} onChange={changeDisplaySession} />
+          disabled={windowLoading || layoutBusy} onChange={changeActiveSession} />
+        {activePane === 1 ? <>
         <ChartVisibilityMenu value={chartVisibility} onChange={changeChartVisibility} />
         <Button type="button" variant={settingsDialog === "candlesticks" ? "secondary" : "ghost"} size="sm" className="h-8" onClick={() => { setChartStyleDraft(cloneChartDisplay(chartStyle)); setSettingsDialog("candlesticks"); }}>
           <ChartCandlestick className="h-4 w-4" />{copy.marketReplay.chartStyle}
@@ -615,19 +757,33 @@ export function HistoricalReplayClient({
         <Button type="button" variant={settingsDialog === "indicators" ? "secondary" : "ghost"} size="sm" className="h-8" onClick={() => setSettingsDialog("indicators")}>
           <Settings2 className="h-4 w-4" />{copy.marketReplay.indicators}
         </Button>
-        {webFullscreen ? <div className="ml-auto"><UserEntry compact session={replaySession ?? undefined} /></div> : null}
+        </> : <div ref={setPaneControls} className="flex items-center gap-2" />}
+        <div className="ml-auto flex items-center gap-2">
+          <ReplayLayoutMenu template={layout.template} disabled={windowLoading || layoutBusy} onSelect={selectLayout} onReset={layout.resetRatios} />
+          {webFullscreen ? <UserEntry compact session={replaySession ?? undefined} /> : null}
+        </div>
       </div>
       <div className="flex min-h-0 flex-1">
-        <ReplayDrawingToolbar cursorMode={cursorMode} onCursorChange={mode => { if (!drawingCommands.pending && !drawingCommands.pasteUnconfirmed) void selectCursor(mode); }} drawingTool={drawingTool} drawingDisabled={!drawingsLoaded || drawingBusy || drawingCommands.pending || drawingCommands.pasteUnconfirmed}
+        {activePane === 1 ? <ReplayDrawingToolbar cursorMode={cursorMode} onCursorChange={mode => { if (!drawingCommands.pending && !drawingCommands.pasteUnconfirmed) void selectCursor(mode); }} drawingTool={drawingTool} drawingDisabled={!drawingsLoaded || drawingBusy || drawingCommands.pending || drawingCommands.pasteUnconfirmed || layoutBusy}
           history={drawingCommands} onArmDrawing={tool => void armDrawing(tool)} measurementArmed={measurementArmed}
           onToggleMeasurement={() => { if (!drawingCommands.pending && !drawingCommands.pasteUnconfirmed) { setDrawingTool(null); setMeasurementArmed(current => !current); } }}
           drawingObjectsOpen={drawingObjectsOpen} onToggleDrawingObjects={() => setDrawingObjectsOpen(current => !current)}
-          webFullscreen={webFullscreen} onToggleWebFullscreen={() => setWebFullscreen(current => !current)} />
-      <div className="relative min-h-0 min-w-0 flex-1" aria-busy={windowLoading || drawingBusy}>
+          webFullscreen={webFullscreen} onToggleWebFullscreen={() => setWebFullscreen(current => !current)} /> : <div ref={setPaneToolbar} className="flex shrink-0" />}
+      <div ref={layout.setHost} className="relative min-h-0 min-w-0 flex-1" data-replay-pane-workspace aria-busy={windowLoading || drawingBusy}>
+        {windowLoading ? <div className="absolute left-3 top-3 z-50 flex w-fit items-center gap-2 rounded-md border bg-card px-3 py-2 text-xs text-muted-foreground" role="status"><Loader2 className="h-4 w-4 animate-spin" aria-hidden="true" />{copy.marketReplay.loading}</div> : null}
+        {windowError ? <Alert className="absolute left-3 top-3 z-50 w-auto max-w-[calc(100%-1.5rem)] border-negative/40 bg-negative-background" role="alert"><AlertTitle>{copy.common.error}</AlertTitle><AlertDescription>{windowError}</AlertDescription></Alert> : null}
+        {layout.measured && layout.panes.has(1) ? <ReplayPaneFrame pane={1} rect={layout.panes.get(1)!} active={activePane === 1}
+          title={dataset.symbol + " · " + formatInterval(displayIntervalSeconds)} showHeader={layout.panes.size > 1 || layout.maximized === 1}
+          maximized={layout.maximized === 1} canMaximize={!layoutBusy && !windowLoading && (layout.panes.size > 1 || layout.maximized === 1)}
+          onActivate={() => layout.setActive(1)} onMaximize={() => togglePane(1)}>
         {drawingError ? <Alert className="absolute left-3 top-3 z-50 w-auto border-red-200 dark:border-negative/40 bg-red-50 dark:bg-negative-background" role="alert"><AlertTitle>{copy.marketReplay.drawingSyncErrorTitle}</AlertTitle><AlertDescription>{drawingError}</AlertDescription></Alert> : null}
-        {windowLoading ? <div className="absolute left-3 top-3 z-50 flex items-center gap-2 rounded-md border bg-white dark:bg-card px-3 py-2 text-xs text-slate-600 dark:text-secondary-text" role="status"><Loader2 className="h-4 w-4 animate-spin" aria-hidden="true" />{copy.marketReplay.loading}</div> : null}
-        {windowError ? <Alert className="absolute left-3 top-3 z-50 w-auto border-red-200 dark:border-negative/40 bg-red-50 dark:bg-negative-background" role="alert"><AlertTitle>{copy.common.error}</AlertTitle><AlertDescription>{windowError}</AlertDescription></Alert> : null}
         <ReplayChart
+          key={primaryRevision}
+          compact={layout.panes.size > 1 || Boolean(layout.maximized)}
+          shortcutsActive={activePane === 1}
+          onAltMaximize={!layoutBusy && !windowLoading && (layout.panes.size > 1 || layout.maximized === 1) ? () => togglePane(1) : undefined}
+          viewportApiRef={primaryViewportApi}
+          initialViewportSnapshot={primaryViewport.current}
           cursorMode={cursorMode}
           datasetId={dataset.id}
           priceTickSize={dataset.priceTickSize}
@@ -661,7 +817,7 @@ export function HistoricalReplayClient({
           }}
           drawings={visibleDrawings}
           drawingNudgePreviews={drawingCommands.nudgePreviews}
-          drawingEditingLocked={drawingCommands.nudging}
+          drawingEditingLocked={drawingCommands.nudging || layoutBusy}
           selectedDrawingId={selectedDrawingId}
           onSelectedDrawingIdChange={setSelectedDrawingId}
           onCreateDrawing={createDrawing}
@@ -689,7 +845,11 @@ export function HistoricalReplayClient({
           currentSourceSequence={playback.boundary?.bar.lastSequence}
           focusSequence={chartFocusSequence}
           onFocusApplied={() => setChartFocusSequence(null)}
-          onVisibleSequenceRangeChange={handleVisibleSequenceRange}
+          onVisibleSequenceRangeChange={range => {
+            const sequence = playback.boundary?.bar.lastSequence ?? bars.at(-1)?.lastSequence ?? focusSequence;
+            primaryViewport.current = primaryViewportApi.current?.capture(sequence, playback.active) ?? primaryViewport.current;
+            handleVisibleSequenceRange(range);
+          }}
           readOnly
           paperBusy={false}
           paperError={null}
@@ -725,10 +885,28 @@ export function HistoricalReplayClient({
           {drawingBusy ? <p role="status" className="border-t px-3 py-2 text-xs text-slate-500 dark:text-muted-foreground">{copy.marketReplay.drawingSaving}</p> : null}
           {!drawingsLoaded && !drawingBusy ? <Button type="button" variant="outline" className="m-3" onClick={() => void drawingState.refresh()}>{copy.marketReplay.drawingRetry}</Button> : null}
         </aside> : null}
+        </ReplayPaneFrame> : null}
+        {layout.dividers.map(divider => <ReplayPaneDivider key={divider.key} divider={divider} onRatio={ratio => layout.changeRatio(divider.key, ratio)} />)}
+        {mounted.map(pane => {
+          const focus = paneFocus[pane] ?? secondaryFocus;
+          return <ReplayDrawingPaneProvider key={pane} pane={pane}>
+            <ReplaySecondaryPane pane={pane} core={paneChart} rect={layout.panes.get(pane)} active={activePane === pane}
+              period={periods[pane - 1]} sequence={playback.boundary?.bar.lastSequence ?? session.endSequence} session={displaySession}
+              cursorMode={cursorMode} onCursorChange={setCursorMode} controls={paneControls} toolbar={paneToolbar}
+              register={registerPane} maximized={layout.maximized === pane} canMaximize={!layoutBusy && !windowLoading}
+              onActivate={() => layout.setActive(pane)} onMaximize={() => togglePane(pane)} reader={paneReader}
+              blocked={layoutBusy || Boolean(settingsDialog || rectangleStyleId || arrowStyleId || styleDrawingId)}
+              webFullscreen={webFullscreen} toggleWebFullscreen={() => setWebFullscreen(current => !current)}
+              historical={{ start: session.startSequence, end: session.endSequence, focus: focus.sequence, focusRevision: focus.revision, prepared: focus.prepared,
+                annotations, boundary: playback.boundary, playbackActive: playback.active, playing: playback.playing && !playback.busy && !windowLoading,
+                countdownSeconds: playback.countdownSeconds, onStart: windowLoading ? undefined : startHistoricalPlayback,
+                onHide: playbackEngine.hide, onFocus: sequence => focusPane(pane, sequence) }} />
+          </ReplayDrawingPaneProvider>;
+        })}
       </div>
       </div>
       <HistoricalPlaybackBar playback={playback} seconds={displayIntervalSeconds} disabled={windowLoading}
-        onToggle={playbackEngine.toggle} onNext={() => void playbackEngine.step()} onRate={playbackEngine.setRate} onExit={playbackEngine.exit} />
+        onToggle={playbackEngine.toggle} onNext={() => void playbackEngine.step()} onRate={playbackEngine.setRate} onExit={exitHistoricalPlayback} />
     </div>
 
       {textDrawing.editor ? <TextSettingsDialog key={textDrawing.editor.key} editor={textDrawing.editor}

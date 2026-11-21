@@ -302,6 +302,7 @@ export function useReplayChartSetup(core: ReturnType<typeof useReplayChartCore>)
     viewportUpdatingRef.current = true;
     const following = viewportModeRef.current === "following" || (viewportModeRef.current === null
       && isReplayRangeFollowing(previousRange ?? { from: 0, to: 0 }, previous.length - 1));
+    const previousVisibleLast = barsRef.current.at(-1);
     barsRef.current = visibleBars;
     timelineBarsRef.current = next;
     projectionBarsRef.current = projectionBars;
@@ -339,11 +340,12 @@ export function useReplayChartSetup(core: ReturnType<typeof useReplayChartCore>)
       if (mappedTimelineRange) {
         chart.timeScale().setVisibleLogicalRange(mappedTimelineRange);
       } else if (range && historicalPlaybackActive && hiddenAfter && lastHiddenAfterRef.current) {
-        const previousIndex = previous.findIndex(bar => bar.timestamp === lastHiddenAfterRef.current!.bar.timestamp);
-        const previousInNext = next.findIndex(bar => bar.timestamp === lastHiddenAfterRef.current!.bar.timestamp);
+        const previousIndex = previous.findIndex(bar => bar.timestamp === previousVisibleLast?.timestamp);
+        const previousInNext = next.findIndex(bar => bar.timestamp === previousVisibleLast?.timestamp);
         const nextIndex = next.findIndex(bar => bar.timestamp === visibleBars.at(-1)?.timestamp);
         const shift = previousIndex >= 0 && previousInNext >= 0 ? previousInNext - previousIndex : 0;
-        const advanced = rangeAfterNewReplayBar(range, previousInNext, Math.max(0, nextIndex - previousInNext), following);
+        const advance = previousInNext >= 0 ? Math.max(0, nextIndex - previousInNext) : 0;
+        const advanced = rangeAfterNewReplayBar(range, previousInNext, advance, following);
         chart.timeScale().setVisibleLogicalRange({ from: advanced.from + shift, to: advanced.to + shift });
       } else if (range && previousLastInNext >= 0) {
         // A rolling server window renumbers logical indices. Preserve zoom and historical panning.
@@ -395,17 +397,18 @@ export function useReplayChartSetup(core: ReturnType<typeof useReplayChartCore>)
     if (focusSequence === null) return;
     const chart = chartRef.current;
     if (!chart) return;
-    const range = rangeForReplayFocus(bars, focusSequence, chart.timeScale().getVisibleLogicalRange());
+    const focusBars = historicalPlaybackActive ? visibleBars : bars;
+    const range = rangeForReplayFocus(focusBars, focusSequence, chart.timeScale().getVisibleLogicalRange());
     if (!range) return;
     viewportModeRef.current = historicalPlaybackActive ? "following" : "history";
     if (historicalPlaybackActive) {
       const span = range.to - range.from;
-      const index = bars.findIndex(bar => bar.lastSequence >= focusSequence);
+      const index = focusBars.length - 1;
       const from = index - span * 0.618;
       chart.timeScale().setVisibleLogicalRange({ from, to: from + span });
     } else chart.timeScale().setVisibleLogicalRange(range);
     onFocusAppliedRef.current?.();
-  }, [bars, focusSequence, chartRef, onFocusAppliedRef, viewportModeRef, historicalPlaybackActive]);
+  }, [bars, visibleBars, focusSequence, chartRef, onFocusAppliedRef, viewportModeRef, historicalPlaybackActive]);
 
   useEffect(() => {
     tradeAnnotationPrimitiveRef.current?.setData({

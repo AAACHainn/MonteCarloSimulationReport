@@ -281,7 +281,7 @@ export const zhMarketReplay = {
       historicalPlayback: "逐根回放",
       historicalPlaybackFinished: "已到达本会话／轮次的历史终点",
       historicalPlaybackTiming: (seconds: string) => `每 ${seconds} 秒揭示一根显示 K 线。`,
-      historicalPlaybackHint: "当前显示周期逐根回放，仅查看行情；退出回放恢复全部 K 线。",
+      historicalPlaybackHint: "按主窗显示周期逐根回放，退出回放恢复历史范围内的 K 线。",
       hideSubsequentBars: "隐藏后续K线",
       subsequentBarsHidden: "当前已隐藏后续K线",
       restoreSubsequentBars: "恢复",

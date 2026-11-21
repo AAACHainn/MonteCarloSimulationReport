@@ -1,6 +1,6 @@
 import { describe, expect, it, vi } from "vitest";
-import { historicalWindowFocusSequence, mergeHistoricalBars, readLaterHistoryWindow, boundedHistoricalPlaybackWindow } from "./historical-window";
-import { isHistoricalPlaybackBarReady } from "./historical-playback";
+import { historicalWindowFocusSequence, mergeHistoricalBars, readLaterHistoryWindow, boundedHistoricalPlaybackWindow, commitHistoricalWindowChange } from "./historical-window";
+import { createHistoricalPlayback, isHistoricalPlaybackBarReady } from "./historical-playback";
 import { calculateEmaSeries } from "./ema";
 import { REPLAY_HISTORY_BAR_LIMIT } from "./types";
 import type { AggregatedMarketBarData } from "./types";
@@ -93,6 +93,37 @@ describe("historical period changes", () => {
   it("clamps blank chart margins to the historical session boundaries", () => {
     expect(historicalWindowFocusSequence({ fromSequence: 0, toSequence: 10 }, 100, 100, 2000)).toBe(100);
     expect(historicalWindowFocusSequence({ fromSequence: 2500, toSequence: 3000 }, 100, 100, 2000)).toBe(2000);
+  });
+});
+
+describe("committing an asynchronous historical window change", () => {
+  it("keeps all settings and windows when one pane fails while switching session", async () => {
+    const controller = new AbortController();
+    const apply = vi.fn();
+    const failed = new Error("secondary window failed");
+    await expect(commitHistoricalWindowChange(controller.signal, async () => {
+      const [primary, secondary] = await Promise.all([Promise.resolve([bar(5)]), Promise.reject(failed)]);
+      return () => apply(primary, secondary);
+    })).rejects.toBe(failed);
+    expect(apply).not.toHaveBeenCalled();
+    await expect(commitHistoricalWindowChange(controller.signal, async () => () => apply([bar(5)], [bar(10)]))).resolves.toBe(true);
+    expect(apply).toHaveBeenCalledOnce();
+    expect(apply).toHaveBeenCalledWith([bar(5)], [bar(10)]);
+  });
+
+  it("discards a completed seek after the user exits playback", async () => {
+    const playback = createHistoricalPlayback({ endSequence: 50,
+      getTimeline: () => ({ bars: [bar(0)], seconds: 60, session: "ETH" }), readLater: async () => [], loadFailed: "failed" });
+    const target = { bar: bar(0), displayIntervalSeconds: 60, displaySession: "ETH" as const };
+    const controller = new AbortController();
+    playback.start(target);
+    let finish: (apply: () => void) => void = () => {};
+    const seek = commitHistoricalWindowChange(controller.signal, () => new Promise(resolve => { finish = resolve; }));
+    controller.abort();
+    playback.exit();
+    finish(() => playback.start(target));
+    await expect(seek).resolves.toBe(false);
+    expect(playback.getSnapshot()).toMatchObject({ active: false, boundary: null });
   });
 });
 
