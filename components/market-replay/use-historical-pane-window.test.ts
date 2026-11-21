@@ -1,7 +1,8 @@
 import { describe, expect, it, vi } from "vitest";
 import type { AggregatedMarketBarData, MarketDatasetSummary } from "@/lib/market-replay/types";
+import { commitHistoricalWindowChange } from "@/lib/market-replay/historical-window";
 import type { WindowPayload } from "./replay-client-shared";
-import { readInitialHistoricalPaneWindow } from "./use-historical-pane-window";
+import { prepareHistoricalPaneWindow, readInitialHistoricalPaneWindow } from "./use-historical-pane-window";
 
 const dataset = { id: "history", sourceIntervalSeconds: 60, dataVersion: 1,
   symbol: "ES", timezone: "America/Chicago", tradingWeekdays: [1, 2, 3, 4, 5] } as MarketDatasetSummary;
@@ -51,5 +52,42 @@ describe("loading the initial historical pane window", () => {
     await expect(request).rejects.toMatchObject({ name: "AbortError" });
     expect(release).toHaveBeenCalledOnce();
     expect(reader).toHaveBeenCalledOnce();
+  });
+});
+
+describe("preparing a historical pane timeline change", () => {
+  it("keeps the old timeline if the new window succeeds but its forming bar fails", async () => {
+    const bucket = { ...bar(100), lastSequence: 104, sourceCount: 5, expectedCount: 5 };
+    const failure = new Error("forming snapshot failed");
+    const reader = vi.fn((url: string) => {
+      const query = new URL(url, "http://localhost").searchParams;
+      return { result: query.get("visibleCount") === "1" ? Promise.reject(failure) : Promise.resolve(windowWith([bucket])),
+        release: vi.fn() };
+    });
+    const apply = vi.fn();
+    const config = { dataset, period: 300, session: "RTH" as const, warmup: 20, end: 500, reader };
+    const prepare = async (signal: AbortSignal) => {
+      const prepared = await prepareHistoricalPaneWindow(config, 101, 101, signal);
+      return () => apply(prepared);
+    };
+    await expect(commitHistoricalWindowChange(new AbortController().signal, prepare)).rejects.toBe(failure);
+    expect(reader).toHaveBeenCalledTimes(2);
+    expect(apply).not.toHaveBeenCalled();
+  });
+
+  it("returns the completed window and its bounded forming snapshot together", async () => {
+    const bucket = { ...bar(100), lastSequence: 104, sourceCount: 5, expectedCount: 5 };
+    const forming = { ...bucket, phase: "FORMING" as const, lastSequence: 101, sourceCount: 2 };
+    const reader = vi.fn((url: string) => {
+      const query = new URL(url, "http://localhost").searchParams;
+      const bounded = query.get("visibleCount") === "1";
+      expect(query.get("endSequence")).toBe(bounded ? "101" : "500");
+      return { result: Promise.resolve(windowWith([bounded ? forming : bucket])), release: vi.fn() };
+    });
+    const prepared = await prepareHistoricalPaneWindow({ dataset, period: 300, session: "RTH", warmup: 20, end: 500, reader },
+      101, 101, new AbortController().signal);
+    expect(prepared.window.visibleBars).toEqual([bucket]);
+    expect(prepared.forming).toMatchObject({ through: 101, bar: forming });
+    expect(reader).toHaveBeenCalledTimes(2);
   });
 });

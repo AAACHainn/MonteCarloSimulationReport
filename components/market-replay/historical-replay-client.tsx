@@ -18,7 +18,7 @@ import { ReplayLayoutMenu, ReplayPaneDivider, ReplayPaneFrame, useReplayPaneLayo
 import { ReplaySecondaryPane, type PaneControl } from "./replay-secondary-pane";
 import { useReplayPanePeriods } from "./use-replay-pane-periods";
 import { createPaneReader } from "./use-replay-pane-bars";
-import type { HistoricalPaneWindow } from "./use-historical-pane-window";
+import type { HistoricalPanePreparation } from "./use-historical-pane-window";
 import { useDrawingScopeGuard } from "./use-drawing-scope-guard";
 import type { ReplayViewportApi, ReplayViewportSnapshot } from "@/lib/market-replay/chart-range";
 import type { LayoutId, PaneId } from "@/lib/market-replay/multi-pane-layout";
@@ -99,7 +99,7 @@ type WindowPayload = {
   warmupBars: AggregatedMarketBarData[];
 };
 
-type HistoricalPaneFocus = { sequence: number; revision: number; prepared?: HistoricalPaneWindow };
+type HistoricalPaneFocus = { sequence: number; revision: number; prepared?: HistoricalPanePreparation };
 type WindowChange = (signal: AbortSignal) => Promise<() => void>;
 
 type AnnotationPayload = {
@@ -155,7 +155,7 @@ export function HistoricalReplayClient({
   const [warmupBars, setWarmupBars] = useState<AggregatedMarketBarData[]>([]);
   const [annotations, setAnnotations] = useState<ReplayTradeAnnotationData[]>([]);
   const [loading, setLoading] = useState(true);
-  const { periods, setPeriod, mounted } = useReplayPanePeriods("historical-replay-pane-periods-v1:" + dataset.id,
+  const { periods, periodsForPrimary, setPeriod, mounted } = useReplayPanePeriods("historical-replay-pane-periods-v1:" + dataset.id,
     dataset.sourceIntervalSeconds, displayIntervalSeconds, layout.panes, !loading);
   const [error, setError] = useState<string | null>(null);
   const [measurementArmed, setMeasurementArmed] = useState(false);
@@ -611,10 +611,12 @@ export function HistoricalReplayClient({
       }
       if (periods[activePane - 1] === seconds) return true;
       playbackEngine.pause();
-      const cursor = playbackEngine.getSnapshot().boundary?.bar.lastSequence;
+      const { active, boundary } = playbackEngine.getSnapshot();
+      const cursor = boundary?.bar.lastSequence ?? null;
+      const formingCursor = active ? cursor : null;
       if (activePane === 1) {
         const target = cursor ?? historicalWindowFocusSequence(visibleRangeRef.current, focusSequence, session.startSequence, session.endSequence);
-        return loadHistoryWindow(seconds, target);
+        return loadHistoryWindow(seconds, target, { preparePanes: prepareVisiblePaneSettings(periodsForPrimary(seconds), displaySession, cursor, formingCursor) });
       }
       const controller = paneControllers.current.get(activePane);
       if (!controller?.loadHistory) return false;
@@ -622,7 +624,8 @@ export function HistoricalReplayClient({
       const focus = paneFocus[activePane] ?? secondaryFocus;
       const target = Math.min(session.endSequence, cursor ?? controller.inspect() ?? focus.sequence);
       return runWindowChange(async signal => {
-        const prepared = await loadHistory(seconds, displaySession, target, signal);
+        const prepared = await loadHistory({ period: seconds, session: displaySession, focus: target,
+          formingCursor: seconds > displayIntervalSeconds ? formingCursor : null }, signal);
         return () => {
           focusPane(activePane, target, prepared);
           setPeriod(activePane, seconds);
@@ -631,9 +634,28 @@ export function HistoricalReplayClient({
     });
   }
 
-  function focusPane(pane: PaneId, sequence: number, prepared?: HistoricalPaneWindow) {
+  function focusPane(pane: PaneId, sequence: number, prepared?: HistoricalPanePreparation) {
     const next = { sequence: Math.min(session.endSequence, sequence), revision: ++focusRevision.current, prepared };
     setPaneFocus(current => ({ ...current, [pane]: next }));
+  }
+
+  function prepareVisiblePaneSettings(nextPeriods: number[], nextSession: DisplaySession, cursor: number | null, formingCursor: number | null): WindowChange {
+    const panes = [...paneControllers.current].filter(([pane]) => layout.panes.has(pane));
+    return async signal => {
+      const nextFocus: Partial<Record<PaneId, HistoricalPaneFocus>> = {};
+      await Promise.all(panes.map(async ([pane, controller]) => {
+        if (!controller.loadHistory) return;
+        const period = nextPeriods[pane - 1];
+        const paneFormingCursor = period > nextPeriods[0] ? formingCursor : null;
+        const needsForming = paneFormingCursor !== null && periods[pane - 1] <= displayIntervalSeconds;
+        if (nextSession === displaySession && period === periods[pane - 1] && !needsForming) return;
+        const focus = paneFocus[pane] ?? secondaryFocus;
+        const sequence = Math.min(session.endSequence, cursor ?? controller.inspect() ?? focus.sequence);
+        const prepared = await controller.loadHistory({ period, session: nextSession, focus: sequence, formingCursor: paneFormingCursor }, signal);
+        nextFocus[pane] = { sequence, revision: ++focusRevision.current, prepared };
+      }));
+      return () => setPaneFocus(current => ({ ...current, ...nextFocus }));
+    };
   }
 
   function changeActiveSession(next: DisplaySession) {
@@ -644,20 +666,11 @@ export function HistoricalReplayClient({
         return false;
       }
       playbackEngine.pause();
-      const cursor = playbackEngine.getSnapshot().boundary?.bar.lastSequence;
+      const { active, boundary } = playbackEngine.getSnapshot();
+      const cursor = boundary?.bar.lastSequence ?? null;
       const target = cursor ?? historicalWindowFocusSequence(visibleRangeRef.current, focusSequence, session.startSequence, session.endSequence);
-      const visiblePanes = [...paneControllers.current].filter(([pane]) => layout.panes.has(pane));
-      return loadHistoryWindow(displayIntervalSeconds, target, { session: next, preparePanes: async signal => {
-        const nextFocus: Partial<Record<PaneId, HistoricalPaneFocus>> = {};
-        await Promise.all(visiblePanes.map(async ([pane, controller]) => {
-          if (!controller.loadHistory) return;
-          const focus = paneFocus[pane] ?? secondaryFocus;
-          const sequence = Math.min(session.endSequence, cursor ?? controller.inspect() ?? focus.sequence);
-          const prepared = await controller.loadHistory(periods[pane - 1], next, sequence, signal);
-          nextFocus[pane] = { sequence, revision: ++focusRevision.current, prepared };
-        }));
-        return () => setPaneFocus(current => ({ ...current, ...nextFocus }));
-      } });
+      return loadHistoryWindow(displayIntervalSeconds, target, { session: next,
+        preparePanes: prepareVisiblePaneSettings(periods, next, cursor, active ? cursor : null) });
     });
   }
 
@@ -897,7 +910,8 @@ export function HistoricalReplayClient({
               onActivate={() => layout.setActive(pane)} onMaximize={() => togglePane(pane)} reader={paneReader}
               blocked={layoutBusy || Boolean(settingsDialog || rectangleStyleId || arrowStyleId || styleDrawingId)}
               webFullscreen={webFullscreen} toggleWebFullscreen={() => setWebFullscreen(current => !current)}
-              historical={{ start: session.startSequence, end: session.endSequence, focus: focus.sequence, focusRevision: focus.revision, prepared: focus.prepared,
+              historical={{ start: session.startSequence, end: session.endSequence, primaryPeriod: displayIntervalSeconds,
+                focus: focus.sequence, focusRevision: focus.revision, prepared: focus.prepared,
                 annotations, boundary: playback.boundary, playbackActive: playback.active, playing: playback.playing && !playback.busy && !windowLoading,
                 countdownSeconds: playback.countdownSeconds, onStart: windowLoading ? undefined : startHistoricalPlayback,
                 onHide: playbackEngine.hide, onFocus: sequence => focusPane(pane, sequence) }} />

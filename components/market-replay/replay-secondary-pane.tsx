@@ -34,7 +34,8 @@ import { TextSettingsDialog } from "./text-settings-dialog";
 import { useDrawingCommands } from "./use-drawing-commands";
 import { useDrawingStyleShortcuts } from "./use-drawing-style-shortcuts";
 import { useHistoricalDrawings } from "./use-historical-drawings";
-import { readInitialHistoricalPaneWindow, useHistoricalPaneWindow, type HistoricalPaneWindow } from "./use-historical-pane-window";
+import { prepareHistoricalPaneWindow, useHistoricalPaneWindow, type HistoricalPanePreparation } from "./use-historical-pane-window";
+import { useHistoricalPaneFormingBar } from "./use-historical-pane-forming-bar";
 import { EMA_COLORS, useReplayPreferences } from "./use-replay-preferences";
 import type { useReplayCore } from "./use-replay-core";
 import { useReplayPaneBars, type createPaneReader } from "./use-replay-pane-bars";
@@ -47,7 +48,8 @@ export type PaneControl = {
   armDrawing: (tool: DrawingTool) => Promise<void>;
   inspect: () => number | null;
   hasInteraction: () => boolean;
-  loadHistory?: (period: number, session: DisplaySession, focus: number, signal: AbortSignal) => Promise<HistoricalPaneWindow>;
+  loadHistory?: (settings: { period: number; session: DisplaySession; focus: number; formingCursor: number | null },
+    signal: AbortSignal) => Promise<HistoricalPanePreparation>;
 };
 type Core = ReturnType<typeof useReplayCore>;
 type ChartContext = Pick<Core, "dataset" | "drawingWriteScope" | "drawingScopeGuard" | "defaultTextStyle" | "textTemplates" | "setTextTemplates" | "setDefaultTextStyle"
@@ -59,9 +61,10 @@ type LiveSource = Pick<Core, "currentSourceBar" | "replay" | "marketCache" | "pa
 type HistoricalSource = {
   start: number;
   end: number;
+  primaryPeriod: number;
   focus: number;
   focusRevision: number;
-  prepared?: HistoricalPaneWindow;
+  prepared?: HistoricalPanePreparation;
   annotations: ReplayTradeAnnotationData[];
   boundary: ChartHideAfter | null;
   playbackActive: boolean;
@@ -138,8 +141,8 @@ export function ReplaySecondaryPane({ pane, core, rect, active, period, sequence
     armDrawing,
     inspect: () => center.current,
     hasInteraction: () => Boolean(tool || selected || measuring),
-    loadHistory: historical ? (period, session, focus, signal) => readInitialHistoricalPaneWindow(
-      { dataset: core.dataset, period, session, warmup, reader, end: historical.end }, focus, signal) : undefined,
+    loadHistory: historical ? ({ period, session, focus, formingCursor }, signal) => prepareHistoricalPaneWindow(
+      { dataset: core.dataset, period, session, warmup, reader, end: historical.end }, focus, formingCursor, signal) : undefined,
     async prepare() {
       if (commands.pasteUnconfirmed || styleId || chartDraft || showIndicators) return false;
       if (!await text.beforeExit() || !await commands.flushNudges() || state.loaded && state.busy || commands.pending && !commands.nudging) return false;
@@ -170,10 +173,18 @@ export function ReplaySecondaryPane({ pane, core, rect, active, period, sequence
   const following = useCallback(() => savedViewport.current?.mode !== "history", []);
   const historicalWindow = useHistoricalPaneWindow({ visible: visible && Boolean(historical), dataset: core.dataset, period, session, warmup, reader,
     start: historical?.start ?? 0, end: historical?.end ?? 0, focus: historical?.focus ?? 0,
-    revision: historical?.focusRevision ?? 0, prepared: historical?.prepared,
+    revision: historical?.focusRevision ?? 0, prepared: historical?.prepared?.window,
     cursor: historical?.playbackActive ? historical.boundary?.bar.lastSequence ?? null : null, following });
-  const { data, error, retry } = historical ? historicalWindow : liveWindow;
+  const { data, error: windowError, retry: retryWindow } = historical ? historicalWindow : liveWindow;
   const bars = data?.visibleBars ?? emptyBars;
+  const forming = useHistoricalPaneFormingBar({ dataset: core.dataset, period, session, reader, bars, revision: historical?.focusRevision ?? 0,
+    prepared: historical?.prepared?.forming,
+    cursor: visible && historical?.playbackActive && period > historical.primaryPeriod ? historical.boundary?.bar.lastSequence ?? null : null });
+  const boundary = historical?.boundary;
+  const hiddenAfter = useMemo(() => forming.bar ? { bar: forming.bar, displayIntervalSeconds: period, displaySession: session } : boundary,
+    [boundary, forming.bar, period, session]);
+  const error = windowError ?? forming.error;
+  const retry = windowError ? retryWindow : forming.retry;
   const firstSequence = bars[0]?.firstSequence;
   const fromSequence = firstSequence === undefined ? undefined : Math.floor(firstSequence / 300) * 300;
   const endRef = useRef(sequence);
@@ -267,7 +278,7 @@ export function ReplaySecondaryPane({ pane, core, rect, active, period, sequence
         currentSourceSequence={historical ? historical.boundary?.bar.lastSequence : liveWindow.data?.sequence}
         currentSourceTimestamp={live?.currentSourceBar?.timestamp}
         playbackActive={historical ? historical.playing : live?.replay?.status === "playing"} displaySession={session}
-        readOnly={Boolean(historical)} hiddenAfter={historical?.boundary} historicalPlaybackActive={historical?.playbackActive}
+        readOnly={Boolean(historical)} hiddenAfter={hiddenAfter} historicalPlaybackActive={historical?.playbackActive}
         onHiddenAfterChange={historical?.onHide} onStartHistoricalPlayback={historical?.onStart}
         focusSequence={historical && appliedFocus !== historical.focusRevision ? historical.focus : null}
         onFocusApplied={historical ? () => setAppliedFocus(historical.focusRevision) : undefined}

@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import { displayIntervalOptions } from "@/lib/market-replay/display-interval";
 import { paneIds, secondaryIntervals, type PaneId } from "@/lib/market-replay/multi-pane-layout";
 
@@ -17,8 +17,9 @@ export function useReplayPanePeriods(key: string, source: number | null, primary
     setStored({ key, values });
   }, [key]);
 
-  const periods = useMemo(() => [primary, ...secondaryIntervals(source, primary,
-    displayIntervalOptions(source, primary), stored?.key === key ? stored.values : [])], [key, primary, source, stored]);
+  const periodsForPrimary = useCallback((seconds: number) => [seconds, ...secondaryIntervals(source, seconds,
+    displayIntervalOptions(source, seconds), stored?.key === key ? stored.values : [])], [key, source, stored]);
+  const periods = useMemo(() => periodsForPrimary(primary), [periodsForPrimary, primary]);
 
   useEffect(() => {
     const visible = visibleKey.split(",");
@@ -38,5 +39,6 @@ export function useReplayPanePeriods(key: string, source: number | null, primary
     try { localStorage.setItem(key, JSON.stringify(values)); } catch { /* Keep the in-memory periods. */ }
   }
 
-  return { periods, setPeriod, mounted: stored?.key === key ? paneIds.slice(1).filter(pane => panes.has(pane) || visited.includes(pane)) : [] };
+  return { periods, periodsForPrimary, setPeriod,
+    mounted: stored?.key === key ? paneIds.slice(1).filter(pane => panes.has(pane) || visited.includes(pane)) : [] };
 }

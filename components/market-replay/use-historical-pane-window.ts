@@ -8,9 +8,11 @@ import { REPLAY_HISTORY_BAR_LIMIT, type DisplaySession, type MarketDatasetSummar
 import { replayWindowRequest, type WindowPayload } from "./replay-client-shared";
 import type { ReplayVisibleSequenceRange } from "./replay-chart-shared";
 import type { createPaneReader } from "./use-replay-pane-bars";
+import { prepareHistoricalFormingBar, type HistoricalFormingSnapshot } from "./use-historical-pane-forming-bar";
 
 const pageSize = 300;
 export type HistoricalPaneWindow = Pick<WindowPayload, "visibleBars" | "warmupBars"> & { key: string };
+export type HistoricalPanePreparation = { window: HistoricalPaneWindow; forming?: HistoricalFormingSnapshot };
 type Direction = "left" | "right";
 type HistoricalPaneRead = {
   dataset: MarketDatasetSummary; period: number; session: DisplaySession; warmup: number;
@@ -47,6 +49,13 @@ export async function readInitialHistoricalPaneWindow(config: HistoricalPaneRead
   // on that candle so the view has room to browse and reveal subsequent bars.
   const available = await readPanePage(config, end, later.visibleBars[0].firstSequence, signal);
   return { ...available, key: focused.key };
+}
+
+export async function prepareHistoricalPaneWindow(config: HistoricalPaneRead, focus: number, formingCursor: number | null, signal: AbortSignal):
+  Promise<HistoricalPanePreparation> {
+  const window = await readInitialHistoricalPaneWindow(config, focus, signal);
+  const forming = await prepareHistoricalFormingBar(config, window.visibleBars, formingCursor, signal);
+  return { window, forming };
 }
 
 export function useHistoricalPaneWindow({ visible, dataset, period, session, warmup, reader, start, end, focus, revision, prepared, cursor, following }:
