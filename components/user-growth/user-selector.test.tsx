@@ -56,9 +56,9 @@ beforeEach(() => {
 });
 afterEach(() => vi.unstubAllGlobals());
 
-function render(selected?: UserIdentity, context?: ReactNode, onOpen = vi.fn()) {
+function render(selected?: UserIdentity, context?: ReactNode, onOpen = vi.fn(), feedback?: ReactNode) {
   runtime.index = 0;
-  const tree = UserSelector({ users, selected, compact: true, context, onSelect: vi.fn(), onCreate: vi.fn(), onProfiles: vi.fn(), onRetry: vi.fn(), onOpen }) as Node;
+  const tree = UserSelector({ users, selected, compact: true, context, onSelect: vi.fn(), onCreate: vi.fn(), onProfiles: vi.fn(), onRetry: vi.fn(), onOpen, feedback }) as Node;
   runtime.effects.splice(0).forEach(effect => effect());
   return tree;
 }
@@ -94,6 +94,14 @@ function openUserList(selected?: UserIdentity) {
 }
 
 describe("user selector menu ordering and search interaction", () => {
+  it("stacks feedback outside the avatar layout without blocking the controls beneath it", () => {
+    const tree = render(users[0], undefined, vi.fn(), ["经验 +10", "解锁成就"]);
+    const stack = all(tree).find(node => Array.isArray(node.props.children) && node.props.children[0] === "经验 +10");
+    expect(stack?.props.className).toContain("pointer-events-none absolute right-0 top-full");
+    expect(stack?.props.className).toContain("flex-col");
+    expect(stack?.props.children).toEqual(["经验 +10", "解锁成就"]);
+  });
+
   it("shows only the selected identity's progress and refreshes users when the avatar menu opens", () => {
     const progress = { totalXp: 600, realm: "qi" as const, segment: { value: 200, max: 450, next: "炼气三层" } };
     const selected = identity("beta", progress);

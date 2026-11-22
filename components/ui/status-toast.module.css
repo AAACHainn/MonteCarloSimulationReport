@@ -1,0 +1,3 @@
+.toast { animation: status-toast ease-out forwards; }
+@keyframes status-toast { 0%, 72% { opacity: 1; } 100% { opacity: 0; } }
+@media (prefers-reduced-motion: reduce) { .toast { animation: none; } }

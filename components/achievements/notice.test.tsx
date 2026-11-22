@@ -38,7 +38,7 @@ describe("achievement notification receipts", () => {
     vi.stubGlobal("fetch", fetchFeed);
     function mount(visible: () => boolean) {
       hooks.anchor = { current: { getClientRects: () => visible() ? [{}] : [] } as unknown as HTMLElement };
-      AchievementNotice({ userId: "user", compact: true, href: "/users/user/achievements" });
+      AchievementNotice({ userId: "user", href: "/users/user/achievements" });
       return hooks.effect.mock.calls.at(-1)![0]();
     }
 
@@ -59,6 +59,10 @@ describe("achievement notification receipts", () => {
     expect(saveReceipt).toHaveBeenCalledTimes(1);
     expect(saveReceipt).toHaveBeenCalledWith("achievements.receipt.v1.user", "4");
     expect(hooks.show).toHaveBeenCalledTimes(1);
+    await vi.advanceTimersByTimeAsync(4_999);
+    expect(hooks.show).toHaveBeenCalledTimes(1);
+    await vi.advanceTimersByTimeAsync(1);
+    expect(hooks.show).toHaveBeenLastCalledWith([]);
     closeFullscreen();
     await vi.advanceTimersByTimeAsync(8_000);
     expect(fetchFeed).toHaveBeenCalledTimes(2);

@@ -1,15 +1,16 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
-import Link from "next/link";
+import { StatusToast } from "@/components/ui/status-toast";
 import { formatInteger } from "@/lib/format";
+import { STATUS_TOAST_DURATION_MS } from "@/lib/ui/status-toast";
 import type { readAchievementNotifications } from "@/lib/achievements/read";
 import { achievementRequest, collectionApi, t } from "./shared";
 
 type Feed = Awaited<ReturnType<typeof readAchievementNotifications>>;
 const receiptKey = (id: string) => `achievements.receipt.v1.${id}`;
 
-export function AchievementNotice({ userId, href, compact }: { userId: string; href: string; compact: boolean }) {
+export function AchievementNotice({ userId, href }: { userId: string; href: string }) {
   const [message, setMessage] = useState<string[]>([]);
   const anchor = useRef<HTMLSpanElement>(null);
   useEffect(() => {
@@ -44,7 +45,7 @@ export function AchievementNotice({ userId, href, compact }: { userId: string; h
           if (feed.historical) latest.push(t.historyNotification(feed.user.nickname, formatInteger(feed.historical)));
           setMessage(latest);
           clearTimeout(dismiss);
-          dismiss = setTimeout(() => setMessage([]), 9_000);
+          dismiss = setTimeout(() => setMessage([]), STATUS_TOAST_DURATION_MS);
         }
       } catch { /* The collection remains available when notification polling fails. */ }
       finally { if (!controller.signal.aborted) poll = setTimeout(check, 8_000); }
@@ -54,9 +55,6 @@ export function AchievementNotice({ userId, href, compact }: { userId: string; h
   }, [userId]);
   return <>
     <span ref={anchor} aria-hidden="true" className="pointer-events-none absolute size-px" />
-    {!!message.length && <div className={`absolute right-0 top-full z-40 ${compact ? "mt-12" : "mt-2"} w-max max-w-[min(20rem,calc(100vw-2rem))] space-y-1 rounded-md border bg-surface-raised px-3 py-2 text-xs text-foreground shadow-sm`}>
-      <p role="status" aria-live="polite" aria-atomic="true" className="break-words">{message.join("。")}</p>
-      <Link href={href} className="inline-flex min-h-10 items-center rounded-md text-link underline-offset-4 hover:underline focus-visible:ring-2 focus-visible:ring-ring">{t.viewAll}</Link>
-    </div>}
+    <StatusToast message={message.join("。")} action={{ href, label: t.viewAll }} />
   </>;
 }

@@ -29,9 +29,6 @@
 @media (max-width: 639px) { .condition { grid-template-columns: 1fr auto; } .condition > :last-child { grid-column: 1 / -1; } }
 @media (prefers-reduced-motion: reduce) { .bar { transition: none; } .breakthrough { animation: none; } }
 
-.settlementToast { animation: settlement-notice 5s ease-out forwards; }
-@keyframes settlement-notice { 0%, 72% { opacity: 1; } 100% { opacity: 0; } }
-@media (prefers-reduced-motion: reduce) { .settlementToast { animation: none; } }
 
 :global(.dark) .theme {
   --growth-paper: #171E25;

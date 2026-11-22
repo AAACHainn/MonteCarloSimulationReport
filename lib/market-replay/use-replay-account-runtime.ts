@@ -1,6 +1,7 @@
 "use client";
 
 import { settledGrowthNotice } from "@/lib/user-growth/presentation";
+import { STATUS_TOAST_DURATION_MS } from "@/lib/ui/status-toast";
 import { useCallback, useEffect, useRef, useState, type Dispatch, type SetStateAction } from "react";
 import type { PaperSessionSnapshot } from "@/lib/paper-trading/types";
 
@@ -22,7 +23,7 @@ export function useReplayAccountRuntime(
   useEffect(() => { paperSnapshotRef.current = paperSnapshot; }, [paperSnapshot]);
   useEffect(() => {
     if (!growthFeedback) return;
-    const timer = setTimeout(() => setGrowthFeedback(null), 5000);
+    const timer = setTimeout(() => setGrowthFeedback(null), STATUS_TOAST_DURATION_MS);
     return () => clearTimeout(timer);
   }, [growthFeedback]);
 

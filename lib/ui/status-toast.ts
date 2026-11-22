@@ -1,0 +1,1 @@
+export const STATUS_TOAST_DURATION_MS = 5_000;

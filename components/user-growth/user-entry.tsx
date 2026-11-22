@@ -1,5 +1,5 @@
 "use client";
-import { useState } from "react";
+import { useState, type ReactNode } from "react";
 import { usePathname, useRouter } from "next/navigation";
 import { copy } from "@/lib/i18n";
 import { UserSelector } from "./user-selector";
@@ -10,7 +10,7 @@ import { OwnershipContext } from "./ownership-context";
 import type { ReplaySessionSummary } from "@/lib/replay-sessions/types";
 import { AchievementNotice } from "@/components/achievements/notice";
 import { collectionHref, profileHref } from "@/components/achievements/shared";
-export function UserEntry({ compact = false, session }: { compact?: boolean; session?: ReplaySessionSummary } = {}) {
+export function UserEntry({ compact = false, session, growthFeedback }: { compact?: boolean; session?: ReplaySessionSummary; growthFeedback?: ReactNode } = {}) {
   const current = useCurrentUser(), router = useRouter(), pathname = usePathname();
   const [creating, setCreating] = useState(false);
   const displayed = session ? current.users.find(user => user.id === session.userId) ?? (session.owner ? { id: session.owner.id, nickname: session.owner.nickname, avatar: { preset: -1, zoom: 1, x: 50, y: 50 }, realmLabel: "" } : undefined) : current.selected;
@@ -28,7 +28,10 @@ export function UserEntry({ compact = false, session }: { compact?: boolean; ses
       }
     }} onCreate={() => setCreating(true)} onProfiles={() => router.push(profileId ? `/users/${encodeURIComponent(profileId)}` : "/users")}
       achievementsHref={achievementsHref} showAchievementHint={!achievementsHref}
-      achievementNotice={profileId && achievementsHref ? <AchievementNotice key={profileId} userId={profileId} href={achievementsHref} compact={compact} /> : undefined} />
+      feedback={<>
+        {growthFeedback}
+        {profileId && achievementsHref && <AchievementNotice key={profileId} userId={profileId} href={achievementsHref} />}
+      </>} />
     {creating && <ProfileDialog description={copy.userGrowth.profileAvatarHint} onClose={() => setCreating(false)} onSave={async (nickname, avatar, image) => {
       try {
         const user = await writeProfile(nickname, avatar, image);

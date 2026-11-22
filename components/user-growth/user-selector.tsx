@@ -17,10 +17,10 @@ import { ExperienceProgress } from "./experience-progress";
 import { AppearanceMenu } from "@/components/appearance-menu";
 
 const t = copy.userGrowth;
-export function UserSelector({ users, selected, onSelect, onCreate, onProfiles, state = "normal", onRetry, notice = "", compact = false, context, allowSwitch = true, onOpen, achievementsHref, showAchievementHint, achievementNotice }: {
+export function UserSelector({ users, selected, onSelect, onCreate, onProfiles, state = "normal", onRetry, notice = "", compact = false, context, allowSwitch = true, onOpen, achievementsHref, showAchievementHint, feedback }: {
   users: UserIdentity[]; selected?: UserIdentity; onSelect: (id: string | null) => void; onCreate: () => void; onProfiles: () => void; state?: QueryState; onRetry: () => void;
   notice?: string; compact?: boolean; context?: ReactNode; allowSwitch?: boolean; onOpen?: () => void;
-  achievementsHref?: string; showAchievementHint?: boolean; achievementNotice?: ReactNode;
+  achievementsHref?: string; showAchievementHint?: boolean; feedback?: ReactNode;
 }) {
   const [open, setOpen] = useState(false);
   const [view, setView] = useState<"menu" | "users">("menu");
@@ -54,7 +54,7 @@ export function UserSelector({ users, selected, onSelect, onCreate, onProfiles, 
     <Popover.Trigger asChild><Button ref={triggerRef} variant="ghost" size="icon" className={cn("shrink-0 rounded-full p-0", compact && "h-8 w-8")} title={`${t.selection}：${selected?.nickname ?? t.all}`} aria-label={`${t.selection}：${selected?.nickname ?? t.all}`}>
       {selected ? <UserAvatar avatar={selected.avatar} realm={selectedUser?.growth?.realm} size={compact ? "list" : "control"} /> : <span className={cn("flex items-center justify-center rounded-full border border-slate-300 dark:border-input bg-slate-50 dark:bg-muted text-slate-600 dark:text-secondary-text", compact ? "h-8 w-8" : "h-10 w-10")}><Users className={compact ? "h-4 w-4" : "h-5 w-5"} aria-hidden="true" /></span>}
     </Button></Popover.Trigger>
-    {achievementNotice}
+    {feedback && <div className="pointer-events-none absolute right-0 top-full z-40 mt-2 flex w-max max-w-[min(20rem,calc(100vw-2rem))] flex-col items-end gap-2">{feedback}</div>}
     </div>
     <Popover.Portal container={portalContainer ?? undefined}><OptionPopoverContent align="end" className="w-80 p-3" aria-label={listing ? t.switchUser : t.scope} onEscapeKeyDown={event => { if (listing && searchOpen) { event.preventDefault(); closeSearch(); } else if (listing) { event.preventDefault(); back(); } }}>
       {listing ? <>
