@@ -1,14 +1,11 @@
-import { execFileSync } from "node:child_process";
 import { rmSync } from "node:fs";
 import { randomUUID } from "node:crypto";
 import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
 
 vi.mock("@/lib/db", async () => {
   const { createDatabaseClient } = await import("@/lib/sqlite-client.mjs");
-  const { tmpdir } = await import("node:os");
-  const { join } = await import("node:path");
-  const { randomUUID: uuid } = await import("node:crypto");
-  return { prisma: createDatabaseClient({ datasourceUrl: `file:${join(tmpdir(), `user-wallet-${uuid()}.db`)}` }, { allowCreate: true }) };
+  const { createSqliteFixture } = await import("@/scripts/database/sqlite-test-fixture");
+  return { prisma: createDatabaseClient({ datasourceUrl: `file:${createSqliteFixture("user-wallet")}` }) };
 });
 
 import { prisma } from "@/lib/db";
@@ -30,10 +27,6 @@ let userNumber = 0;
 
 beforeAll(async () => {
   databaseFile = (await prisma.$queryRawUnsafe<Array<{ file: string }>>("PRAGMA database_list"))[0].file;
-  execFileSync(process.execPath, ["scripts/database/init-sqlite.mjs"], {
-    env: { ...process.env, DATABASE_URL: `file:${databaseFile}` },
-    stdio: "pipe",
-  });
   await prisma.marketDataset.create({ data: {
     id: "wallet-dataset", name: "Wallet isolated fixture", symbol: "TEST", timeframe: "1m", timezone: "UTC",
     sourceIntervalSeconds: 60, barCount: 1, startTime: new Date("2026-10-01T00:00:00Z"), endTime: new Date("2026-10-01T00:00:00Z"),

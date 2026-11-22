@@ -6,9 +6,8 @@ import { beforeAll, afterAll, afterEach, describe, expect, it, vi } from "vitest
 
 vi.mock("@/lib/db", async () => {
   const { PrismaClient } = await import("@prisma/client");
-  const { join } = await import("node:path");
-  const { tmpdir } = await import("node:os");
-  return { prisma: new PrismaClient({ datasourceUrl: "file:" + join(tmpdir(), "ai-test-" + randomUUID() + ".db") }) };
+  const { createSqliteFixture } = await import("@/scripts/database/sqlite-test-fixture");
+  return { prisma: new PrismaClient({ datasourceUrl: `file:${createSqliteFixture("ai-test")}` }) };
 });
 import { prisma } from "@/lib/db";
 import { queueAggregation, processAggregationJob } from "@/lib/market-replay/aggregation-jobs";
@@ -42,7 +41,6 @@ let file = "", sessionId = "", projectionId = "", entryId = "";
 const base = new Date("2026-10-01T00:00:00Z");
 beforeAll(async () => {
   file = (await prisma.$queryRawUnsafe<Array<{ file: string }>>("PRAGMA database_list"))[0].file;
-  execFileSync(process.execPath, ["scripts/database/init-sqlite.mjs"], { env: { ...process.env, DATABASE_URL: "file:" + file }, stdio: "pipe" });
   vi.stubEnv("AI_ENCRYPTION_KEY", Buffer.alloc(32, 7).toString("base64"));
   await prisma.marketDataset.create({ data: { id: "market", name: "test", symbol: "TEST", timeframe: "1m", timezone: "UTC", sourceIntervalSeconds: 60, barCount: 10, startTime: base, endTime: new Date(+base + 540000) } });
   await prisma.marketBar.createMany({ data: Array.from({ length: 10 }, (_, sequence) => ({

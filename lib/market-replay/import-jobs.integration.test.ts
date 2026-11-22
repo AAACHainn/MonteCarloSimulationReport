@@ -1,4 +1,3 @@
-import { execFileSync } from "node:child_process";
 import { randomUUID } from "node:crypto";
 import { rmSync, statSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
@@ -8,11 +7,9 @@ import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
 
 vi.mock("@/lib/db", async () => {
   const { PrismaClient } = await import("@prisma/client");
-  const { tmpdir: getTmpdir } = await import("node:os");
-  const { join: joinPath } = await import("node:path");
-  const { randomUUID: uuid } = await import("node:crypto");
+  const { createSqliteFixture } = await import("@/scripts/database/sqlite-test-fixture");
   return {
-    prisma: new PrismaClient({ datasourceUrl: `file:${joinPath(getTmpdir(), "market-import-" + uuid() + ".db")}` }),
+    prisma: new PrismaClient({ datasourceUrl: `file:${createSqliteFixture("market-import")}` }),
     replayDatabaseQueryCount: () => null,
   };
 });
@@ -30,10 +27,6 @@ const temporaryFiles = new Set<string>();
 beforeAll(async () => {
   const files = await prisma.$queryRawUnsafe<Array<{ file: string }>>("PRAGMA database_list");
   databaseFile = files[0].file;
-  execFileSync(process.execPath, ["scripts/database/init-sqlite.mjs"], {
-    env: { ...process.env, DATABASE_URL: `file:${databaseFile}` },
-    stdio: "pipe",
-  });
 }, 30_000);
 
 afterAll(async () => {

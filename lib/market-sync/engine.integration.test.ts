@@ -1,10 +1,10 @@
-import { execFileSync } from "node:child_process";
 import { rmSync } from "node:fs";
 import { randomUUID } from "node:crypto";
 import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
 vi.mock("@/lib/db", async () => {
-  const { PrismaClient } = await import("@prisma/client"); const { tmpdir } = await import("node:os"); const { join } = await import("node:path");
-  return { prisma: new PrismaClient({ datasourceUrl: `file:${join(tmpdir(), "market-sync-" + randomUUID() + ".db")}` }), replayDatabaseQueryCount: () => null };
+  const { PrismaClient } = await import("@prisma/client");
+  const { createSqliteFixture } = await import("@/scripts/database/sqlite-test-fixture");
+  return { prisma: new PrismaClient({ datasourceUrl: `file:${createSqliteFixture("market-sync")}` }), replayDatabaseQueryCount: () => null };
 });
 import { queueAggregation, processAggregationJob } from "@/lib/market-replay/aggregation-jobs";
 import { prisma } from "@/lib/db";
@@ -21,7 +21,6 @@ import { SyncError } from "./security";
 let databaseFile = "";
 beforeAll(async () => {
   const rows = await prisma.$queryRawUnsafe<Array<{ file: string }>>("PRAGMA database_list"); databaseFile = rows[0].file;
-  execFileSync(process.execPath, ["scripts/database/init-sqlite.mjs"], { env: { ...process.env, DATABASE_URL: `file:${databaseFile}` }, stdio: "pipe" });
   process.env.MARKET_DATA_ENCRYPTION_KEY = Buffer.alloc(32, 3).toString("base64");
   await saveConnection({ apiKey: "mock-databento-api-key" });
   await prisma.marketDataConnection.update({ where: { id: "databento" }, data: { status: "CONNECTED" } });

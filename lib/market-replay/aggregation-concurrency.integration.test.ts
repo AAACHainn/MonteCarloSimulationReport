@@ -1,10 +1,9 @@
-import { fork, execFileSync, type ChildProcess } from "node:child_process";
-import { randomUUID } from "node:crypto";
+import { fork, type ChildProcess } from "node:child_process";
 import { rmSync } from "node:fs";
-import { tmpdir } from "node:os";
-import { join, resolve } from "node:path";
+import { resolve } from "node:path";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { createDatabaseClient } from "../sqlite-client.mjs";
+import { createSqliteFixture } from "@/scripts/database/sqlite-test-fixture";
 
 type Reply = { id?: number; event?: string; result?: unknown; error?: string; taskId?: string };
 class Peer {
@@ -53,12 +52,11 @@ class Peer {
     this.release(); await this.call("close"); await exited;
   }
 }
-const file = join(tmpdir(), "aggregation-concurrency-" + randomUUID() + ".db");
+const file = createSqliteFixture("aggregation-concurrency");
 let client: ReturnType<typeof createDatabaseClient>;
 let a: Peer, b: Peer, c: Peer, session: { sessionId: string; entryId: string };
 const count = 50000;
 beforeAll(async () => {
-  execFileSync(process.execPath, ["scripts/database/init-sqlite.mjs"], { env: { ...process.env, DATABASE_URL: "file:" + file, SQLITE_DRIVER: "native", SQLITE_JOURNAL_MODE: "delete", SQLITE_SYNCHRONOUS: "FULL" }, stdio: "pipe" });
   client = createDatabaseClient({ datasourceUrl: "file:" + file }, { env: { SQLITE_DRIVER: "better-sqlite3", SQLITE_JOURNAL_MODE: "wal", SQLITE_SYNCHRONOUS: "FULL" } });
   const start = Date.parse("2026-10-19T22:00:00Z");
   for (const id of ["a", "b"]) {

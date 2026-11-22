@@ -1,14 +1,11 @@
-import { execFileSync } from "node:child_process";
 import { rmSync } from "node:fs";
 import { randomUUID } from "node:crypto";
 import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
 
 vi.mock("@/lib/db", async () => {
   const { createDatabaseClient } = await import("@/lib/sqlite-client.mjs");
-  const { tmpdir } = await import("node:os");
-  const { join } = await import("node:path");
-  const { randomUUID: uuid } = await import("node:crypto");
-  return { prisma: createDatabaseClient({ datasourceUrl: `file:${join(tmpdir(), `user-wallet-lifecycle-${uuid()}.db`)}` }, { allowCreate: true }), replayDatabaseQueryCount: () => null };
+  const { createSqliteFixture } = await import("@/scripts/database/sqlite-test-fixture");
+  return { prisma: createDatabaseClient({ datasourceUrl: `file:${createSqliteFixture("user-wallet-lifecycle")}` }), replayDatabaseQueryCount: () => null };
 });
 
 import { prisma } from "@/lib/db";
@@ -37,7 +34,6 @@ const times = ["2026-10-01T23:58:00Z", "2026-10-01T23:59:00Z", "2026-10-02T00:00
 
 beforeAll(async () => {
   databaseFile = (await prisma.$queryRawUnsafe<Array<{ file: string }>>("PRAGMA database_list"))[0].file;
-  execFileSync(process.execPath, ["scripts/database/init-sqlite.mjs"], { env: { ...process.env, DATABASE_URL: `file:${databaseFile}` }, stdio: "pipe" });
   await prisma.marketDataset.create({ data: {
     id: datasetId, name: "Wallet lifecycle fixture", symbol: "TEST", timeframe: "1m", timezone: "UTC", sourceIntervalSeconds: 60,
     barCount: times.length, startTime: new Date(times[0]), endTime: new Date(times.at(-1)!),

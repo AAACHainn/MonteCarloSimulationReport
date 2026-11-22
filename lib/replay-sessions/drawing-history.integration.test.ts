@@ -1,10 +1,9 @@
-import { execFileSync } from "node:child_process";
 import { beforeAll, afterAll, describe, expect, it, vi } from "vitest";
 vi.mock("@/lib/db", async () => {
   const { createDatabaseClient } = await import("@/lib/sqlite-client.mjs");
-  const { randomUUID } = await import("node:crypto");
+  const { createSqliteFixture } = await import("@/scripts/database/sqlite-test-fixture");
   const { join } = await import("node:path");
-  return { prisma: createDatabaseClient({ datasourceUrl: `file:${join(process.cwd(), "tmp", `drawing-history-20261108-${randomUUID()}.db`)}` }, { allowCreate: true }), replayDatabaseQueryCount: () => null };
+  return { prisma: createDatabaseClient({ datasourceUrl: `file:${createSqliteFixture("drawing-history-20261108", join(process.cwd(), "tmp"))}` }), replayDatabaseQueryCount: () => null };
 });
 import { prisma } from "@/lib/db";
 import { createReplaySession } from "./service";
@@ -31,7 +30,6 @@ async function read(scope: Session) { return (await (await readDrawings(request(
 beforeAll(async () => {
   const file = (await prisma.$queryRawUnsafe<Array<{ file: string }>>("PRAGMA database_list"))[0].file;
   console.info("Synthetic drawing-history database retained:", file);
-  execFileSync(process.execPath, ["scripts/database/init-sqlite.mjs"], { env: { ...process.env, DATABASE_URL: `file:${file}` }, stdio: "pipe" });
   await prisma.marketDataset.create({ data: { id: "history-data", name: "History test", symbol: "TEST", timeframe: "1m", timezone: "UTC", sourceIntervalSeconds: 60, barCount: 4, startTime: base, endTime: new Date(+base + 180_000) } });
   await prisma.marketBar.createMany({ data: Array.from({ length: 4 }, (_, sequence) => ({ datasetId: "history-data", sequence, timestamp: new Date(+base + sequence * 60_000), open: 100, high: 110, low: 90, close: 102 })) });
 }, 30_000);

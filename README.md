@@ -394,6 +394,8 @@ corepack pnpm run build
 
 默认 `corepack pnpm test` 运行当前功能测试。需要复核升级到 v1.0 的旧兼容流程时，使用该标签的完整代码和测试。详见[历史迁移测试](docs/operations/upgrade.md#历史迁移测试)。
 
+使用当前 SQLite 结构的业务集成测试从 `tmp/vitest-sqlite-templates/` 中复制独立测试库。迁移、Prisma schema 或初始化脚本变化时，Vitest 在运行这些套件前生成并校验一次新模板。验证新装、升级或 SQLite 运行时的专项测试继续独立建库。
+
 纯文档修改执行 `corepack pnpm docs:check` 和 `git diff --check`，无需运行应用测试或构建。`lint` 自动先执行同一文档检查；检查范围与功能变更的同步维护要求见[持续维护说明](docs/README.md#持续维护)。
 
 Windows 下若 Prisma query engine DLL 被占用，请先确认并停止本项目的开发服务及关联 Node 进程，再重新构建。

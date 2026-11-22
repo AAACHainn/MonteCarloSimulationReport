@@ -1,18 +1,15 @@
 import type { Prisma } from "@prisma/client";
 import { loadReplayScope, runWithReplayScope } from "@/lib/replay-sessions/scope";
 import { logicalId, projectionRecordId } from "@/lib/replay-sessions/identity";
-import { execFileSync } from "node:child_process";
 import { rmSync } from "node:fs";
 import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
 
 const queryAudit = vi.hoisted(() => ({ statements: [] as string[] }));
 vi.mock("@/lib/db", async () => {
   const { createDatabaseClient } = await import("@/lib/sqlite-client.mjs");
-  const { tmpdir } = await import("node:os");
-  const { join } = await import("node:path");
-  const { randomUUID } = await import("node:crypto");
-  const client = createDatabaseClient({ datasourceUrl: `file:${join(tmpdir(), "replay-integration-" + randomUUID() + ".db")}`,
-    log: [{ emit: "event", level: "query" }] }, { allowCreate: true });
+  const { createSqliteFixture } = await import("@/scripts/database/sqlite-test-fixture");
+  const client = createDatabaseClient({ datasourceUrl: `file:${createSqliteFixture("replay-integration")}`,
+    log: [{ emit: "event", level: "query" }] });
   (client as unknown as { $on(event: "query", callback: (event: { query: string }) => void): void })
     .$on("query", event => queryAudit.statements.push(event.query));
   return {
@@ -98,9 +95,6 @@ const context = (id: string) => ({ params: Promise.resolve({ id }) });
 beforeAll(async () => {
   const files = await prisma.$queryRawUnsafe<Array<{ file: string }>>("PRAGMA database_list");
   databaseFile = files[0].file;
-  execFileSync(process.execPath, ["scripts/database/init-sqlite.mjs"], {
-    env: { ...process.env, DATABASE_URL: `file:${databaseFile}` }, stdio: "pipe",
-  });
 }, 30_000);
 
 afterAll(async () => {

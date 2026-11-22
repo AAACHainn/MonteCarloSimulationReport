@@ -1,4 +1,3 @@
-import { execFileSync } from "node:child_process";
 import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
 import { POST as discardPreviewRoute } from "@/app/api/admin/achievements/jobs/[jobId]/discard/route";
 import { prisma } from "@/lib/db";
@@ -20,10 +19,8 @@ import { ExitReason } from "./exit-evidence";
 
 vi.mock("@/lib/db", async () => {
   const { createDatabaseClient } = await import("@/lib/sqlite-client.mjs");
-  const { tmpdir } = await import("node:os");
-  const { join } = await import("node:path");
-  const { randomUUID } = await import("node:crypto");
-  return { prisma: createDatabaseClient({ datasourceUrl: `file:${join(tmpdir(), `achievements-test-${randomUUID()}.db`)}` }, { allowCreate: true }) };
+  const { createSqliteFixture } = await import("@/scripts/database/sqlite-test-fixture");
+  return { prisma: createDatabaseClient({ datasourceUrl: `file:${createSqliteFixture("achievements-test")}` }) };
 });
 
 const barTime = (sequence: number) => new Date(Date.UTC(2026, 0, 1, 0, sequence));
@@ -32,8 +29,6 @@ let profileNumber = 0;
 const profile = () => saveProfile({ nickname: `成就测试${++profileNumber}` });
 
 beforeAll(async () => {
-  const [{ file }] = await prisma.$queryRaw<Array<{ file: string }>>`PRAGMA database_list`;
-  execFileSync(process.execPath, ["scripts/database/init-sqlite.mjs"], { env: { ...process.env, DATABASE_URL: `file:${file}` } });
   await prisma.marketDataset.create({ data: { id: datasetId, name: "Fixtures", symbol: "TEST", timeframe: "1m", timezone: "UTC", sourceIntervalSeconds: 60, barCount: 1, startTime: barTime(0), endTime: barTime(0) } });
   await prisma.marketBar.create({ data: { datasetId, sequence: 0, timestamp: barTime(0), open: 100, high: 110, low: 90, close: 100 } });
 }, 30_000);

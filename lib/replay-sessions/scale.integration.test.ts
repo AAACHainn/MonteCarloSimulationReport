@@ -1,14 +1,11 @@
-import { execFileSync } from "node:child_process";
 import { rmSync } from "node:fs";
 import { beforeAll, afterAll, it, expect, vi } from "vitest";
 import type { MarketBar } from "@prisma/client";
 
 vi.mock("@/lib/db", async () => {
   const { PrismaClient } = await import("@prisma/client");
-  const { randomUUID } = await import("node:crypto");
-  const { join } = await import("node:path");
-  const { tmpdir } = await import("node:os");
-  return { prisma: new PrismaClient({ datasourceUrl: `file:${join(tmpdir(), `replay-scale-${randomUUID()}.db`)}` }), replayDatabaseQueryCount: () => null };
+  const { createSqliteFixture } = await import("@/scripts/database/sqlite-test-fixture");
+  return { prisma: new PrismaClient({ datasourceUrl: `file:${createSqliteFixture("replay-scale")}` }), replayDatabaseQueryCount: () => null };
 });
 import { prisma } from "@/lib/db";
 import { createReplaySession } from "./service";
@@ -22,7 +19,6 @@ const origin = Date.UTC(2026, 0, 1);
 const sourceCount = 20_000_000;
 beforeAll(async () => {
   databaseFile = (await prisma.$queryRawUnsafe<Array<{ file: string }>>("PRAGMA database_list"))[0].file;
-  execFileSync(process.execPath, ["scripts/database/init-sqlite.mjs"], { env: { ...process.env, DATABASE_URL: `file:${databaseFile}` }, stdio: "pipe" });
   await prisma.marketDataset.create({ data: { id: "virtual", name: "20M logical source", symbol: "TEST", timeframe: "1s", timezone: "UTC", sourceIntervalSeconds: 1,
     barCount: sourceCount, startTime: new Date(origin), endTime: new Date(origin + (sourceCount - 1) * 1000) } });
   await prisma.marketBar.create({ data: { datasetId: "virtual", sequence: 0, timestamp: new Date(origin), open: 100, high: 101, low: 99, close: 100 } });

@@ -1,23 +1,13 @@
-import { execFileSync } from "node:child_process";
-import { randomUUID } from "node:crypto";
 import { unlinkSync } from "node:fs";
-import { tmpdir } from "node:os";
-import { join } from "node:path";
 import { PrismaClient } from "@prisma/client";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
+import { createSqliteFixture } from "./sqlite-test-fixture";
 
-const databaseFile = join(tmpdir(), `review-limit-${randomUUID()}.db`);
+const databaseFile = createSqliteFixture("review-limit");
 const prisma = new PrismaClient({ datasourceUrl: `file:${databaseFile}` });
 const originalReview = "入场依据：\n  顺势交易 😀\n";
 
-function initialize() {
-  execFileSync(process.execPath, ["scripts/database/init-sqlite.mjs"], {
-    env: { ...process.env, DATABASE_URL: `file:${databaseFile}` }, stdio: "pipe",
-  });
-}
-
 beforeAll(async () => {
-  initialize();
   await prisma.marketDataset.create({ data: {
     id: "dataset-1", name: "回放练习", symbol: "ES", timeframe: "5m", timezone: "UTC",
     barCount: 1, startTime: new Date(), endTime: new Date(),
@@ -53,5 +43,5 @@ async function checkLimit() {
 }
 
 describe("current review length SQLite constraint", () => {
-  it("enforces the 2000-character limit in a newly initialized database", checkLimit);
+  it("enforces the 2000-character limit in the current schema", checkLimit);
 });

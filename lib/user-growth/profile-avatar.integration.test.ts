@@ -1,4 +1,3 @@
-import { execFileSync } from "node:child_process";
 import { mkdtemp, readdir } from "node:fs/promises";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
@@ -6,9 +5,8 @@ import sharp from "sharp";
 import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
 vi.mock("@/lib/db", async () => {
   const { createDatabaseClient } = await import("@/lib/sqlite-client.mjs");
-  const { randomUUID } = await import("node:crypto");
-  const { join } = await import("node:path"), { tmpdir } = await import("node:os");
-  return { prisma: createDatabaseClient({ datasourceUrl: `file:${join(tmpdir(), `profile-avatar-${randomUUID()}.db`)}` }, { allowCreate: true }) };
+  const { createSqliteFixture } = await import("@/scripts/database/sqlite-test-fixture");
+  return { prisma: createDatabaseClient({ datasourceUrl: `file:${createSqliteFixture("profile-avatar")}` }) };
 });
 import { prisma } from "@/lib/db";
 import * as profiles from "./service";
@@ -23,8 +21,6 @@ const json = (body: unknown) => new Request(url, { method: "POST", headers: { "C
 let png: Buffer, directory: string;
 beforeAll(async () => {
   directory = await mkdtemp(join(tmpdir(), "avatar-storage-")); vi.stubEnv("USER_AVATAR_DIR", directory);
-  const file = (await prisma.$queryRawUnsafe<Array<{ file: string }>>("PRAGMA database_list"))[0].file;
-  execFileSync(process.execPath, ["scripts/database/init-sqlite.mjs"], { env: { ...process.env, DATABASE_URL: `file:${file}` }, stdio: "pipe" });
   png = await sharp({ create: { width: 160, height: 80, channels: 3, background: "cyan" } }).withMetadata().png().toBuffer();
 }, 30000);
 afterAll(async () => { await prisma.$disconnect(); vi.unstubAllEnvs(); });

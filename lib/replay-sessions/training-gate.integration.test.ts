@@ -3,10 +3,8 @@ import { rmSync } from "node:fs";
 import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
 vi.mock("@/lib/db", async () => {
   const { createDatabaseClient } = await import("@/lib/sqlite-client.mjs");
-  const { randomUUID } = await import("node:crypto");
-  const { join } = await import("node:path");
-  const { tmpdir } = await import("node:os");
-  return { prisma: createDatabaseClient({ datasourceUrl: `file:${join(tmpdir(), `training-gate-${randomUUID()}.db`)}` }, { allowCreate: true }), replayDatabaseQueryCount: () => null };
+  const { createSqliteFixture } = await import("@/scripts/database/sqlite-test-fixture");
+  return { prisma: createDatabaseClient({ datasourceUrl: `file:${createSqliteFixture("training-gate")}` }), replayDatabaseQueryCount: () => null };
 });
 import { prisma } from "@/lib/db";
 import { defaultTrainingGate, type TrainingGateMode } from "@/lib/paper-trading/training-gate";
@@ -33,8 +31,7 @@ let databaseFile = "";
 let serial = 0;
 beforeAll(async () => {
   databaseFile = (await prisma.$queryRawUnsafe<Array<{ file: string }>>("PRAGMA database_list"))[0].file;
-  execFileSync(process.execPath, ["scripts/database/init-sqlite.mjs"], { env: { ...process.env, DATABASE_URL: `file:${databaseFile}` }, stdio: "pipe" });
-  // Initialization is idempotent, and all new columns survive a second run.
+  // Verify a repeat initialization of the migrated database before using it.
   execFileSync(process.execPath, ["scripts/database/init-sqlite.mjs"], { env: { ...process.env, DATABASE_URL: `file:${databaseFile}` }, stdio: "pipe" });
 }, 30000);
 afterAll(async () => { await prisma.$disconnect(); if (databaseFile.includes("training-gate-")) rmSync(databaseFile, { force: true }); });

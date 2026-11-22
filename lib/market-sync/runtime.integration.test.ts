@@ -1,11 +1,10 @@
-import { execFileSync } from "node:child_process";
 import { rmSync } from "node:fs";
-import { randomUUID } from "node:crypto";
 import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
 const executed = vi.hoisted(() => vi.fn());
 vi.mock("@/lib/db", async () => {
-  const { PrismaClient } = await import("@prisma/client"); const { tmpdir } = await import("node:os"); const { join } = await import("node:path");
-  return { prisma: new PrismaClient({ datasourceUrl: `file:${join(tmpdir(), "market-runtime-" + randomUUID() + ".db")}` }) };
+  const { PrismaClient } = await import("@prisma/client");
+  const { createSqliteFixture } = await import("@/scripts/database/sqlite-test-fixture");
+  return { prisma: new PrismaClient({ datasourceUrl: `file:${createSqliteFixture("market-runtime")}` }) };
 });
 vi.mock("./engine", () => ({ executeSyncRun: async (id: string) => {
   executed(id); const { prisma } = await import("@/lib/db"); const run = await prisma.marketDataSyncRun.update({ where: { id }, data: { status: "COMPLETED" } });
@@ -17,7 +16,6 @@ import { defaultSchedule } from "./types";
 let databaseFile = "";
 beforeAll(async () => {
   const rows = await prisma.$queryRawUnsafe<Array<{ file: string }>>("PRAGMA database_list"); databaseFile = rows[0].file;
-  execFileSync(process.execPath, ["scripts/database/init-sqlite.mjs"], { env: { ...process.env, DATABASE_URL: `file:${databaseFile}` }, stdio: "pipe" });
 });
 afterAll(async () => {
   const globals = globalThis as unknown as { marketSyncRuntime?: { stop: () => void } }; globals.marketSyncRuntime?.stop(); delete globals.marketSyncRuntime;

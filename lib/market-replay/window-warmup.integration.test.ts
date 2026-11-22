@@ -1,13 +1,10 @@
-import { execFileSync } from "node:child_process";
 import { rmSync } from "node:fs";
 import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
 
 vi.mock("@/lib/db", async () => {
   const { createDatabaseClient } = await import("@/lib/sqlite-client.mjs");
-  const { tmpdir } = await import("node:os");
-  const { join } = await import("node:path");
-  const { randomUUID } = await import("node:crypto");
-  return { prisma: createDatabaseClient({ datasourceUrl: `file:${join(tmpdir(), "window-warmup-" + randomUUID() + ".db")}` }, { allowCreate: true }), replayDatabaseQueryCount: () => null };
+  const { createSqliteFixture } = await import("@/scripts/database/sqlite-test-fixture");
+  return { prisma: createDatabaseClient({ datasourceUrl: `file:${createSqliteFixture("window-warmup")}` }), replayDatabaseQueryCount: () => null };
 });
 
 import { prisma } from "@/lib/db";
@@ -25,7 +22,6 @@ import type { AggregatedMarketBarData } from "./types";
 let databaseFile = "";
 beforeAll(async () => {
   databaseFile = (await prisma.$queryRawUnsafe<Array<{ file: string }>>("PRAGMA database_list"))[0].file;
-  execFileSync(process.execPath, ["scripts/database/init-sqlite.mjs"], { env: { ...process.env, DATABASE_URL: `file:${databaseFile}` }, stdio: "pipe" });
   await prisma.marketDataset.create({ data: { id: "warmup", name: "warmup", symbol: "TEST", timeframe: "1s", timezone: "UTC",
     sourceIntervalSeconds: 1, barEmissionMode: "DENSE", barCount: 100_000, startTime: new Date(0), endTime: new Date(99_999_000) } });
   for (let offset = 0; offset < 100_000; offset += 1000) {

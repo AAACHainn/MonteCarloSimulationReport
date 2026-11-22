@@ -1,15 +1,12 @@
-import { execFileSync } from "node:child_process";
 import { rmSync } from "node:fs";
 import JSZip from "jszip";
 import { beforeAll, afterAll, describe, it, expect, vi } from "vitest";
 
 vi.mock("@/lib/db", async () => {
   const { createDatabaseClient } = await import("@/lib/sqlite-client.mjs");
-  const { randomUUID } = await import("node:crypto");
-  const { join } = await import("node:path");
-  const { tmpdir } = await import("node:os");
+  const { createSqliteFixture } = await import("@/scripts/database/sqlite-test-fixture");
   return {
-    prisma: createDatabaseClient({ datasourceUrl: `file:${join(tmpdir(), `replay-sessions-${randomUUID()}.db`)}` }, { allowCreate: true }),
+    prisma: createDatabaseClient({ datasourceUrl: `file:${createSqliteFixture("replay-sessions")}` }),
     replayDatabaseQueryCount: () => null,
   };
 });
@@ -50,7 +47,6 @@ let file = "";
 const base = new Date("2026-10-01T00:00:00Z");
 beforeAll(async () => {
   file = (await prisma.$queryRawUnsafe<Array<{ file: string }>>("PRAGMA database_list"))[0].file;
-  execFileSync(process.execPath, ["scripts/database/init-sqlite.mjs"], { env: { ...process.env, DATABASE_URL: `file:${file}` }, stdio: "pipe" });
   await prisma.marketDataset.create({ data: {
     id: "shared", name: "Shared", symbol: "TEST", timeframe: "1m", timezone: "UTC", sourceIntervalSeconds: 60,
     barCount: 8, startTime: base, endTime: new Date(base.getTime() + 420_000),

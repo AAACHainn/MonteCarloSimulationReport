@@ -1,11 +1,10 @@
-import { execFileSync } from "node:child_process";
 import { rmSync } from "node:fs";
 import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
 vi.mock("./aggregation-worker", () => ({ startAggregationWorker: vi.fn() }));
 vi.mock("@/lib/db", async () => {
   const { createDatabaseClient } = await import("@/lib/sqlite-client.mjs");
-  const { tmpdir } = await import("node:os"); const { join } = await import("node:path"); const { randomUUID } = await import("node:crypto");
-  return { prisma: createDatabaseClient({ datasourceUrl: `file:${join(tmpdir(), "aggregation-integration-" + randomUUID() + ".db")}` }, { allowCreate: true }), replayDatabaseQueryCount: () => null };
+  const { createSqliteFixture } = await import("@/scripts/database/sqlite-test-fixture");
+  return { prisma: createDatabaseClient({ datasourceUrl: `file:${createSqliteFixture("aggregation-integration")}` }), replayDatabaseQueryCount: () => null };
 });
 import { prisma } from "@/lib/db";
 import { aggregateMarketBars } from "./aggregation";
@@ -22,7 +21,6 @@ import { PATCH as datasetPATCH } from "@/app/api/market-datasets/[id]/route";
 let file = "";
 beforeAll(async () => {
   file = (await prisma.$queryRawUnsafe<Array<{ file: string }>>("PRAGMA database_list"))[0].file;
-  execFileSync(process.execPath, ["scripts/database/init-sqlite.mjs"], { env: { ...process.env, DATABASE_URL: `file:${file}` }, stdio: "pipe" });
 }, 30000);
 afterAll(async () => { await prisma.$disconnect(); if (file.includes("aggregation-integration-")) rmSync(file, { force: true }); });
 async function seed(id: string, source: number, count: number) {
