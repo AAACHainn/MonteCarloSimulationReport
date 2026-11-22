@@ -64,6 +64,7 @@
 | 类别 | 文档与当前入口 |
 | --- | --- |
 | K 线多窗口回放 | [首版设计与验收](replay/multi-pane-replay-design.md)。当前规范见[回放会话与纠错](replay/replay-sessions-implementation.md) |
+| 用户成就系统 | [成就目录、历史补算与维护页](account/achievements-design.md)（首版产品已确认，待开发）；当前归属与成长边界见[用户档案与成长](account/user-growth-design.md) |
 | 用户成长分阶段方案 | [五阶段实施顺序与交付摘要](account/user-growth-implementation-plan.md)；当前规范见[用户档案与成长](account/user-growth-design.md) |
 | 聚合排队与写入冲突方案 | [聚合排队方案](operations/aggregation-lock-repair-plan.md)；当前规范见[时间聚合与查询](market-data/time-aggregation.md) |
 | 旧升级入口交互方案 | [升级进度方案](operations/db-upgrade-progress-plan.md)；当前操作及版本边界见[升级指南](operations/upgrade.md) |
