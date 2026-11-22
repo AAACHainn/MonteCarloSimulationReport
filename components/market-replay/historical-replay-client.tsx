@@ -783,26 +783,28 @@ export function HistoricalReplayClient({
     <div data-web-fullscreen={webFullscreen} aria-label={dataset.name} className={webFullscreen
       ? "fixed inset-0 z-40 flex h-dvh min-h-0 flex-col overflow-hidden bg-white dark:bg-card"
       : "flex h-full min-h-0 flex-col"}>
-      <div className="flex h-12 shrink-0 items-center gap-2 overflow-x-auto border-b px-3 [&>*]:shrink-0">
-        {webFullscreen ? <span className="max-w-48 truncate text-xs font-medium" title={dataset.name}>{dataset.symbol} · {copy.paperTrading.historicalReplayReadOnly}</span> : null}
-        <DisplayIntervalControls
-          value={periods[activePane - 1]}
-          sourceIntervalSeconds={dataset.sourceIntervalSeconds}
-          disabled={windowLoading || layoutBusy}
-          onChange={changeActivePeriod}
-        />
-        <DisplaySessionControls value={displaySession} available={dataset.availableDisplaySessions}
-          disabled={windowLoading || layoutBusy} onChange={changeActiveSession} />
-        {activePane === 1 ? <>
-        <ChartVisibilityMenu value={chartVisibility} onChange={changeChartVisibility} />
-        <Button type="button" variant={settingsDialog === "candlesticks" ? "secondary" : "ghost"} size="sm" className="h-8" onClick={() => { setChartStyleDraft(cloneChartDisplay(chartStyle)); setSettingsDialog("candlesticks"); }}>
-          <ChartCandlestick className="h-4 w-4" />{copy.marketReplay.chartStyle}
-        </Button>
-        <Button type="button" variant={settingsDialog === "indicators" ? "secondary" : "ghost"} size="sm" className="h-8" onClick={() => setSettingsDialog("indicators")}>
-          <Settings2 className="h-4 w-4" />{copy.marketReplay.indicators}
-        </Button>
-        </> : <div ref={setPaneControls} className="flex items-center gap-2" />}
-        <div className="ml-auto flex items-center gap-2">
+      <div className="flex h-12 shrink-0 items-center gap-2 border-b px-3">
+        <div className="flex min-w-0 flex-1 items-center gap-2 self-stretch overflow-x-auto overflow-y-hidden [&>*]:shrink-0">
+          {webFullscreen ? <span className="max-w-48 truncate text-xs font-medium" title={dataset.name}>{dataset.symbol} · {copy.paperTrading.historicalReplayReadOnly}</span> : null}
+          <DisplayIntervalControls
+            value={periods[activePane - 1]}
+            sourceIntervalSeconds={dataset.sourceIntervalSeconds}
+            disabled={windowLoading || layoutBusy}
+            onChange={changeActivePeriod}
+          />
+          <DisplaySessionControls value={displaySession} available={dataset.availableDisplaySessions}
+            disabled={windowLoading || layoutBusy} onChange={changeActiveSession} />
+          {activePane === 1 ? <>
+            <ChartVisibilityMenu value={chartVisibility} onChange={changeChartVisibility} />
+            <Button type="button" variant={settingsDialog === "candlesticks" ? "secondary" : "ghost"} size="sm" className="h-8" onClick={() => { setChartStyleDraft(cloneChartDisplay(chartStyle)); setSettingsDialog("candlesticks"); }}>
+              <ChartCandlestick className="h-4 w-4" />{copy.marketReplay.chartStyle}
+            </Button>
+            <Button type="button" variant={settingsDialog === "indicators" ? "secondary" : "ghost"} size="sm" className="h-8" onClick={() => setSettingsDialog("indicators")}>
+              <Settings2 className="h-4 w-4" />{copy.marketReplay.indicators}
+            </Button>
+          </> : <div ref={setPaneControls} className="flex items-center gap-2" />}
+        </div>
+        <div className="flex shrink-0 items-center gap-2">
           <ReplayLayoutMenu template={layout.template} disabled={windowLoading || layoutBusy} onSelect={selectLayout} onReset={layout.resetRatios} />
           {webFullscreen ? <UserEntry compact session={replaySession ?? undefined} /> : null}
         </div>
