@@ -13,6 +13,7 @@ export type DatabaseClientSettings = {
   env?: Record<string, string | undefined>;
   projectRoot?: string;
   allowCreate?: boolean;
+  busyTimeoutMs?: number;
   onConnected?: (info: SqliteConnectionInfo) => void;
 };
 export function resolveSqlitePath(url: string, projectRoot?: string): string;

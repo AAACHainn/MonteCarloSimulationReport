@@ -1,4 +1,4 @@
-import { isSqliteBusy } from "./sqlite-write";
+import { isSqliteBusy, sqliteWriteTransaction, SqliteWriteBusyError } from "./sqlite-write";
 import { randomUUID } from "node:crypto";
 import { execFileSync, spawn } from "node:child_process";
 import { once } from "node:events";
@@ -14,8 +14,8 @@ const { DatabaseSync } = createRequire(import.meta.url)("node:sqlite") as typeof
 const clients: PrismaClient[] = [];
 const files: string[] = [];
 function file() { const path = join(tmpdir(), "sqlite-client-" + randomUUID() + ".db"); files.push(path); return path; }
-function client(path: string, mode: "wal" | "delete" = "wal", allowCreate = true, synchronous = "FULL") {
-  const value = createDatabaseClient({ datasourceUrl: "file:" + path }, { env: { SQLITE_DRIVER: "better-sqlite3", SQLITE_JOURNAL_MODE: mode, SQLITE_SYNCHRONOUS: synchronous }, allowCreate });
+function client(path: string, mode: "wal" | "delete" = "wal", allowCreate = true, synchronous = "FULL", busyTimeoutMs?: number) {
+  const value = createDatabaseClient({ datasourceUrl: "file:" + path }, { env: { SQLITE_DRIVER: "better-sqlite3", SQLITE_JOURNAL_MODE: mode, SQLITE_SYNCHRONOUS: synchronous }, allowCreate, busyTimeoutMs });
   clients.push(value); return value;
 }
 afterEach(async () => {
@@ -102,11 +102,17 @@ describe("configured SQLite runtime", () => {
     const original = createDatabaseClient({ datasourceUrl: "file:" + path }, { env: { SQLITE_DRIVER: "native" } }); clients.push(original);
     expect(await original.$queryRawUnsafe("PRAGMA journal_mode")).toEqual([{ journal_mode: "delete" }]);
   });
-  it("preserves primary SQLITE_BUSY as a structured code instead of an incompatible SocketTimeout", async () => {
-    const path = file(), db = client(path);
-    await db.$executeRawUnsafe("CREATE TABLE BusyProbe (id INTEGER PRIMARY KEY, value TEXT)");
-    await db.$executeRawUnsafe("INSERT INTO BusyProbe VALUES (1, 'original')");
-    await db.$queryRawUnsafe("PRAGMA busy_timeout=5");
+  it("keeps lock waits under a short transaction deadline on a dedicated connection", async () => {
+    const path = file(), foreground = client(path);
+    await foreground.$executeRawUnsafe('CREATE TABLE "MarketDataset" (id TEXT PRIMARY KEY)');
+    await foreground.$executeRawUnsafe("CREATE TABLE BusyProbe (id INTEGER PRIMARY KEY, value TEXT)");
+    await foreground.$executeRawUnsafe("INSERT INTO BusyProbe VALUES (1, 'original')");
+    const db = client(path, "wal", false, "FULL", 100);
+    expect(Number((await db.$queryRaw<Array<{ timeout: number }>>`PRAGMA busy_timeout`)[0].timeout)).toBe(100);
+    expect(Number((await foreground.$queryRaw<Array<{ timeout: number }>>`PRAGMA busy_timeout`)[0].timeout)).toBe(5000);
+    const write = () => sqliteWriteTransaction(db, tx => tx.$executeRaw`UPDATE BusyProbe SET value = 'saved' WHERE id=1`,
+      { maxWait: 100, timeout: 1_000 },
+      { attempts: 1, budgetMs: 1_500, delayMs: 0, maxDelayMs: 0 });
     // Keep the lock in another process: two SQLite libraries in one Linux process
     // can share process-scoped file locks instead of producing SQLITE_BUSY.
     const blocker = spawn(process.execPath, ["--input-type=commonjs", "--eval", [
@@ -127,9 +133,11 @@ describe("configured SQLite runtime", () => {
       try { await db.$executeRawUnsafe("UPDATE BusyProbe SET value = 'blocked' WHERE id=1"); } catch (caught) { error = caught; }
       expect(error).toBeDefined(); expect(isSqliteBusy(error)).toBe(true);
       expect((error as { meta?: { code?: string } }).meta?.code).toBe("5");
+      await expect(write()).rejects.toBeInstanceOf(SqliteWriteBusyError);
+      expect(await db.$queryRawUnsafe("SELECT value FROM BusyProbe")).toEqual([{ value: "original" }]);
       blocker.send("release");
       await exited;
-      await db.$executeRawUnsafe("UPDATE BusyProbe SET value = 'saved' WHERE id=1");
+      expect(await write()).toBe(1);
       expect(await db.$queryRawUnsafe("SELECT value FROM BusyProbe")).toEqual([{ value: "saved" }]);
     } finally {
       if (blocker.connected) blocker.send("release");

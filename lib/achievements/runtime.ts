@@ -1,8 +1,9 @@
 import { randomUUID } from "node:crypto";
 import { monitorEventLoopDelay } from "node:perf_hooks";
 import { freemem } from "node:os";
-import type { AchievementJob, AchievementSyncState, Prisma } from "@prisma/client";
+import type { AchievementJob, AchievementSyncState, Prisma, PrismaClient } from "@prisma/client";
 import { prisma } from "@/lib/db";
+import { createDatabaseClient } from "@/lib/sqlite-client.mjs";
 import { SqliteCommitUncertainError, SqliteWriteBusyError, sqliteWriteTransaction } from "@/lib/sqlite-write";
 import { metricFingerprints, metricKeys } from "./catalog";
 import { indexedEvidence, verifyFoundation, type Evidence } from "./evidence";
@@ -11,7 +12,8 @@ import { applyEvidence, metricEvidence, metricIdentity, publishAwards, qualifyin
 import { registerAchievementWake } from "./wake";
 
 const retryDelays = [5_000, 15_000, 30_000];
-const shortOptions = { maxWait: 100, timeout: 1_000, writeFence: false };
+const lockWaitMs = 100;
+const shortOptions = { maxWait: 100, timeout: 1_000 };
 const shortPolicy = { attempts: 1, budgetMs: 1_500, delayMs: 0, maxDelayMs: 0 };
 const syncKey = { id: 1 };
 const idle = 30_000;
@@ -55,14 +57,14 @@ async function processLive(tx: Prisma.TransactionClient, slot: AchievementSyncSt
   return { lastAppliedSeq: indexes.at(-1)!.seq, lastSyncedAt: new Date(), liveFailures: 0, liveError: null, retryAt: null };
 }
 
-async function recordFailure(work: Work, slot: AchievementSyncState, error: unknown, uncertain: boolean) {
+async function recordFailure(db: PrismaClient, work: Work, slot: AchievementSyncState, error: unknown, uncertain: boolean) {
   const attempt = (work.kind === "live" ? slot.liveFailures : work.job.attempts) + 1;
   const delay = error instanceof SqliteWriteBusyError ? retryDelays[attempt - 1] : undefined;
   const code = uncertain ? "COMMIT_UNVERIFIED"
     : error instanceof AchievementError ? error.code
     : error instanceof SqliteWriteBusyError ? "DATABASE_BUSY" : "BATCH_FAILED";
   const retryAt = delay ? new Date(Date.now() + delay) : null;
-  await sqliteWriteTransaction(prisma, async tx => {
+  await sqliteWriteTransaction(db, async tx => {
     const current = await tx.achievementSyncState.findUniqueOrThrow({ where: syncKey });
     if (!uncertain && current.batchToken !== slot.batchToken) return;
     if (work.kind === "live") {
@@ -73,15 +75,15 @@ async function recordFailure(work: Work, slot: AchievementSyncState, error: unkn
         data: { attempts: attempt, error: code, retryAt, ...(!delay && { status: "FAILED" }) },
       });
     }
-  }, { ...shortOptions, writeFence: true }, shortPolicy);
+  }, shortOptions, shortPolicy);
 }
 
 /** A short transaction is also the lease period. The fenced first write
  * serializes SQLite workers, and the receipt commits with every cursor. */
-async function runBatch(work: Work, slot: AchievementSyncState, size: number) {
+async function runBatch(db: PrismaClient, work: Work, slot: AchievementSyncState, size: number) {
   const owner = randomUUID();
   try {
-    return await sqliteWriteTransaction(prisma, async tx => {
+    return await sqliteWriteTransaction(db, async tx => {
       const now = new Date();
       const acquired = await tx.achievementSyncState.updateMany({
         where: { ...syncKey, batchToken: slot.batchToken, OR: [{ ownerToken: null }, { leaseUntil: { lt: now } }] },
@@ -107,65 +109,70 @@ async function runBatch(work: Work, slot: AchievementSyncState, size: number) {
     }, shortOptions, shortPolicy);
   } catch (error) {
     if (error instanceof SqliteCommitUncertainError) {
-      const actual = await prisma.achievementSyncState.findUniqueOrThrow({ where: syncKey });
+      const actual = await db.achievementSyncState.findUniqueOrThrow({ where: syncKey });
       if (actual.batchToken === owner) return true;
-      await recordFailure(work, slot, error, actual.batchToken !== slot.batchToken);
+      await recordFailure(db, work, slot, error, actual.batchToken !== slot.batchToken);
     } else {
-      await recordFailure(work, slot, error, false);
+      await recordFailure(db, work, slot, error, false);
     }
     console.warn(JSON.stringify({ event: "achievement-batch", kind: work.kind, jobId: work.kind === "history" ? work.job.id : undefined, error: error instanceof Error ? error.name : "unknown" }));
     return false;
   }
 }
 
-async function heavyWorkActive() {
+async function heavyWorkActive(db: PrismaClient) {
   const available = process.availableMemory?.() ?? freemem();
   if (available < 384 * 1024 * 1024) return true;
   const [importing, aggregating, correcting, ai] = await Promise.all([
-    prisma.marketDatasetImport.findFirst({ where: { status: "PROCESSING" }, select: { id: true } }),
-    prisma.marketAggregationJob.findFirst({ where: { status: "RUNNING" }, select: { id: true } }),
-    prisma.replayCorrectionJob.findFirst({ where: { status: "RUNNING" }, select: { id: true } }),
-    prisma.aiRun.findFirst({ where: { status: "RUNNING" }, select: { id: true } }),
+    db.marketDatasetImport.findFirst({ where: { status: "PROCESSING" }, select: { id: true } }),
+    db.marketAggregationJob.findFirst({ where: { status: "RUNNING" }, select: { id: true } }),
+    db.replayCorrectionJob.findFirst({ where: { status: "RUNNING" }, select: { id: true } }),
+    db.aiRun.findFirst({ where: { status: "RUNNING" }, select: { id: true } }),
   ]);
   return !!(importing || aggregating || correcting || ai);
 }
 
 /** Exported for isolated, deterministic integration verification. */
-export async function achievementTick({ allowHistory = true, liveSize = 25, historySize = 24, now = new Date() } = {}) {
-  let slot = await prisma.achievementSyncState.findUnique({ where: syncKey });
+export async function achievementTick({ db = prisma, allowHistory = true, liveSize = 25, historySize = 24, now = new Date() } = {}) {
+  let slot = await db.achievementSyncState.findUnique({ where: syncKey });
   if (!slot) throw new Error("ACHIEVEMENT_SCHEMA_NOT_READY");
   if (!slot.enabledAt) {
-    await prisma.achievementSyncState.updateMany({ where: { ...syncKey, enabledAt: null }, data: { enabledAt: now } });
+    await db.achievementSyncState.updateMany({ where: { ...syncKey, enabledAt: null }, data: { enabledAt: now } });
   }
   const live = (!slot.liveError || (slot.retryAt && slot.retryAt <= now))
-    && await prisma.achievementFact.findFirst({ where: { seq: { gt: slot.lastAppliedSeq } }, select: { seq: true } });
+    && await db.achievementFact.findFirst({ where: { seq: { gt: slot.lastAppliedSeq } }, select: { seq: true } });
   let worked = false;
   if (live) {
-    worked = await runBatch({ kind: "live" }, slot, liveSize);
-    slot = await prisma.achievementSyncState.findUniqueOrThrow({ where: syncKey });
+    worked = await runBatch(db, { kind: "live" }, slot, liveSize);
+    slot = await db.achievementSyncState.findUniqueOrThrow({ where: syncKey });
   }
   const eligible = { OR: [{ retryAt: null }, { retryAt: { lte: now } }] };
-  const job = await prisma.achievementJob.findFirst({
+  const job = await db.achievementJob.findFirst({
     where: { ...eligible, status: { in: runnableJobs.filter(status => status !== "DISCARDING") } },
     orderBy: { createdAt: "asc" },
-  }) ?? await prisma.achievementJob.findFirst({
+  }) ?? await db.achievementJob.findFirst({
     where: { ...eligible, status: "DISCARDING" },
     orderBy: { createdAt: "asc" },
   });
-  const blocked = job && (!allowHistory || await heavyWorkActive());
-  if (job && !blocked) worked = await runBatch({ kind: "history", job }, slot, historySize) || worked;
+  const blocked = job && (!allowHistory || await heavyWorkActive(db));
+  if (job && !blocked) worked = await runBatch(db, { kind: "history", job }, slot, historySize) || worked;
   return worked ? pause : blocked ? 5_000 : idle;
 }
 
 const globals = globalThis as typeof globalThis & { achievementRuntime?: boolean };
 export function startAchievementRuntime() {
   if (globals.achievementRuntime || process.env.VITEST || process.env.NEXT_PHASE === "phase-production-build") return;
+  // A synchronous SQLite lock wait must finish before the short Prisma transaction expires.
+  const db = process.env.SQLITE_DRIVER === "better-sqlite3"
+    ? createDatabaseClient(undefined, { busyTimeoutMs: lockWaitMs })
+    : prisma;
   globals.achievementRuntime = true;
   const delay = monitorEventLoopDelay({ resolution: 20 });
   delay.enable();
   let timer: NodeJS.Timeout | undefined;
   let running = false, requested = false, stopped = false;
   let historySize = 24, liveSize = 25, quiet = false;
+  const disconnect = () => { if (db !== prisma) void db.$disconnect().catch(() => {}); };
   const schedule = (ms: number) => {
     if (stopped) return;
     if (timer) clearTimeout(timer);
@@ -180,7 +187,7 @@ export function startAchievementRuntime() {
     let next = idle;
     const started = performance.now();
     try {
-      next = await achievementTick({ allowHistory: delay.percentile(95) < 50_000_000, liveSize, historySize });
+      next = await achievementTick({ db, allowHistory: delay.percentile(95) < 50_000_000, liveSize, historySize });
       if (next === pause && performance.now() - started > 100) {
         historySize = Math.max(4, Math.floor(historySize / 2));
         liveSize = Math.max(4, Math.floor(liveSize / 2));
@@ -193,7 +200,8 @@ export function startAchievementRuntime() {
       delay.reset();
       const wait = next === idle && quiet ? 60_000 : next;
       quiet = next === idle;
-      schedule(requested ? pause : wait);
+      if (stopped) disconnect();
+      else schedule(requested ? pause : wait);
     }
   }
   registerAchievementWake(() => {
@@ -201,7 +209,13 @@ export function startAchievementRuntime() {
     requested = true;
     if (!running) schedule(pause);
   });
-  const stop = () => { stopped = true; clearTimeout(timer); delay.disable(); };
+  const stop = () => {
+    if (stopped) return;
+    stopped = true;
+    clearTimeout(timer);
+    delay.disable();
+    if (!running) disconnect();
+  };
   process.once("SIGTERM", stop);
   process.once("SIGINT", stop);
   schedule(1_000);

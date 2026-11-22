@@ -44,7 +44,7 @@
 
 - [目录与指标指纹](../../lib/achievements/catalog.ts)集中维护系列、阶段及证据版本。相同指标共享进度；已获阶段的阈值快照与规则指纹随奖章保存。
 - [原子捕获](../../lib/user-growth/settlement.ts)、[退出累积](../../lib/paper-trading/persist.ts)和[证据校验](../../lib/achievements/evidence.ts)沿用既有业务事务，新增全局递增消费索引。
-- [后台执行](../../lib/achievements/runtime.ts)优先处理新增事实，再处理历史批次。历史任务结合内存、事件循环延迟与现有重任务状态让出资源。使用单个 SQLite 运行槽、短批次及事务回执。
+- [后台执行](../../lib/achievements/runtime.ts)优先处理新增事实，再处理历史批次。历史任务结合内存、事件循环延迟与现有重任务状态让出资源。使用单个 SQLite 运行槽、短批次及事务回执。使用 `better-sqlite3` 时，成就后台连接的 SQLite 写锁等待为 100 毫秒，批次事务时限为 1 秒。
 - 结构变更从[升级指南](../operations/upgrade.md#当前入口)进入。迁移初始化结构及同步状态，首次历史计算仍由维护页确认启动。
 
 读取 API 位于 `/api/users/{userId}/achievements`，展示偏好写入 `/api/users/{userId}/achievement-showcase`。维护任务与只读分页由 `/api/admin/achievements` 下的 API 提供。GET 只读，写入使用同源 JSON 请求。
