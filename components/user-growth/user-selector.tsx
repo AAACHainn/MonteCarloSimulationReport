@@ -1,8 +1,9 @@
 "use client";
 
 import { useEffect, useId, useRef, useState, type ReactNode } from "react";
+import Link from "next/link";
 import * as Popover from "@radix-ui/react-popover";
-import { ArrowLeft, ArrowRightLeft, Check, Search, Users } from "lucide-react";
+import { ArrowLeft, ArrowRightLeft, Award, Check, Search, Users } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { RealmBadge } from "./realm-badge";
 import { Input } from "@/components/ui/input";
@@ -16,9 +17,10 @@ import { ExperienceProgress } from "./experience-progress";
 import { AppearanceMenu } from "@/components/appearance-menu";
 
 const t = copy.userGrowth;
-export function UserSelector({ users, selected, onSelect, onCreate, onProfiles, state = "normal", onRetry, notice = "", compact = false, context, allowSwitch = true, onOpen }: {
+export function UserSelector({ users, selected, onSelect, onCreate, onProfiles, state = "normal", onRetry, notice = "", compact = false, context, allowSwitch = true, onOpen, achievementsHref, showAchievementHint, achievementNotice }: {
   users: UserIdentity[]; selected?: UserIdentity; onSelect: (id: string | null) => void; onCreate: () => void; onProfiles: () => void; state?: QueryState; onRetry: () => void;
   notice?: string; compact?: boolean; context?: ReactNode; allowSwitch?: boolean; onOpen?: () => void;
+  achievementsHref?: string; showAchievementHint?: boolean; achievementNotice?: ReactNode;
 }) {
   const [open, setOpen] = useState(false);
   const [view, setView] = useState<"menu" | "users">("menu");
@@ -48,9 +50,12 @@ export function UserSelector({ users, selected, onSelect, onCreate, onProfiles, 
   useEffect(() => { if (open) { if (view === "menu") switchRef.current?.focus(); else backRef.current?.focus(); } }, [open, view]);
   const avatar = (user?: UserIdentity, small = false) => user ? <UserAvatar avatar={user.avatar} realm={user.growth?.realm} size={small ? "compact" : "list"} /> : <span className={cn("flex shrink-0 items-center justify-center rounded-full border border-slate-300 dark:border-input bg-slate-50 dark:bg-muted text-slate-600 dark:text-secondary-text", small ? "h-5 w-5" : "h-8 w-8")}><Users className={small ? "h-3 w-3" : "h-4 w-4"} aria-hidden="true" /></span>;
   return <Popover.Root open={open} onOpenChange={changeOpen}>
+    <div className="relative inline-flex shrink-0">
     <Popover.Trigger asChild><Button ref={triggerRef} variant="ghost" size="icon" className={cn("shrink-0 rounded-full p-0", compact && "h-8 w-8")} title={`${t.selection}：${selected?.nickname ?? t.all}`} aria-label={`${t.selection}：${selected?.nickname ?? t.all}`}>
       {selected ? <UserAvatar avatar={selected.avatar} realm={selectedUser?.growth?.realm} size={compact ? "list" : "control"} /> : <span className={cn("flex items-center justify-center rounded-full border border-slate-300 dark:border-input bg-slate-50 dark:bg-muted text-slate-600 dark:text-secondary-text", compact ? "h-8 w-8" : "h-10 w-10")}><Users className={compact ? "h-4 w-4" : "h-5 w-5"} aria-hidden="true" /></span>}
     </Button></Popover.Trigger>
+    {achievementNotice}
+    </div>
     <Popover.Portal container={portalContainer ?? undefined}><OptionPopoverContent align="end" className="w-80 p-3" aria-label={listing ? t.switchUser : t.scope} onEscapeKeyDown={event => { if (listing && searchOpen) { event.preventDefault(); closeSearch(); } else if (listing) { event.preventDefault(); back(); } }}>
       {listing ? <>
         <div className="flex shrink-0 items-center gap-2"><Button ref={backRef} variant="ghost" size="icon" aria-label={t.backToUserMenu} title={t.backToUserMenu} onClick={back}><ArrowLeft className="h-4 w-4" aria-hidden="true" /></Button><p className="flex-1 text-sm font-medium">{t.switchUser}</p><Button ref={searchButtonRef} variant="ghost" size="icon" aria-label={searchOpen ? t.closeSearch : t.search} title={searchOpen ? t.closeSearch : t.search} aria-expanded={searchOpen} aria-controls={searchOpen ? searchId : undefined} onClick={() => { if (searchOpen) closeSearch(); else setSearchOpen(true); }}><Search className="h-4 w-4" aria-hidden="true" /></Button></div>
@@ -69,6 +74,8 @@ export function UserSelector({ users, selected, onSelect, onCreate, onProfiles, 
         {selectedUser?.growth && <div className="shrink-0 px-2 pb-3"><ExperienceProgress growth={selectedUser.growth} compact /></div>}
         {context && <div className="shrink-0 border-t px-2 py-3">{context}</div>}
         {allowSwitch && <Button ref={switchRef} variant="ghost" className="w-full justify-start gap-3" onClick={() => setView("users")}><ArrowRightLeft className="h-4 w-4" aria-hidden="true" />{t.switchUser}</Button>}
+        {achievementsHref && <Button asChild variant="ghost" className="w-full justify-start gap-3"><Link href={achievementsHref} onClick={() => changeOpen(false)}><Award className="h-4 w-4" aria-hidden="true" />{copy.achievements.menu}</Link></Button>}
+        {showAchievementHint && <p className="px-2 py-2 text-xs text-secondary-text">{copy.achievements.selectUser}</p>}
         <div className="mt-1 shrink-0 border-t pt-1"><AppearanceMenu portalContainer={portalContainer} /></div>
         <p className="shrink-0 border-t px-2 py-3 text-xs text-slate-600 dark:text-secondary-text">{t.scopeHint}</p>
         <div className="flex shrink-0 justify-between gap-2"><Button variant="outline" onClick={() => { changeOpen(false); onCreate(); }}>{t.create}</Button><Button variant="ghost" onClick={() => { changeOpen(false); onProfiles(); }}>{t.profiles}</Button></div>

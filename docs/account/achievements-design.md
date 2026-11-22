@@ -1,7 +1,7 @@
 # 用户成就系统设计与开发方案
 
-> 文档状态：设计与计划。适用范围：用户成就展示、增量解锁、历史补算、后台任务和维护页面的待开发方案，不表示功能已实现。
-> 当前规范：[用户档案与成长](user-growth-design.md)、[自营练习账户](../replay/prop-practice-account-design.md)、[交易关卡](../replay/training-gate.md)、[UI 规范](../ui/ui-guidelines.md)、[升级指南](../operations/upgrade.md)。
+> 文档状态：设计与计划。适用范围：首版产品确认、实施前的技术方案与发布验收标准，现行行为见当前规范。
+> 当前规范：[用户成就](achievements.md)、[用户档案与成长](user-growth-design.md)、[自营练习账户](../replay/prop-practice-account-design.md)、[交易关卡](../replay/training-gate.md)、[UI 规范](../ui/ui-guidelines.md)、[升级指南](../operations/upgrade.md)。
 > 整理日期：2026-11-22。代码核对基点：`fb4ef49`。后续实施须重新核对实际代码、数据库结构和工作区，不能沿用本文的调研状态作为验收证据。
 > 评审约束：目标服务器为 2 vCPU / 2 GiB RAM；已完成一次独立 subagent 静态设计审阅并据此修订，尚未做目标机器性能测试。
 > 产品确认：2026-11-22，用户已确认第 19 节全部七项首版产品选择；技术参数与实现效果仍待开发验证。

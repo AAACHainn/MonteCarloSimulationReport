@@ -4,6 +4,7 @@ import { storageId, getReplayScope } from "@/lib/replay-sessions/scope";
 import type { PaperOrderData, PaperFillData } from "./types";
 import { derivePaperTradeTransitions } from "./reducers";
 import { recordClosedTrade, type IncrementalTradeStats } from "./trade-stats";
+import { accumulateExitReason, ExitReason, reconcileExitMask, verifiedExitMask } from "@/lib/achievements/exit-evidence";
 
 export function orderCreateData(sessionId: string, order: PaperOrderData) {
   return {
@@ -25,16 +26,24 @@ export async function persistTrades(
   orders: PaperOrderData[],
   fills: PaperFillData[],
   initialStats: IncrementalTradeStats,
+  forcedExit = false,
+  previousNet?: number,
 ) {
   let stats = initialStats;
   let activeTrade = fills.length
     ? await tx.paperTrade.findFirst({ where: { sessionId, status: "OPEN" } })
     : null;
+  if (activeTrade && previousNet && (activeTrade.exitReasonMask === null || activeTrade.exitReasonMask & ExitReason.UNKNOWN)
+    && fills.some(fill => fill.closedQuantity > 0)) {
+    // At this point the current batch has not inserted its fills.
+    const verified = await verifiedExitMask(tx, activeTrade, previousNet, fills[0].sequence);
+    activeTrade.exitReasonMask = reconcileExitMask(activeTrade.exitReasonMask, verified);
+  }
   for (const transition of derivePaperTradeTransitions(orders, fills)) {
     const fill = transition.fill;
     if (transition.kind === "ENTRY") {
       activeTrade = await tx.paperTrade.create({
-        data: { ...(getReplayScope() ? { id: storageId(`speculative_${fill.id}`) } : {}), sessionId, side: fill.netQuantityAfter > 0 ? "LONG" : "SHORT", openedSequence: fill.sequence, openedAt: new Date(fill.timestamp), fees: fill.fee, plannedRisk: transition.plannedRisk },
+        data: { ...(getReplayScope() ? { id: storageId(`speculative_${fill.id}`) } : {}), sessionId, side: fill.netQuantityAfter > 0 ? "LONG" : "SHORT", openedSequence: fill.sequence, openedAt: new Date(fill.timestamp), fees: fill.fee, plannedRisk: transition.plannedRisk, exitReasonMask: 0 },
       });
     } else if (transition.kind === "ADD" && activeTrade) {
       activeTrade = await tx.paperTrade.update({
@@ -44,12 +53,12 @@ export async function persistTrades(
     } else if (transition.kind === "REDUCE" && activeTrade) {
       activeTrade = await tx.paperTrade.update({
         where: { id: activeTrade.id },
-        data: { grossPnl: { increment: fill.realizedPnl }, fees: { increment: fill.fee } },
+        data: { grossPnl: { increment: fill.realizedPnl }, fees: { increment: fill.fee }, exitReasonMask: accumulateExitReason(activeTrade.exitReasonMask, fill.reason, forcedExit) },
       });
     } else if ((transition.kind === "CLOSE" || transition.kind === "STOP_LOSS" || transition.kind === "TAKE_PROFIT") && activeTrade) {
       const closed = await tx.paperTrade.update({
         where: { id: activeTrade.id },
-        data: { status: "CLOSED", grossPnl: { increment: fill.realizedPnl }, fees: { increment: fill.fee }, closedSequence: fill.sequence, closedAt: new Date(fill.timestamp) },
+        data: { status: "CLOSED", grossPnl: { increment: fill.realizedPnl }, fees: { increment: fill.fee }, closedSequence: fill.sequence, closedAt: new Date(fill.timestamp), exitReasonMask: accumulateExitReason(activeTrade.exitReasonMask, fill.reason, forcedExit) },
       });
       stats = recordClosedTrade(stats, closed.grossPnl - closed.fees);
       await settleClosedCycle(tx, closed);
@@ -59,13 +68,13 @@ export async function persistTrades(
       if (activeTrade) {
         const closed = await tx.paperTrade.update({
           where: { id: activeTrade.id },
-          data: { status: "CLOSED", grossPnl: { increment: fill.realizedPnl }, fees: { increment: closingFee }, closedSequence: fill.sequence, closedAt: new Date(fill.timestamp) },
+          data: { status: "CLOSED", grossPnl: { increment: fill.realizedPnl }, fees: { increment: closingFee }, closedSequence: fill.sequence, closedAt: new Date(fill.timestamp), exitReasonMask: accumulateExitReason(activeTrade.exitReasonMask, fill.reason, forcedExit) },
         });
         stats = recordClosedTrade(stats, closed.grossPnl - closed.fees);
         await settleClosedCycle(tx, closed);
       }
       activeTrade = await tx.paperTrade.create({
-        data: { ...(getReplayScope() ? { id: storageId(`speculative_${fill.id}`) } : {}), sessionId, side: fill.netQuantityAfter > 0 ? "LONG" : "SHORT", openedSequence: fill.sequence, openedAt: new Date(fill.timestamp), fees: fill.fee - closingFee, plannedRisk: transition.plannedRisk },
+        data: { ...(getReplayScope() ? { id: storageId(`speculative_${fill.id}`) } : {}), sessionId, side: fill.netQuantityAfter > 0 ? "LONG" : "SHORT", openedSequence: fill.sequence, openedAt: new Date(fill.timestamp), fees: fill.fee - closingFee, plannedRisk: transition.plannedRisk, exitReasonMask: 0 },
       });
     }
   }

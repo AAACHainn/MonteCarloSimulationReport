@@ -6,7 +6,8 @@ import { checkBaselineStructure } from "./sqlite-baseline-structure.mjs";
 
 const baseline = "20261026170000_user_wallet_transfers";
 const paneMigration = "20261120120000_market_drawing_pane";
-const legacyVersions = new Set([baseline, paneMigration]);
+export const achievementsMigration = "20261122120000_achievements";
+const legacyVersions = new Set([baseline, paneMigration, achievementsMigration]);
 const legacyHistory = "_replay_schema_migrations";
 const hash = input => createHash("sha256").update(input).digest("hex");
 const sqlFor = (root, name) => readFileSync(join(root, "prisma/migrations", name, "migration.sql"), "utf8");
@@ -69,6 +70,9 @@ export function identifyMigration(db, root) {
     checkLegacyVersion(db, root, migrations, version);
     const unsupported = pending.find(name => !legacyVersions.has(name));
     if (unsupported) throw new Error(`初始化路径缺少目标版本核验规则：${unsupported}`);
+  }
+  if (version >= achievementsMigration && !db.prepare('SELECT 1 FROM "AchievementSyncState" WHERE id = 1').get()) {
+    throw new Error("成就同步状态缺失");
   }
   return { method, pending, migrations };
 }

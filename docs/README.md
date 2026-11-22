@@ -41,6 +41,7 @@
 | --- | --- | --- |
 | 文件清理 | [自动清理范围、删除前核验与现场保留](operations/file-cleanup.md)；执行清理前完整阅读 | [协作约定](../AGENTS.md#安全与数据保护) |
 | 用户档案与成长 | [归属、经验及突破规则](account/user-growth-design.md) | [成长规则与参数](../lib/user-growth/rules.ts)、[原子结算](../lib/user-growth/settlement.ts) |
+| 用户成就 | [成就目录、展示、历史补算与维护](account/achievements.md) | [成就目录](../lib/achievements/catalog.ts)、[后台执行](../lib/achievements/runtime.ts) |
 | 用户资金 | [初始发放、账本、存取及删除结算](account/user-wallet-transfers-progress.md#当前规则) | [钱包服务](../lib/user-wallet/service.ts)、[资金存取](../lib/user-wallet/transfers.ts) |
 | AI 机器人 | [使用、配置与统计口径](ai/ai-assistant.md)；[取图、展示及截图契约](ai/ai-chart-images.md) | [工具注册](../lib/ai/tools.ts)、[上限](../lib/ai/limits.ts)、[图片契约](../lib/ai/chart-images-contract.ts) |
 | 图表绘图 | [Bar Count](charting/bar-count.md)、[矩形](charting/rectangle-drawing.md)、[文字用法与数据](charting/text-drawing.md)、[文字保存状态机](charting/text-autosave-design.md)、[AB=CD](charting/abcd-drawing.md)、[箭头](charting/arrow-drawing.md)、[绘图快捷键](charting/drawing-template-shortcuts.md)、[绘图编辑与撤销重做](charting/drawing-editing.md)；跨工具保存规则见[会话绘图持久化](charting/archived-drawings.md) | [类型、样式与校验](../lib/market-replay/chart-drawings.ts)、[快捷键](../lib/market-replay/keyboard-shortcuts.ts)、[文字自动保存](../lib/market-replay/text-autosave.ts) |
@@ -64,7 +65,7 @@
 | 类别 | 文档与当前入口 |
 | --- | --- |
 | K 线多窗口回放 | [首版设计与验收](replay/multi-pane-replay-design.md)。当前规范见[回放会话与纠错](replay/replay-sessions-implementation.md) |
-| 用户成就系统 | [成就目录、历史补算与维护页](account/achievements-design.md)（首版产品已确认，待开发）；当前归属与成长边界见[用户档案与成长](account/user-growth-design.md) |
+| 用户成就系统 | [首版设计、确认与发布标准](account/achievements-design.md)。当前规则见[用户成就](account/achievements.md) |
 | 用户成长分阶段方案 | [五阶段实施顺序与交付摘要](account/user-growth-implementation-plan.md)；当前规范见[用户档案与成长](account/user-growth-design.md) |
 | 聚合排队与写入冲突方案 | [聚合排队方案](operations/aggregation-lock-repair-plan.md)；当前规范见[时间聚合与查询](market-data/time-aggregation.md) |
 | 旧升级入口交互方案 | [升级进度方案](operations/db-upgrade-progress-plan.md)；当前操作及版本边界见[升级指南](operations/upgrade.md) |

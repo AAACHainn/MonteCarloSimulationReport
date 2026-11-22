@@ -1,7 +1,8 @@
 import type { Prisma } from "@prisma/client";
 import { prisma } from "@/lib/db";
 import { copy } from "@/lib/i18n";
-import { sqliteWriteTransaction } from "@/lib/sqlite-write";
+import { afterSqliteCommit, sqliteWriteTransaction } from "@/lib/sqlite-write";
+import { wakeAchievements } from "@/lib/achievements/wake";
 import { getReplayScope, ReplaySessionError } from "@/lib/replay-sessions/scope";
 import { logicalId } from "@/lib/replay-sessions/identity";
 import { emptyGrowthTotals, foundationReady, growthRealm, GROWTH_RULE_VERSION, GROWTH_XP, receivedUsdtMinor, type GrowthTotals } from "./rules";
@@ -16,6 +17,7 @@ export async function settleGrowth(tx: Prisma.TransactionClient, input: {
   type: GrowthFactType; sourceId: string; roundNumber?: number; occurredAt: Date; sessionId?: string;
   source?: Partial<Pick<GrowthSource, "sequence" | "entryKey" | "entryNo" | "journalSessionId" | "currency">>;
   payout?: { received: number; currency: string; firstInRound: boolean };
+  exitReasonMask?: number | null;
 }): Promise<GrowthReceipt | null> {
   const sessionId = input.sessionId ?? getReplayScope()?.id;
   if (!sessionId) return null;
@@ -32,10 +34,11 @@ export async function settleGrowth(tx: Prisma.TransactionClient, input: {
     passedEvaluations: input.type === "EVALUATION" ? 1 : 0, successfulPayouts: input.type === "PAYOUT" ? 1 : 0,
     receivedUsdtMinor: input.type === "PAYOUT" && input.payout?.currency === "USDT" ? receivedUsdtMinor(input.payout.received) : BigInt(0) };
   const summary: GrowthSource = { sessionName: session.name, datasetId: session.datasetId, datasetName: session.dataset.name, symbol: session.dataset.symbol, ...input.source };
-  await tx.userGrowthFact.create({ data: { userId: session.userId, type: input.type, sourceKey: key, firstPayoutKey: first ? firstKey : null,
+  const fact = await tx.userGrowthFact.create({ data: { userId: session.userId, type: input.type, sourceKey: key, firstPayoutKey: first ? firstKey : null,
     sessionId: session.id, roundNumber: round, sourceSummary: JSON.stringify(summary), occurredAt: input.occurredAt,
-    ruleVersion: GROWTH_RULE_VERSION, xpDelta: delta.totalXp, cyclesDelta: delta.completedCycles, reviewsDelta: delta.completedReviews,
+    ruleVersion: GROWTH_RULE_VERSION, achievementCaptureVersion: 1, xpDelta: delta.totalXp, cyclesDelta: delta.completedCycles, reviewsDelta: delta.completedReviews,
     evaluationsDelta: delta.passedEvaluations, payoutsDelta: delta.successfulPayouts, receivedUsdtMinorDelta: delta.receivedUsdtMinor } });
+  await captureAchievementFact(tx, fact, input.exitReasonMask);
   const current = await tx.userGrowth.upsert({ where: { userId: session.userId }, create: { userId: session.userId }, update: {} });
   const totals: GrowthTotals = { totalXp: current.totalXp + delta.totalXp, completedCycles: current.completedCycles + delta.completedCycles,
     completedReviews: current.completedReviews + delta.completedReviews, passedEvaluations: current.passedEvaluations + delta.passedEvaluations,
@@ -45,11 +48,16 @@ export async function settleGrowth(tx: Prisma.TransactionClient, input: {
   return { userId: session.userId, nickname: session.user.nickname, xp: delta.totalXp, awarded: true };
 }
 
-export async function settleClosedCycle(tx: Prisma.TransactionClient, trade: { id: string; closedAt: Date | null; closedSequence: number | null }) {
+async function captureAchievementFact(tx: Prisma.TransactionClient, fact: { id: string; userId: string }, exitReasonMask?: number | null) {
+  await tx.achievementFact.create({ data: { userId: fact.userId, growthFactId: fact.id, exitReasonMask } });
+  afterSqliteCommit(tx, wakeAchievements);
+}
+
+export async function settleClosedCycle(tx: Prisma.TransactionClient, trade: { id: string; closedAt: Date | null; closedSequence: number | null; exitReasonMask: number | null }) {
   const scope = getReplayScope();
   if (!scope || scope.mode !== "TRAINING" || !trade.closedAt) return;
   const round = scope.accountCategory === "PROP_PRACTICE" ? await tx.propPracticeRound.findUnique({ where: { projectionId: scope.projectionId }, select: { number: true } }) : null;
-  await settleGrowth(tx, { type: "CYCLE", sourceId: logicalId(trade.id), roundNumber: round?.number ?? 0, occurredAt: trade.closedAt,
+  await settleGrowth(tx, { type: "CYCLE", sourceId: logicalId(trade.id), roundNumber: round?.number ?? 0, occurredAt: trade.closedAt, exitReasonMask: trade.exitReasonMask,
     source: { sequence: trade.closedSequence ?? undefined } });
 }
 
@@ -74,8 +82,9 @@ export async function breakthroughFoundation(userId: string) {
       ruleVersion: GROWTH_RULE_VERSION, metricsSnapshot: JSON.stringify({ ...totals, receivedUsdtMinor: totals.receivedUsdtMinor.toString() }) } });
     await tx.userGrowth.update({ where: { userId }, data: { realm: "FOUNDATION", layer: 1, version: { increment: 1 } } });
     // Independent achievement source; no session foreign key and no extra experience reward.
-    await tx.userGrowthFact.create({ data: { userId, type: "BREAKTHROUGH", sourceKey: `foundation:${userId}`, sessionId: "", sourceSummary: JSON.stringify({ sessionName: copy.userGrowth.recordBreakthrough }),
-      occurredAt: record.attainedAt, ruleVersion: GROWTH_RULE_VERSION } });
+    const fact = await tx.userGrowthFact.create({ data: { userId, type: "BREAKTHROUGH", sourceKey: `foundation:${userId}`, sessionId: "", sourceSummary: JSON.stringify({ sessionName: copy.userGrowth.recordBreakthrough }),
+      occurredAt: record.attainedAt, ruleVersion: GROWTH_RULE_VERSION, achievementCaptureVersion: 1 } });
+    await captureAchievementFact(tx, fact);
     return { id: record.id, attainedAt: record.attainedAt, repeated: false };
   });
 }

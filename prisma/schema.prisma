@@ -786,8 +786,11 @@ model UserGrowthFact {
   evaluationsDelta Int @default(0)
   payoutsDelta Int @default(0)
   receivedUsdtMinorDelta BigInt @default(0)
+  achievementCaptureVersion Int @default(0)
   ruleVersion String
   @@index([userId, settledAt, id])
+  @@index([userId, achievementCaptureVersion, settledAt, id])
+  @@index([userId, achievementCaptureVersion, type, occurredAt, id])
 }
 
 model UserRealmRecord {
@@ -801,6 +804,113 @@ model UserRealmRecord {
   idempotencyKey String @unique
   attainedAt DateTime @default(now())
   @@unique([userId, toRealm])
+}
+
+// Append-only consumer index. Source rows outlive their original replay data.
+model AchievementFact {
+  seq Int @id @default(autoincrement())
+  userId String
+  growthFactId String @unique
+  exitReasonMask Int?
+  @@index([userId, seq])
+}
+
+model UserAchievement {
+  seq Int @id @default(autoincrement())
+  userId String
+  achievementKey String
+  tierKey String
+  threshold Int
+  fingerprint String
+  attainedAt DateTime?
+  recordedAt DateTime @default(now())
+  historical Boolean
+  growthFactId String?
+  @@unique([userId, achievementKey, tierKey])
+  @@index([userId, seq])
+}
+
+model UserAchievementState {
+  userId String
+  metricKey String
+  generation String @default("live")
+  fingerprint String
+  lastAppliedSeq Int @default(0)
+  historyChecked Boolean @default(false)
+  @@id([userId, metricKey])
+}
+
+model UserAchievementProgress {
+  userId String
+  metricKey String
+  generation String
+  scopeKey String
+  current Int @default(0)
+  best Int @default(0)
+  coverageGaps Int @default(0)
+  // Earliest proven source for each reached threshold.
+  milestones String @default("{}")
+  @@id([userId, metricKey, generation, scopeKey])
+  @@index([userId, metricKey, generation, current])
+}
+
+model UserAchievementShowcase {
+  userId String
+  slot Int
+  achievementKey String
+  @@id([userId, slot])
+  @@unique([userId, achievementKey])
+}
+
+model AchievementSyncState {
+  id Int @id
+  enabledAt DateTime?
+  lastAppliedSeq Int @default(0)
+  lastSyncedAt DateTime?
+  ownerToken String?
+  leaseUntil DateTime?
+  batchToken String?
+  liveFailures Int @default(0)
+  liveError String?
+  retryAt DateTime?
+}
+
+model AchievementJob {
+  id String @id @default(cuid())
+  userId String?
+  metrics String
+  fingerprint String
+  mode String
+  status String @default("PREVIEW")
+  phase String @default("DISCOVER")
+  // Fixed preview boundary for profiles and for live evidence.
+  userWatermark String
+  liveWatermark Int
+  userCursor String @default("")
+  users Int @default(0)
+  processed Int @default(0)
+  expectedAwards Int @default(0)
+  coverageGaps Int @default(0)
+  published Int @default(0)
+  attempts Int @default(0)
+  error String?
+  retryAt DateTime?
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+  @@index([status, retryAt])
+  @@index([createdAt, id])
+}
+
+model AchievementJobItem {
+  jobId String
+  userId String
+  status String @default("QUEUED")
+  phase String @default("TOTALS")
+  factCursor String @default("")
+  liveCursor Int @default(0)
+  retired String @default("{}")
+  @@id([jobId, userId])
+  @@index([jobId, status, userId])
 }
 
 model PropPracticeTemplate {
@@ -1045,6 +1155,7 @@ model PaperTrade {
   grossPnl       Float               @default(0)
   fees           Float               @default(0)
   plannedRisk    Float?
+  exitReasonMask Int?
   createdAt      DateTime            @default(now())
   updatedAt      DateTime            @updatedAt
 

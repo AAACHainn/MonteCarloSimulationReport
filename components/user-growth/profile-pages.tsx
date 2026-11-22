@@ -16,6 +16,7 @@ import { ProfileDialog } from "./profile-dialog";
 import { ProfileView } from "./profile-view";
 import { GrowthHistory, GrowthSourceDialog } from "./growth-history";
 import { useReplaySessionEntry } from "@/components/market-replay/replay-session-entry-guard";
+import { AchievementProfileSummary } from "@/components/achievements/collection";
 const t = copy.userGrowth;
 type SessionPage = { items: ProfileSession[]; page: number; total: number };
 export function UserProfiles() {
@@ -62,7 +63,7 @@ export function UserProfilePage({ userId }: { userId: string }) {
   return <div className="space-y-6"><Breadcrumbs items={[{ label: t.title, href: "/users" }, { label: data.user.nickname }]} />
     {status && <p role="status" className="rounded-md border border-emerald-200 dark:border-positive/40 bg-emerald-50 dark:bg-positive-background p-3 text-sm text-emerald-700 dark:text-positive">{status}</p>}
     {error && <p role="alert" className="text-sm text-red-700 dark:text-negative">{error}<Button variant="outline" className="ml-3" onClick={() => setRevision(value => value + 1)}>{t.retry}</Button></p>}
-    <ProfileView key={userId} profile={profile} selected={current.selected} state={state} onRetry={() => setRevision(value => value + 1)} onSwitch={() => current.select(userId)} onEdit={() => setEditing(true)} walletContent={<WalletPanel userId={userId} />}
+    <ProfileView key={userId} profile={profile} selected={current.selected} state={state} onRetry={() => setRevision(value => value + 1)} onSwitch={() => current.select(userId)} onEdit={() => setEditing(true)} walletContent={<WalletPanel userId={userId} />} achievementsContent={<AchievementProfileSummary userId={userId} />}
       onBreakthrough={async () => {
         if (breaking) return false; setBreaking(true); setActionError("");
         try {

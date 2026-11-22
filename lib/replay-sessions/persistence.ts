@@ -24,7 +24,7 @@ export type DerivedBatch = {
   equityPoints: PaperEquityPointData[];
 };
 export async function persistDerivedBatch(tx: Prisma.TransactionClient, account: PaperTradingSession, generation: number, batch: DerivedBatch,
-  options: { previousLots?: PaperPositionLotData[]; updateProjection?: boolean } = {}) {
+  options: { previousLots?: PaperPositionLotData[]; updateProjection?: boolean; forcedExit?: boolean } = {}) {
   const scope = getReplayScope();
   const owner = scope && batch.orders.some(order => !order.createdAt)
     ? await tx.replaySession.findUniqueOrThrow({ where: { id: scope.id }, select: { activeProjectionId: true } }) : null;
@@ -42,11 +42,11 @@ export async function persistDerivedBatch(tx: Prisma.TransactionClient, account:
     void _id; void _sessionId;
     await tx.paperOrder.upsert({ where: { id: storageId(order.id) }, create, update });
   }
+  const stats = await persistTrades(tx, account.id, batch.orders, batch.fills, tradeStatsFromSession(account), options.forcedExit, account.netQuantity);
   if (batch.fills.length) await tx.paperFill.createMany({ data: batch.fills.map((fill) => ({
     ...fill, id: storageId(fill.id), orderId: storageId(fill.orderId), cycleKey: fill.cycleKey ?? null,
     sessionId: account.id, timestamp: new Date(fill.timestamp),
   })) });
-  const stats = await persistTrades(tx, account.id, batch.orders, batch.fills, tradeStatsFromSession(account));
   const journalId = await ensureReplayJournalSession(tx, account, generation);
   const lotsChanged = options.previousLots === undefined || JSON.stringify(options.previousLots) !== JSON.stringify(batch.lots);
   await persistPaperJournalState(tx, account.datasetId, account.id, journalId, batch.lots, batch.entries, { persistLots: lotsChanged });

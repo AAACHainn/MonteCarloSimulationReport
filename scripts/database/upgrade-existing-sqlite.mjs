@@ -9,7 +9,7 @@ import { createInterface } from "node:readline/promises";
 import { isMainThread } from "node:worker_threads";
 import { createRequire } from "node:module";
 import { resolveSqlitePath, SQLITE_DRIVER_VERSION } from "../../lib/sqlite-client.mjs";
-import { identifyMigration, localMigrations as identifyLocalMigrations } from "./sqlite-upgrade-plan.mjs";
+import { achievementsMigration, identifyMigration, localMigrations as identifyLocalMigrations } from "./sqlite-upgrade-plan.mjs";
 import { createProgress, monitorUpgrade, printUpgradeStatus, readUpgradeStatus } from "./upgrade-sqlite-progress.mjs";
 
 const projectRoot = resolve(dirname(fileURLToPath(import.meta.url)), "../..");
@@ -251,6 +251,11 @@ export async function upgradeDatabase(options, execute = runCommand) {
       try {
         checkTarget(db);
         if (plan.pending.includes("20261120120000_market_drawing_pane") && db.prepare('SELECT 1 FROM "MarketDrawing" WHERE pane <> 1 LIMIT 1').get()) throw new Error("旧绘图未归入窗口 1");
+        if (plan.pending.includes(achievementsMigration)) {
+          const initialized = db.prepare('SELECT 1 FROM "AchievementSyncState" WHERE id = 1 AND enabledAt IS NULL AND lastAppliedSeq = 0 AND batchToken IS NULL').get();
+          const unexpected = db.prepare('SELECT 1 FROM "UserGrowthFact" WHERE achievementCaptureVersion <> 0 UNION ALL SELECT 1 FROM "PaperTrade" WHERE exitReasonMask IS NOT NULL UNION ALL SELECT 1 FROM "UserAchievement" LIMIT 1').get();
+          if (!initialized || unexpected) throw new Error("成就迁移未保持历史事实待补算状态");
+        }
         assertSame(db.pragma("journal_mode", { simple: true }), mode, "升级过程日志模式");
         const afterPlan = identifyMigration(db, root);
         if (afterPlan.method !== plan.method || (afterPlan.pending?.length ?? 0)) throw new Error("迁移路径发生变化或仍有待应用项");

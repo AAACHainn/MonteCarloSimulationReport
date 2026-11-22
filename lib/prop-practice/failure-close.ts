@@ -34,7 +34,7 @@ export async function liquidatePropFailure(tx: Prisma.TransactionClient, runtime
     } });
     // Use the just-persisted gate, without leaking a speculative settlement into the caller's scope.
     const close = await runWithReplayScope({ ...scope, trainingGate },
-      () => executeCurrentPriceCloseResult(tx, account, progress.generation, serializeSourceBar(bar), id));
+      () => executeCurrentPriceCloseResult(tx, account, progress.generation, serializeSourceBar(bar), id, true));
     account = close.account; fills = close.result.fills;
     trainingGate = close.result.state.trainingGate!;
   } else if (cancelled.count) {

@@ -6,6 +6,7 @@ import { zhTradeJournals } from "./i18n/zh-trade-journals";
 import { propPractice } from "./i18n/zh-prop-practice";
 import { userGrowth } from "./i18n/zh-user-growth";
 import { userWallet } from "./i18n/zh-user-wallet";
+import { achievements } from "./i18n/zh-achievements";
 
 export const defaultLocale = "zh-CN" as const;
 export const supportedLocales = ["zh-CN", "en-US"] as const;
@@ -13,7 +14,7 @@ export const supportedLocales = ["zh-CN", "en-US"] as const;
 export type SupportedLocale = (typeof supportedLocales)[number];
 
 export const dictionaries = {
-  "zh-CN": { ...zhStart, ...zhMarketReplay, ...zhPaperTrading, ...zhTradeJournals, ...zhEnd, propPractice, userGrowth, userWallet },
+  "zh-CN": { ...zhStart, ...zhMarketReplay, ...zhPaperTrading, ...zhTradeJournals, ...zhEnd, propPractice, userGrowth, userWallet, achievements },
   "en-US": enUS,
 } as const;
 

@@ -113,7 +113,7 @@ export default async function HistoricalReplayPage({
   const title = session.name || copy.paperTrading.historicalReplayTitle(session.replayGeneration);
 
   return <ReplaySessionGate key={`${replaySession.id}:${projectionId}`} session={replaySession}><ReplaySessionProvider session={{ ...replaySession, activeProjectionId: projectionId, propRoundNumber: round?.number, status: "ARCHIVED" }}><div className="market-replay-page relative -my-6 left-1/2 flex h-[calc(100dvh-1rem-var(--app-notice-height,0px))] w-[calc(100vw-1rem)] max-w-none -translate-x-1/2 flex-col gap-2 overflow-hidden">
-    <div className="shrink-0 space-y-2 px-4 pt-3">
+    <div className="shrink-0 space-y-2 px-4 pt-3" data-replay-workspace-header>
       <UserContextHeader session={replaySession}><Breadcrumbs items={[
         { label: copy.marketReplay.title, href: "/market-replay" },
         { label: dataset.name, href: `/market-replay/${id}` },

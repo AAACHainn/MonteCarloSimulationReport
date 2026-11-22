@@ -10,6 +10,10 @@
   transform: none;
 }
 
+.market-replay-page:has([data-web-fullscreen="true"]) > [data-replay-workspace-header] {
+  display: none;
+}
+
 @layer base {
   :root {
     --background: 210 20% 98%;

@@ -18,6 +18,16 @@ describe("explicit avatar selection navigation", () => {
     selector.onSelect("b"); expect(mocks.select).toHaveBeenCalledWith("b"); expect(mocks.push).toHaveBeenCalledWith("/users/b");
     selector.onSelect(null); expect(mocks.push).toHaveBeenLastCalledWith("/users");
   });
+  it("follows an explicit user switch on the achievement collection, or opens profiles for all users", () => {
+    mocks.pathname = "/users/a/achievements/";
+    const selector = entry();
+    expect(mocks.push).not.toHaveBeenCalled();
+    selector.onSelect("b c");
+    expect(mocks.select).toHaveBeenCalledWith("b c");
+    expect(mocks.push).toHaveBeenCalledWith("/users/b%20c/achievements");
+    selector.onSelect(null);
+    expect(mocks.push).toHaveBeenLastCalledWith("/users");
+  });
   it("does not navigate away from replay or other shared pages", () => {
     for (const path of ["/market-replay/fixture", "/market-replay/fixture/trade-history", "/users", "/datasets"]) {
       mocks.pathname = path; entry().onSelect("b");

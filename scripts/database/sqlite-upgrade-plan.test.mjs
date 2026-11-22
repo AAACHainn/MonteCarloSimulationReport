@@ -7,6 +7,8 @@ import { applyBaselineMigrations, identifyMigration, localMigrations } from "./s
 const root = fileURLToPath(new URL("../../", import.meta.url));
 const baseline = "20261026170000_user_wallet_transfers";
 const pane = "20261120120000_market_drawing_pane";
+const achievements = "20261122120000_achievements";
+const pending = [pane, achievements];
 const migrations = localMigrations(root);
 const baselineMigrations = migrations.filter(({ name }) => name <= baseline);
 let db;
@@ -43,15 +45,22 @@ describe("upgrade planning for v1.0 databases", () => {
         VALUES ('data','TEST','1m','UTC',1,1000,1000,1000);
       INSERT INTO "MarketDrawing" (id,datasetId,type,geometry,style,updatedAt,legacyLabel)
         VALUES ('drawing','data','line','{}','{}',1000,'original');
+      INSERT INTO "UserProfile" (id,nickname,updatedAt) VALUES ('owner','Fixture owner',1000);
+      INSERT INTO "UserGrowthFact" (rowid,id,userId,type,sourceKey,sessionId,sourceSummary,occurredAt,cyclesDelta,ruleVersion)
+        VALUES (12,'original-fact','owner','CYCLE','legacy-fact','removed-session','{}',1000,1,'v1');
     `);
-    expect(identifyMigration(db, root)).toMatchObject({ method: "baseline", pending: [pane] });
+    expect(identifyMigration(db, root)).toMatchObject({ method: "baseline", pending });
     applyBaselineMigrations(db, root);
     expect(identifyMigration(db, root).pending).toEqual([]);
     applyBaselineMigrations(db, root);
     expect(db.prepare('SELECT pane, legacyLabel, legacyRank FROM "MarketDrawing"').get())
       .toEqual({ pane: 1, legacyLabel: "original", legacyRank: 3 });
     expect(db.prepare('SELECT message FROM "sqliteLegacyNotes"').get().message).toBe("keep this");
-    expect(db.prepare('SELECT * FROM "_replay_schema_migrations"').all()).toEqual(migrations.filter(({ name }) => name === pane));
+    expect(db.prepare('SELECT * FROM "_replay_schema_migrations"').all()).toEqual(migrations.filter(({ name }) => pending.includes(name)));
+    expect(db.prepare('SELECT id, lastAppliedSeq FROM "AchievementSyncState"').get()).toEqual({ id: 1, lastAppliedSeq: 0 });
+    expect(db.prepare('SELECT count(*) AS n FROM "UserAchievement"').get()).toEqual({ n: 0 });
+    expect(db.prepare('SELECT rowid, cyclesDelta, achievementCaptureVersion FROM "UserGrowthFact"').get())
+      .toEqual({ rowid: 12, cyclesDelta: 1, achievementCaptureVersion: 0 });
     expect(() => db.prepare('UPDATE "MarketDrawing" SET pane = 6').run()).toThrow(/CHECK constraint failed/);
   });
 
@@ -75,7 +84,7 @@ describe("upgrade planning for v1.0 databases", () => {
     createBaseline().exec('CREATE TABLE "_prisma_migrations" (migration_name, checksum, finished_at, rolled_back_at)');
     const record = db.prepare('INSERT INTO "_prisma_migrations" VALUES (?, ?, 1, NULL)');
     for (const { name, checksum } of baselineMigrations) record.run(name, checksum);
-    expect(identifyMigration(db, root)).toMatchObject({ method: "prisma", pending: [pane] });
+    expect(identifyMigration(db, root)).toMatchObject({ method: "prisma", pending });
     db.exec('ALTER TABLE "Trade" ADD COLUMN "legacyNote" TEXT');
     expect(() => identifyMigration(db, root)).toThrow("数据库结构与迁移历史不符");
     db.prepare('UPDATE "_prisma_migrations" SET checksum = ? WHERE migration_name = ?').run("invalid", baseline);

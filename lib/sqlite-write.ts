@@ -4,6 +4,11 @@ type RetryPolicy = { attempts: number; budgetMs: number; delayMs: number; maxDel
 export const backgroundWritePolicy: RetryPolicy = { attempts: 8, budgetMs: 30000, delayMs: 50, maxDelayMs: 1000 };
 const foregroundWritePolicy: RetryPolicy = { attempts: 5, budgetMs: 1500, delayMs: 15, maxDelayMs: 150 };
 export const sqlitePause = (ms: number) => new Promise<void>((resolve) => setTimeout(resolve, ms));
+const commitCallbacks = new WeakMap<Prisma.TransactionClient, Set<() => void>>();
+
+export function afterSqliteCommit(tx: Prisma.TransactionClient, callback: () => void) {
+  commitCallbacks.get(tx)?.add(callback);
+}
 
 /** Codes only: a Prisma timeout or an error containing "locked" is not proof of rollback. */
 export function isSqliteBusy(error: unknown): boolean {
@@ -59,22 +64,31 @@ export function sqliteWriteTransaction<T>(
   const started = performance.now();
   return retrySqliteWrite(async () => {
     let callbackReturned = false;
+    const callbacks = new Set<() => void>();
+    let result: T;
     try {
       const remaining = Math.max(1, Math.floor(policy.budgetMs - (performance.now() - started)));
-      return await db.$transaction(async (tx) => {
+      result = await db.$transaction(async (tx) => {
         // All initialized application databases contain MarketDataset. WHERE 0 changes no
         // records, timestamps or leases, but obtains the SQLite write slot before reads.
         // Background jobs supply their own owner-qualified first statement instead.
         if ((options?.writeFence ?? policy !== backgroundWritePolicy) && tx.$executeRaw) {
           await tx.$executeRaw`UPDATE "MarketDataset" SET "id" = "id" WHERE 0`;
         }
-        const result = await work(tx);
-        callbackReturned = true;
-        return result;
+        commitCallbacks.set(tx, callbacks);
+        try {
+          const result = await work(tx);
+          callbackReturned = true;
+          return result;
+        } finally { commitCallbacks.delete(tx); }
       }, { maxWait: Math.min(options?.maxWait ?? remaining, remaining), timeout: options?.timeout ?? 30000 });
     } catch (error) {
       if (callbackReturned) throw new SqliteCommitUncertainError(error);
       throw error;
     }
+    for (const callback of callbacks) {
+      try { callback(); } catch { console.warn("SQLite commit callback failed"); }
+    }
+    return result;
   }, policy);
 }

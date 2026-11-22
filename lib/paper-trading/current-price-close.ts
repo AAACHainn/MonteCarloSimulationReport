@@ -24,6 +24,7 @@ export async function executeCurrentPriceCloseResult(
   generation: number,
   bar: MarketBarData,
   orderId: string,
+  forcedExit = false,
 ) {
   account = await ensurePaperTradeStats(account, tx) as PaperTradingSession;
   if (getReplayScope()?.mode === "TRAINING") await hydrateTrainingLots(tx, account.id);
@@ -39,7 +40,7 @@ export async function executeCurrentPriceCloseResult(
   const updated = await persistDerivedBatch(tx, account, generation, {
     state: result.state, orders: result.orders, fills: result.fills, lots: result.lots,
     entries: result.journalEntries, equityPoints: [],
-  });
+  }, { forcedExit });
   // The current source candle may already have a sampled point. Replace it with
   // post-close equity without adding a candle or losing the existing peak.
   const point = { ...result.equityPoint, timestamp: new Date(result.equityPoint.timestamp) };

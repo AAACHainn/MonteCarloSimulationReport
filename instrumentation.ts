@@ -5,5 +5,7 @@ export async function register() {
     startMarketSyncRuntime();
     const { startAggregationRuntime } = await import("./lib/market-replay/aggregation-runtime");
     startAggregationRuntime();
+    const { startAchievementRuntime } = await import("./lib/achievements/runtime");
+    startAchievementRuntime();
   }
 }

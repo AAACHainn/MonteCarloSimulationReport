@@ -45,9 +45,9 @@ function RealmTrack({ profile }: { profile: GrowthProfile }) {
   </div>;
 }
 
-export function ProfileView({ profile, selected, state, onRetry, onSwitch, onEdit, onBreakthrough, breaking, actionError, onOpenSession, onSource, onAllRecords, walletContent }: {
+export function ProfileView({ profile, selected, state, onRetry, onSwitch, onEdit, onBreakthrough, breaking, actionError, onOpenSession, onSource, onAllRecords, walletContent, achievementsContent }: {
   profile: GrowthProfile; selected?: UserIdentity; state: QueryState; onRetry: () => void; onSwitch: () => void; onEdit: () => void;
-  onBreakthrough: () => Promise<boolean>; breaking: boolean; actionError: string; onOpenSession: (session: ProfileSession) => void; onSource: (record: GrowthRecord) => void; onAllRecords: () => void; walletContent?: ReactNode;
+  onBreakthrough: () => Promise<boolean>; breaking: boolean; actionError: string; onOpenSession: (session: ProfileSession) => void; onSource: (record: GrowthRecord) => void; onAllRecords: () => void; walletContent?: ReactNode; achievementsContent?: ReactNode;
 }) {
   const [conditionsOpen, setConditionsOpen] = useState(profile.realm === "qi");
   const [rulesTab, setRulesTab] = useState<GrowthRulesTab | null>(null);
@@ -78,6 +78,7 @@ export function ProfileView({ profile, selected, state, onRetry, onSwitch, onEdi
       </div>
     </section>
     <GrowthRulesDialog tab={rulesTab} onTabChange={setRulesTab} current={profile.growthPending ? undefined : profile} onClose={() => setRulesTab(null)} />
+    {achievementsContent}
     {walletContent}
     {actionError && <p role="alert" className="rounded-md border border-red-200 dark:border-negative/40 bg-red-50 dark:bg-negative-background p-3 text-sm text-red-700 dark:text-negative">{actionError}</p>}
     {state !== "normal" && <div role={state === "error" ? "alert" : "status"} className="flex items-center justify-between gap-3 rounded-md border bg-white dark:bg-card p-3 text-sm text-slate-700 dark:text-secondary-text"><span>{state === "loading" ? profile.growthPending ? t.loadingProfile : t.loadingHint : profile.growthPending ? t.profileStale : t.stale}</span>{state === "error" && <Button variant="outline" onClick={onRetry}>{t.retry}</Button>}</div>}
