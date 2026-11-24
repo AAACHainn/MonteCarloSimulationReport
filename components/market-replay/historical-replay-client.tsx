@@ -827,7 +827,7 @@ export function HistoricalReplayClient({
           key={primaryRevision}
           compact={layout.panes.size > 1 || Boolean(layout.maximized)}
           shortcutsActive={activePane === 1}
-          onAltMaximize={!layoutBusy && !windowLoading && (layout.panes.size > 1 || layout.maximized === 1) ? () => togglePane(1) : undefined}
+          onToggleMaximize={!layoutBusy && !windowLoading && (layout.panes.size > 1 || layout.maximized === 1) ? () => togglePane(1) : undefined}
           viewportApiRef={primaryViewportApi}
           initialViewportSnapshot={primaryViewport.current}
           cursorMode={cursorMode}

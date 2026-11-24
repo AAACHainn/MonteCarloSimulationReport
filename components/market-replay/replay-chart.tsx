@@ -29,6 +29,7 @@ import { useProtectiveExitControls } from "./use-protective-exit-controls";
 import { ProtectiveOrderDialog } from "./protective-order-dialog";
 import { protectiveOrderLabel } from "@/lib/paper-trading/protective-orders";
 import { layoutPriceLineLabels } from "@/lib/market-replay/price-lines";
+import { isReplayPaneMaximizeGesture } from "@/lib/market-replay/keyboard-shortcuts";
 
 export function ReplayChart(props: ReplayChartProps) {
   const core = useReplayChartCore(props);
@@ -80,7 +81,9 @@ export function ReplayChart(props: ReplayChartProps) {
       className="relative h-full min-h-0 select-none focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring"
       onContextMenu={openContextMenu}
       onPointerDownCapture={event => {
-        if (!props.onAltMaximize || !event.altKey || event.button !== 0 || event.pointerType !== "mouse"
+        if (!props.onToggleMaximize || !isReplayPaneMaximizeGesture(event)
+          || core.drawingToolRef.current || core.drawingDraftRef.current || core.drawingPreviewRef.current
+          || core.measurementArmedRef.current || core.measurementRef.current || core.textEditRef.current
           || !containerRef.current?.contains(event.target as Node)) return;
         const chart = core.chartRef.current;
         const bounds = containerRef.current.getBoundingClientRect();
@@ -88,7 +91,7 @@ export function ReplayChart(props: ReplayChartProps) {
         if (!chart || x < 0 || y < 0 || x >= chart.timeScale().width() || y >= (chart.panes()[0]?.getHeight() ?? 0)) return;
         event.preventDefault();
         event.stopPropagation();
-        props.onAltMaximize();
+        props.onToggleMaximize();
       }}
       onPointerDown={(event: ReactPointerEvent<HTMLDivElement>) => {
         if (!(event.target as HTMLElement).closest("[data-context-menu]")) setContextMenu(null);

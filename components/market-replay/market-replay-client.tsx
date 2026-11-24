@@ -412,7 +412,7 @@ export function MarketReplayClient({ dataset: initialDataset, initialJournalFocu
             maximized={layout.maximized === 1} canMaximize={!layoutBusy && !journalReview && (layout.panes.size > 1 || layout.maximized === 1)}
             onActivate={() => layout.setActive(1)} onMaximize={() => togglePane(1)}>
           <ReplayChart key={mainChartRevision}
-            onAltMaximize={!layoutBusy && !journalReview && (layout.panes.size > 1 || layout.maximized === 1) ? () => togglePane(1) : undefined}
+            onToggleMaximize={!layoutBusy && !journalReview && (layout.panes.size > 1 || layout.maximized === 1) ? () => togglePane(1) : undefined}
             shortcutsActive={activePane === 1} compact={layout.panes.size > 1 || Boolean(layout.maximized)}
             cursorMode={cursorMode}
             datasetId={dataset.id}

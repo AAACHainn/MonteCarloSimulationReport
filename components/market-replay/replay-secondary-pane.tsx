@@ -274,7 +274,7 @@ export function ReplaySecondaryPane({ pane, core, rect, active, period, sequence
     {rect ? <ReplayPaneFrame pane={pane} rect={rect} title={core.dataset.symbol + " · " + formatInterval(period)}
       active={active} showHeader canMaximize={canMaximize} maximized={maximized} onActivate={onActivate} onMaximize={onMaximize}>
       <ReplayChart key={restoreRevision} compact observeTrades shortcutsActive={active} cursorMode={cursorMode}
-        onAltMaximize={canMaximize ? onMaximize : undefined}
+        onToggleMaximize={canMaximize ? onMaximize : undefined}
         datasetId={core.dataset.id} dataRevision={scope + ":" + live?.replay?.generation}
         bars={bars} warmupBars={data?.warmupBars ?? emptyBars} priceTickSize={core.dataset.priceTickSize}
         displayIntervalSeconds={period} displayUtcOffsetMinutes={core.displayUtcOffsetMinutes} sourceIntervalSeconds={core.dataset.sourceIntervalSeconds ?? undefined}

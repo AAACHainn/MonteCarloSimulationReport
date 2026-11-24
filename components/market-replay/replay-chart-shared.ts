@@ -231,7 +231,7 @@ export type ReplayChartProps = {
   orderLinesVisible?: boolean;
   shortcutsActive?: boolean;
   compact?: boolean;
-  onAltMaximize?: () => void;
+  onToggleMaximize?: () => void;
   hiddenAfter?: ChartHideAfter | null;
   onHiddenAfterChange?: (target: ChartHideAfter | null) => void;
   historicalPlaybackActive?: boolean;

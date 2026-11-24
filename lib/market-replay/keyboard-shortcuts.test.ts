@@ -1,7 +1,24 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { hasVisibleReplayDialog, replayDrawingShortcutKey, replayTrendLineWidthShortcut, replayDrawingEditShortcut } from "./keyboard-shortcuts";
+import { hasVisibleReplayDialog, isReplayPaneMaximizeGesture, replayDrawingShortcutKey, replayTrendLineWidthShortcut, replayDrawingEditShortcut } from "./keyboard-shortcuts";
 
 afterEach(() => vi.unstubAllGlobals());
+
+describe("maximizing a replay pane", () => {
+  const gesture = { altKey: true, shiftKey: false, ctrlKey: true, metaKey: false,
+    pointerType: "mouse", button: 0, defaultPrevented: false };
+
+  it("recognizes Ctrl + Alt + left click", () => {
+    expect(isReplayPaneMaximizeGesture(gesture)).toBe(true);
+  });
+
+  it.each([{ altKey: false }, { ctrlKey: false }, { ctrlKey: false, shiftKey: true }, { shiftKey: true }, { metaKey: true },
+    { button: 1 }, { button: 2 }, { pointerType: "pen" }, { pointerType: "touch" }, { defaultPrevented: true }])(
+    "leaves other chart gestures alone (%j)", extra => {
+      expect(isReplayPaneMaximizeGesture({ ...gesture, ...extra })).toBe(false);
+    },
+  );
+});
+
 describe("object copy, paste, undo and redo", () => {
   const key = { key: "c", code: "KeyC", altKey: false, ctrlKey: true, metaKey: false, shiftKey: false, isComposing: false, defaultPrevented: false };
   it.each([["KeyC", false, "copy"], ["KeyV", false, "paste"], ["KeyZ", false, "undo"], ["KeyZ", true, "redo"], ["KeyY", false, "redo"]] as const)(

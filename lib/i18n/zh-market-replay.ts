@@ -366,6 +366,7 @@ export const zhMarketReplay = {
       fibonacciRetracementShortcut: (modifier: string) => `${modifier} + F`,
       multiPane: {
         layout: "布局", reset: "重置布局比例", maximize: "最大化图表", restore: "恢复布局",
+        maximizeShortcut: "Ctrl + Alt + 鼠标左键",
         paneCount: (count: number) => `${count} 个窗口`,
         resizeWidth: "调整窗口宽度", resizeHeight: "调整窗口高度",
         hideOrderLines: "隐藏订单和持仓", showOrderLines: "显示订单和持仓",

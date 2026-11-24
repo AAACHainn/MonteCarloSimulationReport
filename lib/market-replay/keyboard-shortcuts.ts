@@ -10,6 +10,13 @@ type ShortcutKeyEvent = Pick<KeyboardEvent,
   "key" | "code" | "altKey" | "ctrlKey" | "metaKey" | "shiftKey" | "isComposing" | "defaultPrevented"
 >;
 
+export function isReplayPaneMaximizeGesture(event: Pick<PointerEvent,
+  "altKey" | "ctrlKey" | "metaKey" | "shiftKey" | "button" | "pointerType" | "defaultPrevented"
+>) {
+  return !event.defaultPrevented && event.pointerType === "mouse" && event.button === 0
+    && event.ctrlKey && event.altKey && !event.shiftKey && !event.metaKey;
+}
+
 export function detectReplayShortcutPlatform(browser: BrowserPlatformInfo): ReplayShortcutPlatform {
   const platform = browser.userAgentData?.platform || browser.platform;
   const isMac = platform ? /mac/i.test(platform) : /Macintosh|Mac OS X/i.test(browser.userAgent ?? "");

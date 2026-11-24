@@ -196,7 +196,8 @@ export function ReplayPaneFrame({ pane, rect, active, title, showHeader, maximiz
     {showHeader ? <header className="flex h-7 shrink-0 items-center justify-between border-b px-1">
       <Button size="sm" variant="ghost" className="h-6 min-w-0 px-2 text-xs" data-pane-activate
         aria-pressed={active} onClick={onActivate}><span className="truncate">{title}</span></Button>
-      {canMaximize ? <Button size="icon" variant="ghost" className="h-6 w-7 shrink-0" aria-label={maxLabel} title={maxLabel} onClick={onMaximize}>
+      {canMaximize ? <Button size="icon" variant="ghost" className="h-6 w-7 shrink-0" aria-label={maxLabel}
+        aria-description={t.maximizeShortcut} title={`${maxLabel}（${t.maximizeShortcut}）`} onClick={onMaximize}>
         {maximized ? <Minimize2 className="h-4 w-4" aria-hidden="true" /> : <Maximize2 className="h-4 w-4" aria-hidden="true" />}
       </Button> : null}
     </header> : null}
