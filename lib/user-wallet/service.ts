@@ -3,6 +3,7 @@ import type { Prisma } from "@prisma/client";
 import { copy } from "@/lib/i18n";
 import { formatNumber } from "@/lib/format";
 import { ReplaySessionError } from "@/lib/replay-sessions/scope";
+import { observeWalletFunds } from "@/lib/achievements/funds";
 
 const t = copy.userWallet;
 export const INITIAL_BALANCE_MINOR = BigInt(1_000_000);
@@ -48,6 +49,8 @@ export async function writeWalletEntry(tx: Prisma.TransactionClient, input: Entr
   moneyValue(balance);
   const saved = await tx.userWallet.updateMany({ where: { userId: input.userId, version: wallet.version, balanceMinor: wallet.balanceMinor }, data: { balanceMinor: balance, version: { increment: 1 } } });
   if (saved.count !== 1) throw new ReplaySessionError("WALLET_CONFLICT", 409, t.conflict);
+  // Other wallet credits move money out of a held allocation later in this transaction.
+  await observeWalletFunds(tx, input.userId, wallet.balanceMinor, input.type === "PAYOUT" ? input.amountMinor : BigInt(0));
   return tx.userWalletEntry.create({ data: { ...input, balanceAfterMinor: balance } });
 }
 export async function fundStandardAccount(tx: Prisma.TransactionClient, owner: WalletOwner, projectionId: string, initialCapital: number) {

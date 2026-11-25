@@ -5,6 +5,7 @@ import type { PaperSessionState, PaperOrderData, PaperFillData, PaperPositionLot
 import { orderCreateData, persistTrades } from "@/lib/paper-trading/persist";
 import { ensureReplayJournalSession, persistPaperJournalState } from "@/lib/paper-trading/journal-storage";
 import { tradeStatsFromSession } from "@/lib/paper-trading/serialize";
+import { observeTradingFunds } from "@/lib/achievements/funds";
 
 export function paperStateUpdate(state: PaperSessionState) {
   return {
@@ -56,6 +57,9 @@ export async function persistDerivedBatch(tx: Prisma.TransactionClient, account:
   const updated = await tx.paperTradingSession.update({ where: { id: account.id }, data: {
     ...paperStateUpdate(batch.state), ...stats, tradeStatsVersion: 1, journalSessionId: journalId,
   } });
+  if (scope?.mode === "TRAINING" && scope.accountCategory !== "PROP_PRACTICE") {
+    await observeTradingFunds(tx, account, batch.state, batch.fills);
+  }
   if (scope && options.updateProjection !== false) await tx.replayProjection.update({ where: { id: scope.projectionId }, data: { currentSequence: batch.state.lastProcessedSequence } });
   return updated;
 }

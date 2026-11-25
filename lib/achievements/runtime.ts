@@ -7,6 +7,7 @@ import { createDatabaseClient } from "@/lib/sqlite-client.mjs";
 import { SqliteCommitUncertainError, SqliteWriteBusyError, sqliteWriteTransaction } from "@/lib/sqlite-write";
 import { metricFingerprints, metricKeys } from "./catalog";
 import { indexedEvidence, verifyFoundation, type Evidence } from "./evidence";
+import { captureFundBaseline, pendingFundBaselines } from "./funds";
 import { AchievementError, processJobBatch, runnableJobs } from "./jobs";
 import { applyEvidence, metricEvidence, metricIdentity, publishAwards, qualifyingAwards } from "./projection";
 import { registerAchievementWake } from "./wake";
@@ -18,7 +19,9 @@ const shortPolicy = { attempts: 1, budgetMs: 1_500, delayMs: 0, maxDelayMs: 0 };
 const syncKey = { id: 1 };
 const idle = 30_000;
 const pause = 250;
+const fundRetryDelay = 5_000;
 type Work = { kind: "live" } | { kind: "history"; job: AchievementJob };
+const fundRetryState = () => ({ batchSize: 10, retryAt: 0 });
 
 async function processLive(tx: Prisma.TransactionClient, slot: AchievementSyncState, size: number) {
   const indexes = await tx.achievementFact.findMany({ where: { seq: { gt: slot.lastAppliedSeq } }, orderBy: { seq: "asc" }, take: size });
@@ -132,8 +135,30 @@ async function heavyWorkActive(db: PrismaClient) {
   return !!(importing || aggregating || correcting || ai);
 }
 
+async function tickFundBaselines(db: PrismaClient, retry: ReturnType<typeof fundRetryState>, now: Date, historySize: number, checkHeavy: boolean) {
+  const waiting = retry.retryAt - now.getTime();
+  if (waiting > 0) return waiting;
+  const size = Math.min(retry.batchSize, historySize);
+  try {
+    const users = await pendingFundBaselines(db, size);
+    if (!users.length) return idle;
+    if (checkHeavy && await heavyWorkActive(db)) return fundRetryDelay;
+    // The write fence serializes this batch. Each profile's committed progress is
+    // rechecked under the fence, including after a previous uncertain commit.
+    await sqliteWriteTransaction(db, async tx => {
+      for (const { userId } of users) await captureFundBaseline(tx, userId);
+    }, shortOptions, shortPolicy);
+    return pause;
+  } catch (error) {
+    retry.batchSize = Math.max(1, Math.floor(size / 2));
+    retry.retryAt = now.getTime() + fundRetryDelay;
+    console.warn(JSON.stringify({ event: "achievement-fund-baseline", error: error instanceof Error ? error.name : "unknown" }));
+    return fundRetryDelay;
+  }
+}
+
 /** Exported for isolated, deterministic integration verification. */
-export async function achievementTick({ db = prisma, allowHistory = true, liveSize = 25, historySize = 24, now = new Date() } = {}) {
+export async function achievementTick({ db = prisma, allowHistory = true, liveSize = 25, historySize = 24, now = new Date(), fundRetry = fundRetryState() } = {}) {
   let slot = await db.achievementSyncState.findUnique({ where: syncKey });
   if (!slot) throw new Error("ACHIEVEMENT_SCHEMA_NOT_READY");
   if (!slot.enabledAt) {
@@ -156,7 +181,9 @@ export async function achievementTick({ db = prisma, allowHistory = true, liveSi
   });
   const blocked = job && (!allowHistory || await heavyWorkActive(db));
   if (job && !blocked) worked = await runBatch(db, { kind: "history", job }, slot, historySize) || worked;
-  return worked ? pause : blocked ? 5_000 : idle;
+  if (worked) return pause;
+  if (blocked) return 5_000;
+  return allowHistory ? tickFundBaselines(db, fundRetry, now, historySize, !job) : idle;
 }
 
 const globals = globalThis as typeof globalThis & { achievementRuntime?: boolean };
@@ -172,6 +199,7 @@ export function startAchievementRuntime() {
   let timer: NodeJS.Timeout | undefined;
   let running = false, requested = false, stopped = false;
   let historySize = 24, liveSize = 25, quiet = false;
+  const fundRetry = fundRetryState();
   const disconnect = () => { if (db !== prisma) void db.$disconnect().catch(() => {}); };
   const schedule = (ms: number) => {
     if (stopped) return;
@@ -187,7 +215,7 @@ export function startAchievementRuntime() {
     let next = idle;
     const started = performance.now();
     try {
-      next = await achievementTick({ db, allowHistory: delay.percentile(95) < 50_000_000, liveSize, historySize });
+      next = await achievementTick({ db, allowHistory: delay.percentile(95) < 50_000_000, liveSize, historySize, fundRetry });
       if (next === pause && performance.now() - started > 100) {
         historySize = Math.max(4, Math.floor(historySize / 2));
         liveSize = Math.max(4, Math.floor(liveSize / 2));

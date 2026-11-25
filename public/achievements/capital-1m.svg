@@ -1,0 +1,7 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="64" height="64" viewBox="0 0 64 64" role="img" aria-labelledby="badge-title">
+  <title id="badge-title">百万封王</title>
+  <path d="M23 5h18l7 4v3l8 5v26l-5 5-19 11-19-11-5-5V17l8-5V9Z" fill="#111825" stroke="#AF8A4D" stroke-width="2.2" stroke-linejoin="round"/>
+  <path d="M24.5 10h15l3.5 2v3l8 5v21l-3 3-16 9-16-9-3-3V20l8-5v-3Z" fill="none" stroke="#6C5228" stroke-width="1.8" stroke-linejoin="round"/>
+  <path d="m15 21.5 10.3 6.5L32 15.5 38.7 28 49 21.5 43.5 44h-23ZM32 29l-4 5 4 4.5 4-4.5Z" fill="#F5CB6D" fill-rule="evenodd"/>
+  <path d="M19.4 39.5h25.2L43.5 44h-23Z" fill="#C49749"/>
+</svg>

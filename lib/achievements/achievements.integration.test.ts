@@ -1,4 +1,5 @@
 import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
+import { Prisma } from "@prisma/client";
 import { POST as discardPreviewRoute } from "@/app/api/admin/achievements/jobs/[jobId]/discard/route";
 import { prisma } from "@/lib/db";
 import { sqliteWriteTransaction } from "@/lib/sqlite-write";
@@ -16,6 +17,9 @@ import { createAchievementPreview, discardAchievementPreview, retryAchievementJo
 import { readAchievementDetail, readAchievementNotifications, readAchievements, saveShowcase } from "./read";
 import { achievementTick } from "./runtime";
 import { ExitReason } from "./exit-evidence";
+import { creditPropPayout, fundStandardAccount } from "@/lib/user-wallet/service";
+import { transferStandardAccount } from "@/lib/user-wallet/transfers";
+import { readUserWallet } from "@/lib/user-wallet/read";
 
 vi.mock("@/lib/db", async () => {
   const { createDatabaseClient } = await import("@/lib/sqlite-client.mjs");
@@ -53,6 +57,139 @@ async function until(id: string, expected: string) {
 }
 
 const findSeries = (data: Awaited<ReturnType<typeof readAchievements>>, key: string) => data.items.find(row => row.key === key)!;
+
+describe("account funding milestones", () => {
+  async function paperAccount(projectionId: string, realizedPnl = 0, initialCapital = 5_000) {
+    return prisma.paperTradingSession.create({ data: { datasetId, projectionId, realizedPnl, currency: "USDT",
+      initialCapital, peakEquity: initialCapital, lastProcessedSequence: 0 } });
+  }
+
+  it("backfills the verified balance of an existing profile without changing the ledger or inventing a date", async () => {
+    const user = await profile(), other = await profile();
+    const own = await session(user.id), live = await session(user.id, "LIVE_REPLAY");
+    await paperAccount(own.activeProjectionId, 90_000);
+    await paperAccount(live.activeProjectionId, 2_000_000);
+    // Fixture loaded from an older release that already funded a standard account.
+    await prisma.userWallet.update({ where: { userId: user.id }, data: { balanceMinor: BigInt(500_000) } });
+    await prisma.userWalletAllocation.create({ data: { userId: user.id, sessionId: own.id, sessionName: own.name,
+      projectionId: own.activeProjectionId, depositedMinor: BigInt(500_000) } });
+    const before = await readAchievements(user.id);
+    expect(findSeries(before, "capital-100k")).toMatchObject({ current: 10_000_000, historyPending: true, highest: 0 });
+    await achievementTick();
+    await achievementTick();
+    const result = await readAchievements(user.id);
+    expect(result.unlockedStages).toBe(2);
+    expect(findSeries(result, "capital-100k")).toMatchObject({ current: 10_000_000, historyPending: false, highest: 1 });
+    expect(findSeries(result, "capital-1m").highest).toBe(0);
+    expect((await readAchievements(other.id)).unlockedStages).toBe(0);
+    expect((await readAchievementDetail(user.id, "capital-100k"))[0]).toMatchObject({ attainedAt: null, historical: true, source: null });
+    expect(await readAchievementNotifications(user.id, 0)).toMatchObject({ count: 2, historical: 2 });
+    expect(await prisma.userWalletEntry.count({ where: { userId: user.id } })).toBe(1);
+  });
+
+  it("retries an expired funding batch independently of new growth facts", async () => {
+    const user = await profile();
+    await prisma.userWallet.update({ where: { userId: user.id }, data: { balanceMinor: BigInt(2_000_000) } });
+    const now = new Date();
+    const fundRetry = { batchSize: 10, retryAt: 0 };
+    const transaction = vi.fn().mockRejectedValue(new Prisma.PrismaClientKnownRequestError("expired transaction", { code: "P2028", clientVersion: "fixture" }));
+    const db = new Proxy(prisma, { get(target, key) {
+      if (key === "$transaction") return transaction;
+      const value = Reflect.get(target, key, target);
+      return typeof value === "function" ? value.bind(target) : value;
+    } });
+    expect(await achievementTick({ db, now, fundRetry, historySize: 4 })).toBe(5_000);
+    expect(transaction).toHaveBeenCalledTimes(1);
+    expect(fundRetry).toEqual({ batchSize: 2, retryAt: now.getTime() + 5_000 });
+    expect(await prisma.achievementSyncState.findUnique({ where: { id: 1 } })).toMatchObject({ liveError: null, liveFailures: 0, retryAt: null });
+
+    const trader = await profile(), own = await session(trader.id);
+    await appendFact(own.id, "CYCLE", "during-fund-backoff");
+    await achievementTick({ now, fundRetry });
+    expect(findSeries(await readAchievements(trader.id), "first-cycle").highest).toBe(1);
+    expect(findSeries(await readAchievements(user.id), "capital-doubled")).toMatchObject({ highest: 0, historyPending: true });
+    await achievementTick({ now: new Date(fundRetry.retryAt), fundRetry });
+    expect(findSeries(await readAchievements(user.id), "capital-doubled")).toMatchObject({ highest: 1, historyPending: false });
+  });
+
+  it("uses received payout cents, supports treasury transfers, and grants each milestone once", async () => {
+    const user = await profile(), own = await session(user.id), payer = await session(user.id);
+    await paperAccount(own.activeProjectionId);
+    await sqliteWriteTransaction(prisma, tx => fundStandardAccount(tx, own, own.activeProjectionId, 5_000));
+    const payout = (tx: Parameters<typeof creditPropPayout>[0], id: string, received: number) => creditPropPayout(tx, payer, { id, received, roundNumber: 1 });
+    await sqliteWriteTransaction(prisma, tx => payout(tx, "just-below", 9_999.99));
+    const scope = await loadReplayScope(own.id);
+    await runWithReplayScope(scope, () => sqliteWriteTransaction(prisma, tx => transferStandardAccount(tx, {
+      userId: user.id, kind: "WITHDRAW", amount: 5_000, expectedVersion: scope.version, requestId: "internal-transfer",
+    })));
+    expect(findSeries(await readAchievements(user.id), "capital-doubled")).toMatchObject({ current: 1_999_999, highest: 0 });
+    await expect(sqliteWriteTransaction(prisma, async tx => {
+      await payout(tx, "rolled-back", 0.01);
+      throw new Error("simulation rollback");
+    })).rejects.toThrow("simulation rollback");
+    expect((await readAchievements(user.id)).unlockedStages).toBe(0);
+    await sqliteWriteTransaction(prisma, tx => payout(tx, "exact", 0.01));
+    expect(findSeries(await readAchievements(user.id), "capital-doubled")).toMatchObject({ current: 2_000_000, highest: 1 });
+    for (let attempt = 0; attempt < 2; attempt++) await sqliteWriteTransaction(prisma, tx => payout(tx, "peak", 980_000));
+    expect((await readAchievements(user.id)).unlockedStages).toBe(3);
+    expect((await readAchievementDetail(user.id, "capital-1m"))[0]).toMatchObject({ threshold: 100_000_000, historical: false, attainedAt: expect.any(String) });
+    await saveShowcase(user.id, ["capital-1m", "capital-100k", "capital-doubled"]);
+    expect((await readAchievements(user.id)).showcase.map(row => row.key)).toEqual(["capital-1m", "capital-100k", "capital-doubled"]);
+  });
+
+  it("grants a realized trade peak within one persisted batch and retains it after the balance falls", async () => {
+    const user = await profile(), own = await session(user.id);
+    const scope = await loadReplayScope(own.id), account = await paperAccount(scope.projectionId);
+    await sqliteWriteTransaction(prisma, tx => fundStandardAccount(tx, own, scope.projectionId, 5_000));
+    const fills: PaperFillData[] = [];
+    for (const [sequence, realizedPnl, fee] of [[1, 0, 0], [2, 10_001, 1], [3, 0, 0], [4, -5_000, 0]]) {
+      const opens = sequence % 2 === 1;
+      const side = opens ? "BUY" : "SELL";
+      const orderId = `fund-order-${sequence}`;
+      await prisma.paperOrder.create({ data: { id: projectionRecordId(scope.projectionId, orderId), sessionId: account.id,
+        side, type: "MARKET", quantity: 1, createdSequence: sequence, activeFromSequence: sequence } });
+      fills.push({ id: `fund-fill-${sequence}`, orderId, sequence, timestamp: barTime(sequence).toISOString(), side,
+        reason: opens ? "ENTRY" : "CLOSE", price: 100, quantity: 1, fee, slippageCost: 0, realizedPnl,
+        closedQuantity: opens ? 0 : 1, openedQuantity: opens ? 1 : 0, netQuantityAfter: opens ? 1 : 0,
+        averagePriceAfter: opens ? 100 : null });
+    }
+    await runWithReplayScope(scope, () => sqliteWriteTransaction(prisma, tx => persistDerivedBatch(tx, account, 1, {
+      state: { ...serializePaperSession(account), realizedPnl: 5_001, totalFees: 1, lastProcessedSequence: 4 },
+      orders: [], fills, lots: [], equityPoints: [], entries: [],
+    })));
+    const result = await readAchievements(user.id);
+    expect(findSeries(result, "capital-doubled")).toMatchObject({ current: 1_500_000, best: 2_000_000, highest: 1 });
+    expect(findSeries(result, "capital-100k").highest).toBe(0);
+    expect((await readAchievementDetail(user.id, "capital-doubled"))[0]).toMatchObject({ historical: false, attainedAt: expect.any(String) });
+  });
+
+  it("uses the same half-cent rounding as the profile when a close reaches the milestone", async () => {
+    const user = await profile(), own = await session(user.id), scope = await loadReplayScope(own.id);
+    await paperAccount(scope.projectionId, 0, 0.01);
+    await sqliteWriteTransaction(prisma, tx => fundStandardAccount(tx, own, scope.projectionId, 0.01));
+    await prisma.userWallet.update({ where: { userId: user.id }, data: { balanceMinor: BigInt(1_999_999) } });
+    const account = await prisma.paperTradingSession.update({ where: { projectionId: scope.projectionId }, data: { netQuantity: -0.01, averageEntryPrice: 1.5, totalFees: 0.006 } });
+    const orderId = "half-cent-close";
+    await prisma.paperOrder.create({ data: { id: projectionRecordId(scope.projectionId, orderId), sessionId: account.id,
+      side: "BUY", type: "MARKET", quantity: 0.01, createdSequence: 1, activeFromSequence: 1 } });
+    const fill: PaperFillData = {
+      id: "half-cent-fill", orderId, sequence: 1, timestamp: barTime(1).toISOString(), side: "BUY", reason: "CLOSE",
+      price: 1, quantity: 0.01, fee: 0.004, slippageCost: 0, realizedPnl: 0.005, closedQuantity: 0.01,
+      openedQuantity: 0, netQuantityAfter: 0, averagePriceAfter: null,
+    };
+    expect(findSeries(await readAchievements(user.id), "capital-doubled")).toMatchObject({ current: 1_999_999, highest: 0 });
+    await runWithReplayScope(scope, () => sqliteWriteTransaction(prisma, tx => persistDerivedBatch(tx, account, 1, {
+      state: { ...serializePaperSession(account), netQuantity: 0, averageEntryPrice: null, realizedPnl: fill.realizedPnl,
+        totalFees: account.totalFees + fill.fee, lastProcessedSequence: 1 },
+      orders: [], fills: [fill], lots: [], equityPoints: [], entries: [],
+    })));
+    const wallet = await readUserWallet(user.id);
+    const totalMinor = Math.round(wallet.available * 100) + Math.round(wallet.held * 100);
+    // The bundled Prisma SQLite and better-sqlite3 versions can round this float differently.
+    if (process.env.SQLITE_DRIVER === "better-sqlite3") expect(wallet.held).toBe(0.01);
+    expect(findSeries(await readAchievements(user.id), "capital-doubled")).toMatchObject({ current: totalMinor, highest: Number(totalMinor >= 2_000_000) });
+  });
+});
 
 describe("achievement evidence and projection", () => {
   it("persists cross-transaction mixed exits, true order within a bar, and separate scopes", async () => {

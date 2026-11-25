@@ -4,8 +4,10 @@ import { prisma } from "@/lib/db";
 import { sqliteWriteTransaction } from "@/lib/sqlite-write";
 import { replayJournalTradeHref } from "@/lib/paper-trading/journal-links";
 import { projectionRecordId } from "@/lib/replay-sessions/identity";
-import { achievementCatalog, achievementKeys, achievementStageCount, catalogVersion, isStreak, metricFingerprints, metricKeys, tierKey, type AchievementKey, type MetricKey } from "./catalog";
+import { readUserFundsMinor } from "@/lib/user-wallet/balances";
+import { achievementCatalog, achievementKeys, achievementStageCount, catalogVersion, fundsMetric, isStreak, metricFingerprints, metricKeys, tierKey, type AchievementKey, type MetricKey } from "./catalog";
 import { factSelect, scopeIdentity, sourceProjectionId } from "./evidence";
+import { readFundMilestones } from "./funds";
 import { AchievementError, canDiscardPlan } from "./jobs";
 
 export const showcaseInput = z.object({ series: z.array(z.enum(achievementKeys)).max(3).refine(keys => new Set(keys).size === keys.length) }).strict();
@@ -41,7 +43,7 @@ export async function readAchievements(userId: string, focusSession?: string) {
   return prisma.$transaction(async tx => {
     const user = await requireUser(tx, userId);
     const activeGenerations = await tx.userAchievementState.findMany({ where: { userId, metricKey: { in: metricKeys } } });
-    const [progress, awards, showcase, pending, slot, legacy] = await Promise.all([
+    const [progress, awards, showcase, pending, slot, legacy, fundsBalance, fundProgress] = await Promise.all([
       activeGenerations.length ? tx.userAchievementProgress.findMany({ where: {
         userId, scopeKey: "", OR: activeGenerations.map(({ metricKey, generation }) => ({ metricKey, generation })),
       } }) : [],
@@ -50,25 +52,32 @@ export async function readAchievements(userId: string, focusSession?: string) {
       tx.achievementJob.findFirst({ where: { status: { in: ["QUEUED", "RUNNING"] }, OR: [{ userId }, { userId: null, userWatermark: { gte: userId } }] }, select: { id: true } }),
       tx.achievementSyncState.findUnique({ where: { id: 1 }, select: { liveError: true } }),
       tx.userGrowthFact.findFirst({ where: { userId, achievementCaptureVersion: 0 }, select: { id: true } }),
+      readUserFundsMinor(tx, userId),
+      readFundMilestones(tx, userId),
     ]);
     const items = await Promise.all(achievementKeys.map(async key => {
       const spec = achievementCatalog[key];
-      const state = activeGenerations.find(item => item.metricKey === spec.metric);
+      const metric = spec.metric;
+      const state = activeGenerations.find(item => item.metricKey === metric);
       const row = progress.find(item => item.metricKey === spec.metric);
       const match = awards.filter(award => award.achievementKey === key).map(publicAward);
-      const streak = isStreak(spec.metric);
-      const focused = streak && state && focusSession ? await bestActiveScope(tx, userId, spec.metric, state.generation, focusSession) : undefined;
-      const scope = focused ?? (streak && state ? await bestActiveScope(tx, userId, spec.metric, state.generation) : undefined);
+      const streak = metric !== fundsMetric && isStreak(metric);
+      const focused = streak && state && focusSession ? await bestActiveScope(tx, userId, metric, state.generation, focusSession) : undefined;
+      const scope = focused ?? (streak && state ? await bestActiveScope(tx, userId, metric, state.generation) : undefined);
       const located = scope ? z.tuple([z.string(), z.number()]).parse(JSON.parse(scope.scopeKey)) : undefined;
       const tiers = (spec.thresholds as readonly number[]).map((threshold, index) => ({ target: threshold, key: tierKey(index), award: match.find(item => item.tier === tierKey(index)) ?? null }));
       const highest = tiers.findLastIndex(tier => tier.award) + 1;
-      const status = highest ? "unlocked" as const : row?.best ? "inProgress" as const : "locked" as const;
+      const funds = metric === fundsMetric;
+      const current = funds ? Number(fundsBalance ?? 0) : streak ? scope?.current ?? 0 : row?.best ?? 0;
+      const best = funds ? fundProgress?.best ?? 0 : row?.best ?? 0;
+      const status = highest ? "unlocked" as const : (funds ? current : best) > 0 ? "inProgress" as const : "locked" as const;
       return {
         key, category: spec.category, highest, status, tiers,
-        current: streak ? scope?.current ?? 0 : row?.best ?? 0, best: row?.best ?? 0, streak,
+        current, best, streak,
         scope: located && scope ? { name: scope.name, round: located[1], focused: !!focused } : null,
-        gap: !!row?.coverageGaps, historyPending: !!legacy && !state?.historyChecked,
-        outdated: !!state && state.fingerprint !== metricFingerprints[spec.metric],
+        gap: !!row?.coverageGaps,
+        historyPending: funds ? fundsBalance !== null && !fundProgress : !!legacy && !state?.historyChecked,
+        outdated: metric !== fundsMetric && !!state && state.fingerprint !== metricFingerprints[metric],
       };
     }));
     return { user, version: catalogVersion, items, totalStages: achievementStageCount, unlockedStages: items.reduce((sum, item) => sum + item.tiers.filter(tier => tier.award).length, 0),

@@ -11,10 +11,11 @@ import { Dialog } from "@/components/ui/dialog";
 import { InfoTooltip } from "@/components/ui/info-tooltip";
 import { Label } from "@/components/ui/label";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
-import { achievementCategories, type AchievementKey } from "@/lib/achievements/catalog";
+import { achievementCatalog, achievementCategories, type AchievementKey } from "@/lib/achievements/catalog";
 import type { readAchievementDetail, readAchievements } from "@/lib/achievements/read";
-import { formatInteger as fmt } from "@/lib/format";
+import { formatInteger as fmt, formatNumber } from "@/lib/format";
 import { copy } from "@/lib/i18n";
+import { cn } from "@/lib/utils";
 import { AchievementBadge, AchievementErrorAlert, achievementDate, achievementRequest, collectionApi, collectionHref, profileHref, t, useAchievementQuery } from "./shared";
 
 type Collection = Awaited<ReturnType<typeof readAchievements>>;
@@ -22,6 +23,12 @@ type Series = Collection["items"][number];
 type Details = Awaited<ReturnType<typeof readAchievementDetail>>;
 const statuses = ["unlocked", "inProgress", "locked"] as const;
 const collectionPolling = 8_000;
+const conditions: Partial<Record<AchievementKey, string>> = t.conditions;
+const fundsAmount = (minor: number) => `${formatNumber(minor / 100)} ${copy.userWallet.currency}`;
+function achievementCondition(key: AchievementKey) {
+  return conditions[key] ?? t.fundsCondition(fundsAmount(achievementCatalog[key].thresholds[0]));
+}
+
 const statusAppearance = {
   unlocked: { icon: Check, className: "border-positive/25 bg-positive-background text-positive" },
   inProgress: { icon: CircleDot, className: "border-link/25 bg-info-background text-link" },
@@ -38,26 +45,29 @@ function AchievementStatus({ status, stage }: { status: Series["status"]; stage?
 
 function StageDetails({ id, item, onClose }: { id: string; item: Series; onClose: () => void }) {
   const query = useAchievementQuery<Details>(`${collectionApi(id)}/${item.key}`, collectionPolling);
-  return <Dialog open title={t.names[item.key]} description={t.conditions[item.key]} onClose={onClose}>
+  const funds = item.category === "funds";
+  return <Dialog open title={t.names[item.key]} description={achievementCondition(item.key)} onClose={onClose}>
     <div className="space-y-4">
       {query.error && <AchievementErrorAlert error={query.error} retry={query.refresh} />}
       {!query.data && !query.error && <p role="status">{t.loading}</p>}
       {item.streak && <p className="text-sm text-secondary-text">{t.streakRule}</p>}
+      {funds && <p className="text-sm text-secondary-text">{t.fundsRule}</p>}
       {item.streak && item.scope && <p className="text-sm text-secondary-text">{item.scope.focused ? t.focusScope : t.scopeBest} · {t.currentScope(item.scope.name, item.scope.round ? fmt(item.scope.round) : "")}</p>}
       {item.gap && <p className="flex items-start gap-2 rounded-md border border-warning/25 bg-warning-background px-3 py-2.5 text-sm leading-relaxed text-secondary-text">
         <Info className="mt-0.5 h-4 w-4 shrink-0 text-warning" aria-hidden="true" />
         <span>{item.streak ? t.streakHistoryGap : t.historyGap}</span>
       </p>}
-      {(item.outdated || item.historyPending) && <p className="text-sm text-secondary-text">{item.outdated ? t.outdated : t.historyPending}</p>}
+      {(item.outdated || item.historyPending) && <p className="text-sm text-secondary-text">{item.outdated ? t.outdated : funds ? t.fundsHistoryPending : t.historyPending}</p>}
       <ol className="divide-y rounded-md border bg-card">
         {item.tiers.map((stage, index) => {
           const award = query.data?.find(row => row.tier === stage.key);
           const known = award ?? stage.award;
+          const target = known?.threshold ?? stage.target;
           return <li key={stage.key} className="space-y-3 px-4 py-3">
             <div className="flex flex-wrap items-center justify-between gap-x-4 gap-y-2 text-sm">
               <div className="flex flex-wrap items-baseline gap-x-3 gap-y-1">
                 <strong className="font-semibold">{t.tier(fmt(index + 1))}</strong>
-                <span className="tabular-nums text-secondary-text">{t.target(fmt(known?.threshold ?? stage.target))}</span>
+                <span className="tabular-nums text-secondary-text">{t.target(funds ? fundsAmount(target) : fmt(target))}</span>
               </div>
               <div className="flex flex-wrap items-center gap-2">
                 <AchievementStatus status={known ? "unlocked" : "locked"} />
@@ -65,7 +75,7 @@ function StageDetails({ id, item, onClose }: { id: string; item: Series; onClose
               </div>
             </div>
             {known && <dl className="grid gap-x-4 gap-y-3 text-sm sm:grid-cols-2 [&_dd]:mt-1 [&_dt]:text-xs [&_dt]:text-muted-foreground">
-              <div><dt>{t.attainedAt}</dt><dd className="tabular-nums">{known.attainedAt ? achievementDate(known.attainedAt) : t.historicalDateUnknown}</dd></div>
+              <div><dt>{t.attainedAt}</dt><dd className="tabular-nums">{known.attainedAt ? achievementDate(known.attainedAt) : funds ? t.fundsDateUnknown : t.historicalDateUnknown}</dd></div>
               <div><dt>{t.recordedAt}</dt><dd className="tabular-nums">{achievementDate(known.recordedAt)}</dd></div>
               <div><dt>{t.rule}</dt><dd className="break-words font-mono text-xs">{known.fingerprint}</dd></div>
               {award?.source && <>
@@ -90,6 +100,9 @@ function StageDetails({ id, item, onClose }: { id: string; item: Series; onClose
 
 function AchievementCard({ item, onDetails }: { item: Series; onDetails: () => void }) {
   const next = item.tiers.find(tier => !tier.award);
+  const funds = item.category === "funds";
+  const amount = funds ? item.current : item.best;
+  const unit = funds ? 100 : 1;
   return <Card className="flex min-w-0 flex-col">
     <CardHeader className="flex-row items-start gap-3 space-y-0 pb-3">
       <AchievementBadge id={item.key} level={item.highest} />
@@ -99,7 +112,7 @@ function AchievementCard({ item, onDetails }: { item: Series; onDetails: () => v
           <AchievementStatus status={item.status} stage={item.tiers.length > 1 ? item.highest : undefined} />
           <span className="text-xs text-secondary-text">{t.categories[item.category]}</span>
         </div>
-        <CardDescription className="leading-relaxed text-secondary-text">{t.conditions[item.key]}</CardDescription>
+        <CardDescription className="leading-relaxed text-secondary-text">{achievementCondition(item.key)}</CardDescription>
       </div>
     </CardHeader>
     <CardContent className="mt-auto flex items-end gap-3">
@@ -107,11 +120,13 @@ function AchievementCard({ item, onDetails }: { item: Series; onDetails: () => v
         {item.streak && <p className="tabular-nums text-xs leading-relaxed text-secondary-text">{item.scope?.focused ? t.focusScope : t.scopeBest} {fmt(item.current)} · {t.historyBest} {fmt(item.best)}</p>}
         {next && <div className="space-y-1.5 pb-1">
           <div className="flex flex-wrap items-baseline justify-between gap-x-2 text-xs tabular-nums">
-            <span className="text-secondary-text">{t.target(fmt(next.target))}</span>
-            <span className="whitespace-nowrap text-sm font-semibold text-foreground">{t.progress(fmt(item.best), fmt(next.target))}</span>
+            <span className="text-secondary-text">{t.target(funds ? fundsAmount(next.target) : fmt(next.target))}</span>
+            <span className={cn("text-sm font-semibold text-foreground", funds ? "ml-auto min-w-0 break-words text-right" : "whitespace-nowrap")}>
+              {funds ? t.progress(formatNumber(amount / unit), fundsAmount(next.target)) : t.progress(fmt(amount), fmt(next.target))}
+            </span>
           </div>
-          <div role="progressbar" aria-label={t.names[item.key]} aria-valuemin={0} aria-valuemax={next.target} aria-valuenow={Math.min(item.best, next.target)} className="h-1.5 overflow-hidden rounded-md bg-border">
-            <div className="h-full rounded-md bg-primary" style={{ width: `${Math.min(100, 100 * item.best / next.target)}%` }} />
+          <div role="progressbar" aria-label={t.names[item.key]} aria-valuemin={0} aria-valuemax={next.target / unit} aria-valuenow={Math.min(amount, next.target) / unit} className="h-1.5 overflow-hidden rounded-md bg-border">
+            <div className="h-full rounded-md bg-primary" style={{ width: `${Math.min(100, 100 * amount / next.target)}%` }} />
           </div>
         </div>}
       </div>
@@ -208,7 +223,7 @@ export function AchievementProfileSummary({ userId }: { userId: string }) {
         {t.latest} · <span className="font-medium text-foreground">{t.names[data.latest.key]}</span> · <span className="tabular-nums">{data.latest.attainedAt ? achievementDate(data.latest.attainedAt) : t.historicalDateUnknown}</span>
       </> : t.none}</p>}
       {!!data?.showcase.length && <ul className="flex flex-wrap gap-2 border-t pt-3">{data.showcase.map(badge => <li key={badge.key}>
-        <InfoTooltip label={`${t.names[badge.key]} · ${t.tier(fmt(badge.tier))}`} text={t.conditions[badge.key]}
+        <InfoTooltip label={`${t.names[badge.key]} · ${t.tier(fmt(badge.tier))}`} text={achievementCondition(badge.key)}
           className="h-auto min-h-10 border bg-background py-1 pl-1 pr-3">
           <AchievementBadge id={badge.key} level={badge.tier} compact />
           <span>{t.names[badge.key]}</span>

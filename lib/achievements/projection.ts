@@ -1,6 +1,6 @@
 import type { Prisma, UserAchievementProgress } from "@prisma/client";
 import { z } from "zod";
-import { achievementCatalog, achievementKeys, isStreak, metricFingerprints, tierKey, type MetricKey } from "./catalog";
+import { achievementCatalog, achievementKeys, isStreak, metricFingerprints, tierKey, type AchievementMetricKey, type MetricKey } from "./catalog";
 import { scopeIdentity, type Evidence } from "./evidence";
 import { ExitReason } from "./exit-evidence";
 
@@ -9,7 +9,7 @@ type Milestones = z.infer<typeof milestoneSchema>;
 const summaryScope = "";
 type Cell = Pick<UserAchievementProgress, "current" | "best" | "coverageGaps"> & { milestones: Milestones };
 export const metricIdentity = (userId: string, metricKey: MetricKey) => ({ userId, metricKey });
-export const progressIdentity = (userId: string, metricKey: MetricKey, generation: string, scopeKey = summaryScope) =>
+export const progressIdentity = (userId: string, metricKey: AchievementMetricKey, generation: string, scopeKey = summaryScope) =>
   ({ userId, metricKey, generation, scopeKey });
 const emptyCell = (): Cell => ({ current: 0, best: 0, coverageGaps: 0, milestones: {} });
 

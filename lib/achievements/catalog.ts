@@ -1,3 +1,5 @@
+export const fundsMetric = "account-funds";
+// Funding thresholds are in minor units, matching the wallet ledger.
 export const achievementCatalog = {
   "first-cycle": { metric: "completed-cycles", category: "trading", thresholds: [1] },
   "completed-cycles": { metric: "completed-cycles", category: "trading", thresholds: [100, 500, 1000] },
@@ -9,12 +11,16 @@ export const achievementCatalog = {
   foundation: { metric: "foundation", category: "growth", thresholds: [1] },
   "stop-loss-streak": { metric: "stop-loss-streak", category: "trading", thresholds: [5, 10] },
   "take-profit-streak": { metric: "take-profit-streak", category: "trading", thresholds: [5, 10] },
+  "capital-doubled": { metric: fundsMetric, category: "funds", thresholds: [2_000_000] },
+  "capital-100k": { metric: fundsMetric, category: "funds", thresholds: [10_000_000] },
+  "capital-1m": { metric: fundsMetric, category: "funds", thresholds: [100_000_000] },
 } as const;
 
 export type AchievementKey = keyof typeof achievementCatalog;
 export type AchievementCategory = (typeof achievementCatalog)[AchievementKey]["category"];
+export type AchievementMetricKey = (typeof achievementCatalog)[AchievementKey]["metric"];
 export const achievementKeys = Object.keys(achievementCatalog) as [AchievementKey, ...AchievementKey[]];
-export const achievementCategories = ["trading", "review", "prop", "growth"] as const;
+export const achievementCategories = ["trading", "review", "prop", "growth", "funds"] as const;
 export const achievementStageCount = achievementKeys.reduce((total, key) => total + achievementCatalog[key].thresholds.length, 0);
 
 export const metricFingerprints = {
@@ -29,10 +35,13 @@ export const metricFingerprints = {
 } as const;
 export type MetricKey = keyof typeof metricFingerprints;
 export const metricKeys = Object.keys(metricFingerprints) as [MetricKey, ...MetricKey[]];
-export const catalogVersion = "1";
+export const catalogVersion = "2";
+// Funding milestones use balance snapshots and are independent of growth-evidence plans.
+export const fundsFingerprint = "1:realized-wallet-and-held-usdt";
+const evidencePlanVersion = "1";
 export const tierKey = (index: number) => `tier-${index + 1}`;
 export const isStreak = (metric: MetricKey) => metric === "stop-loss-streak" || metric === "take-profit-streak";
 
 export function metricPlanFingerprint(metrics: MetricKey[]) {
-  return JSON.stringify([catalogVersion, metrics.map(key => [key, metricFingerprints[key]])]);
+  return JSON.stringify([evidencePlanVersion, metrics.map(key => [key, metricFingerprints[key]])]);
 }
