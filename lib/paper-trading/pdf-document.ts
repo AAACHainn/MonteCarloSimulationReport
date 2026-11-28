@@ -2,7 +2,7 @@ import { encodePdfText } from "./pdf-text";
 import { jsPDF } from "jspdf";
 import { autoTable } from "jspdf-autotable";
 import { copy } from "@/lib/i18n";
-import { formatNumber, formatPercent } from "@/lib/format";
+import { formatMoney, formatNumber, formatPercent } from "@/lib/format";
 import { formatPriceForTick } from "@/lib/market-replay/price-ticks";
 import { formatInterval } from "@/lib/market-replay/types";
 import { formatUtcDateTime, formatUtcOffset } from "@/lib/market-replay/display-timezone";
@@ -66,11 +66,11 @@ export class ReplayPdfDocument {
       [text.trades, text.counts(s.session.totalCount, s.entries.length)],
       [text.filters, s.filterDescription], [text.settings, settings],
       [copy.paperTrading.journalWinRate, formatPercent(s.summary.winRate)],
-      [copy.paperTrading.totalProfitPoints, formatNumber(s.summary.totalProfitPoints)],
-      [copy.paperTrading.totalLossPoints, formatNumber(s.summary.totalLossPoints)],
+      [copy.paperTrading.totalProfit, formatMoney(s.summary.totalProfit, s.session.currency)],
+      [copy.paperTrading.totalLoss, formatMoney(s.summary.totalLoss, s.session.currency)],
       [copy.paperTrading.actualProfitLossRatio, s.summary.actualProfitLossRatio === null ? copy.common.dash : formatNumber(s.summary.actualProfitLossRatio)],
       [text.includeDetails, o.includeDetails ? selectedDetailColumns(o.detailFieldIds).map((c) => c.label).join(" · ") : text.detailsOff],
-      [text.reportTitle, text.snapshotHint + " " + text.context + (this.escapedCharacters ? " " + text.unicodeHint : "")],
+      [text.reportTitle, copy.paperTrading.journalGrossPnlDescription + " " + text.snapshotHint + " " + text.context + (this.escapedCharacters ? " " + text.unicodeHint : "")],
     ], 26, { 0: { cellWidth: 45 } });
   }
   addChart(page: PdfChartPage, png: ArrayBuffer, caption: string) {

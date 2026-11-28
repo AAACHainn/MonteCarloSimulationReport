@@ -7,7 +7,7 @@ import type { CandlestickStyle } from "@/lib/market-replay/candlestick-style";
 export const PDF_MAX_BARS = 200;
 export const PDF_CHARTS_PER_VOLUME = 50;
 export type PdfSnapshot = {
-  session: { id: string; name: string; createdAt: string; totalCount: number };
+  session: { id: string; name: string; createdAt: string; currency: string; totalCount: number };
   dataset: MarketDatasetSummary;
   entries: ReplayJournalEntryData[];
   summary: ReplayJournalSummary;

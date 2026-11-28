@@ -13,8 +13,8 @@ beforeEach(() => {
   vi.clearAllMocks();
   const d = pdfSnapshot().dataset;
   mocks.dataset.mockResolvedValue({ ...d, tradingWeekdays: d.tradingWeekdays.join(","), startTime: new Date(d.startTime), endTime: new Date(d.endTime), createdAt: new Date(d.createdAt) });
-  mocks.session.mockResolvedValue({ id: "session-qa", name: "复盘测试", archivedAt: null, createdAt: new Date(), entries: [1,2,3].map((no) => {
-    const e = pdfEntry(no, no * 10, no * 10 + 5, { direction: no === 2 ? "SHORT" : "LONG" });
+  mocks.session.mockResolvedValue({ id: "session-qa", name: "复盘测试", currency: "EUR", archivedAt: null, createdAt: new Date(), entries: [1,2,3].map((no) => {
+    const e = pdfEntry(no, no * 10, no * 10 + 5, { direction: no === 2 ? "SHORT" : "LONG", quantity: no });
     return { ...e, accountNo: e.no, no: e.globalNo, openedAt: new Date(e.openedAt), closedAt: new Date(e.closedAt) };
   }) });
   mocks.transaction.mockImplementation((fn) => fn({ marketDataset: { findUnique: mocks.dataset }, replayJournalSession: { findFirst: mocks.session } }));
@@ -24,7 +24,9 @@ describe("PDF filtered snapshot API", () => {
     const response = await GET(new Request("http://localhost/api?directions=LONG&page=2&take=1&columns=no"), context);
     const data = await response.json();
     expect(data.entries.map((e: { no: number }) => e.no)).toEqual([1,3]);
-    expect(data.session.totalCount).toBe(3); expect(data.summary.tradeCount).toBe(2); expect(data.entries[0].review).toBeTruthy();
+    expect(data.session).toMatchObject({ totalCount: 3, currency: "EUR" });
+    expect(data.summary).toMatchObject({ tradeCount: 2, totalProfit: 16, totalLoss: 0, actualProfitLossRatio: null });
+    expect(data.entries[0].review).toBeTruthy();
     expect(data.dataset.progress).toBeNull(); expect(data.endSequence).toBe(999); expect(response.headers.get("cache-control")).toBe("no-store");
     expect(mocks.transaction).toHaveBeenCalledTimes(1);
   });

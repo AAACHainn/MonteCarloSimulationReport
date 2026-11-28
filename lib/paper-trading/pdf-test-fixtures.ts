@@ -22,7 +22,7 @@ export function pdfBars(count: number, stride = 1): AggregatedMarketBarData[] {
   });
 }
 export function pdfSnapshot(entries = [pdfEntry(1, 70, 80)]): PdfSnapshot {
-  return { session: { id: "session-qa", name: "复盘测试", createdAt: "2026-09-08T00:00:00.000Z", totalCount: entries.length }, capturedAt: "2026-10-11T12:00:00.000Z", endSequence: 999,
+  return { session: { id: "session-qa", name: "复盘测试", createdAt: "2026-09-08T00:00:00.000Z", currency: "USD", totalCount: entries.length }, capturedAt: "2026-10-11T12:00:00.000Z", endSequence: 999,
     dataset: { id: "dataset-qa", name: "ES", description: null, symbol: "ES", timeframe: "1m", timezone: "America/Chicago", status: "READY", dataVersion: 1, sourceIntervalSeconds: 60, priceTickSize: 0.25, sessionMode: "TWENTY_FOUR_SEVEN", sessionOpenMinute: null, sessionCloseMinute: null, tradingWeekdays: [1,2,3,4,5,6,7], availableDisplaySessions: ["ETH", "RTH"], barCount: 1000, startTime: pdfBars(1)[0].timestamp, endTime: pdfBars(1000).at(-1)!.timestamp, createdAt: "2026-09-08T00:00:00.000Z", progress: null },
     entries, summary: calculateReplayJournalSummary(entries), filters: createEmptyReplayJournalFilters(), filterDescription: "无筛选" };
 }

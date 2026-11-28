@@ -48,6 +48,11 @@
 [`/preview/chart-style`](../../app/preview/chart-style/page.tsx) 仅在 `USER_GROWTH_PREVIEW=1` 时开放，使用[真实 ReplayChart 与设置面板](../../components/market-replay/chart-style-preview.tsx)及合成已揭示行情、浏览器内存账户，不加载用户、AI 或 PDF Provider，不请求业务 API。验收应使用独立端口与输出目录，并将 DATABASE_URL 指向不存在的专用临时文件，不能使用真实账户或数据库。
 
 预览提供两主题、实时 / 历史只读、网页全屏、历史右键逐根回放与退出恢复、源柱推进、形成中价格更新、显示周期切换、手动平移和重置、绘图工具、预置绘图 / 订单 / 成交标注 / 指标；右键可建立本地订单草稿。诊断区仅在该隔离入口展示配置、真实收盘、折线点价、源序号、持仓盈亏与视口，正式页面不展示实现细节。配置刷新恢复使用实际偏好 Hook；订单 / 成交操作只改变预览内存，不模拟真实交易服务或持久化。
+## 历史交易日志统计
+
+- 会话统计使用所选会话和轮次中符合已应用筛选的全部 FIFO 日志行，不受分页影响。胜率及胜、负、平笔数按配对行计算，加仓和分批平仓沿用同一口径。
+- 每行的手续费前盈亏等于该行的方向价差乘实际配对数量。总盈利累加所有盈利行，总亏损累加所有亏损行的绝对值，按会话币种显示。实际盈亏比为总盈利 ÷ 总亏损，总亏损为零时显示 `—`。PDF 摘要使用相同口径。日志明细的价差和风险倍数仍按每单位价格计算。
+
 ## 历史交易日志日历
 
 - 历史日志支持表格和月历，默认显示表格。月历沿用所选回放会话、自营轮次和已应用的日志筛选，首次打开定位到最新已回放月份。月份选择和前后翻页限于所选范围的首末已回放月份，超出范围的请求返回最新可用月份。
@@ -96,6 +101,7 @@
 | 会话 / 结果身份、只读和写入限制 | [会话作用域](../../lib/replay-sessions/scope.ts) |
 | 纠错请求、预览确认和取消 | [纠错服务](../../lib/replay-sessions/corrections.ts)、[分块重建](../../lib/replay-sessions/correction-runner.ts) |
 | 历史逐根回放与终点 | [历史页](../../app/market-replay/[id]/history/[sessionId]/page.tsx)、[只读游标](../../lib/market-replay/historical-playback.ts)、[播放 Hook](../../components/market-replay/use-historical-playback.ts) |
+| 历史交易日志统计 | [FIFO 配对与会话统计](../../lib/paper-trading/journal.ts) |
 | 主价格图形与显示配置 | [主序列适配](../../lib/market-replay/price-series.ts)、[配置与点价映射](../../lib/market-replay/chart-display.ts)、[偏好 Hook](../../components/market-replay/use-replay-preferences.ts) |
 | 图表分批退出与数量模式 | [保护单规则](../../lib/paper-trading/protective-orders.ts)、[撮合](../../lib/paper-trading/engine.ts)、[图表交互](../../components/market-replay/use-protective-exit-controls.tsx) |
 | 逐源推进、事务及自营观察 | [推进服务](../../lib/market-replay/replay-sync.ts) |

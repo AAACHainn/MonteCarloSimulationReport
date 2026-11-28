@@ -75,37 +75,32 @@ describe("paper replay journal", () => {
       averageWin: 0, averageLoss: 0, pnlCurve: [{ tradeNumber: 0, cumulativePnl: 0 }],
     });
   });
-  it("calculates full-session win rate, profit/loss points, and actual profit-loss ratio", () => {
+  it("weights full-session profit and loss by FIFO quantity without weighting win rate", () => {
     const summary = calculateReplayJournalSummary([
-      { gainLoss: 9.9, priceTickSize: 0.01 },
-      { gainLoss: -6.1, priceTickSize: 0.01 },
-      { gainLoss: 5.8, priceTickSize: 0.01 },
-      { gainLoss: -7.4, priceTickSize: 0.01 },
-      { gainLoss: -2.2, priceTickSize: 0.01 },
-      { gainLoss: -1.5, priceTickSize: 0.01 },
+      { gainLoss: 10, priceTickSize: 0.01, quantity: 10 },
+      { gainLoss: -10, priceTickSize: 0.01, quantity: 5 },
+      { gainLoss: 4, priceTickSize: 0.01, quantity: 0.5 },
+      { gainLoss: -3, priceTickSize: 0.01, quantity: 0.5 },
+      { gainLoss: 0, priceTickSize: 0.01, quantity: 100 },
     ]);
-    expect(summary.tradeCount).toBe(6);
-    expect(summary.winningTradeCount).toBe(2);
-    expect(summary.losingTradeCount).toBe(4);
-    expect(summary.breakEvenTradeCount).toBe(0);
-    expect(summary.winRate).toBeCloseTo(100 / 3);
-    expect(summary.totalProfitPoints).toBeCloseTo(15.7);
-    expect(summary.totalLossPoints).toBeCloseTo(17.2);
-    expect(summary.actualProfitLossRatio).toBeCloseTo(15.7 / 17.2);
+    expect(summary).toEqual({
+      tradeCount: 5, winningTradeCount: 2, losingTradeCount: 2, breakEvenTradeCount: 1, winRate: 40,
+      totalProfit: 102, totalLoss: 51.5, actualProfitLossRatio: 102 / 51.5,
+    });
   });
 
   it("returns no actual profit-loss ratio when the session has no losses", () => {
     expect(calculateReplayJournalSummary([
-      { gainLoss: 3, priceTickSize: 0.01 },
-      { gainLoss: 0, priceTickSize: 0.01 },
+      { gainLoss: 3, priceTickSize: 0.01, quantity: 0.5 },
+      { gainLoss: 0, priceTickSize: 0.01, quantity: 10 },
     ])).toEqual({
       tradeCount: 2,
       winningTradeCount: 1,
       losingTradeCount: 0,
       breakEvenTradeCount: 1,
       winRate: 50,
-      totalProfitPoints: 3,
-      totalLossPoints: 0,
+      totalProfit: 1.5,
+      totalLoss: 0,
       actualProfitLossRatio: null,
     });
   });

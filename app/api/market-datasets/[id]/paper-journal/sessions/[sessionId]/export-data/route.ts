@@ -31,7 +31,7 @@ async function handleGET(request: Request, context: { params: Promise<{ id: stri
   const entries = all.filter(compiled.test);
   const snapshot: PdfSnapshot = {
     session: { id: records.session.id, name: getReplayScope() ? `${records.session.name} · ${getReplayScope()!.mode === "TRAINING" ? copy.replaySessions.training : copy.replaySessions.liveReplay} · ${copy.replaySessions.source}` : records.session.name,
-      createdAt: records.session.createdAt.toISOString(), totalCount: all.length },
+      createdAt: records.session.createdAt.toISOString(), currency: records.session.currency, totalCount: all.length },
     dataset: serializeMarketDataset({ ...records.dataset, progress: null }),
     entries, summary: calculateReplayJournalSummary(entries), filters,
     filterDescription: describePdfFilters(filters, all), capturedAt: records.capturedAt, endSequence: records.projection?.currentSequence ?? records.dataset.barCount - 1,

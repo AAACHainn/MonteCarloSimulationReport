@@ -27,7 +27,7 @@ import { PdfExportButton } from "@/components/market-replay/pdf-export-button";
 import { CheckboxField } from "@/components/ui/checkbox-field";
 import { ReviewEditorDialog } from "@/components/market-replay/review-editor-dialog";
 import { limitReview } from "@/lib/paper-trading/review-templates";
-import { formatNumber, formatPercent } from "@/lib/format";
+import { formatMoney, formatNumber, formatPercent } from "@/lib/format";
 import { copy } from "@/lib/i18n";
 import { replayJournalTradeHref } from "@/lib/paper-trading/journal-links";
 import { formatInterval } from "@/lib/market-replay/types";
@@ -183,6 +183,7 @@ export function PaperJournalTable({
             {hasActiveFilters
               ? copy.paperTrading.journalStatisticsFilteredDescription
               : copy.paperTrading.journalStatisticsDescription}
+            {" "}{copy.paperTrading.journalGrossPnlDescription}
           </CardDescription>
         </CardHeader>
         <CardContent className="grid gap-3 p-4 pt-0 sm:grid-cols-3">
@@ -195,14 +196,14 @@ export function PaperJournalTable({
           <div className="rounded-md border bg-slate-50 dark:bg-muted p-3">
             <div className="grid grid-cols-2 gap-4">
               <JournalStatValue
-                label={copy.paperTrading.totalProfitPoints}
-                value={formatNumber(summary.totalProfitPoints)}
-                valueClassName="text-emerald-700 dark:text-positive"
+                label={copy.paperTrading.totalProfit}
+                value={selectedSession ? formatMoney(summary.totalProfit, selectedSession.currency) : formatNumber(summary.totalProfit)}
+                valueClassName={summary.totalProfit > 0 ? "text-emerald-700 dark:text-positive" : undefined}
               />
               <JournalStatValue
-                label={copy.paperTrading.totalLossPoints}
-                value={formatNumber(summary.totalLossPoints)}
-                valueClassName="text-red-700 dark:text-negative"
+                label={copy.paperTrading.totalLoss}
+                value={selectedSession ? formatMoney(summary.totalLoss, selectedSession.currency) : formatNumber(summary.totalLoss)}
+                valueClassName={summary.totalLoss > 0 ? "text-red-700 dark:text-negative" : undefined}
               />
             </div>
           </div>
@@ -683,7 +684,7 @@ function JournalStatValue({
   return (
     <div className="min-w-0">
       <p className="text-xs font-medium text-slate-600 dark:text-secondary-text">{label}</p>
-      <p className={`mt-1 text-xl font-semibold tabular-nums ${valueClassName}`}>{value}</p>
+      <p className={`mt-1 break-words text-xl font-semibold tabular-nums ${valueClassName}`}>{value}</p>
     </div>
   );
 }

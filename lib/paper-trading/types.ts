@@ -154,8 +154,8 @@ export type ReplayJournalSummary = {
   losingTradeCount: number;
   breakEvenTradeCount: number;
   winRate: number;
-  totalProfitPoints: number;
-  totalLossPoints: number;
+  totalProfit: number;
+  totalLoss: number;
   actualProfitLossRatio: number | null;
 };
 

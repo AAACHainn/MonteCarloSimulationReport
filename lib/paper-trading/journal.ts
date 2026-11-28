@@ -25,12 +25,14 @@ export const DEFAULT_PAPER_JOURNAL_CONTEXT: PaperJournalContext = {
   priceTickSize: 0.01,
 };
 
-export function calculateReplayJournalSummary(
-  entries: ReadonlyArray<{ gainLoss: number; priceTickSize: number }>,
-): ReplayJournalSummary {
+type JournalSummaryEntry = Pick<ReplayJournalEntryData, "gainLoss" | "priceTickSize" | "quantity">;
+
+function calculateReplayJournalTotals(entries: ReadonlyArray<JournalSummaryEntry>) {
   let winningTrades = 0;
   let losingTrades = 0;
   let breakEvenTrades = 0;
+  let totalProfit = 0;
+  let totalLoss = 0;
   let totalProfitPoints = 0;
   let totalLossPoints = 0;
 
@@ -38,9 +40,11 @@ export function calculateReplayJournalSummary(
     const result = replayJournalResult(entry.gainLoss, entry.priceTickSize);
     if (result === "W") {
       winningTrades += 1;
+      totalProfit += entry.gainLoss * entry.quantity;
       totalProfitPoints += entry.gainLoss;
     } else if (result === "L") {
       losingTrades += 1;
+      totalLoss += -entry.gainLoss * entry.quantity;
       totalLossPoints += Math.abs(entry.gainLoss);
     } else {
       breakEvenTrades += 1;
@@ -48,25 +52,36 @@ export function calculateReplayJournalSummary(
   }
 
   return {
-    tradeCount: entries.length,
-    winningTradeCount: winningTrades,
-    losingTradeCount: losingTrades,
-    breakEvenTradeCount: breakEvenTrades,
-    winRate: entries.length === 0 ? 0 : (winningTrades / entries.length) * 100,
+    counts: {
+      tradeCount: entries.length,
+      winningTradeCount: winningTrades,
+      losingTradeCount: losingTrades,
+      breakEvenTradeCount: breakEvenTrades,
+      winRate: entries.length === 0 ? 0 : (winningTrades / entries.length) * 100,
+    },
+    totalProfit,
+    totalLoss,
     totalProfitPoints,
     totalLossPoints,
-    actualProfitLossRatio: totalLossPoints > EPSILON ? totalProfitPoints / totalLossPoints : null,
+  };
+}
+
+export function calculateReplayJournalSummary(entries: ReadonlyArray<JournalSummaryEntry>): ReplayJournalSummary {
+  const { counts, totalProfit, totalLoss } = calculateReplayJournalTotals(entries);
+  return {
+    ...counts,
+    totalProfit,
+    totalLoss,
+    actualProfitLossRatio: totalLoss > 0 ? totalProfit / totalLoss : null,
   };
 }
 
 export function calculateReplayJournalTrainingStats(
-  entries: ReadonlyArray<{ gainLoss: number; priceTickSize: number; quantity: number }>,
+  entries: ReadonlyArray<JournalSummaryEntry>,
 ) {
-  const summary = calculateReplayJournalSummary(entries);
+  const { counts, totalProfit, totalLoss, totalProfitPoints, totalLossPoints } = calculateReplayJournalTotals(entries);
   let cumulativePoints = 0;
   let cumulativePnl = 0;
-  let totalWinningPnl = 0;
-  let totalLosingPnl = 0;
   let winStreak = 0;
   let lossStreak = 0;
   let maxConsecutiveWins = 0;
@@ -78,12 +93,10 @@ export function calculateReplayJournalTrainingStats(
     const result = replayJournalResult(entry.gainLoss, entry.priceTickSize);
     const pnl = entry.gainLoss * entry.quantity;
     if (result === "W") {
-      totalWinningPnl += pnl;
       winStreak += 1;
       lossStreak = 0;
       maxConsecutiveWins = Math.max(maxConsecutiveWins, winStreak);
     } else if (result === "L") {
-      totalLosingPnl += pnl;
       lossStreak += 1;
       winStreak = 0;
       maxConsecutiveLosses = Math.max(maxConsecutiveLosses, lossStreak);
@@ -99,12 +112,15 @@ export function calculateReplayJournalTrainingStats(
 
   const stride = Math.max(1, Math.ceil(points.length / 2_000));
   return {
-    ...summary,
-    averageWin: summary.winningTradeCount ? totalWinningPnl / summary.winningTradeCount : 0,
-    averageLoss: summary.losingTradeCount ? totalLosingPnl / summary.losingTradeCount : 0,
+    ...counts,
+    totalProfitPoints,
+    totalLossPoints,
+    actualProfitLossRatio: totalLossPoints > EPSILON ? totalProfitPoints / totalLossPoints : null,
+    averageWin: counts.winningTradeCount ? totalProfit / counts.winningTradeCount : 0,
+    averageLoss: counts.losingTradeCount ? -totalLoss / counts.losingTradeCount : 0,
     pnlCurve: pnlCurve.filter((_point, index) => index % stride === 0 || index === pnlCurve.length - 1),
-    averageWinPoints: summary.winningTradeCount ? summary.totalProfitPoints / summary.winningTradeCount : 0,
-    averageLossPoints: summary.losingTradeCount ? -summary.totalLossPoints / summary.losingTradeCount : 0,
+    averageWinPoints: counts.winningTradeCount ? totalProfitPoints / counts.winningTradeCount : 0,
+    averageLossPoints: counts.losingTradeCount ? -totalLossPoints / counts.losingTradeCount : 0,
     maxConsecutiveWins,
     maxConsecutiveLosses,
     points: points.filter((_point, index) => index % stride === 0 || index === points.length - 1),

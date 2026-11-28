@@ -224,6 +224,8 @@ describe("replay paper journal API", () => {
       no: index + 1,
       accountNo: index + 1,
       journalSessionId: "journal-latest",
+      ...(index === 0 ? { lotId: "split-lot", quantity: 5, gainLoss: 10, exitPrice: 110 } : {}),
+      ...(index === 20 ? { lotId: "split-lot", quantity: 5, gainLoss: -4, exitPrice: 96 } : {}),
     })));
 
     const response = await GET(new Request(
@@ -245,13 +247,13 @@ describe("replay paper journal API", () => {
       selectedSessionId: "journal-latest",
       summary: {
         tradeCount: 35,
-        winningTradeCount: 35,
-        losingTradeCount: 0,
+        winningTradeCount: 34,
+        losingTradeCount: 1,
         breakEvenTradeCount: 0,
-        winRate: 100,
-        totalProfitPoints: 70,
-        totalLossPoints: 0,
-        actualProfitLossRatio: null,
+        winRate: (34 / 35) * 100,
+        totalProfit: 116,
+        totalLoss: 20,
+        actualProfitLossRatio: 5.8,
       },
       pagination: { page: 2, pageSize: 20, totalItems: 35, totalPages: 2 },
     });
@@ -269,9 +271,9 @@ describe("replay paper journal API", () => {
       _count: { entries: 3 },
     }]);
     mocks.entryFindMany.mockResolvedValue([
-      { ...record(), id: "winner-1", gainLoss: 2, actualRisk: 1 },
-      { ...record(), id: "loser", gainLoss: -1, actualRisk: 1 },
-      { ...record(), id: "winner-2", gainLoss: 4, actualRisk: 2 },
+      { ...record(), id: "winner-1", gainLoss: 2, actualRisk: 1, quantity: 5 },
+      { ...record(), id: "loser", gainLoss: -1, actualRisk: 1, quantity: 10 },
+      { ...record(), id: "winner-2", gainLoss: 4, actualRisk: 2, quantity: 0.5 },
     ]);
 
     const response = await GET(new Request(
@@ -288,8 +290,8 @@ describe("replay paper journal API", () => {
       losingTradeCount: 0,
       breakEvenTradeCount: 0,
       winRate: 100,
-      totalProfitPoints: 6,
-      totalLossPoints: 0,
+      totalProfit: 12,
+      totalLoss: 0,
       actualProfitLossRatio: null,
     });
     expect(data.pagination).toMatchObject({ totalItems: 2, totalPages: 1 });
@@ -322,7 +324,7 @@ describe("replay paper journal API", () => {
     expect(response.status).toBe(200);
     const data = await response.json();
     expect(data.items.map((item: { id: string }) => item.id)).toEqual(["long-without-setup"]);
-    expect(data.summary).toMatchObject({ tradeCount: 1, winRate: 100, totalProfitPoints: 4, totalLossPoints: 0 });
+    expect(data.summary).toMatchObject({ tradeCount: 1, winRate: 100, totalProfit: 4, totalLoss: 0 });
     expect(data.pagination).toMatchObject({ totalItems: 1, totalPages: 1 });
     expect(data.filterOptions).toEqual({
       setups: [{ value: "setup-1", label: "Opening Range Breakout" }],
@@ -362,7 +364,7 @@ describe("replay paper journal API", () => {
     expect(data.pagination).toEqual({ page: 2, pageSize: 10, totalItems, totalPages: 3 });
     expect(data.summary).toMatchObject({
       tradeCount: totalItems, winningTradeCount: used ? 23 : 0, losingTradeCount: used ? 0 : 22,
-      totalProfitPoints: used ? 46 : 0, totalLossPoints: used ? 0 : 22,
+      totalProfit: used ? 46 : 0, totalLoss: used ? 0 : 22,
     });
     expect(data.sessions[0].entryCount).toBe(45);
   });
